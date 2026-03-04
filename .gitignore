@@ -1,6 +1,7 @@
 # Binaries
-hadrond
-hadron
+/hadrond
+/hadron
+/hadron-app
 *.exe
 *.out
 

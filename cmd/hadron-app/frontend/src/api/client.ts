@@ -237,6 +237,17 @@ export async function getBlueprintMetadata(path: string): Promise<BlueprintMetaS
   throw new Error('Wails binding not available');
 }
 
+// ── Blueprint directory (Go bindings) ─────────────────────────────────
+
+export async function getBlueprintDir(): Promise<string> {
+  if (go?.GetBlueprintDir) return go.GetBlueprintDir();
+  return '';
+}
+
+export async function setBlueprintDir(dir: string): Promise<void> {
+  if (go?.SetBlueprintDir) return go.SetBlueprintDir(dir);
+}
+
 // ── Settings (Go bindings) ────────────────────────────────────────────
 
 export async function getSettings(): Promise<HadronSettings> {

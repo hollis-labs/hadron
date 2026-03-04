@@ -273,6 +273,7 @@ export interface ValidateResult {
 // ── Settings types (matching Go settings.Settings) ────────────────────
 
 export interface HadronSettings {
+  blueprint_dir: string;
   execution: {
     allowedCommands: string[];
     deniedCommands: string[];

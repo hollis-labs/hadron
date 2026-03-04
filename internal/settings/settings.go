@@ -9,9 +9,10 @@ import (
 )
 
 type Settings struct {
-	Execution ExecutionSettings  `json:"execution"`
-	Safety    SafetySettings     `json:"safety"`
-	Telemetry TelemetrySettings  `json:"telemetry"`
+	BlueprintDir string             `json:"blueprint_dir"`
+	Execution    ExecutionSettings  `json:"execution"`
+	Safety       SafetySettings     `json:"safety"`
+	Telemetry    TelemetrySettings  `json:"telemetry"`
 }
 
 type TelemetrySettings struct {
@@ -36,8 +37,18 @@ type SafetySettings struct {
 	SandboxMode         bool `json:"sandboxMode"`
 }
 
+// DefaultBlueprintDir returns the default blueprint directory path.
+func DefaultBlueprintDir() string {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		home = "."
+	}
+	return filepath.Join(home, ".hadron", "blueprints")
+}
+
 func DefaultSettings() *Settings {
 	return &Settings{
+		BlueprintDir: DefaultBlueprintDir(),
 		Telemetry: TelemetrySettings{
 			Enabled:    true,
 			RetainDays: 30,
@@ -74,6 +85,11 @@ func Load(dataDir string) (*Settings, error) {
 	var s Settings
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("failed to parse settings: %w", err)
+	}
+
+	// Fill default for blueprint_dir if not set (backward compat).
+	if s.BlueprintDir == "" {
+		s.BlueprintDir = DefaultBlueprintDir()
 	}
 
 	return &s, nil

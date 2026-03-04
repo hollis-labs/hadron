@@ -398,6 +398,25 @@ func (a *App) ParseBlueprintInputs(path string) ([]BlueprintInput, error) {
 	return out, nil
 }
 
+// GetBlueprintDir returns the configured blueprint directory from settings.json (exposed to frontend).
+func (a *App) GetBlueprintDir() string {
+	sett, err := settings.Load(a.dataDir)
+	if err != nil {
+		return settings.DefaultBlueprintDir()
+	}
+	return sett.BlueprintDir
+}
+
+// SetBlueprintDir updates the blueprint_dir in settings.json (exposed to frontend).
+func (a *App) SetBlueprintDir(dir string) error {
+	sett, err := settings.Load(a.dataDir)
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+	sett.BlueprintDir = dir
+	return sett.Save(a.dataDir)
+}
+
 // GetSettings reads settings.json and returns it as JSON (exposed to frontend).
 func (a *App) GetSettings() (string, error) {
 	sett, err := settings.Load(a.dataDir)

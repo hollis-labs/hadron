@@ -14,6 +14,8 @@ export function DeleteBlueprintFile(arg1:string):Promise<void>;
 
 export function DeleteTelemetryLog(arg1:string):Promise<void>;
 
+export function GetBlueprintDir():Promise<string>;
+
 export function GetBlueprintMetadata(arg1:string):Promise<string>;
 
 export function GetDaemonAddr():Promise<string>;
@@ -47,6 +49,8 @@ export function SaveSettings(arg1:string):Promise<void>;
 export function SelectBlueprintFile():Promise<string>;
 
 export function SelectDirectoryDialog():Promise<string>;
+
+export function SetBlueprintDir(arg1:string):Promise<void>;
 
 export function SetPreference(arg1:string,arg2:string):Promise<void>;
 

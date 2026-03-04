@@ -26,6 +26,10 @@ export function DeleteTelemetryLog(arg1) {
   return window['go']['main']['App']['DeleteTelemetryLog'](arg1);
 }
 
+export function GetBlueprintDir() {
+  return window['go']['main']['App']['GetBlueprintDir']();
+}
+
 export function GetBlueprintMetadata(arg1) {
   return window['go']['main']['App']['GetBlueprintMetadata'](arg1);
 }
@@ -92,6 +96,10 @@ export function SelectBlueprintFile() {
 
 export function SelectDirectoryDialog() {
   return window['go']['main']['App']['SelectDirectoryDialog']();
+}
+
+export function SetBlueprintDir(arg1) {
+  return window['go']['main']['App']['SetBlueprintDir'](arg1);
 }
 
 export function SetPreference(arg1, arg2) {

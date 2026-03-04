@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { getSettings, saveSettings, getPreference, setPreference, selectDirectoryDialog } from '../api/client';
+import { getSettings, saveSettings, selectDirectoryDialog, getBlueprintDir, setBlueprintDir } from '../api/client';
 import { Spinner } from '../components/ui/Spinner';
 import { FolderOpen, X } from 'lucide-react';
 import type { HadronSettings } from '../api/types';
@@ -16,7 +16,7 @@ export function SettingsPage() {
     setLoading(true);
     Promise.all([
       getSettings().then(s => { setSettings(s); setError(null); }).catch(err => setError(String(err))),
-      getPreference('defaultBlueprintDir').then(v => { if (v) setDefaultBpDir(v); }).catch(() => {}),
+      getBlueprintDir().then(v => { if (v) setDefaultBpDir(v); }).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -25,7 +25,7 @@ export function SettingsPage() {
     setSaving(true);
     try {
       await saveSettings(settings);
-      await setPreference('defaultBlueprintDir', defaultBpDir);
+      await setBlueprintDir(defaultBpDir);
       toast.success('Settings saved');
     } catch (err: unknown) {
       toast.error(`Save failed: ${err}`);
