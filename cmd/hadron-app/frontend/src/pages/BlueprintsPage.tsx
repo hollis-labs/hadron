@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { openDirectoryDialog, listFilesInDir, validateBlueprintFile, enqueueRun, getPreference, setPreference, parseBlueprintInputs, deleteBlueprintFile, getBlueprintMetadata, getSettings, createDirectory, selectDirectoryDialog, moveBlueprintFile, copyBlueprintFile, archiveBlueprintFile, getBlueprintDir, setBlueprintDir } from '../api/client';
+import { openDirectoryDialog, listFilesInDir, validateBlueprintFile, enqueueRun, parseBlueprintInputs, deleteBlueprintFile, getBlueprintMetadata, getSettings, createDirectory, selectDirectoryDialog, moveBlueprintFile, copyBlueprintFile, archiveBlueprintFile, getBlueprintDir, setBlueprintDir } from '../api/client';
 import { ValidateResult, FileEntry, BlueprintInput, BlueprintMetaSummary } from '../api/types';
 import { FolderOpen, FolderPlus, Play, CheckCircle, ChevronLeft, Folder, FileCode, Plus, Trash2, RefreshCw, MoveRight, Copy, Archive } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -45,19 +45,12 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
     }
   }, []);
 
-  // Restore last-used folder from preferences on mount, fallback to settings blueprint_dir
+  // Restore blueprint folder from settings.json (authoritative source)
   useEffect(() => {
-    getPreference('lastBlueprintDir').then(async saved => {
-      if (saved) {
-        setRootDir(saved);
-        setCurrentDir(saved);
-      } else {
-        // Use blueprint_dir from settings.json (authoritative source)
-        const settingsDir = await getBlueprintDir();
-        if (settingsDir) {
-          setRootDir(settingsDir);
-          setCurrentDir(settingsDir);
-        }
+    getBlueprintDir().then(dir => {
+      if (dir) {
+        setRootDir(dir);
+        setCurrentDir(dir);
       }
     });
   }, []);
@@ -99,8 +92,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
       setValidateStates({});
       setMetaCache({});
       setSelected(new Set());
-      setPreference('lastBlueprintDir', dir); // fire-and-forget
-      setBlueprintDir(dir); // persist to settings.json
+      setBlueprintDir(dir); // persist to settings.json (authoritative source)
     }
   };
 
