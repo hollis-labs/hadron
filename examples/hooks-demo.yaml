@@ -1,0 +1,63 @@
+# hooks-demo.yaml — blueprint-level hooks + per-task hooks
+#
+# Demonstrates:
+#   - hooks.before_run  — runs before any steps execute
+#   - hooks.after_run   — runs after all steps complete successfully
+#   - hooks.on_error    — runs if any step fails and is not continue_on_error
+#   - per-task on_success with type: cmd
+#   - per-task on_fail with type: cmd and type: error
+#   - per-task on_fail with type: step (references another step's task)
+#
+version: "0.4"
+
+blueprint:
+  name: hooks-demo
+  title: Hooks Demo
+  description: Demonstrates all hook types available in Hadron v0.4.
+  author: Hollis Labs
+  tags: [example, hooks, lifecycle]
+
+hooks:
+  before_run:
+    - name: announce-start
+      cmd: echo "[hook:before_run] Starting hooks-demo blueprint"
+
+  after_run:
+    - name: announce-finish
+      cmd: echo "[hook:after_run] Blueprint completed successfully"
+
+  on_error:
+    - name: announce-failure
+      cmd: echo "[hook:on_error] Something went wrong — check the run events"
+
+steps:
+  - section: Happy Path
+    tasks:
+      - name: task-with-success-hook
+        cmd: echo "task ran successfully"
+        on_success:
+          - type: cmd
+            value: echo "[on_success] task-with-success-hook completed"
+
+      - name: task-with-both-hooks
+        cmd: echo "this task also succeeded"
+        on_success:
+          - type: cmd
+            value: echo "[on_success] both-hooks task done"
+        on_fail:
+          - type: cmd
+            value: echo "[on_fail] both-hooks task failed"
+
+  - section: Failure Handling
+    tasks:
+      - name: intentional-failure
+        cmd: "false"
+        continue_on_error: true
+        on_fail:
+          - type: cmd
+            value: echo "[on_fail:cmd] caught the failure — continuing"
+          - type: error
+            value: "intentional-failure task failed (logged as error event)"
+
+      - name: after-failure
+        cmd: echo "execution continues after continue_on_error task"

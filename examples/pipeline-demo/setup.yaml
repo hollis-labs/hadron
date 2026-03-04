@@ -1,0 +1,20 @@
+# pipeline-demo/setup.yaml — Stage 1: Dependency setup
+#
+# Part of the pipeline-demo showing multi-blueprint pipelines.
+#
+version: "0.4"
+
+blueprint:
+  name: pipeline-demo-setup
+  title: Pipeline Demo — Setup Stage
+  description: First stage of the pipeline-demo. Prepares the environment.
+  tags: [example, pipeline]
+
+steps:
+  - section: Setup
+    tasks:
+      - name: check-environment
+        cmd: echo "[stage 1/setup] Checking environment..."
+
+      - name: install-deps
+        cmd: echo "[stage 1/setup] Installing dependencies (simulated)"

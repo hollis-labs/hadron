@@ -1,0 +1,7 @@
+meta:
+  name: simple-success
+stages:
+  - name: first
+    blueprint_path: ../blueprints/minimal-success.yaml
+  - name: second
+    blueprint_path: ../blueprints/minimal-success.yaml

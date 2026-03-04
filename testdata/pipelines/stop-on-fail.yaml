@@ -1,0 +1,7 @@
+meta:
+  name: stop-on-fail
+stages:
+  - name: fails
+    blueprint_path: ../blueprints/timeout-fail.yaml
+  - name: should-not-run
+    blueprint_path: ../blueprints/minimal-success.yaml

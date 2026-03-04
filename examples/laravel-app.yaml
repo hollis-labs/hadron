@@ -1,0 +1,126 @@
+# laravel-app.yaml — Laravel project scaffold
+#
+# Demonstrates:
+#   - inputs with defaults and templates
+#   - project block
+#   - packages (composer + npm)
+#   - git block
+#   - stubs block
+#   - multi-section pipeline
+#   - on_success and on_fail hooks
+#   - template expressions: {{ .inputs.app_name }}, {{ .project.path }}
+#
+version: "0.4"
+
+blueprint:
+  name: laravel-app
+  title: Laravel Application Scaffold
+  description: Creates a new Laravel application with frontend tooling and git initialisation.
+  author: Hollis Labs
+  tags: [example, laravel, php, scaffold]
+
+inputs:
+  - name: app_name
+    label: Application Name
+    description: Slug used for the project directory and Laravel app name.
+    type: string
+    required: true
+    pattern: "^[a-zA-Z][a-zA-Z0-9_-]*$"
+    prompt: "What should the application be named?"
+
+  - name: php_version
+    label: PHP Version
+    type: string
+    default: "8.3"
+    enum: ["8.1", "8.2", "8.3"]
+
+  - name: install_inertia
+    label: Install Inertia.js?
+    type: boolean
+    default: false
+
+project:
+  type: app
+  name: "{{ .inputs.app_name }}"
+  dir: "{{ .inputs.app_name }}"
+  path: "."
+  php_version: "{{ .inputs.php_version }}"
+  node: true
+
+packages:
+  composer:
+    require: []
+    require_dev:
+      - "laravel/pint"
+      - "pestphp/pest"
+  npm:
+    dev:
+      - "vite"
+      - "laravel-vite-plugin"
+
+git:
+  init: true
+  branch: main
+
+stubs:
+  enabled: true
+  search_paths: ["stubs/"]
+
+hooks:
+  before_run:
+    - name: check-composer
+      cmd: which composer || (echo "composer not found" && exit 1)
+  after_run:
+    - name: success-summary
+      cmd: echo "Laravel app '{{ .inputs.app_name }}' created at {{ .project.path }}/{{ .inputs.app_name }}"
+  on_error:
+    - name: cleanup-on-fail
+      cmd: echo "Setup failed — check logs for details"
+
+steps:
+  - section: Bootstrap
+    tasks:
+      - name: create-laravel-project
+        cmd: composer create-project laravel/laravel {{ .inputs.app_name }}
+        on_success:
+          - type: cmd
+            value: echo "Laravel created successfully"
+        on_fail:
+          - type: error
+            value: "Failed to create Laravel project — is composer installed?"
+
+  - section: PHP & Laravel
+    tasks:
+      - name: install-composer-deps
+        cmd: cd {{ .inputs.app_name }} && composer install --no-interaction
+        continue_on_error: false
+
+      - name: generate-app-key
+        cmd: cd {{ .inputs.app_name }} && php artisan key:generate
+
+      - name: install-inertia
+        cmd: cd {{ .inputs.app_name }} && composer require inertiajs/inertia-laravel
+        if: "{{ .inputs.install_inertia }}"
+
+  - section: Frontend
+    tasks:
+      - name: install-npm-deps
+        cmd: cd {{ .inputs.app_name }} && npm install
+        retry: 2
+        retry_delay_seconds: 5
+
+      - name: build-assets
+        cmd: cd {{ .inputs.app_name }} && npm run build
+        on_fail:
+          - type: cmd
+            value: echo "Asset build failed — continuing anyway"
+        continue_on_error: true
+
+  - section: Project Hygiene
+    tasks:
+      - name: git-init
+        cmd: cd {{ .inputs.app_name }} && git init && git add . && git commit -m "Initial Laravel scaffold"
+        continue_on_error: true
+
+      - name: show-summary
+        cmd: echo "Project ready at ./{{ .inputs.app_name }}"

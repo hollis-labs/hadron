@@ -1,0 +1,7 @@
+blueprint:
+  name: minimal-success
+steps:
+  - section: main
+    tasks:
+      - name: hello
+        cmd: echo "hello"

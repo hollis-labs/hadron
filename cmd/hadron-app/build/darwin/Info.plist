@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleName</key>
+	<string>Hadron</string>
+	<key>CFBundleExecutable</key>
+	<string>hadron-app</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.hollislabs.hadron</string>
+	<key>CFBundleVersion</key>
+	<string>0.4.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.4.0</string>
+	<key>CFBundleIconFile</key>
+	<string>iconfile</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>10.13.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>LSUIElement</key>
+	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

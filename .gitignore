@@ -1,0 +1,25 @@
+# Binaries
+hadrond
+hadron
+*.exe
+*.out
+
+# Go build artifacts
+/bin/
+/dist/
+
+# Vendor
+vendor/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp

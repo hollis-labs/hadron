@@ -1,0 +1,77 @@
+# dev-cleanup.yaml — daily development maintenance routine
+#
+# Demonstrates:
+#   - if: conditions (shell expression and literal)
+#   - continue_on_error: true for non-critical steps
+#   - env vars per-task
+#   - multi-section organisation
+#   - brew tool presence check
+#
+version: "0.4"
+
+blueprint:
+  name: dev-cleanup
+  title: Developer Machine Cleanup
+  description: Clears temp files, stale logs, and build artifacts from a development machine.
+  author: Hollis Labs
+  tags: [example, maintenance, cleanup]
+
+env:
+  CLEANUP_DRY_RUN: "false"
+
+steps:
+  - section: Temp Files
+    tasks:
+      - name: clear-tmp-hadron
+        cmd: rm -rf /tmp/hadron-*
+        continue_on_error: true
+
+      - name: clear-ds-store
+        cmd: find ~ -name ".DS_Store" -maxdepth 5 -delete
+        continue_on_error: true
+
+      - name: clear-node-caches
+        # Only runs if the node_modules/.cache directory exists
+        if: "test -d ~/.npm/_cacache"
+        cmd: npm cache clean --force
+        continue_on_error: true
+
+  - section: Logs
+    tasks:
+      - name: rotate-hadrond-logs
+        cmd: find ~/.hadron/logs/runs -name "*.jsonl" -mtime +30 -delete
+        continue_on_error: true
+
+      - name: clear-xcode-logs
+        if: "test -d ~/Library/Logs/CoreSimulator"
+        cmd: rm -rf ~/Library/Logs/CoreSimulator/*
+        continue_on_error: true
+
+  - section: Build Artifacts
+    tasks:
+      - name: check-brew-available
+        cmd: which brew
+        on_fail:
+          - type: cmd
+            value: echo "brew not available — skipping brew cleanup"
+        continue_on_error: true
+
+      - name: brew-cleanup
+        cmd: brew cleanup --prune=7
+        if: "which brew"
+        continue_on_error: true
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+
+      - name: go-clean-cache
+        cmd: go clean -testcache
+        if: "which go"
+        continue_on_error: true
+
+      - name: docker-prune
+        cmd: docker system prune -f --filter "until=168h"
+        if: "which docker && docker info > /dev/null 2>&1"
+        continue_on_error: true
+
+      - name: cleanup-summary
+        cmd: echo "Cleanup complete — $(date '+%Y-%m-%d %H:%M:%S')"

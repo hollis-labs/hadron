@@ -1,0 +1,8 @@
+blueprint:
+  name: timeout-fail
+steps:
+  - section: main
+    tasks:
+      - name: too-slow
+        cmd: sleep 5
+        timeout_seconds: 1

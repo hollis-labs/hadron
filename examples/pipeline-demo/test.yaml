@@ -1,0 +1,23 @@
+# pipeline-demo/test.yaml — Stage 2: Test execution
+#
+# Part of the pipeline-demo showing multi-blueprint pipelines.
+#
+version: "0.4"
+
+blueprint:
+  name: pipeline-demo-test
+  title: Pipeline Demo — Test Stage
+  description: Second stage of the pipeline-demo. Runs the test suite.
+  tags: [example, pipeline]
+
+steps:
+  - section: Test
+    tasks:
+      - name: run-unit-tests
+        cmd: echo "[stage 2/test] Running unit tests (simulated)"
+
+      - name: run-integration-tests
+        cmd: echo "[stage 2/test] Running integration tests (simulated)"
+
+      - name: show-results
+        cmd: echo "[stage 2/test] All tests passed"

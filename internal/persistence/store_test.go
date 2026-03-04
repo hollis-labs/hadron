@@ -1,0 +1,371 @@
+package persistence
+
+import (
+	"context"
+	"database/sql"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestOpen_AppliesMigrations(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hadron.db")
+
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+
+	tables := []string{"runs", "schedules", "queue_entries", "pipeline_runs", "pipeline_stage_runs", "settings", "schema_migrations", "run_events", "workspaces"}
+	for _, tbl := range tables {
+		var name string
+		err := store.DB().QueryRowContext(ctx,
+			`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, tbl,
+		).Scan(&name)
+		if err != nil {
+			t.Fatalf("table %s not found: %v", tbl, err)
+		}
+	}
+}
+
+func TestWorkspaceMigrationAndScopedQueries(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hadron.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	defaultWS, err := store.GetWorkspace(ctx, "default")
+	if err != nil {
+		t.Fatalf("default workspace should exist: %v", err)
+	}
+	if defaultWS.Name == "" {
+		t.Fatalf("default workspace should have a name")
+	}
+
+	tables := []string{"runs", "schedules", "pipeline_runs", "pipeline_stage_runs"}
+	for _, table := range tables {
+		if !hasColumn(t, store, table, "workspace_id") {
+			t.Fatalf("expected workspace_id column in %s", table)
+		}
+	}
+
+	if err := store.CreateWorkspace(ctx, "team-a", "Team A"); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	workspaces, err := store.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if len(workspaces) < 2 {
+		t.Fatalf("expected at least default + team-a workspaces")
+	}
+
+	if err := store.CreateRun(ctx, RunRecord{
+		ID:            "run-team-a-1",
+		WorkspaceID:   "team-a",
+		BlueprintPath: "./bp.yaml",
+		Status:        "queued",
+		CreatedAt:     now,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	runs, err := store.ListRunsByWorkspace(ctx, "team-a", 10)
+	if err != nil {
+		t.Fatalf("list runs by workspace: %v", err)
+	}
+	if len(runs) != 1 || runs[0].WorkspaceID != "team-a" {
+		t.Fatalf("unexpected runs by workspace result: %+v", runs)
+	}
+
+	if err := store.CreateSchedule(ctx, ScheduleRecord{
+		ID:            "sch-team-a-1",
+		WorkspaceID:   "team-a",
+		Name:          "sched-a",
+		BlueprintPath: "./bp.yaml",
+		CronExpr:      "* * * * *",
+		Enabled:       true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	schedules, err := store.ListSchedulesByWorkspace(ctx, "team-a")
+	if err != nil {
+		t.Fatalf("list schedules by workspace: %v", err)
+	}
+	if len(schedules) != 1 || schedules[0].WorkspaceID != "team-a" {
+		t.Fatalf("unexpected schedules by workspace result: %+v", schedules)
+	}
+
+	if err := store.CreatePipelineRun(ctx, PipelineRunRecord{
+		ID:           "pl-team-a-1",
+		WorkspaceID:  "team-a",
+		PipelinePath: "./pl.yaml",
+		Status:       "queued",
+		CreatedAt:    now,
+	}); err != nil {
+		t.Fatalf("create pipeline run: %v", err)
+	}
+	pipelines, err := store.ListPipelineRunsByWorkspace(ctx, "team-a", 10)
+	if err != nil {
+		t.Fatalf("list pipelines by workspace: %v", err)
+	}
+	if len(pipelines) != 1 || pipelines[0].WorkspaceID != "team-a" {
+		t.Fatalf("unexpected pipelines by workspace result: %+v", pipelines)
+	}
+}
+
+func hasColumn(t *testing.T, store *Store, table, column string) bool {
+	t.Helper()
+	rows, err := store.DB().Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		t.Fatalf("pragma table_info(%s): %v", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan table info %s: %v", table, err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("table info rows err %s: %v", table, err)
+	}
+	return false
+}
+
+func TestRunAndScheduleCRUD(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hadron.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	run := RunRecord{
+		ID:            "run-001",
+		BlueprintPath: "./blueprints/setup.yaml",
+		Status:        "queued",
+		InputJSON:     `{"project":"demo"}`,
+		CreatedAt:     now,
+	}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	fetchedRun, err := store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if fetchedRun.ID != run.ID || fetchedRun.Status != "queued" {
+		t.Fatalf("unexpected run fetched: %+v", fetchedRun)
+	}
+
+	errMsg := "step failed"
+	if err := store.UpdateRunStatus(ctx, run.ID, "failed", &errMsg); err != nil {
+		t.Fatalf("update run status: %v", err)
+	}
+
+	runs, err := store.ListRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	if runs[0].Status != "failed" {
+		t.Fatalf("expected failed run status, got %s", runs[0].Status)
+	}
+	if !runs[0].ErrorMessage.Valid || runs[0].ErrorMessage.String != errMsg {
+		t.Fatalf("expected error message %q, got %+v", errMsg, runs[0].ErrorMessage)
+	}
+
+	sched := ScheduleRecord{
+		ID:            "sch-001",
+		Name:          "Nightly setup",
+		BlueprintPath: "./blueprints/setup.yaml",
+		CronExpr:      "0 2 * * *",
+		Enabled:       true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := store.CreateSchedule(ctx, sched); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+
+	if err := store.UpdateScheduleEnabled(ctx, sched.ID, false); err != nil {
+		t.Fatalf("update schedule enabled: %v", err)
+	}
+
+	schedules, err := store.ListSchedules(ctx)
+	if err != nil {
+		t.Fatalf("list schedules: %v", err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("expected 1 schedule, got %d", len(schedules))
+	}
+	if schedules[0].Enabled {
+		t.Fatalf("expected disabled schedule, got enabled")
+	}
+}
+
+func TestOpen_RequiresPath(t *testing.T) {
+	_, err := Open("")
+	if err == nil {
+		t.Fatalf("expected error for empty path")
+	}
+}
+
+func TestUpdateRunStatus_LeavesNullErrorWhenNil(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hadron.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	run := RunRecord{ID: "run-002", BlueprintPath: "./bp.yaml", Status: "queued", CreatedAt: now}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := store.UpdateRunStatus(ctx, run.ID, "running", nil); err != nil {
+		t.Fatalf("update run status: %v", err)
+	}
+
+	var msg sql.NullString
+	if err := store.DB().QueryRowContext(ctx, `SELECT error_message FROM runs WHERE id = ?`, run.ID).Scan(&msg); err != nil {
+		t.Fatalf("read error_message: %v", err)
+	}
+	if msg.Valid {
+		t.Fatalf("expected null error_message, got %+v", msg)
+	}
+}
+
+func TestRunEventsCRUD(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hadron.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	run := RunRecord{ID: "run-evt-1", BlueprintPath: "./bp.yaml", Status: "queued", CreatedAt: now}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := store.AppendRunEvent(ctx, RunEventRecord{
+		RunID:     run.ID,
+		EventType: "queued",
+		Message:   sql.NullString{String: "run queued", Valid: true},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("append run event: %v", err)
+	}
+
+	events, err := store.ListRunEvents(ctx, run.ID, 10)
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].EventType != "queued" {
+		t.Fatalf("expected queued event, got %s", events[0].EventType)
+	}
+	if !events[0].Message.Valid || events[0].Message.String != "run queued" {
+		t.Fatalf("unexpected event message: %+v", events[0].Message)
+	}
+}
+
+func TestPipelineRunsAndStagesCRUD(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hadron.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := store.CreatePipelineRun(ctx, PipelineRunRecord{
+		ID:           "pl-001",
+		PipelinePath: "./testdata/pipelines/simple-success.yaml",
+		Status:       "queued",
+		CreatedAt:    now,
+	}); err != nil {
+		t.Fatalf("create pipeline run: %v", err)
+	}
+	if err := store.SetPipelineRunStarted(ctx, "pl-001", now); err != nil {
+		t.Fatalf("set pipeline started: %v", err)
+	}
+
+	if err := store.AddPipelineStageRun(ctx, PipelineStageRunRecord{
+		PipelineRunID: "pl-001",
+		StageIndex:    0,
+		StageName:     "first",
+		RunID:         "run-001",
+		Status:        "running",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("add stage run: %v", err)
+	}
+	if err := store.UpdatePipelineStageRunStatus(ctx, "pl-001", 0, "success"); err != nil {
+		t.Fatalf("update stage status: %v", err)
+	}
+	if err := store.SetPipelineRunFinished(ctx, "pl-001", "success", now, nil); err != nil {
+		t.Fatalf("set pipeline finished: %v", err)
+	}
+
+	rec, err := store.GetPipelineRun(ctx, "pl-001")
+	if err != nil {
+		t.Fatalf("get pipeline run: %v", err)
+	}
+	if rec.Status != "success" {
+		t.Fatalf("expected success status, got %s", rec.Status)
+	}
+
+	list, err := store.ListPipelineRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("list pipeline runs: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 pipeline run, got %d", len(list))
+	}
+
+	stages, err := store.ListPipelineStageRuns(ctx, "pl-001")
+	if err != nil {
+		t.Fatalf("list stage runs: %v", err)
+	}
+	if len(stages) != 1 {
+		t.Fatalf("expected 1 stage run, got %d", len(stages))
+	}
+	if stages[0].Status != "success" {
+		t.Fatalf("expected stage success, got %s", stages[0].Status)
+	}
+}

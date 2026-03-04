@@ -1,0 +1,18 @@
+# pipeline-demo/pipeline.yaml — multi-stage pipeline spec
+#
+# Demonstrates:
+#   - Pipeline spec format (meta, stages, stop_on_fail)
+#   - Chaining two blueprints into ordered stages
+#   - stop_on_fail: true — if stage 1 fails, stage 2 is skipped
+#
+meta:
+  name: pipeline-demo
+
+stop_on_fail: true
+
+stages:
+  - name: setup
+    blueprint_path: setup.yaml
+
+  - name: test
+    blueprint_path: test.yaml

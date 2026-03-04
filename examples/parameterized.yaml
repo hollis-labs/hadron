@@ -1,0 +1,83 @@
+# parameterized.yaml — typed input showcase
+#
+# Demonstrates:
+#   - All input types: string, number, boolean, array, enum
+#   - Pattern validation on string inputs
+#   - min/max constraints on number inputs
+#   - Template expressions in cmd: {{ .inputs.<name> }}
+#   - Using inputs across multiple sections
+#
+version: "0.4"
+
+blueprint:
+  name: parameterized
+  title: Parameterized Blueprint Demo
+  description: Shows all supported input types and how to use them in task commands.
+  author: Hollis Labs
+  tags: [example, inputs, templates]
+
+inputs:
+  - name: app_name
+    label: Application Name
+    description: Name of the application (letters, numbers, hyphens).
+    type: string
+    required: true
+    pattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    min_length: 2
+    max_length: 50
+    prompt: "Application name?"
+
+  - name: worker_count
+    label: Worker Count
+    description: Number of worker processes to spawn.
+    type: number
+    default: 3
+    min: 1
+    max: 32
+
+  - name: enable_debug
+    label: Enable Debug Mode
+    description: Whether to enable verbose debug output.
+    type: boolean
+    default: false
+
+  - name: environment
+    label: Target Environment
+    description: Deployment environment tier.
+    type: string
+    default: development
+    enum: [development, staging, production]
+
+  - name: tags
+    label: Tags
+    description: List of metadata tags to attach.
+    type: array
+    items_type: string
+
+steps:
+  - section: Configuration
+    tasks:
+      - name: show-config
+        cmd: |
+          echo "=== Configuration ==="
+          echo "App Name    : {{ .inputs.app_name }}"
+          echo "Workers     : {{ .inputs.worker_count }}"
+          echo "Debug Mode  : {{ .inputs.enable_debug }}"
+          echo "Environment : {{ .inputs.environment }}"
+
+      - name: validate-prod-warning
+        # Only warn when targeting production
+        if: "test '{{ .inputs.environment }}' = 'production'"
+        cmd: 'echo "WARNING: targeting production environment"'
+
+  - section: Execution
+    tasks:
+      - name: start-app
+        cmd: echo "Starting {{ .inputs.app_name }} with {{ .inputs.worker_count }} workers in {{ .inputs.environment }} mode"
+
+      - name: enable-debug-output
+        if: "test '{{ .inputs.enable_debug }}' = 'true'"
+        cmd: echo "Debug logging enabled for {{ .inputs.app_name }}"
+        env:
+          LOG_LEVEL: debug
+          APP_ENV: "{{ .inputs.environment }}"

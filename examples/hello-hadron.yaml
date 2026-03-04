@@ -1,0 +1,24 @@
+# hello-hadron.yaml — minimal v0.4 blueprint
+#
+# Demonstrates:
+#   - version and blueprint meta block
+#   - simple section + task structure
+#   - echo commands that work on any macOS/Linux machine
+#
+version: "0.4"
+
+blueprint:
+  name: hello-hadron
+  title: Hello Hadron
+  description: Minimal example blueprint — prints a greeting and the current date.
+  author: Hollis Labs
+  tags: [example, minimal]
+
+steps:
+  - section: Greet
+    tasks:
+      - name: hello
+        cmd: echo "Hello from Hadron!"
+
+      - name: show-date
+        cmd: date "+%Y-%m-%d %H:%M:%S"
