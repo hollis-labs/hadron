@@ -9,6 +9,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
+	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -29,6 +30,7 @@ type Store interface {
 	ListSchedulesByWorkspace(ctx context.Context, workspaceID string) ([]persistence.ScheduleRecord, error)
 	CreateSchedule(ctx context.Context, rec persistence.ScheduleRecord) error
 	UpdateScheduleEnabledAndNext(ctx context.Context, id string, enabled bool, nextRun *time.Time) error
+	DeleteSchedule(ctx context.Context, id string) error
 }
 
 type Runner interface {
@@ -58,15 +60,16 @@ const (
 
 // Adapter exposes Hadron read/query surfaces as MCP tools over stdio.
 type Adapter struct {
-	store    Store
-	runner   Runner
-	sched    SchedulerControl
-	pipeline PipelineRunner
-	token    string
-	scopes   map[string]struct{}
+	store        Store
+	runner       Runner
+	sched        SchedulerControl
+	pipeline     PipelineRunner
+	token        string
+	scopes       map[string]struct{}
+	blueprintDir string
 }
 
-func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRunner, token string, scopes []string) *Adapter {
+func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRunner, token string, scopes []string, opts ...Option) *Adapter {
 	scopeSet := map[string]struct{}{}
 	for _, s := range scopes {
 		s = strings.TrimSpace(s)
@@ -75,13 +78,30 @@ func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRu
 		}
 		scopeSet[s] = struct{}{}
 	}
-	return &Adapter{
-		store:    store,
-		runner:   runner,
-		sched:    sched,
-		pipeline: pipeline,
-		token:    strings.TrimSpace(token),
-		scopes:   scopeSet,
+	a := &Adapter{
+		store:        store,
+		runner:       runner,
+		sched:        sched,
+		pipeline:     pipeline,
+		token:        strings.TrimSpace(token),
+		scopes:       scopeSet,
+		blueprintDir: settings.DefaultBlueprintDir(),
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// Option configures optional Adapter fields.
+type Option func(*Adapter)
+
+// WithBlueprintDir sets the directory used for blueprint listing and reading.
+func WithBlueprintDir(dir string) Option {
+	return func(a *Adapter) {
+		if dir != "" {
+			a.blueprintDir = dir
+		}
 	}
 }
 
@@ -125,6 +145,9 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_pipeline_enqueue":     a.handlePipelineEnqueue,
 		"hadron_pipeline_stages":      a.handlePipelineStages,
 		"hadron_blueprint_validate":   a.handleBlueprintValidate,
+		"hadron_blueprints_list":      a.handleBlueprintsList,
+		"hadron_blueprint_get":        a.handleBlueprintGet,
+		"hadron_schedule_delete":      a.handleScheduleDelete,
 	}
 }
 

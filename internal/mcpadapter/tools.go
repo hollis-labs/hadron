@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -115,6 +117,20 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithDescription("Validate blueprint YAML/JSON content."),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Blueprint YAML or JSON content")),
 	), a.handleBlueprintValidate)
+
+	s.AddTool(mcp.NewTool("hadron_blueprints_list",
+		mcp.WithDescription("List available blueprint files from the blueprints directory."),
+	), a.handleBlueprintsList)
+
+	s.AddTool(mcp.NewTool("hadron_blueprint_get",
+		mcp.WithDescription("Read a blueprint file's YAML content by path."),
+		mcp.WithString("blueprint_path", mcp.Required(), mcp.Description("Path to the blueprint file")),
+	), a.handleBlueprintGet)
+
+	s.AddTool(mcp.NewTool("hadron_schedule_delete",
+		mcp.WithDescription("Delete a schedule by id (requires scope schedule.write)."),
+		mcp.WithString("schedule_id", mcp.Required(), mcp.Description("Schedule id")),
+	), a.handleScheduleDelete)
 }
 
 func (a *Adapter) handleHealth(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -533,6 +549,86 @@ func (a *Adapter) handleBlueprintValidate(_ context.Context, req mcp.CallToolReq
 		return toolJSON(map[string]any{"valid": false, "error": err.Error()}), nil
 	}
 	return toolJSON(map[string]any{"valid": true}), nil
+}
+
+func (a *Adapter) handleBlueprintsList(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	dir := a.blueprintDir
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return toolJSON(map[string]any{"items": []any{}, "count": 0, "directory": dir}), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	var items []map[string]any
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		ext := filepath.Ext(name)
+		if ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		items = append(items, map[string]any{
+			"name":      name,
+			"path":      filepath.Join(dir, name),
+			"size":      info.Size(),
+			"modified":  info.ModTime().UTC().Format(time.RFC3339),
+		})
+	}
+	if items == nil {
+		items = []map[string]any{}
+	}
+	return toolJSON(map[string]any{"items": items, "count": len(items), "directory": dir}), nil
+}
+
+func (a *Adapter) handleBlueprintGet(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	bpPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	if bpPath == "" {
+		return toolError("validation_error", "blueprint_path is required"), nil
+	}
+	// Resolve to absolute and ensure the path is within the blueprints directory.
+	absPath, err := filepath.Abs(bpPath)
+	if err != nil {
+		return toolError("validation_error", "invalid path"), nil
+	}
+	absDir, err := filepath.Abs(a.blueprintDir)
+	if err != nil {
+		return toolError("internal_error", "cannot resolve blueprint directory"), nil
+	}
+	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
+		return toolError("validation_error", "path is outside the blueprints directory"), nil
+	}
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return toolError("not_found", "blueprint file not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(map[string]any{
+		"path":    absPath,
+		"content": string(data),
+	}), nil
+}
+
+func (a *Adapter) handleScheduleDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if deny := a.checkScope(ScopeScheduleWrite); deny != nil {
+		return deny, nil
+	}
+	scheduleID := strings.TrimSpace(req.GetString("schedule_id", ""))
+	if scheduleID == "" {
+		return toolError("validation_error", "schedule_id is required"), nil
+	}
+	if err := a.store.DeleteSchedule(ctx, scheduleID); err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(map[string]any{"schedule_id": scheduleID, "deleted": true}), nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

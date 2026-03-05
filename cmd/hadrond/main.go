@@ -225,7 +225,8 @@ func runMCP(args []string) error {
 		}
 	}
 
-	adapter := mcpadapter.New(store, mgr, sched, pipelineRunner, *tokenFlag, scopes)
+	adapter := mcpadapter.New(store, mgr, sched, pipelineRunner, *tokenFlag, scopes,
+		mcpadapter.WithBlueprintDir(sett.BlueprintDir))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
