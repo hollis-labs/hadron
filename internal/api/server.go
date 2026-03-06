@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
+	"github.com/hollis-labs/tiamat-otel/propagation"
 )
 
 // ── Store interfaces ──────────────────────────────────────────────────────────
@@ -123,10 +124,10 @@ func NewServer(addr string, deps Dependencies) *Server {
 		writeError(w, http.StatusNotFound, "not found")
 	})
 
-	s.handler = mux
+	s.handler = propagation.HTTPMiddleware(mux)
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: s.handler,
 	}
 	return s
 }

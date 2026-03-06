@@ -17,6 +17,9 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	tiamatotel "github.com/hollis-labs/tiamat-otel"
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/telemetry"
@@ -244,13 +247,25 @@ func (m *Manager) worker() {
 }
 
 func (m *Manager) executeBlueprint(ctx context.Context, req Request) error {
+	ctx, span := tiamatotel.StartSpan(ctx, "hadron.blueprint.run")
+	span.SetAttributes(
+		attribute.String("hadron.blueprint.path", req.BlueprintPath),
+		attribute.String("hadron.run.id", req.RunID),
+		attribute.String("hadron.workspace.id", req.WorkspaceID),
+	)
+	defer span.End()
+
 	re := &runExecution{
 		manager:     m,
 		runID:       req.RunID,
 		workspaceID: req.WorkspaceID,
 		dryRun:      req.DryRun,
 	}
-	return re.executeFile(ctx, req.BlueprintPath, req.Inputs, 0)
+	err := re.executeFile(ctx, req.BlueprintPath, req.Inputs, 0)
+	if err != nil {
+		span.RecordError(err)
+	}
+	return err
 }
 
 // ─── runExecution ─────────────────────────────────────────────────────────────
@@ -356,7 +371,19 @@ func (r *runExecution) executeFile(ctx context.Context, bpPath string, inputs ma
 }
 
 // runTask executes a single task's cmd/run via PTY.
-func (r *runExecution) runTask(ctx context.Context, section string, task blueprint.Task) error {
+func (r *runExecution) runTask(ctx context.Context, section string, task blueprint.Task) (taskErr error) {
+	ctx, taskSpan := tiamatotel.ToolCallSpan(ctx, task.Name)
+	taskSpan.SetAttributes(
+		attribute.String("hadron.section", section),
+		attribute.String("hadron.run.id", r.runID),
+	)
+	defer func() {
+		if taskErr != nil {
+			taskSpan.RecordError(taskErr)
+		}
+		taskSpan.End()
+	}()
+
 	cmd := task.Cmd
 	if cmd == "" {
 		cmd = task.Run

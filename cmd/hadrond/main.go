@@ -14,6 +14,8 @@ import (
 
 	"encoding/json"
 
+	tiamatotel "github.com/hollis-labs/tiamat-otel"
+
 	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/config"
 	"github.com/hollis-labs/hadron/internal/execution"
@@ -88,6 +90,15 @@ func runServe(args []string) error {
 
 	if err := cfg.Ensure(); err != nil {
 		return fmt.Errorf("ensure dirs: %w", err)
+	}
+
+	// Initialise OpenTelemetry tracing.
+	otelCtx := context.Background()
+	otelShutdown, otelErr := tiamatotel.Init(otelCtx, tiamatotel.WithServiceName("hadron"))
+	if otelErr != nil {
+		log.Printf("warning: OTel init failed: %v", otelErr)
+	} else {
+		defer otelShutdown(otelCtx)
 	}
 
 	store, err := persistence.Open(cfg.DBPath)
