@@ -1,6 +1,6 @@
 import { LayoutDashboard, FolderOpen, List, CalendarClock, ChevronRight, GitBranch, Settings, HelpCircle, Activity } from 'lucide-react';
 
-export type NavPage = 'dashboard' | 'blueprints' | 'blueprintDetail' | 'blueprintWizard' | 'runs' | 'runDetail' | 'schedules' | 'pipelines' | 'telemetry' | 'settings' | 'help';
+export type NavPage = 'dashboard' | 'blueprints' | 'blueprintDetail' | 'blueprintWizard' | 'runs' | 'runDetail' | 'schedules' | 'pipelines' | 'pipelineDetail' | 'telemetry' | 'settings' | 'help';
 
 interface AppNavProps {
   current: NavPage;

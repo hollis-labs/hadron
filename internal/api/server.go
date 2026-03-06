@@ -124,7 +124,7 @@ func NewServer(addr string, deps Dependencies) *Server {
 		writeError(w, http.StatusNotFound, "not found")
 	})
 
-	s.handler = propagation.HTTPMiddleware(mux)
+	s.handler = corsMiddleware(propagation.HTTPMiddleware(mux))
 	s.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: s.handler,
@@ -138,6 +138,25 @@ func (s *Server) ListenAndServe() error {
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
+}
+
+// corsMiddleware handles CORS preflight (OPTIONS) requests and sets
+// permissive headers for local development. The Wails webview in production
+// mode loads from a wails:// origin, so cross-origin requests to the daemon
+// require proper CORS headers.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ── Health ────────────────────────────────────────────────────────────────────

@@ -24,6 +24,7 @@ type Stage struct {
 	Name          string         `yaml:"name" json:"name"`
 	BlueprintPath string         `yaml:"blueprint_path" json:"blueprint_path"`
 	Inputs        map[string]any `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	If            string         `yaml:"if,omitempty" json:"if,omitempty"`
 }
 
 func ParseFile(path string) (*Spec, error) {

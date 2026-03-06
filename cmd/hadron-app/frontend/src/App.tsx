@@ -11,10 +11,11 @@ import { RunsPage } from './pages/RunsPage';
 import { RunDetailPage } from './pages/RunDetailPage';
 import { SchedulerPage } from './pages/SchedulerPage';
 import { PipelinesPage } from './pages/PipelinesPage';
+import { PipelineDetailPage } from './pages/PipelineDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TelemetryPage } from './pages/TelemetryPage';
 import { HelpPage } from './pages/HelpPage';
-import { setBaseURL, listWorkspaces, createWorkspace, getPreference, setPreference, listRuns } from './api/client';
+import { setBaseURL, listWorkspaces, createWorkspace, getPreference, setPreference, listRuns, readBlueprintFile } from './api/client';
 import { isDemoMode, setDemoMode } from './demo/demoMode';
 import type { Workspace } from './api/types';
 
@@ -24,6 +25,7 @@ const PAGE_TITLES: Record<NavPage, string> = {
   blueprintDetail: 'Blueprint Detail',
   blueprintWizard: 'Blueprint Wizard',
   pipelines: 'Pipelines',
+  pipelineDetail: 'Pipeline Detail',
   runs: 'Run Log',
   runDetail: 'Run Detail',
   schedules: 'Schedules',
@@ -53,6 +55,7 @@ export default function App() {
   const [phase, setPhase] = useState<NavPage>('dashboard');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedBlueprintPath, setSelectedBlueprintPath] = useState<string | null>(null);
+  const [selectedPipelinePath, setSelectedPipelinePath] = useState<string | null>(null);
   const [wizardEditPath, setWizardEditPath] = useState<string | null>(null);
   const [daemonAddr, setDaemonAddr] = useState('127.0.0.1:8095');
   const [daemonStatus, setDaemonStatus] = useState<string>('stopped');
@@ -166,9 +169,25 @@ export default function App() {
     setPhase('runDetail');
   };
 
-  const openBlueprintDetail = (path: string) => {
+  const openBlueprintDetail = async (path: string) => {
+    // Detect if file is a pipeline spec (has stages: key) vs a blueprint
+    try {
+      const content = await readBlueprintFile(path);
+      if (/^stages:/m.test(content)) {
+        setSelectedPipelinePath(path);
+        setPhase('pipelineDetail');
+        return;
+      }
+    } catch {
+      // Fall through to blueprint detail — it will show its own error
+    }
     setSelectedBlueprintPath(path);
     setPhase('blueprintDetail');
+  };
+
+  const openPipelineDetail = (path: string) => {
+    setSelectedPipelinePath(path);
+    setPhase('pipelineDetail');
   };
 
   const openWizard = (editPath: string | null = null) => {
@@ -193,6 +212,7 @@ export default function App() {
       if (phase === 'runDetail') { setPhase('runs'); e.preventDefault(); }
       else if (phase === 'blueprintDetail') { setPhase('blueprints'); e.preventDefault(); }
       else if (phase === 'blueprintWizard') { setPhase('blueprints'); e.preventDefault(); }
+      else if (phase === 'pipelineDetail') { setPhase('pipelines'); e.preventDefault(); }
     }
 
     // R — refresh (dispatch custom event that pages can listen for)
@@ -279,6 +299,20 @@ export default function App() {
               daemonStatus={daemonStatus}
               workspaceId={selectedWorkspaceId}
               onOpenRun={openRunDetail}
+              onOpenPipeline={openPipelineDetail}
+            />
+          )}
+          {phase === 'pipelineDetail' && selectedPipelinePath && (
+            <PipelineDetailPage
+              path={selectedPipelinePath}
+              onBack={() => setPhase('pipelines')}
+              onOpenRun={openRunDetail}
+              onEditPipeline={(p) => {
+                // Navigate back to pipelines with edit modal — for now just go back
+                setPhase('pipelines');
+              }}
+              daemonStatus={daemonStatus}
+              workspaceId={selectedWorkspaceId}
             />
           )}
           {phase === 'runs' && (

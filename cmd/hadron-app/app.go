@@ -72,12 +72,14 @@ func (a *App) startup(ctx context.Context) {
 	go a.startDaemon()
 }
 
-// shutdown is called by Wails when the app closes. It kills hadrond.
+// shutdown is called by Wails when the app closes. It kills hadrond only if
+// the GUI spawned it (not in external mode).
 func (a *App) shutdown(ctx context.Context) {
 	a.mu.Lock()
 	cmd := a.daemonCmd
 	a.mu.Unlock()
 
+	// Only kill daemon if we spawned it (daemonCmd is nil in external/adopt mode)
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -550,8 +552,36 @@ func (a *App) DeleteTelemetryLog(runID string) error {
 // startDaemon locates hadrond, picks a port, starts it, and polls health.
 // If a daemon is already running on port 8095 (e.g. via make run-daemon in dev mode),
 // it adopts that instance rather than spawning a new one.
+//
+// When HADRON_DAEMON_EXTERNAL=true (e.g. set by Cerberus), the GUI never
+// spawns its own daemon — it only adopts an existing one on port 8095,
+// polling until it appears or timing out after 15 seconds.
 func (a *App) startDaemon() {
 	preferredAddr := "127.0.0.1:8095"
+	external := os.Getenv("HADRON_DAEMON_EXTERNAL") == "true" || os.Getenv("HADRON_DAEMON_EXTERNAL") == "1"
+
+	if external {
+		// External mode: wait for an externally managed daemon (Cerberus, manual, etc.)
+		if err := waitForHealth(preferredAddr, 15*time.Second); err != nil {
+			a.setStatus("error")
+			runtime.EventsEmit(a.ctx, "daemon:status", map[string]string{
+				"status": "error",
+				"error":  "external daemon not found on " + preferredAddr + " (HADRON_DAEMON_EXTERNAL=true)",
+			})
+			return
+		}
+		a.mu.Lock()
+		a.daemonAddr = preferredAddr
+		a.mu.Unlock()
+		a.setStatus("running")
+		runtime.EventsEmit(a.ctx, "daemon:status", map[string]string{
+			"status": "running",
+			"addr":   preferredAddr,
+		})
+		return
+	}
+
+	// Default mode: adopt existing daemon or spawn a new one.
 	if err := waitForHealth(preferredAddr, 500*time.Millisecond); err == nil {
 		a.mu.Lock()
 		a.daemonAddr = preferredAddr

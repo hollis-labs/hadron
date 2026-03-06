@@ -10,6 +10,7 @@ interface PipelinesPageProps {
   daemonStatus: string;
   workspaceId: string;
   onOpenRun: (runId: string) => void;
+  onOpenPipeline?: (path: string) => void;
 }
 
 function formatDuration(start?: string | null, end?: string | null): string {
@@ -34,66 +35,177 @@ function shortPath(p: string): string {
 interface PipelineStageForm {
   name: string;
   blueprint_path: string;
+  inputs: Record<string, string>;
+  condition: string; // if: field
 }
 
 interface PipelineForm {
   name: string;
   stop_on_fail: boolean;
   stages: PipelineStageForm[];
+  inputs: Record<string, string>; // top-level pipeline inputs
 }
 
-const EMPTY_STAGE: PipelineStageForm = { name: '', blueprint_path: '' };
-const EMPTY_FORM: PipelineForm = { name: '', stop_on_fail: true, stages: [{ ...EMPTY_STAGE }] };
+const EMPTY_STAGE: PipelineStageForm = { name: '', blueprint_path: '', inputs: {}, condition: '' };
+const EMPTY_FORM: PipelineForm = { name: '', stop_on_fail: true, stages: [{ ...EMPTY_STAGE }], inputs: {} };
 
 // Simple YAML serializer for pipeline spec
 function serializePipeline(form: PipelineForm): string {
-  let yaml = `meta:\n  name: "${form.name}"\n`;
-  yaml += `stop_on_fail: ${form.stop_on_fail}\n`;
+  let yaml = `meta:\n  name: "${form.name}"\n\n`;
+  yaml += `stop_on_fail: ${form.stop_on_fail}\n\n`;
   yaml += `stages:\n`;
   for (const stage of form.stages) {
     yaml += `  - name: "${stage.name}"\n`;
     yaml += `    blueprint_path: "${stage.blueprint_path}"\n`;
+    if (stage.condition.trim()) {
+      yaml += `    if: "${stage.condition}"\n`;
+    }
+    const inputKeys = Object.keys(stage.inputs);
+    if (inputKeys.length > 0) {
+      yaml += `    inputs:\n`;
+      for (const key of inputKeys) {
+        yaml += `      ${key}: "${stage.inputs[key]}"\n`;
+      }
+    }
+    yaml += `\n`;
   }
-  return yaml;
+  // Top-level pipeline inputs
+  const topInputKeys = Object.keys(form.inputs);
+  if (topInputKeys.length > 0) {
+    yaml += `inputs:\n`;
+    for (const key of topInputKeys) {
+      yaml += `  ${key}: "${form.inputs[key]}"\n`;
+    }
+  }
+  return yaml.trimEnd() + '\n';
 }
 
-// Simple YAML parser for pipeline spec (handles the format we generate)
+// Helper: strip quotes from a YAML value
+function unquote(v: string): string {
+  return v.trim().replace(/^["']/, '').replace(/["']$/, '');
+}
+
+// Indentation-aware YAML parser for pipeline spec
 function parsePipelineYaml(content: string): PipelineForm | null {
   try {
-    const form: PipelineForm = { name: '', stop_on_fail: true, stages: [] };
+    const form: PipelineForm = { name: '', stop_on_fail: true, stages: [], inputs: {} };
     const lines = content.split('\n');
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.startsWith('name:') && i > 0 && lines[i - 1].trim() === 'meta:') {
-        form.name = line.replace(/^name:\s*["']?/, '').replace(/["']$/, '');
+    // State machine: track which top-level block we're in
+    type Section = 'none' | 'meta' | 'stages' | 'inputs';
+    let section: Section = 'none';
+    let currentStage: PipelineStageForm | null = null;
+    let inStageInputs = false;
+
+    for (const line of lines) {
+      // Skip blank lines and comments
+      if (line.trim() === '' || line.trim().startsWith('#')) continue;
+
+      // Measure indentation (number of leading spaces)
+      const indent = line.search(/\S/);
+
+      // Top-level keys (indent 0)
+      if (indent === 0) {
+        const trimmed = line.trim();
+        if (trimmed === 'meta:') {
+          // Flush any pending stage
+          if (currentStage) { form.stages.push(currentStage); currentStage = null; }
+          inStageInputs = false;
+          section = 'meta';
+          continue;
+        }
+        if (trimmed.startsWith('stop_on_fail:')) {
+          if (currentStage) { form.stages.push(currentStage); currentStage = null; }
+          inStageInputs = false;
+          section = 'none';
+          form.stop_on_fail = trimmed.includes('true');
+          continue;
+        }
+        if (trimmed === 'stages:') {
+          if (currentStage) { form.stages.push(currentStage); currentStage = null; }
+          inStageInputs = false;
+          section = 'stages';
+          continue;
+        }
+        if (trimmed === 'inputs:') {
+          if (currentStage) { form.stages.push(currentStage); currentStage = null; }
+          inStageInputs = false;
+          section = 'inputs';
+          continue;
+        }
+        // Unknown top-level key — skip
+        section = 'none';
+        continue;
       }
-      if (line.startsWith('stop_on_fail:')) {
-        form.stop_on_fail = line.includes('true');
+
+      // meta: block (indent 2)
+      if (section === 'meta' && indent >= 2) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('name:')) {
+          form.name = unquote(trimmed.slice(5));
+        }
+        continue;
+      }
+
+      // stages: block
+      if (section === 'stages') {
+        const trimmed = line.trim();
+
+        // New stage item: "  - name: ..."
+        if (trimmed.startsWith('- ')) {
+          if (currentStage) form.stages.push(currentStage);
+          inStageInputs = false;
+          currentStage = { name: '', blueprint_path: '', inputs: {}, condition: '' };
+          // The "- " prefix may contain name: on same line
+          const after = trimmed.slice(2).trim();
+          if (after.startsWith('name:')) {
+            currentStage.name = unquote(after.slice(5));
+          }
+          continue;
+        }
+
+        // Stage properties (indent 4+)
+        if (currentStage && indent >= 4) {
+          if (inStageInputs && indent >= 6) {
+            // key: value inside stage inputs
+            const colonIdx = trimmed.indexOf(':');
+            if (colonIdx > 0) {
+              const key = trimmed.slice(0, colonIdx).trim();
+              const val = unquote(trimmed.slice(colonIdx + 1));
+              currentStage.inputs[key] = val;
+            }
+            continue;
+          }
+          // Not inside inputs (or back to indent 4)
+          inStageInputs = false;
+          if (trimmed.startsWith('blueprint_path:')) {
+            currentStage.blueprint_path = unquote(trimmed.slice(15));
+          } else if (trimmed.startsWith('name:')) {
+            currentStage.name = unquote(trimmed.slice(5));
+          } else if (trimmed.startsWith('if:')) {
+            currentStage.condition = unquote(trimmed.slice(3));
+          } else if (trimmed === 'inputs:') {
+            inStageInputs = true;
+          }
+          continue;
+        }
+        continue;
+      }
+
+      // Top-level inputs: block (indent 2)
+      if (section === 'inputs' && indent >= 2) {
+        const trimmed = line.trim();
+        const colonIdx = trimmed.indexOf(':');
+        if (colonIdx > 0) {
+          const key = trimmed.slice(0, colonIdx).trim();
+          const val = unquote(trimmed.slice(colonIdx + 1));
+          form.inputs[key] = val;
+        }
+        continue;
       }
     }
 
-    // Parse stages
-    let inStages = false;
-    let currentStage: PipelineStageForm | null = null;
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed === 'stages:') { inStages = true; continue; }
-      if (inStages) {
-        if (trimmed.startsWith('- name:')) {
-          if (currentStage) form.stages.push(currentStage);
-          currentStage = {
-            name: trimmed.replace(/^- name:\s*["']?/, '').replace(/["']$/, ''),
-            blueprint_path: '',
-          };
-        } else if (trimmed.startsWith('blueprint_path:') && currentStage) {
-          currentStage.blueprint_path = trimmed.replace(/^blueprint_path:\s*["']?/, '').replace(/["']$/, '');
-        } else if (/^[a-z]/.test(trimmed) && !trimmed.startsWith('blueprint_path')) {
-          // New top-level key, stop parsing stages
-          break;
-        }
-      }
-    }
+    // Flush last stage
     if (currentStage) form.stages.push(currentStage);
     if (form.stages.length === 0) form.stages.push({ ...EMPTY_STAGE });
 
@@ -103,7 +215,7 @@ function parsePipelineYaml(content: string): PipelineForm | null {
   }
 }
 
-export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun }: PipelinesPageProps) {
+export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipeline }: PipelinesPageProps) {
   const [rootDir, setRootDir] = useState<string>('');
   const [currentDir, setCurrentDir] = useState<string>('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -293,6 +405,71 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun }: Pipeline
     if (path) updateStage(index, 'blueprint_path', path);
   };
 
+  // Stage input management
+  const addStageInput = (stageIndex: number) => {
+    setEditorForm(f => ({
+      ...f,
+      stages: f.stages.map((s, i) => {
+        if (i !== stageIndex) return s;
+        // Find a unique placeholder key
+        let k = '';
+        let n = 0;
+        while (k in s.inputs) { n++; k = `key${n}`; }
+        return { ...s, inputs: { ...s.inputs, [k]: '' } };
+      }),
+    }));
+  };
+
+  const updateStageInput = (stageIndex: number, oldKey: string, newKey: string, value: string) => {
+    setEditorForm(f => ({
+      ...f,
+      stages: f.stages.map((s, i) => {
+        if (i !== stageIndex) return s;
+        const entries = Object.entries(s.inputs).map(([k, v]) =>
+          k === oldKey ? [newKey, value] : [k, v]
+        );
+        return { ...s, inputs: Object.fromEntries(entries) };
+      }),
+    }));
+  };
+
+  const removeStageInput = (stageIndex: number, key: string) => {
+    setEditorForm(f => ({
+      ...f,
+      stages: f.stages.map((s, i) => {
+        if (i !== stageIndex) return s;
+        const { [key]: _, ...rest } = s.inputs;
+        return { ...s, inputs: rest };
+      }),
+    }));
+  };
+
+  // Top-level pipeline input management
+  const addPipelineInput = () => {
+    setEditorForm(f => {
+      let k = '';
+      let n = 0;
+      while (k in f.inputs) { n++; k = `key${n}`; }
+      return { ...f, inputs: { ...f.inputs, [k]: '' } };
+    });
+  };
+
+  const updatePipelineInput = (oldKey: string, newKey: string, value: string) => {
+    setEditorForm(f => {
+      const entries = Object.entries(f.inputs).map(([k, v]) =>
+        k === oldKey ? [newKey, value] : [k, v]
+      );
+      return { ...f, inputs: Object.fromEntries(entries) };
+    });
+  };
+
+  const removePipelineInput = (key: string) => {
+    setEditorForm(f => {
+      const { [key]: _, ...rest } = f.inputs;
+      return { ...f, inputs: rest };
+    });
+  };
+
   const canGoBack = currentDir && currentDir !== rootDir;
 
   return (
@@ -344,8 +521,8 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun }: Pipeline
               <div
                 key={entry.path}
                 className="file-row"
-                onClick={() => entry.isDir ? handleDrillDown(entry) : undefined}
-                style={{ cursor: entry.isDir ? 'pointer' : 'default' }}
+                onClick={() => entry.isDir ? handleDrillDown(entry) : onOpenPipeline?.(entry.path)}
+                style={{ cursor: 'pointer' }}
               >
                 <span style={{ color: entry.isDir ? 'rgb(var(--warn))' : 'rgb(var(--accent))', flexShrink: 0 }}>
                   {entry.isDir ? <Folder size={15} /> : <FileCode size={15} />}
@@ -486,6 +663,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun }: Pipeline
                           color: stage.status === 'success' ? 'rgb(var(--ok))'
                             : stage.status === 'failed' ? 'rgb(var(--danger))'
                             : stage.status === 'running' ? 'rgb(var(--accent))'
+                            : stage.status === 'skipped' ? 'rgb(var(--warn))'
                             : 'rgb(var(--muted))',
                         }}>
                           {stage.status}
@@ -640,9 +818,114 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun }: Pipeline
                         <FolderOpen size={11} />
                       </button>
                     </div>
+                    {/* Condition (if:) */}
+                    <div style={{ display: 'flex', gap: '0.3rem', marginLeft: '1.9rem', marginTop: '0.25rem' }}>
+                      <input
+                        className="hud-input"
+                        placeholder="if: condition (optional)"
+                        value={stage.condition}
+                        onChange={e => setEditorForm(f => ({
+                          ...f,
+                          stages: f.stages.map((s, si) => si === i ? { ...s, condition: e.target.value } : s),
+                        }))}
+                        style={{ flex: 1, fontSize: '0.72rem', padding: '0.2rem 0.35rem', fontFamily: 'monospace', color: stage.condition ? 'rgb(var(--warn))' : undefined }}
+                      />
+                    </div>
+                    {/* Stage inputs */}
+                    <div style={{ marginLeft: '1.9rem', marginTop: '0.3rem' }}>
+                      {Object.keys(stage.inputs).length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', marginBottom: '0.2rem' }}>
+                          {Object.entries(stage.inputs).map(([key, val], ki) => (
+                            <div key={ki} style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                              <input
+                                className="hud-input"
+                                placeholder="key"
+                                value={key}
+                                onChange={e => updateStageInput(i, key, e.target.value, val)}
+                                style={{ width: '35%', fontSize: '0.72rem', padding: '0.2rem 0.35rem', fontFamily: 'monospace' }}
+                              />
+                              <span style={{ color: 'rgb(var(--muted))', fontSize: '0.7rem' }}>=</span>
+                              <input
+                                className="hud-input"
+                                placeholder="value"
+                                value={val}
+                                onChange={e => updateStageInput(i, key, key, e.target.value)}
+                                style={{ flex: 1, fontSize: '0.72rem', padding: '0.2rem 0.35rem', fontFamily: 'monospace' }}
+                              />
+                              <button
+                                type="button"
+                                className="hud-button-ghost"
+                                onClick={() => removeStageInput(i, key)}
+                                style={{ padding: '0.1rem', color: 'rgb(var(--danger))' }}
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="hud-button-ghost"
+                        onClick={() => addStageInput(i)}
+                        style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', color: 'rgb(var(--muted))' }}
+                      >
+                        <Plus size={10} /> Input
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Top-level pipeline inputs */}
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                <label className="hud-label" style={{ margin: 0 }}>Pipeline Inputs</label>
+                <button
+                  type="button"
+                  className="hud-button-ghost"
+                  onClick={addPipelineInput}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.7rem', padding: '0.15rem 0.4rem' }}
+                >
+                  <Plus size={12} /> Add Input
+                </button>
+              </div>
+              {Object.keys(editorForm.inputs).length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  {Object.entries(editorForm.inputs).map(([key, val], ki) => (
+                    <div key={ki} style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                      <input
+                        className="hud-input"
+                        placeholder="key"
+                        value={key}
+                        onChange={e => updatePipelineInput(key, e.target.value, val)}
+                        style={{ width: '35%', fontSize: '0.78rem', padding: '0.25rem 0.4rem', fontFamily: 'monospace' }}
+                      />
+                      <span style={{ color: 'rgb(var(--muted))', fontSize: '0.75rem' }}>=</span>
+                      <input
+                        className="hud-input"
+                        placeholder="value / default"
+                        value={val}
+                        onChange={e => updatePipelineInput(key, key, e.target.value)}
+                        style={{ flex: 1, fontSize: '0.78rem', padding: '0.25rem 0.4rem', fontFamily: 'monospace' }}
+                      />
+                      <button
+                        type="button"
+                        className="hud-button-ghost"
+                        onClick={() => removePipelineInput(key)}
+                        style={{ padding: '0.15rem', color: 'rgb(var(--danger))' }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.72rem', color: 'rgb(var(--muted))', fontStyle: 'italic' }}>
+                  No pipeline-level inputs defined
+                </div>
+              )}
             </div>
 
             {/* Error */}

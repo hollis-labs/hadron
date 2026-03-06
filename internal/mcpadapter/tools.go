@@ -119,7 +119,8 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 	), a.handleBlueprintValidate)
 
 	s.AddTool(mcp.NewTool("hadron_blueprints_list",
-		mcp.WithDescription("List available blueprint files from the blueprints directory."),
+		mcp.WithDescription("List available blueprint files (recursive). Optionally filter by tag."),
+		mcp.WithString("tag", mcp.Description("Filter by blueprint tag (e.g. 'audit', 'build')")),
 	), a.handleBlueprintsList)
 
 	s.AddTool(mcp.NewTool("hadron_blueprint_get",
@@ -131,6 +132,187 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithDescription("Delete a schedule by id (requires scope schedule.write)."),
 		mcp.WithString("schedule_id", mcp.Required(), mcp.Description("Schedule id")),
 	), a.handleScheduleDelete)
+
+	// Auto-register blueprint files as individual MCP tools
+	a.registerBlueprintTools(s)
+}
+
+// registerBlueprintTools walks the blueprint directory and registers each valid
+// blueprint as its own MCP tool with typed inputs derived from the blueprint spec.
+func (a *Adapter) registerBlueprintTools(s *server.MCPServer) {
+	dir := a.blueprintDir
+	if dir == "" {
+		return
+	}
+
+	var blueprintFiles []string
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		ext := filepath.Ext(d.Name())
+		if ext == ".yaml" || ext == ".yml" {
+			blueprintFiles = append(blueprintFiles, path)
+		}
+		return nil
+	})
+
+	registered := map[string]struct{}{}
+
+	for _, bpPath := range blueprintFiles {
+		bp, err := blueprint.ParseFile(bpPath)
+		if err != nil {
+			continue // skip invalid blueprints
+		}
+
+		// Derive tool name from blueprint slug or name
+		slug := bp.Blueprint.Slug
+		if slug == "" {
+			slug = bp.Blueprint.Name
+		}
+		if slug == "" {
+			// Fall back to filename without extension
+			slug = strings.TrimSuffix(filepath.Base(bpPath), filepath.Ext(bpPath))
+		}
+		// Sanitize: lowercase, replace non-alphanumeric with underscore
+		toolSlug := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+				return r
+			}
+			if r >= 'A' && r <= 'Z' {
+				return r + 32 // toLower
+			}
+			return '_'
+		}, slug)
+		// Collapse multiple underscores
+		for strings.Contains(toolSlug, "__") {
+			toolSlug = strings.ReplaceAll(toolSlug, "__", "_")
+		}
+		toolSlug = strings.Trim(toolSlug, "_")
+		if toolSlug == "" {
+			continue
+		}
+
+		toolName := "hadron_bp_" + toolSlug
+		if _, exists := registered[toolName]; exists {
+			continue // skip duplicates
+		}
+		registered[toolName] = struct{}{}
+
+		// Build description
+		desc := fmt.Sprintf("Run blueprint: %s", bp.Blueprint.Name)
+		if bp.Blueprint.Title != "" {
+			desc = fmt.Sprintf("Run blueprint: %s", bp.Blueprint.Title)
+		}
+		if bp.Blueprint.Description != "" {
+			desc += " — " + bp.Blueprint.Description
+		}
+		desc += " (requires scope run.write)"
+
+		// Build MCP tool options: workspace_id + typed inputs from blueprint
+		toolOpts := []mcp.ToolOption{
+			mcp.WithDescription(desc),
+			mcp.WithString("workspace_id", mcp.Description("Workspace id (default: default)")),
+		}
+
+		for _, inp := range bp.Inputs {
+			inputDesc := inp.Description
+			if inputDesc == "" && inp.Label != "" {
+				inputDesc = inp.Label
+			}
+			if inputDesc == "" {
+				inputDesc = inp.Name
+			}
+
+			switch inp.Type {
+			case "boolean":
+				opts := []mcp.PropertyOption{mcp.Description(inputDesc)}
+				if inp.Required {
+					opts = append(opts, mcp.Required())
+				}
+				toolOpts = append(toolOpts, mcp.WithBoolean(inp.Name, opts...))
+			case "number":
+				opts := []mcp.PropertyOption{mcp.Description(inputDesc)}
+				if inp.Required {
+					opts = append(opts, mcp.Required())
+				}
+				toolOpts = append(toolOpts, mcp.WithNumber(inp.Name, opts...))
+			default: // string, array, or unknown → treat as string
+				opts := []mcp.PropertyOption{mcp.Description(inputDesc)}
+				if inp.Required {
+					opts = append(opts, mcp.Required())
+				}
+				toolOpts = append(toolOpts, mcp.WithString(inp.Name, opts...))
+			}
+		}
+
+		// Capture bpPath for the closure
+		capturedPath := bpPath
+
+		handler := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			if deny := a.checkScope(ScopeRunWrite); deny != nil {
+				return deny, nil
+			}
+			if a.runner == nil {
+				return toolError("unavailable", "runner unavailable"), nil
+			}
+
+			workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
+			if _, err := a.store.GetWorkspace(ctx, workspaceID); err != nil {
+				if isNotFound(err) {
+					return toolError("not_found", "workspace not found"), nil
+				}
+				return toolError("internal_error", err.Error()), nil
+			}
+
+			// Re-parse to get current version of blueprint
+			bpCurrent, err := blueprint.ParseFile(capturedPath)
+			if err != nil {
+				return toolError("validation_error", err.Error()), nil
+			}
+
+			// Build inputs from request arguments
+			inputs := map[string]any{}
+			args := req.GetArguments()
+			for _, inp := range bpCurrent.Inputs {
+				if _, provided := args[inp.Name]; !provided {
+					continue
+				}
+				switch inp.Type {
+				case "boolean":
+					inputs[inp.Name] = req.GetBool(inp.Name, false)
+				case "number":
+					inputs[inp.Name] = req.GetFloat(inp.Name, 0)
+				default:
+					inputs[inp.Name] = req.GetString(inp.Name, "")
+				}
+			}
+
+			normalized, err := blueprint.NormalizeInputs(bpCurrent, inputs)
+			if err != nil {
+				return toolError("validation_error", err.Error()), nil
+			}
+
+			runID := fmt.Sprintf("mcp-run-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&runSeq, 1))
+			if err := a.runner.Enqueue(ctx, execution.Request{
+				RunID:         runID,
+				WorkspaceID:   workspaceID,
+				BlueprintPath: capturedPath,
+				Inputs:        normalized,
+			}); err != nil {
+				return toolError("internal_error", err.Error()), nil
+			}
+			return toolJSON(map[string]any{
+				"run_id":         runID,
+				"status":         "queued",
+				"workspace_id":   workspaceID,
+				"blueprint":      bpCurrent.Blueprint.Name,
+				"blueprint_path": capturedPath,
+			}), nil
+		}
+
+		s.AddTool(mcp.NewTool(toolName, toolOpts...), handler)
+	}
 }
 
 func (a *Adapter) handleHealth(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -551,40 +733,88 @@ func (a *Adapter) handleBlueprintValidate(_ context.Context, req mcp.CallToolReq
 	return toolJSON(map[string]any{"valid": true}), nil
 }
 
-func (a *Adapter) handleBlueprintsList(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (a *Adapter) handleBlueprintsList(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	dir := a.blueprintDir
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
+	tagFilter := strings.TrimSpace(strings.ToLower(req.GetString("tag", "")))
+
+	var items []map[string]any
+	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		ext := filepath.Ext(d.Name())
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
+		}
+
+		// Relative path from blueprint dir for cleaner display
+		relPath, _ := filepath.Rel(dir, path)
+		if relPath == "" {
+			relPath = d.Name()
+		}
+
+		entry := map[string]any{
+			"name":     d.Name(),
+			"path":     path,
+			"rel_path": relPath,
+			"size":     info.Size(),
+			"modified": info.ModTime().UTC().Format(time.RFC3339),
+		}
+
+		// Try parsing for metadata (name, tags, description)
+		bp, parseErr := blueprint.ParseFile(path)
+		if parseErr == nil {
+			entry["blueprint_name"] = bp.Blueprint.Name
+			if bp.Blueprint.Title != "" {
+				entry["title"] = bp.Blueprint.Title
+			}
+			if bp.Blueprint.Description != "" {
+				entry["description"] = bp.Blueprint.Description
+			}
+			if len(bp.Blueprint.Tags) > 0 {
+				entry["tags"] = bp.Blueprint.Tags
+			}
+
+			// Apply tag filter
+			if tagFilter != "" {
+				found := false
+				for _, t := range bp.Blueprint.Tags {
+					if strings.ToLower(t) == tagFilter {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return nil // skip — tag doesn't match
+				}
+			}
+		} else if tagFilter != "" {
+			// If tag filter is set and we can't parse, skip
+			return nil
+		}
+
+		items = append(items, entry)
+		return nil
+	})
+
+	if walkErr != nil {
+		if os.IsNotExist(walkErr) {
 			return toolJSON(map[string]any{"items": []any{}, "count": 0, "directory": dir}), nil
 		}
-		return toolError("internal_error", err.Error()), nil
-	}
-	var items []map[string]any
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		ext := filepath.Ext(name)
-		if ext != ".yaml" && ext != ".yml" {
-			continue
-		}
-		info, infoErr := e.Info()
-		if infoErr != nil {
-			continue
-		}
-		items = append(items, map[string]any{
-			"name":      name,
-			"path":      filepath.Join(dir, name),
-			"size":      info.Size(),
-			"modified":  info.ModTime().UTC().Format(time.RFC3339),
-		})
+		return toolError("internal_error", walkErr.Error()), nil
 	}
 	if items == nil {
 		items = []map[string]any{}
 	}
-	return toolJSON(map[string]any{"items": items, "count": len(items), "directory": dir}), nil
+	result := map[string]any{"items": items, "count": len(items), "directory": dir}
+	if tagFilter != "" {
+		result["tag_filter"] = tagFilter
+	}
+	return toolJSON(result), nil
 }
 
 func (a *Adapter) handleBlueprintGet(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

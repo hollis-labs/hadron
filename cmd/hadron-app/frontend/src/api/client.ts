@@ -4,14 +4,11 @@ import { DEMO_RUNS, getDemoRunEvents, DEMO_SCHEDULES, DEMO_PIPELINES, getDemoPip
 
 // ── Base URL management ───────────────────────────────────────────────
 
-// In Vite dev mode, use empty base so requests go through the Vite proxy.
-// In production (Wails embedded webview), use full URL set by App.tsx.
-const isViteDev = import.meta.env.DEV;
-let _base = isViteDev ? '' : 'http://127.0.0.1:8095';
+// Always use the daemon URL directly. The daemon has CORS headers enabled,
+// so cross-origin requests from the Wails webview (any origin) work fine.
+let _base = 'http://127.0.0.1:8095';
 
 export function setBaseURL(url: string) {
-  // In Vite dev mode, ignore setBaseURL calls — always use proxy
-  if (isViteDev) return;
   _base = url;
 }
 
