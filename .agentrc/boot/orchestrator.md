@@ -10,11 +10,11 @@ updated_at: 2026-02-22
 ## What you can write
 
 You are the **single writer** for these paths:
-- `.volon/tasks/**` — task files and status updates
-- `.volon/backlog/**` — backlog and sprint tracking
-- `.volon/logs/**` — run logs and decision logs
-- `.volon/pcc/**` — project context cache (refresh and updates)
-- `.volon/bootstrap.md` and `.volon/bootstrap/history/**` — iteration state
+- `.agentrc/tasks/**` — task files and status updates
+- `.agentrc/backlog/**` — backlog and sprint tracking
+- `.agentrc/logs/**` — run logs and decision logs
+- `.agentrc/pcc/**` — project context cache (refresh and updates)
+- `.agentrc/bootstrap.md` and `.agentrc/bootstrap/history/**` — iteration state
 - Application code (when executing tasks that require file changes)
 
 ## What you must NOT do
@@ -73,7 +73,7 @@ Do not emit walls of prose between these signals. Summaries and reasoning belong
 
 ## The canonical loop
 
-1. Read `.volon/bootstrap.md` (if present).
+1. Read `.agentrc/bootstrap.md` (if present).
 2. Emit boot confirmation output (see above).
 3. Select next action: run `volon task list --status todo --priority A` and pick the highest-priority `todo` (A > B > C, oldest first) or next workflow step.
 4. Emit task-start signal.
@@ -82,7 +82,7 @@ Do not emit walls of prose between these signals. Summaries and reasoning belong
 7. Transition tasks exclusively through the Volon CLI:
    - `volon task create "<title>" [...]` for new work
    - `volon task start <id>` and `volon task done <id>` for status changes
-   - `volon task reindex` after manual edits or before finalize if anything touched `.volon/tasks/`
+   - `volon task reindex` after manual edits or before finalize if anything touched `.agentrc/tasks/`
 8. Verify against acceptance criteria.
 9. Emit task-done (or blocked/paused) signal.
 10. Commit per policy (per-task or per-iteration). Emit commit signal.
@@ -91,9 +91,9 @@ Do not emit walls of prose between these signals. Summaries and reasoning belong
 
 ## State hygiene responsibilities
 
-- **Initial boot (new clone/export):** Follow the checklist in `docs/05_bootstrap.md` — ensure `.volon/{tasks,logs,pcc,state}` exist, run `volon task reindex`, run `/pcc-refresh scope=all`, and invoke `/bootstrap-update` via `scripts/volon-cli.sh --repo <path> /bootstrap-update` before taking tasks.
-- **Every session start:** Run `volon task list --status todo --priority A` (queue), `volon task show <id>` as needed, and confirm `.volon/state/volon.db` exists (rebuild with `volon task reindex` if missing).
-- **Recurring cleanup (at least once per iteration):** Run `volon task reindex`, `/pcc-refresh scope=all`, trim `.volon/logs/` (move old logs to archive/), rebuild bootstrap (`/bootstrap-update`), and capture findings in a run log.
+- **Initial boot (new clone/export):** Follow the checklist in `docs/05_bootstrap.md` — ensure `.agentrc/{tasks,logs,pcc,state}` exist, run `volon task reindex`, run `/pcc-refresh scope=all`, and invoke `/bootstrap-update` via `scripts/volon-cli.sh --repo <path> /bootstrap-update` before taking tasks.
+- **Every session start:** Run `volon task list --status todo --priority A` (queue), `volon task show <id>` as needed, and confirm `.agentrc/state/volon.db` exists (rebuild with `volon task reindex` if missing).
+- **Recurring cleanup (at least once per iteration):** Run `volon task reindex`, `/pcc-refresh scope=all`, trim `.agentrc/logs/` (move old logs to archive/), rebuild bootstrap (`/bootstrap-update`), and capture findings in a run log.
 
 ## Pause/resume pattern
 

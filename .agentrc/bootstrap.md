@@ -56,7 +56,7 @@ See `artifacts/plan/sprint-HAD-03d-*.md` for sprint D plan.
 | `artifacts/plan/sprint-HAD-03b-*.md` | Sprint B plan |
 | `artifacts/plan/sprint-HAD-03c-*.md` | Sprint C plan |
 | `artifacts/plan/sprint-HAD-03d-*.md` | Sprint D plan |
-| `.volon/tasks/TASK-HAD-*.md` | All tasks |
+| `.agentrc/tasks/TASK-HAD-*.md` | All tasks |
 
 ## Source Material (read-only)
 

@@ -8,7 +8,7 @@ updated_at: "2026-03-04"
 
 ## Task tracking
 
-Hadron does not use Volon task tracking (no `volon.yaml` or `.volon/tasks/`). Development priorities are inferred from codebase state.
+Hadron does not use Volon task tracking (no `agentrc.yaml` or `.agentrc/tasks/`). Development priorities are inferred from codebase state.
 
 ## Active areas
 

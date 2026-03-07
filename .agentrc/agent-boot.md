@@ -12,11 +12,11 @@ Volon is a multi-session orchestration system for repository automation. It coor
 
 ## Ground truth (always read these first)
 
-- `volon.yaml` — system configuration (roles, storage, workflows, observability)
-- `.volon/bootstrap.md` — current iteration state and next actions
-- `.volon/pcc/` — project context cache (agent-only, ground truth for repo info)
-- `.volon/tasks/` — task backlog and execution state
-- `.volon/logs/` — run logs and decision logs
+- `agentrc.yaml` — system configuration (roles, storage, workflows, observability)
+- `.agentrc/bootstrap.md` — current iteration state and next actions
+- `.agentrc/pcc/` — project context cache (agent-only, ground truth for repo info)
+- `.agentrc/tasks/` — task backlog and execution state
+- `.agentrc/logs/` — run logs and decision logs
 - `docs/03_workflow-contracts.md` — execution contract for workflows
 - `docs/08_orchestrator.md` — Orchestrator role responsibilities
 
@@ -31,10 +31,10 @@ Volon is a multi-session orchestration system for repository automation. It coor
 
 ## How to start
 
-1. Read `.volon/bootstrap.md` (if present) for current state and next action.
-2. Identify your role: check `.volon/boot/` for your role addendum (orchestrator.md, worker.md, reviewer.md, architect.md).
+1. Read `.agentrc/bootstrap.md` (if present) for current state and next action.
+2. Identify your role: check `.agentrc/boot/` for your role addendum (orchestrator.md, worker.md, reviewer.md, architect.md).
 3. If this session should use a different agent persona, run `/agent use <name>` before starting work. This prints the relevant boot prompt + guardrails; follow them immediately. To launch a fresh CLI session already in that profile, run `FORGE_AGENT_PROFILE=<name> scripts/volon-cli.sh --repo <path>` or pass `--agent <name>` to the script.
-4. For Orchestrator: ground from `.volon/tasks/` by running `volon task list --status todo --priority A` (the Volon CLI is the canonical interface for create/start/done/list/reindex). Never hand-edit task frontmatter unless you are repairing a parse error.
+4. For Orchestrator: ground from `.agentrc/tasks/` by running `volon task list --status todo --priority A` (the Volon CLI is the canonical interface for create/start/done/list/reindex). Never hand-edit task frontmatter unless you are repairing a parse error.
 5. For Workers/Reviewers: execute your single objective, return results in requested format, do not modify files.
 
 At the beginning of any brand-new clone or export, run the **Initial Boot Checklist** from `docs/05_bootstrap.md` (Volon CLI bootstrap, PCC refresh, directory sanity). During normal work, follow the paired **Cleanup Cycle** in the same doc to keep PCC, task indexes, and bootstrap current.
@@ -59,13 +59,13 @@ scripts/volon-cli.sh --repo /path/to/volon-dev --agent architect --prompt-file /
 ## Your role
 
 You are operating in Volon mode. Load the addendum for your role:
-- **Orchestrator**: `.volon/boot/orchestrator.md` — you drive loops, write state, finalize iterations
-- **Worker**: `.volon/boot/worker.md` — you execute scoped tasks, return results, read-only
-- **Reviewer**: `.volon/boot/reviewer.md` — you scan and summarize, read-only
+- **Orchestrator**: `.agentrc/boot/orchestrator.md` — you drive loops, write state, finalize iterations
+- **Worker**: `.agentrc/boot/worker.md` — you execute scoped tasks, return results, read-only
+- **Reviewer**: `.agentrc/boot/reviewer.md` — you scan and summarize, read-only
 
 ## Boot confirmation
 
-On session start, the Orchestrator emits a structured boot confirmation block. See `.volon/boot/orchestrator.md` § "Boot confirmation output" for the exact format and required transition signals. Include the agent profile you are following (from `/agent use ...` or the `FORGE_AGENT_PROFILE` env var) so collaborators know which constraints apply.
+On session start, the Orchestrator emits a structured boot confirmation block. See `.agentrc/boot/orchestrator.md` § "Boot confirmation output" for the exact format and required transition signals. Include the agent profile you are following (from `/agent use ...` or the `FORGE_AGENT_PROFILE` env var) so collaborators know which constraints apply.
 
 ## Reference map
 

@@ -17,10 +17,10 @@ You transform context into tech docs, ADRs, implementation plans, and actionable
 You may write to:
 - `docs/**` — technical documentation, architecture, specs, PRDs
 - `adr/**` or `artifacts/**` — decision records, plans, knowledge artifacts
-- `.volon/tasks/` — create task files with full execution context
-- `.volon/backlog/` — capture backlog items
-- `.volon/bootstrap.md` — update iteration state
-- `.volon/pcc/` — update project context cache
+- `.agentrc/tasks/` — create task files with full execution context
+- `.agentrc/backlog/` — capture backlog items
+- `.agentrc/bootstrap.md` — update iteration state
+- `.agentrc/pcc/` — update project context cache
 - `CLAUDE.md` — update agent boot instructions
 
 You should **not** write application source code. If implementation is needed, create well-specified tasks with:
