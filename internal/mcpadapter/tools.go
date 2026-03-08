@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/scheduler"
+	"github.com/hollis-labs/tiamat-mcp-helpers/budget"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -47,7 +48,7 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("hadron_runs_list",
 		mcp.WithDescription("List runs for a workspace."),
 		mcp.WithString("workspace_id", mcp.Description("Workspace id (default: default)")),
-		mcp.WithNumber("limit", mcp.Description("Max items (default 20, max 200)")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
 	), a.handleRunsList)
 
 	s.AddTool(mcp.NewTool("hadron_run_get",
@@ -72,12 +73,13 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithDescription("List run events for a run id."),
 		mcp.WithString("run_id", mcp.Required(), mcp.Description("Run id")),
 		mcp.WithString("workspace_id", mcp.Description("Optional workspace scope check")),
-		mcp.WithNumber("limit", mcp.Description("Max items (default 100, max 500)")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
 	), a.handleRunEvents)
 
 	s.AddTool(mcp.NewTool("hadron_schedules_list",
 		mcp.WithDescription("List schedules for a workspace."),
 		mcp.WithString("workspace_id", mcp.Description("Workspace id (default: default)")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
 	), a.handleSchedulesList)
 
 	s.AddTool(mcp.NewTool("hadron_schedule_create",
@@ -98,7 +100,7 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("hadron_pipelines_list",
 		mcp.WithDescription("List pipeline runs for a workspace."),
 		mcp.WithString("workspace_id", mcp.Description("Workspace id (default: default)")),
-		mcp.WithNumber("limit", mcp.Description("Max items (default 20, max 200)")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
 	), a.handlePipelinesList)
 
 	s.AddTool(mcp.NewTool("hadron_pipeline_enqueue",
@@ -121,6 +123,7 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("hadron_blueprints_list",
 		mcp.WithDescription("List available blueprint files (recursive). Optionally filter by tag."),
 		mcp.WithString("tag", mcp.Description("Filter by blueprint tag (e.g. 'audit', 'build')")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
 	), a.handleBlueprintsList)
 
 	s.AddTool(mcp.NewTool("hadron_blueprint_get",
@@ -389,7 +392,7 @@ func (a *Adapter) handleWorkspaceCreate(ctx context.Context, req mcp.CallToolReq
 
 func (a *Adapter) handleRunsList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
-	limit := clamp(req.GetInt("limit", 20), 1, 200)
+	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
 	items, err := a.store.ListRunsByWorkspace(ctx, workspaceID, limit)
 	if err != nil {
 		return toolError("internal_error", err.Error()), nil
@@ -397,17 +400,15 @@ func (a *Adapter) handleRunsList(ctx context.Context, req mcp.CallToolRequest) (
 	out := make([]map[string]any, 0, len(items))
 	for _, r := range items {
 		out = append(out, map[string]any{
-			"id":             r.ID,
-			"workspace_id":   r.WorkspaceID,
-			"blueprint_path": r.BlueprintPath,
-			"status":         r.Status,
-			"created_at":     r.CreatedAt.UTC().Format(time.RFC3339),
-			"started_at":     nullString(r.StartedAt),
-			"ended_at":       nullString(r.EndedAt),
-			"error_message":  nullString(r.ErrorMessage),
+			"id":           r.ID,
+			"blueprint":    r.BlueprintPath,
+			"status":       r.Status,
+			"created_at":   r.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+	env := budget.Apply(out, budget.Config{Limit: limit},
+		"%d runs found. Use hadron_run_get with a specific run_id for full details including error messages.")
+	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
 }
 
 func (a *Adapter) handleRunGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -519,7 +520,7 @@ func (a *Adapter) handleRunEvents(ctx context.Context, req mcp.CallToolRequest) 
 	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
 		return toolError("not_found", "run not found in workspace"), nil
 	}
-	limit := clamp(req.GetInt("limit", 100), 1, 500)
+	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
 	items, err := a.store.ListRunEvents(ctx, runID, limit)
 	if err != nil {
 		return toolError("internal_error", err.Error()), nil
@@ -535,11 +536,14 @@ func (a *Adapter) handleRunEvents(ctx context.Context, req mcp.CallToolRequest) 
 			"created_at": ev.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+	env := budget.Apply(out, budget.Config{Limit: limit},
+		"%d events found. Increase limit parameter for more events.")
+	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
 }
 
 func (a *Adapter) handleSchedulesList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
+	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
 	items, err := a.store.ListSchedulesByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return toolError("internal_error", err.Error()), nil
@@ -559,7 +563,9 @@ func (a *Adapter) handleSchedulesList(ctx context.Context, req mcp.CallToolReque
 			"next_run_at":    nullString(sc.NextRunAt),
 		})
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+	env := budget.Apply(out, budget.Config{Limit: limit},
+		"%d schedules found. Use schedule IDs to manage individual schedules.")
+	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
 }
 
 func (a *Adapter) handleScheduleCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -636,7 +642,7 @@ func (a *Adapter) handleScheduleUpdate(ctx context.Context, req mcp.CallToolRequ
 
 func (a *Adapter) handlePipelinesList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
-	limit := clamp(req.GetInt("limit", 20), 1, 200)
+	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
 	items, err := a.store.ListPipelineRunsByWorkspace(ctx, workspaceID, limit)
 	if err != nil {
 		return toolError("internal_error", err.Error()), nil
@@ -645,16 +651,14 @@ func (a *Adapter) handlePipelinesList(ctx context.Context, req mcp.CallToolReque
 	for _, p := range items {
 		out = append(out, map[string]any{
 			"id":            p.ID,
-			"workspace_id":  p.WorkspaceID,
 			"pipeline_path": p.PipelinePath,
 			"status":        p.Status,
 			"created_at":    p.CreatedAt.UTC().Format(time.RFC3339),
-			"started_at":    nullString(p.StartedAt),
-			"ended_at":      nullString(p.EndedAt),
-			"error_message": nullString(p.ErrorMessage),
 		})
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+	env := budget.Apply(out, budget.Config{Limit: limit},
+		"%d pipeline runs found. Use hadron_pipeline_stages with a specific pipeline_run_id for full details.")
+	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
 }
 
 func (a *Adapter) handlePipelineEnqueue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -736,6 +740,7 @@ func (a *Adapter) handleBlueprintValidate(_ context.Context, req mcp.CallToolReq
 func (a *Adapter) handleBlueprintsList(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	dir := a.blueprintDir
 	tagFilter := strings.TrimSpace(strings.ToLower(req.GetString("tag", "")))
+	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
 
 	var items []map[string]any
 	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -746,10 +751,6 @@ func (a *Adapter) handleBlueprintsList(_ context.Context, req mcp.CallToolReques
 		if ext != ".yaml" && ext != ".yml" {
 			return nil
 		}
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return nil
-		}
 
 		// Relative path from blueprint dir for cleaner display
 		relPath, _ := filepath.Rel(dir, path)
@@ -758,23 +759,14 @@ func (a *Adapter) handleBlueprintsList(_ context.Context, req mcp.CallToolReques
 		}
 
 		entry := map[string]any{
-			"name":     d.Name(),
-			"path":     path,
-			"rel_path": relPath,
-			"size":     info.Size(),
-			"modified": info.ModTime().UTC().Format(time.RFC3339),
+			"name": d.Name(),
+			"path": path,
 		}
 
-		// Try parsing for metadata (name, tags, description)
+		// Try parsing for metadata (name, tags only — summary view)
 		bp, parseErr := blueprint.ParseFile(path)
 		if parseErr == nil {
 			entry["blueprint_name"] = bp.Blueprint.Name
-			if bp.Blueprint.Title != "" {
-				entry["title"] = bp.Blueprint.Title
-			}
-			if bp.Blueprint.Description != "" {
-				entry["description"] = bp.Blueprint.Description
-			}
 			if len(bp.Blueprint.Tags) > 0 {
 				entry["tags"] = bp.Blueprint.Tags
 			}
@@ -803,18 +795,17 @@ func (a *Adapter) handleBlueprintsList(_ context.Context, req mcp.CallToolReques
 
 	if walkErr != nil {
 		if os.IsNotExist(walkErr) {
-			return toolJSON(map[string]any{"items": []any{}, "count": 0, "directory": dir}), nil
+			env := budget.Apply([]map[string]any{}, budget.Config{Limit: limit}, "")
+			return mcp.NewToolResultText(budget.ToolJSON(env)), nil
 		}
 		return toolError("internal_error", walkErr.Error()), nil
 	}
 	if items == nil {
 		items = []map[string]any{}
 	}
-	result := map[string]any{"items": items, "count": len(items), "directory": dir}
-	if tagFilter != "" {
-		result["tag_filter"] = tagFilter
-	}
-	return toolJSON(result), nil
+	env := budget.Apply(items, budget.Config{Limit: limit},
+		"%d blueprints found. Use hadron_blueprint_get with a specific path for full details. Add tag filter to narrow results.")
+	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
 }
 
 func (a *Adapter) handleBlueprintGet(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -868,16 +859,6 @@ func workspaceDefault(workspaceID string) string {
 		return "default"
 	}
 	return strings.TrimSpace(workspaceID)
-}
-
-func clamp(v, min, max int) int {
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
 }
 
 func nullString(s sql.NullString) any {
