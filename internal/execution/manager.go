@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	tiamatotel "github.com/hollis-labs/tiamat-otel"
+	tiamatotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/hadron/internal/blueprint"

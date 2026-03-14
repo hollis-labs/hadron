@@ -1,1 +1,1 @@
-/Users/chrispian/Projects-apps/volon/.claude/hooks/shared/session-inject.sh
+/Users/chrispian/.agentrc/hooks/shared/session-inject.sh

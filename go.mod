@@ -4,8 +4,8 @@ go 1.25.0
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/hollis-labs/tiamat-mcp-helpers v0.0.0
-	github.com/hollis-labs/tiamat-otel v0.0.0
+	github.com/hollis-labs/mcp-helpers v0.0.0
+	github.com/hollis-labs/otel v0.0.0
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
@@ -15,9 +15,9 @@ require (
 	modernc.org/sqlite v1.46.1
 )
 
-replace github.com/hollis-labs/tiamat-mcp-helpers => ../tiamat-mcp-helpers
+replace github.com/hollis-labs/mcp-helpers => ../tiamat-mcp-helpers
 
-replace github.com/hollis-labs/tiamat-otel => ../tiamat-otel
+replace github.com/hollis-labs/otel => ../tiamat-otel
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect

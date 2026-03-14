@@ -1,1 +1,1 @@
-/Users/chrispian/Projects-apps/volon/.claude/hooks/shared/envelope-guard.sh
+/Users/chrispian/.agentrc/hooks/shared/envelope-guard.sh

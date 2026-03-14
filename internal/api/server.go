@@ -16,7 +16,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
-	"github.com/hollis-labs/tiamat-otel/propagation"
+	"github.com/hollis-labs/otel/propagation"
 )
 
 // ── Store interfaces ──────────────────────────────────────────────────────────
