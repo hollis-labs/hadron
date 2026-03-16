@@ -15,7 +15,7 @@ require (
 	modernc.org/sqlite v1.46.1
 )
 
-replace github.com/hollis-labs/mcp-helpers => ../tiamat-mcp-helpers
+replace github.com/hollis-labs/mcp-helpers => ../mcp-helpers
 
 replace github.com/hollis-labs/otel => ../otel
 
