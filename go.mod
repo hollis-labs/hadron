@@ -17,7 +17,7 @@ require (
 
 replace github.com/hollis-labs/mcp-helpers => ../tiamat-mcp-helpers
 
-replace github.com/hollis-labs/otel => ../tiamat-otel
+replace github.com/hollis-labs/otel => ../otel
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
