@@ -129,13 +129,14 @@ func runServe(args []string) error {
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 
 	srv := api.NewServer(cfg.Addr, api.Dependencies{
-		Runs:       store,
-		Schedules:  store,
-		Pipelines:  store,
-		Workspaces: store,
-		Runner:     mgr,
-		Scheduler:  sched,
-		Pipeline:   pipelineRunner,
+		Runs:         store,
+		Schedules:    store,
+		Pipelines:    store,
+		Workspaces:   store,
+		Runner:       mgr,
+		Scheduler:    sched,
+		Pipeline:     pipelineRunner,
+		BlueprintDir: sett.BlueprintDir,
 	})
 
 	startMsg, _ := json.Marshal(map[string]string{

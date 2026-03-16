@@ -246,6 +246,103 @@ func TestCreateSchedule(t *testing.T) {
 	}
 }
 
+func newTestServerWithBlueprintDir(t *testing.T, bpDir string) *httptest.Server {
+	t.Helper()
+	store := openTestStore(t)
+	mgr := execution.NewManager(store, nil, 1, "", nil)
+	t.Cleanup(mgr.Close)
+
+	sched := scheduler.New(store, mgr)
+	pipelineRunner := pipeline.NewRunner(store, mgr)
+
+	srv := api.NewServer("", api.Dependencies{
+		Runs:         store,
+		Schedules:    store,
+		Pipelines:    store,
+		Workspaces:   store,
+		Runner:       mgr,
+		Scheduler:    sched,
+		Pipeline:     pipelineRunner,
+		BlueprintDir: bpDir,
+	})
+
+	return httptest.NewServer(srv.Handler())
+}
+
+func TestTriggerByName(t *testing.T) {
+	bpDir := t.TempDir()
+	bpContent := "blueprint:\n  name: smoke-test\nsteps:\n  - section: main\n    tasks:\n      - name: greet\n        cmd: echo hello\n"
+	if err := os.WriteFile(filepath.Join(bpDir, "smoke-test.yaml"), []byte(bpContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServerWithBlueprintDir(t, bpDir)
+	defer ts.Close()
+
+	resp := doRequest(t, ts, "POST", "/v1/triggers/smoke-test", map[string]any{
+		"inputs": map[string]any{},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		var errResp map[string]any
+		decodeJSON(t, resp, &errResp)
+		t.Fatalf("expected 202, got %d: %v", resp.StatusCode, errResp)
+	}
+	var run map[string]any
+	decodeJSON(t, resp, &run)
+	runID, _ := run["id"].(string)
+	if runID == "" {
+		t.Fatal("missing run id in trigger response")
+	}
+	if run["status"] != "queued" {
+		t.Fatalf("expected status=queued, got %v", run["status"])
+	}
+}
+
+func TestTriggerNotFound(t *testing.T) {
+	bpDir := t.TempDir()
+	ts := newTestServerWithBlueprintDir(t, bpDir)
+	defer ts.Close()
+
+	resp := doRequest(t, ts, "POST", "/v1/triggers/nonexistent", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestTriggerMethodNotAllowed(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	resp := doRequest(t, ts, "GET", "/v1/triggers/anything", nil)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", resp.StatusCode)
+	}
+}
+
+func TestTriggerSubdirectory(t *testing.T) {
+	bpDir := t.TempDir()
+	subDir := filepath.Join(bpDir, "output")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bpContent := "blueprint:\n  name: md-to-pdf\nsteps:\n  - section: main\n    tasks:\n      - name: convert\n        cmd: echo converting\n"
+	if err := os.WriteFile(filepath.Join(subDir, "md-to-pdf.yaml"), []byte(bpContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServerWithBlueprintDir(t, bpDir)
+	defer ts.Close()
+
+	resp := doRequest(t, ts, "POST", "/v1/triggers/md-to-pdf", map[string]any{
+		"inputs": map[string]any{},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		var errResp map[string]any
+		decodeJSON(t, resp, &errResp)
+		t.Fatalf("expected 202, got %d: %v", resp.StatusCode, errResp)
+	}
+}
+
 func TestUnknownRoute(t *testing.T) {
 	ts := newTestServer(t)
 	defer ts.Close()

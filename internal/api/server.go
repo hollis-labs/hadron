@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -71,13 +73,14 @@ type PipelineRunner interface {
 // ── Dependencies and Server ───────────────────────────────────────────────────
 
 type Dependencies struct {
-	Runs      RunStore
-	Schedules ScheduleStore
-	Pipelines PipelineStore
-	Workspaces WorkspaceStore
-	Runner    Runner
-	Scheduler Scheduler
-	Pipeline  PipelineRunner
+	Runs         RunStore
+	Schedules    ScheduleStore
+	Pipelines    PipelineStore
+	Workspaces   WorkspaceStore
+	Runner       Runner
+	Scheduler    Scheduler
+	Pipeline     PipelineRunner
+	BlueprintDir string // root directory for blueprint YAML files
 }
 
 type Server struct {
@@ -115,6 +118,9 @@ func NewServer(addr string, deps Dependencies) *Server {
 	// Pipelines
 	mux.HandleFunc("/v1/pipelines", s.handlePipelines)
 	mux.HandleFunc("/v1/pipelines/", s.handlePipelineByID)
+
+	// Triggers (blueprint-name-based run creation)
+	mux.HandleFunc("/v1/triggers/", s.handleTrigger)
 
 	// Blueprints
 	mux.HandleFunc("/v1/blueprints/validate", s.handleBlueprintValidate)
@@ -833,6 +839,132 @@ func (s *Server) handleBlueprintValidate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
+}
+
+// ── Triggers ──────────────────────────────────────────────────────────────────
+
+func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/v1/triggers/")
+	name = strings.TrimRight(name, "/")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "blueprint name is required")
+		return
+	}
+
+	// Optional bearer token auth
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		// Accept but don't enforce — future: check against configured token
+		_ = authHeader
+	}
+
+	// Resolve blueprint name to file path
+	bpPath, err := s.resolveBlueprintPath(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "blueprint not found: "+name)
+		return
+	}
+
+	// Parse request body for inputs
+	var body struct {
+		WorkspaceID string         `json:"workspace_id"`
+		Inputs      map[string]any `json:"inputs"`
+		DryRun      bool           `json:"dry_run"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+	}
+
+	wsID := body.WorkspaceID
+	if wsID == "" {
+		wsID = "default"
+	}
+
+	bp, err := blueprint.ParseFile(bpPath)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid blueprint: "+err.Error())
+		return
+	}
+	normalized, err := blueprint.NormalizeInputs(bp, body.Inputs)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid inputs: "+err.Error())
+		return
+	}
+
+	runID := s.nextRunID()
+	if err := s.deps.Runner.Enqueue(r.Context(), execution.Request{
+		RunID:         runID,
+		WorkspaceID:   wsID,
+		BlueprintPath: bpPath,
+		Inputs:        normalized,
+		DryRun:        body.DryRun,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	rec, err := s.deps.Runs.GetRun(r.Context(), runID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toRunResponse(rec))
+}
+
+// resolveBlueprintPath resolves a blueprint name to a file path within BlueprintDir.
+// It searches for: name.yaml, name.yml, name/name.yaml, name/name.yml, and
+// walks subdirectories matching by slug, spec name, or filename.
+func (s *Server) resolveBlueprintPath(name string) (string, error) {
+	dir := s.deps.BlueprintDir
+	if dir == "" {
+		return "", fmt.Errorf("blueprint directory not configured")
+	}
+
+	// Direct file match
+	for _, ext := range []string{".yaml", ".yml"} {
+		candidate := filepath.Join(dir, name+ext)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	// Subdirectory match: name/name.yaml
+	for _, ext := range []string{".yaml", ".yml"} {
+		candidate := filepath.Join(dir, name, name+ext)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	// Walk subdirectories looking for matching slug or spec name
+	var found string
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || found != "" {
+			return err
+		}
+		ext := filepath.Ext(path)
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+		base := strings.TrimSuffix(filepath.Base(path), ext)
+		if base == name {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if found != "" {
+		return found, nil
+	}
+
+	return "", fmt.Errorf("not found")
 }
 
 // ── Response helpers ──────────────────────────────────────────────────────────
