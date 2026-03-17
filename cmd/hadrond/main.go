@@ -14,7 +14,7 @@ import (
 
 	"encoding/json"
 
-	tiamatotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/otel"
 
 	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/config"
@@ -94,7 +94,7 @@ func runServe(args []string) error {
 
 	// Initialise OpenTelemetry tracing.
 	otelCtx := context.Background()
-	otelShutdown, otelErr := tiamatotel.Init(otelCtx, tiamatotel.WithServiceName("hadron"))
+	otelShutdown, otelErr := feotel.Init(otelCtx, feotel.WithServiceName("hadron"))
 	if otelErr != nil {
 		log.Printf("warning: OTel init failed: %v", otelErr)
 	} else {

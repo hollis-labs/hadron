@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	tiamatotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/hadron/internal/blueprint"
@@ -247,7 +247,7 @@ func (m *Manager) worker() {
 }
 
 func (m *Manager) executeBlueprint(ctx context.Context, req Request) error {
-	ctx, span := tiamatotel.StartSpan(ctx, "hadron.blueprint.run")
+	ctx, span := feotel.StartSpan(ctx, "hadron.blueprint.run")
 	span.SetAttributes(
 		attribute.String("hadron.blueprint.path", req.BlueprintPath),
 		attribute.String("hadron.run.id", req.RunID),
@@ -316,49 +316,49 @@ func (r *runExecution) executeFile(ctx context.Context, bpPath string, inputs ma
 		return fmt.Errorf("before_run hook failed: %w", err)
 	}
 
-	// Execute sections → tasks.
+	// Execute sections → steps.
 	for _, section := range bp.Steps {
-		for taskIdx, task := range section.Tasks {
+		for stepIdx, step := range section.Steps {
 			// enabled check.
-			if task.Enabled != nil && !*task.Enabled {
-				r.emit(section.Section, task.Name, "task_skipped", "task disabled")
+			if step.Enabled != nil && !*step.Enabled {
+				r.emit(section.Section, step.Name, "step_skipped", "step disabled")
 				continue
 			}
 
 			// condition / if check.
-			if task.If != "" {
-				if !evaluateCondition(task.If) {
-					r.emit(section.Section, task.Name, "task_skipped_condition", "condition false")
+			if step.If != "" {
+				if !evaluateCondition(step.If) {
+					r.emit(section.Section, step.Name, "step_skipped_condition", "condition false")
 					continue
 				}
 			}
 
-			r.emit(section.Section, task.Name, "task_start", fmt.Sprintf("section %q task[%d] %q started", section.Section, taskIdx, task.Name))
+			r.emit(section.Section, step.Name, "step_start", fmt.Sprintf("section %q step[%d] %q started", section.Section, stepIdx, step.Name))
 
-			var taskErr error
-			if strings.TrimSpace(task.Call) != "" {
-				taskErr = r.executeCallTask(ctx, absPath, importIndex, section.Section, task, depth)
+			var stepErr error
+			if strings.TrimSpace(step.Call) != "" {
+				stepErr = r.executeCallStep(ctx, absPath, importIndex, section.Section, step, depth)
 			} else {
-				taskErr = r.runTask(ctx, section.Section, task)
+				stepErr = r.runStep(ctx, section.Section, step)
 			}
 
-			if taskErr != nil {
-				r.emit(section.Section, task.Name, "task_error", taskErr.Error())
+			if stepErr != nil {
+				r.emit(section.Section, step.Name, "step_error", stepErr.Error())
 
 				// Execute on_fail hooks.
-				r.executeActionHooks(ctx, absPath, importIndex, section.Section, task, task.OnFail)
+				r.executeActionHooks(ctx, absPath, importIndex, section.Section, step, step.OnFail)
 
-				if !task.ContinueOnError {
+				if !step.ContinueOnError {
 					_ = r.runBlueprintHooks(context.Background(), bp.Hooks.OnError, "on_error")
-					return fmt.Errorf("section %q task %q failed: %w", section.Section, task.Name, taskErr)
+					return fmt.Errorf("section %q step %q failed: %w", section.Section, step.Name, stepErr)
 				}
-				r.emit(section.Section, task.Name, "task_skipped_error", "continuing after task error")
+				r.emit(section.Section, step.Name, "step_skipped_error", "continuing after step error")
 				continue
 			}
 
 			// Execute on_success hooks.
-			r.executeActionHooks(ctx, absPath, importIndex, section.Section, task, task.OnSuccess)
-			r.emit(section.Section, task.Name, "task_success", "task succeeded")
+			r.executeActionHooks(ctx, absPath, importIndex, section.Section, step, step.OnSuccess)
+			r.emit(section.Section, step.Name, "step_success", "step succeeded")
 		}
 	}
 
@@ -370,26 +370,26 @@ func (r *runExecution) executeFile(ctx context.Context, bpPath string, inputs ma
 	return nil
 }
 
-// runTask executes a single task's cmd/run via PTY.
-func (r *runExecution) runTask(ctx context.Context, section string, task blueprint.Task) (taskErr error) {
-	ctx, taskSpan := tiamatotel.ToolCallSpan(ctx, task.Name)
-	taskSpan.SetAttributes(
+// runStep executes a single step's cmd/run via PTY.
+func (r *runExecution) runStep(ctx context.Context, section string, step blueprint.Step) (stepErr error) {
+	ctx, stepSpan := feotel.ToolCallSpan(ctx, step.Name)
+	stepSpan.SetAttributes(
 		attribute.String("hadron.section", section),
 		attribute.String("hadron.run.id", r.runID),
 	)
 	defer func() {
-		if taskErr != nil {
-			taskSpan.RecordError(taskErr)
+		if stepErr != nil {
+			stepSpan.RecordError(stepErr)
 		}
-		taskSpan.End()
+		stepSpan.End()
 	}()
 
-	cmd := task.Cmd
+	cmd := step.Cmd
 	if cmd == "" {
-		cmd = task.Run
+		cmd = step.Run
 	}
 	if cmd == "" {
-		return fmt.Errorf("task %q has neither cmd nor run", task.Name)
+		return fmt.Errorf("step %q has neither cmd nor run", step.Name)
 	}
 
 	// Safety validation.
@@ -397,8 +397,8 @@ func (r *runExecution) runTask(ctx context.Context, section string, task bluepri
 		if err := r.manager.settings.ValidateCommand(cmd); err != nil {
 			return fmt.Errorf("safety check: %w", err)
 		}
-		if task.Dir != "" {
-			if err := r.manager.settings.ValidatePath(task.Dir); err != nil {
+		if step.Dir != "" {
+			if err := r.manager.settings.ValidatePath(step.Dir); err != nil {
 				return fmt.Errorf("path check: %w", err)
 			}
 		}
@@ -406,11 +406,11 @@ func (r *runExecution) runTask(ctx context.Context, section string, task bluepri
 
 	// DryRun: log and skip execution.
 	if r.dryRun {
-		r.emit(section, task.Name, "dry_run", fmt.Sprintf("[dry-run] would execute: %s", cmd))
+		r.emit(section, step.Name, "dry_run", fmt.Sprintf("[dry-run] would execute: %s", cmd))
 		return nil
 	}
 
-	retries := task.Retry
+	retries := step.Retry
 	if retries < 0 {
 		retries = 0
 	}
@@ -418,19 +418,19 @@ func (r *runExecution) runTask(ctx context.Context, section string, task bluepri
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
 		if attempt > 0 {
-			delay := time.Duration(task.RetryDelaySecs) * time.Second
+			delay := time.Duration(step.RetryDelaySecs) * time.Second
 			if delay > 0 {
-				r.emit(section, task.Name, "task_retry_wait", fmt.Sprintf("waiting %s before retry", delay))
+				r.emit(section, step.Name, "step_retry_wait", fmt.Sprintf("waiting %s before retry", delay))
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-time.After(delay):
 				}
 			}
-			r.emit(section, task.Name, "task_retry", fmt.Sprintf("retry attempt %d/%d", attempt, retries))
+			r.emit(section, step.Name, "step_retry", fmt.Sprintf("retry attempt %d/%d", attempt, retries))
 		}
 
-		lastErr = r.execCmd(ctx, section, task, cmd)
+		lastErr = r.execCmd(ctx, section, step, cmd)
 		if lastErr == nil {
 			return nil
 		}
@@ -442,8 +442,8 @@ func (r *runExecution) runTask(ctx context.Context, section string, task bluepri
 }
 
 // execCmd runs a command via PTY and streams output to run_events.
-func (r *runExecution) execCmd(ctx context.Context, section string, task blueprint.Task, cmd string) error {
-	timeout := task.TimeoutSeconds
+func (r *runExecution) execCmd(ctx context.Context, section string, step blueprint.Step, cmd string) error {
+	timeout := step.TimeoutSeconds
 	if timeout == 0 && r.manager.settings != nil {
 		timeout = r.manager.settings.GetDefaultTimeout()
 	}
@@ -456,11 +456,11 @@ func (r *runExecution) execCmd(ctx context.Context, section string, task bluepri
 	}
 
 	c := exec.CommandContext(stepCtx, "bash", "-lc", cmd)
-	if task.Dir != "" {
-		c.Dir = task.Dir
+	if step.Dir != "" {
+		c.Dir = step.Dir
 	}
 	c.Env = os.Environ()
-	for k, v := range task.Env {
+	for k, v := range step.Env {
 		c.Env = append(c.Env, fmt.Sprintf("%s=%s", k, v))
 	}
 
@@ -471,7 +471,7 @@ func (r *runExecution) execCmd(ctx context.Context, section string, task bluepri
 
 	sc := bufio.NewScanner(ptmx)
 	for sc.Scan() {
-		r.emit(section, task.Name, "log", sc.Text())
+		r.emit(section, step.Name, "log", sc.Text())
 	}
 
 	if err := c.Wait(); err != nil {
@@ -510,40 +510,40 @@ func (r *runExecution) runBlueprintHooks(ctx context.Context, hooks []blueprint.
 
 // ─── ActionHooks (on_success / on_fail) ──────────────────────────────────────
 
-func (r *runExecution) executeActionHooks(ctx context.Context, basePath string, imports map[string]resolvedImport, section string, task blueprint.Task, hooks []blueprint.ActionHook) {
+func (r *runExecution) executeActionHooks(ctx context.Context, basePath string, imports map[string]resolvedImport, section string, step blueprint.Step, hooks []blueprint.ActionHook) {
 	for _, h := range hooks {
 		switch h.Type {
 		case "cmd":
-			r.emit(section, task.Name, "hook_cmd", fmt.Sprintf("[hook] %s", h.Value))
+			r.emit(section, step.Name, "hook_cmd", fmt.Sprintf("[hook] %s", h.Value))
 			c := exec.CommandContext(ctx, "bash", "-lc", h.Value)
 			if out, err := c.CombinedOutput(); err == nil {
-				r.emit(section, task.Name, "hook_output", strings.TrimSpace(string(out)))
+				r.emit(section, step.Name, "hook_output", strings.TrimSpace(string(out)))
 			}
 
 		case "error":
-			r.emit(section, task.Name, "hook_error", h.Value)
+			r.emit(section, step.Name, "hook_error", h.Value)
 
 		case "step":
-			// Execute a named task within the current run's context.
-			r.emit(section, task.Name, "hook_step", fmt.Sprintf("[hook] jump to step: %s", h.Value))
+			// Execute a named step within the current run's context.
+			r.emit(section, step.Name, "hook_step", fmt.Sprintf("[hook] jump to step: %s", h.Value))
 
 		case "blueprint":
-			r.emit(section, task.Name, "hook_blueprint", fmt.Sprintf("[hook] execute blueprint: %s", h.Value))
+			r.emit(section, step.Name, "hook_blueprint", fmt.Sprintf("[hook] execute blueprint: %s", h.Value))
 			bpDir := filepath.Dir(basePath)
 			extPath := filepath.Join(bpDir, h.Value)
 			if err := r.executeFile(ctx, extPath, nil, 1); err != nil {
-				r.emit(section, task.Name, "hook_error", fmt.Sprintf("[hook] blueprint %s failed: %v", h.Value, err))
+				r.emit(section, step.Name, "hook_error", fmt.Sprintf("[hook] blueprint %s failed: %v", h.Value, err))
 			}
 
 		case "call":
-			r.emit(section, task.Name, "hook_call", fmt.Sprintf("[hook] call: %s", h.Value))
+			r.emit(section, step.Name, "hook_call", fmt.Sprintf("[hook] call: %s", h.Value))
 			resolved, ok := imports[h.Value]
 			if !ok {
-				r.emit(section, task.Name, "hook_error", fmt.Sprintf("[hook] import alias %q not found", h.Value))
+				r.emit(section, step.Name, "hook_error", fmt.Sprintf("[hook] import alias %q not found", h.Value))
 				continue
 			}
 			if err := r.executeFile(ctx, resolved.path, cloneMap(resolved.with), 1); err != nil {
-				r.emit(section, task.Name, "hook_error", fmt.Sprintf("[hook] call %s failed: %v", h.Value, err))
+				r.emit(section, step.Name, "hook_error", fmt.Sprintf("[hook] call %s failed: %v", h.Value, err))
 			}
 		}
 	}
@@ -569,24 +569,24 @@ func buildImportIndex(baseBlueprintPath string, imports []blueprint.Import) map[
 	return idx
 }
 
-func (r *runExecution) executeCallTask(ctx context.Context, baseBlueprintPath string, imports map[string]resolvedImport, section string, task blueprint.Task, depth int) error {
-	target := strings.TrimSpace(task.Call)
+func (r *runExecution) executeCallStep(ctx context.Context, baseBlueprintPath string, imports map[string]resolvedImport, section string, step blueprint.Step, depth int) error {
+	target := strings.TrimSpace(step.Call)
 	resolved, ok := imports[target]
 	if !ok {
 		p := resolveImportPath(baseBlueprintPath, target)
 		resolved = resolvedImport{path: p, with: map[string]any{}}
 	}
 	childInputs := cloneMap(resolved.with)
-	for k, v := range task.With {
+	for k, v := range step.With {
 		childInputs[k] = v
 	}
-	r.emit(section, task.Name, "task_call_start", fmt.Sprintf("calling %q", resolved.path))
+	r.emit(section, step.Name, "step_call_start", fmt.Sprintf("calling %q", resolved.path))
 	err := r.executeFile(ctx, resolved.path, childInputs, depth+1)
 	if err != nil {
-		r.emit(section, task.Name, "task_call_error", err.Error())
+		r.emit(section, step.Name, "step_call_error", err.Error())
 		return err
 	}
-	r.emit(section, task.Name, "task_call_success", "call succeeded")
+	r.emit(section, step.Name, "step_call_success", "call succeeded")
 	return nil
 }
 
