@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { ChevronLeft, Play, Copy, X, MoreHorizontal, Trash2, Pencil, Layers, ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronLeft, Play, Copy, X, MoreHorizontal, Trash2, Pencil, Layers, ChevronDown, ChevronRight, Workflow } from 'lucide-react';
 import { readBlueprintFile, enqueuePipeline, deleteBlueprintFile } from '../api/client';
 import { Spinner } from '../components/ui/Spinner';
 
@@ -9,6 +9,7 @@ interface PipelineDetailPageProps {
   onBack: () => void;
   onOpenRun: (runId: string) => void;
   onEditPipeline?: (path: string) => void;
+  onOpenFlowBuilder?: (path: string) => void;
   daemonStatus: string;
   workspaceId: string;
 }
@@ -124,7 +125,7 @@ function parsePipelineYaml(content: string): PipelineDetail | null {
   }
 }
 
-export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, daemonStatus, workspaceId }: PipelineDetailPageProps) {
+export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, onOpenFlowBuilder, daemonStatus, workspaceId }: PipelineDetailPageProps) {
   const [pipeline, setPipeline] = useState<PipelineDetail | null>(null);
   const [rawYaml, setRawYaml] = useState('');
   const [loading, setLoading] = useState(true);
@@ -232,6 +233,15 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, da
         <span className="page-title" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {title}
         </span>
+        {onOpenFlowBuilder && (
+          <button
+            className="hud-button"
+            onClick={() => onOpenFlowBuilder(path)}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+          >
+            <Workflow size={12} /> Flow
+          </button>
+        )}
         <button
           className="hud-button"
           onClick={handleRun}

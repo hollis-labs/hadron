@@ -1,6 +1,6 @@
-import { LayoutDashboard, FolderOpen, List, CalendarClock, ChevronRight, GitBranch, Settings, HelpCircle, Activity } from 'lucide-react';
+import { LayoutDashboard, FolderOpen, List, CalendarClock, ChevronRight, GitBranch, Settings, HelpCircle, Activity, Workflow } from 'lucide-react';
 
-export type NavPage = 'dashboard' | 'blueprints' | 'blueprintDetail' | 'blueprintWizard' | 'runs' | 'runDetail' | 'schedules' | 'pipelines' | 'pipelineDetail' | 'telemetry' | 'settings' | 'help';
+export type NavPage = 'dashboard' | 'blueprints' | 'blueprintDetail' | 'blueprintWizard' | 'runs' | 'runDetail' | 'schedules' | 'pipelines' | 'pipelineDetail' | 'flowBuilder' | 'telemetry' | 'settings' | 'help';
 
 interface AppNavProps {
   current: NavPage;
@@ -11,6 +11,7 @@ const NAV_ITEMS: { page: NavPage; label: string; icon: React.ReactNode }[] = [
   { page: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={15} /> },
   { page: 'blueprints', label: 'Blueprints', icon: <FolderOpen size={15} /> },
   { page: 'pipelines', label: 'Pipelines', icon: <GitBranch size={15} /> },
+  { page: 'flowBuilder', label: 'Flow Builder', icon: <Workflow size={15} /> },
   { page: 'runs', label: 'Run Log', icon: <List size={15} /> },
   { page: 'schedules', label: 'Schedules', icon: <CalendarClock size={15} /> },
   { page: 'telemetry', label: 'Telemetry', icon: <Activity size={15} /> },

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { FolderOpen, Play, ChevronLeft, Folder, FileCode, X, Layers, Plus, Pencil, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { FolderOpen, Play, ChevronLeft, Folder, FileCode, X, Layers, Plus, Pencil, Trash2, ArrowUp, ArrowDown, Workflow } from 'lucide-react';
 import { usePoll } from '../hooks/usePoll';
 import { openDirectoryDialog, listFilesInDir, enqueuePipeline, listPipelines, getPipelineStages, readBlueprintFile, saveBlueprintFile, createBlueprintFile, deleteBlueprintFile, selectBlueprintFile } from '../api/client';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -11,6 +11,7 @@ interface PipelinesPageProps {
   workspaceId: string;
   onOpenRun: (runId: string) => void;
   onOpenPipeline?: (path: string) => void;
+  onOpenFlowBuilder?: (path: string) => void;
 }
 
 function formatDuration(start?: string | null, end?: string | null): string {
@@ -215,7 +216,7 @@ function parsePipelineYaml(content: string): PipelineForm | null {
   }
 }
 
-export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipeline }: PipelinesPageProps) {
+export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipeline, onOpenFlowBuilder }: PipelinesPageProps) {
   const [rootDir, setRootDir] = useState<string>('');
   const [currentDir, setCurrentDir] = useState<string>('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -533,6 +534,16 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                 </span>
                 {!entry.isDir && (
                   <div className="file-row-actions" onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: '0.25rem' }}>
+                    {onOpenFlowBuilder && (
+                      <button
+                        className="hud-button-ghost"
+                        onClick={() => onOpenFlowBuilder(entry.path)}
+                        title="Open in Flow Builder"
+                        style={{ padding: '0.15rem 0.3rem', color: 'rgb(var(--accent))' }}
+                      >
+                        <Workflow size={12} />
+                      </button>
+                    )}
                     <button
                       className="hud-button-ghost"
                       onClick={() => handleEditPipeline(entry)}

@@ -12,6 +12,7 @@ import { RunDetailPage } from './pages/RunDetailPage';
 import { SchedulerPage } from './pages/SchedulerPage';
 import { PipelinesPage } from './pages/PipelinesPage';
 import { PipelineDetailPage } from './pages/PipelineDetailPage';
+import { FlowBuilderPage } from './pages/FlowBuilderPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TelemetryPage } from './pages/TelemetryPage';
 import { HelpPage } from './pages/HelpPage';
@@ -26,6 +27,7 @@ const PAGE_TITLES: Record<NavPage, string> = {
   blueprintWizard: 'Blueprint Wizard',
   pipelines: 'Pipelines',
   pipelineDetail: 'Pipeline Detail',
+  flowBuilder: 'Flow Builder',
   runs: 'Run Log',
   runDetail: 'Run Detail',
   schedules: 'Schedules',
@@ -190,6 +192,11 @@ export default function App() {
     setPhase('pipelineDetail');
   };
 
+  const openFlowBuilder = (path: string) => {
+    setSelectedPipelinePath(path);
+    setPhase('flowBuilder');
+  };
+
   const openWizard = (editPath: string | null = null) => {
     setWizardEditPath(editPath);
     setPhase('blueprintWizard');
@@ -213,6 +220,7 @@ export default function App() {
       else if (phase === 'blueprintDetail') { setPhase('blueprints'); e.preventDefault(); }
       else if (phase === 'blueprintWizard') { setPhase('blueprints'); e.preventDefault(); }
       else if (phase === 'pipelineDetail') { setPhase('pipelines'); e.preventDefault(); }
+      else if (phase === 'flowBuilder') { setPhase('pipelines'); e.preventDefault(); }
     }
 
     // R — refresh (dispatch custom event that pages can listen for)
@@ -300,6 +308,7 @@ export default function App() {
               workspaceId={selectedWorkspaceId}
               onOpenRun={openRunDetail}
               onOpenPipeline={openPipelineDetail}
+              onOpenFlowBuilder={openFlowBuilder}
             />
           )}
           {phase === 'pipelineDetail' && selectedPipelinePath && (
@@ -307,10 +316,19 @@ export default function App() {
               path={selectedPipelinePath}
               onBack={() => setPhase('pipelines')}
               onOpenRun={openRunDetail}
-              onEditPipeline={(p) => {
+              onEditPipeline={() => {
                 // Navigate back to pipelines with edit modal — for now just go back
                 setPhase('pipelines');
               }}
+              onOpenFlowBuilder={openFlowBuilder}
+              daemonStatus={daemonStatus}
+              workspaceId={selectedWorkspaceId}
+            />
+          )}
+          {phase === 'flowBuilder' && (
+            <FlowBuilderPage
+              path={selectedPipelinePath}
+              onBack={() => setPhase('pipelines')}
               daemonStatus={daemonStatus}
               workspaceId={selectedWorkspaceId}
             />
