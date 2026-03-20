@@ -3,6 +3,7 @@ package mcpadapter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ type Store interface {
 	GetTrigger(ctx context.Context, id string) (persistence.TriggerRecord, error)
 	ListTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
 	DeleteTrigger(ctx context.Context, id string) error
+	ListTriggersByCreatedBy(ctx context.Context, createdBy string) ([]persistence.TriggerRecord, error)
 }
 
 type Runner interface {
@@ -75,6 +77,7 @@ type Adapter struct {
 	token        string
 	scopes       map[string]struct{}
 	blueprintDir string
+	sessionID    string // unique ID for this MCP session, used for trigger ownership
 }
 
 func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRunner, token string, scopes []string, opts ...Option) *Adapter {
@@ -94,6 +97,7 @@ func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRu
 		token:        strings.TrimSpace(token),
 		scopes:       scopeSet,
 		blueprintDir: settings.DefaultBlueprintDir(),
+		sessionID:    fmt.Sprintf("mcp-%s", time.Now().UTC().Format("20060102-150405")),
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -168,6 +172,8 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_triggers_list":      a.handleTriggersList,
 		"hadron_trigger_create":     a.handleTriggerCreate,
 		"hadron_trigger_delete":     a.handleTriggerDelete,
+		"hadron_trigger_watch":      a.handleTriggerWatch,
+		"hadron_trigger_list_mine":  a.handleTriggerListMine,
 	}
 }
 

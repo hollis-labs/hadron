@@ -11,7 +11,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
@@ -75,6 +78,31 @@ func (s *mockStore) ListWebhookTriggers(_ context.Context) ([]persistence.Trigge
 		}
 	}
 	return out, nil
+}
+
+func (s *mockStore) ListFileWatchTriggers(_ context.Context) ([]persistence.TriggerRecord, error) {
+	var out []persistence.TriggerRecord
+	for _, t := range s.triggers {
+		if t.Enabled && t.Type == "file_watch" {
+			out = append(out, *t)
+		}
+	}
+	return out, nil
+}
+
+func (s *mockStore) DeleteExpiredTriggers(_ context.Context, now time.Time) (int64, error) {
+	var count int64
+	for id, t := range s.triggers {
+		if t.TTLExpiresAt.Valid && t.TTLExpiresAt.String != "" {
+			expires, err := time.Parse(time.RFC3339, t.TTLExpiresAt.String)
+			if err == nil && expires.Before(now) {
+				delete(s.triggerByPath, t.Path)
+				delete(s.triggers, id)
+				count++
+			}
+		}
+	}
+	return count, nil
 }
 
 // ── Mock Runner ───────────────────────────────────────────────────────────────
@@ -418,5 +446,262 @@ func TestDotPathAccess(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("dotPathAccess(%q) = %v, want %v", tt.path, got, tt.expected)
 		}
+	}
+}
+
+// ── File-Watch Trigger Tests ──────────────────────────────────────────────────
+
+func TestFileWatchTrigger_StoredCorrectly(t *testing.T) {
+	store := newMockStore()
+	runner := &mockRunner{}
+	_ = New(store, runner)
+
+	trig := persistence.TriggerRecord{
+		ID:              "fw-1",
+		Type:            "file_watch",
+		Name:            "Config Watcher",
+		Path:            `["/tmp/configs"]`,
+		BlueprintPath:   "/bp/reload.yaml",
+		WorkspaceID:     "default",
+		Enabled:         true,
+		DebounceSeconds: 3,
+	}
+	store.addTrigger(trig)
+
+	got := store.triggers["fw-1"]
+	if got.Type != "file_watch" {
+		t.Errorf("expected type=file_watch, got %s", got.Type)
+	}
+	if got.DebounceSeconds != 3 {
+		t.Errorf("expected debounce=3, got %d", got.DebounceSeconds)
+	}
+	if got.Path != `["/tmp/configs"]` {
+		t.Errorf("expected JSON paths, got %s", got.Path)
+	}
+}
+
+func TestFileWatchTrigger_FileCreated_RunEnqueued(t *testing.T) {
+	store := newMockStore()
+	runner := &mockRunner{}
+	mgr := New(store, runner)
+
+	tmpDir := t.TempDir()
+
+	trig := persistence.TriggerRecord{
+		ID:              "fw-2",
+		Type:            "file_watch",
+		Name:            "Dir Watcher",
+		Path:            `["` + tmpDir + `"]`,
+		BlueprintPath:   "/bp/deploy.yaml",
+		WorkspaceID:     "default",
+		Enabled:         true,
+		DebounceSeconds: 1,
+	}
+	store.addTrigger(trig)
+
+	mgr.StartFileWatchers()
+	defer mgr.StopFileWatchers()
+
+	// Create a file in watched directory
+	testFile := filepath.Join(tmpDir, "new-config.yaml")
+	if err := os.WriteFile(testFile, []byte("test"), 0o644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	// Wait for debounce (1s) + processing time
+	time.Sleep(2 * time.Second)
+
+	if len(runner.enqueued) == 0 {
+		t.Fatal("expected at least 1 enqueued run after file creation, got 0")
+	}
+	req := runner.enqueued[0]
+	if req.BlueprintPath != "/bp/deploy.yaml" {
+		t.Errorf("wrong blueprint path: %s", req.BlueprintPath)
+	}
+	if req.Inputs["changed_file"] == nil {
+		t.Error("expected changed_file input")
+	}
+	if req.Inputs["event_type"] == nil {
+		t.Error("expected event_type input")
+	}
+}
+
+func TestFileWatchTrigger_Debounce_OnlyOneRun(t *testing.T) {
+	store := newMockStore()
+	runner := &mockRunner{}
+	mgr := New(store, runner)
+
+	tmpDir := t.TempDir()
+
+	trig := persistence.TriggerRecord{
+		ID:              "fw-3",
+		Type:            "file_watch",
+		Name:            "Debounce Test",
+		Path:            `["` + tmpDir + `"]`,
+		BlueprintPath:   "/bp/debounce.yaml",
+		WorkspaceID:     "default",
+		Enabled:         true,
+		DebounceSeconds: 1,
+	}
+	store.addTrigger(trig)
+
+	mgr.StartFileWatchers()
+	defer mgr.StopFileWatchers()
+
+	// Rapid file changes — should be debounced into one run
+	for i := 0; i < 5; i++ {
+		testFile := filepath.Join(tmpDir, fmt.Sprintf("file-%d.yaml", i))
+		_ = os.WriteFile(testFile, []byte(fmt.Sprintf("content-%d", i)), 0o644)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Wait for debounce (1s) + processing
+	time.Sleep(2 * time.Second)
+
+	if len(runner.enqueued) != 1 {
+		t.Errorf("expected exactly 1 enqueued run (debounced), got %d", len(runner.enqueued))
+	}
+}
+
+func TestFileWatchTrigger_OneShot_DeletedAfterFire(t *testing.T) {
+	store := newMockStore()
+	runner := &mockRunner{}
+	mgr := New(store, runner)
+
+	tmpDir := t.TempDir()
+
+	trig := persistence.TriggerRecord{
+		ID:              "fw-4",
+		Type:            "file_watch",
+		Name:            "One-shot Watcher",
+		Path:            `["` + tmpDir + `"]`,
+		BlueprintPath:   "/bp/oneshot.yaml",
+		WorkspaceID:     "default",
+		Enabled:         true,
+		OneShot:         true,
+		DebounceSeconds: 1,
+	}
+	store.addTrigger(trig)
+
+	mgr.StartFileWatchers()
+	defer mgr.StopFileWatchers()
+
+	testFile := filepath.Join(tmpDir, "trigger-file.txt")
+	if err := os.WriteFile(testFile, []byte("fire"), 0o644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	if len(runner.enqueued) == 0 {
+		t.Fatal("expected at least 1 enqueued run")
+	}
+	if len(store.deletedIDs) != 1 || store.deletedIDs[0] != "fw-4" {
+		t.Errorf("expected trigger fw-4 to be deleted, got %v", store.deletedIDs)
+	}
+}
+
+// ── TTL Cleanup Tests ─────────────────────────────────────────────────────────
+
+func TestCleanExpiredTriggers_RemovesExpired(t *testing.T) {
+	store := newMockStore()
+	runner := &mockRunner{}
+	mgr := New(store, runner)
+
+	// Expired trigger
+	expired := persistence.TriggerRecord{
+		ID:            "trig-expired",
+		Type:          "webhook",
+		Name:          "Expired",
+		Path:          "expired-hook",
+		BlueprintPath: "/bp/expired.yaml",
+		WorkspaceID:   "default",
+		Enabled:       true,
+		TTLExpiresAt:  sql.NullString{String: time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339), Valid: true},
+	}
+	store.addTrigger(expired)
+
+	// Non-expired trigger
+	active := persistence.TriggerRecord{
+		ID:            "trig-active",
+		Type:          "webhook",
+		Name:          "Active",
+		Path:          "active-hook",
+		BlueprintPath: "/bp/active.yaml",
+		WorkspaceID:   "default",
+		Enabled:       true,
+		TTLExpiresAt:  sql.NullString{String: time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339), Valid: true},
+	}
+	store.addTrigger(active)
+
+	ctx := context.Background()
+	n, err := mgr.CleanExpiredTriggers(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 expired trigger deleted, got %d", n)
+	}
+
+	// Active trigger should still exist
+	if _, ok := store.triggers["trig-active"]; !ok {
+		t.Error("active trigger should not have been deleted")
+	}
+	// Expired trigger should be gone
+	if _, ok := store.triggers["trig-expired"]; ok {
+		t.Error("expired trigger should have been deleted")
+	}
+}
+
+func TestCleanExpiredTriggers_NoExpired(t *testing.T) {
+	store := newMockStore()
+	runner := &mockRunner{}
+	mgr := New(store, runner)
+
+	active := persistence.TriggerRecord{
+		ID:            "trig-active2",
+		Type:          "webhook",
+		Name:          "Active",
+		Path:          "active-hook",
+		BlueprintPath: "/bp/active.yaml",
+		WorkspaceID:   "default",
+		Enabled:       true,
+	}
+	store.addTrigger(active)
+
+	ctx := context.Background()
+	n, err := mgr.CleanExpiredTriggers(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 expired triggers deleted, got %d", n)
+	}
+}
+
+func TestOneShotWithTTL_DeletedOnFire_NotWaitForTTL(t *testing.T) {
+	store := newMockStore()
+	runner := &mockRunner{}
+	mgr := New(store, runner)
+
+	trig := baseTrigger("trig-os-ttl", "oneshot-ttl", "/bp/os-ttl.yaml")
+	trig.OneShot = true
+	trig.TTLExpiresAt = sql.NullString{String: time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339), Valid: true}
+	store.addTrigger(trig)
+
+	mux := http.NewServeMux()
+	mgr.RegisterWebhookRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/hooks/oneshot-ttl", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(store.deletedIDs) != 1 || store.deletedIDs[0] != "trig-os-ttl" {
+		t.Errorf("expected trigger deleted on fire (not waiting for TTL), got %v", store.deletedIDs)
 	}
 }

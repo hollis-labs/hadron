@@ -21,6 +21,7 @@ func buildRegistryCmd() *cobra.Command {
 		buildRegistrySearchCmd(),
 		buildRegistryShowCmd(),
 		buildRegistryListCmd(),
+		buildRegistryVersionsCmd(),
 	)
 	return cmd
 }
@@ -126,6 +127,34 @@ func buildRegistryShowCmd() *cobra.Command {
 			fmt.Printf("indexed_at:  %s\n", entry.IndexedAt)
 			if entry.InputsJSON != "" && entry.InputsJSON != "[]" {
 				fmt.Printf("inputs:      %s\n", entry.InputsJSON)
+			}
+			return nil
+		},
+	}
+}
+
+func buildRegistryVersionsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "versions <name>",
+		Short: "Show version history for a blueprint",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reg, cleanup, err := openRegistry()
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			versions, err := reg.Versions(args[0])
+			if err != nil {
+				return err
+			}
+			if len(versions) == 0 {
+				fmt.Println("no versions found")
+				return nil
+			}
+			for _, v := range versions {
+				fmt.Printf("%s  %s  %s\n", v.VersionHash[:16], v.IndexedAt, v.FilePath)
 			}
 			return nil
 		},

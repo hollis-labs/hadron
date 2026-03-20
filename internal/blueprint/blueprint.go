@@ -858,9 +858,24 @@ func RenderForExecution(bp *Blueprint, ctx map[string]any) (*Blueprint, error) {
 
 // ─── LoadWithImports ──────────────────────────────────────────────────────────
 
+// ImportResolver resolves a blueprint name or slug to its file path.
+// It is used by LoadWithImportsAndResolver to resolve imports that are not
+// file paths (no slashes, no .yaml/.yml extension).
+type ImportResolver func(nameOrSlug string) (string, error)
+
 // LoadWithImports parses a blueprint and recursively resolves all imports,
 // appending imported sections to the end of the blueprint's steps.
 func LoadWithImports(path string) (*Blueprint, error) {
+	return LoadWithImportsAndResolver(path, nil)
+}
+
+// LoadWithImportsAndResolver parses a blueprint and recursively resolves all imports.
+// Import resolution order for each import path:
+//  1. Try as file path (relative to importing blueprint's directory) -- backward compat
+//  2. If file doesn't exist AND path has no slashes and no .yaml/.yml extension, try resolver
+//  3. If resolver returns a path, use it
+//  4. Error with helpful message
+func LoadWithImportsAndResolver(path string, resolver ImportResolver) (*Blueprint, error) {
 	bp, err := ParseFile(path)
 	if err != nil {
 		return nil, err
@@ -871,11 +886,13 @@ func LoadWithImports(path string) (*Blueprint, error) {
 		if strings.TrimSpace(imp.Path) == "" {
 			continue
 		}
-		importPath := imp.Path
-		if !filepath.IsAbs(importPath) {
-			importPath = filepath.Join(baseDir, importPath)
+
+		importPath, resolveErr := resolveImportPath(imp.Path, baseDir, resolver)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("import %q: %w", imp.Path, resolveErr)
 		}
-		imported, ierr := LoadWithImports(importPath)
+
+		imported, ierr := LoadWithImportsAndResolver(importPath, resolver)
 		if ierr != nil {
 			return nil, fmt.Errorf("import %q: %w", imp.Path, ierr)
 		}
@@ -883,6 +900,74 @@ func LoadWithImports(path string) (*Blueprint, error) {
 	}
 
 	return bp, nil
+}
+
+// resolveImportPath resolves an import path to an absolute file path.
+func resolveImportPath(importRef, baseDir string, resolver ImportResolver) (string, error) {
+	// Step 1: Try as file path (relative to importing blueprint's directory).
+	candidate := importRef
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(baseDir, candidate)
+	}
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+
+	// Step 2: If the import looks like a name (no slashes, no yaml extension), try resolver.
+	ext := strings.ToLower(filepath.Ext(importRef))
+	if !strings.Contains(importRef, "/") && ext != ".yaml" && ext != ".yml" && resolver != nil {
+		resolved, err := resolver(importRef)
+		if err == nil && resolved != "" {
+			return resolved, nil
+		}
+	}
+
+	// Step 3: Error with helpful message.
+	return "", fmt.Errorf("cannot resolve import: file %q not found and registry lookup failed", importRef)
+}
+
+// CollectImportPaths recursively collects all imported file paths for a blueprint.
+// This is used by the pack command to bundle all dependencies.
+func CollectImportPaths(path string, resolver ImportResolver) ([]string, error) {
+	bp, err := ParseFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	baseDir := filepath.Dir(path)
+	var paths []string
+	seen := map[string]bool{}
+
+	for _, imp := range bp.Imports {
+		if strings.TrimSpace(imp.Path) == "" {
+			continue
+		}
+		importPath, resolveErr := resolveImportPath(imp.Path, baseDir, resolver)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("import %q: %w", imp.Path, resolveErr)
+		}
+
+		absPath, _ := filepath.Abs(importPath)
+		if seen[absPath] {
+			continue
+		}
+		seen[absPath] = true
+		paths = append(paths, absPath)
+
+		// Recurse into the imported blueprint's imports.
+		subPaths, subErr := CollectImportPaths(importPath, resolver)
+		if subErr != nil {
+			return nil, fmt.Errorf("import %q: %w", imp.Path, subErr)
+		}
+		for _, sp := range subPaths {
+			if !seen[sp] {
+				seen[sp] = true
+				paths = append(paths, sp)
+			}
+		}
+	}
+
+	return paths, nil
 }
 
 // ─── Template Engine ──────────────────────────────────────────────────────────

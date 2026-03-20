@@ -27,6 +27,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/telemetry"
+	"github.com/hollis-labs/hadron/internal/trigger"
 )
 
 const version = "0.4.0"
@@ -143,6 +144,13 @@ func runServe(args []string) error {
 		Pipeline:     pipelineRunner,
 		BlueprintDir: sett.BlueprintDir,
 	})
+
+	// Start trigger file watchers and TTL cleanup.
+	trigMgr := trigger.New(store, mgr)
+	trigMgr.StartFileWatchers()
+	trigMgr.StartTTLCleanup(60 * time.Second)
+	defer trigMgr.StopFileWatchers()
+	defer trigMgr.StopTTLCleanup()
 
 	// Initialise plugin host and discover plugins.
 	pluginLogger := hplugin.NewLogger("hadron-plugin")

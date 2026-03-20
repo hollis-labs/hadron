@@ -177,6 +177,20 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithString("trigger_id", mcp.Required(), mcp.Description("Trigger id")),
 	), a.handleTriggerDelete)
 
+	s.AddTool(mcp.NewTool("hadron_trigger_watch",
+		mcp.WithDescription("Create a temporary trigger with TTL for agent use. Supports webhook and file_watch types (requires scope trigger.write)."),
+		mcp.WithString("type", mcp.Required(), mcp.Description("Trigger type: 'webhook' or 'file_watch'")),
+		mcp.WithString("blueprint_path", mcp.Required(), mcp.Description("Blueprint file path to run when triggered")),
+		mcp.WithString("config", mcp.Required(), mcp.Description("JSON config: for webhook {\"path\":\"my-hook\",\"name\":\"My Hook\"}, for file_watch {\"paths\":[\"/dir\"],\"name\":\"Watch\",\"events\":\"create,modify\",\"debounce\":5}")),
+		mcp.WithNumber("ttl_minutes", mcp.Required(), mcp.Description("TTL in minutes (max 1440 = 24h)")),
+		mcp.WithBoolean("one_shot", mcp.Description("Delete trigger after first firing (default true)")),
+		mcp.WithString("workspace_id", mcp.Description("Workspace id (default: default)")),
+	), a.handleTriggerWatch)
+
+	s.AddTool(mcp.NewTool("hadron_trigger_list_mine",
+		mcp.WithDescription("List triggers created by the current MCP session."),
+	), a.handleTriggerListMine)
+
 	// Register blueprint registry tools
 	registerRegistryTools(s, a.registry)
 
@@ -1181,6 +1195,133 @@ func (a *Adapter) handleTriggerCreate(ctx context.Context, req mcp.CallToolReque
 		"blueprint_path": blueprintPath,
 		"webhook_url":    "/hooks/" + path,
 	}), nil
+}
+
+func (a *Adapter) handleTriggerWatch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if deny := a.checkScope(ScopeTriggerWrite); deny != nil {
+		return deny, nil
+	}
+
+	trigType := strings.TrimSpace(req.GetString("type", ""))
+	if trigType != "webhook" && trigType != "file_watch" {
+		return toolError("validation_error", "type must be 'webhook' or 'file_watch'"), nil
+	}
+	blueprintPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	if blueprintPath == "" {
+		return toolError("validation_error", "blueprint_path is required"), nil
+	}
+	configJSON := strings.TrimSpace(req.GetString("config", ""))
+	if configJSON == "" {
+		return toolError("validation_error", "config is required"), nil
+	}
+	ttlMinutes := req.GetFloat("ttl_minutes", 0)
+	if ttlMinutes <= 0 {
+		return toolError("validation_error", "ttl_minutes is required and must be > 0"), nil
+	}
+	if ttlMinutes > 1440 {
+		return toolError("validation_error", "ttl_minutes max is 1440 (24 hours)"), nil
+	}
+	oneShot := req.GetBool("one_shot", true)
+	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
+
+	// Parse config
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return toolError("validation_error", "config must be valid JSON: "+err.Error()), nil
+	}
+
+	triggerID := fmt.Sprintf("mcp-trig-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&runSeq, 1))
+	expires := time.Now().UTC().Add(time.Duration(ttlMinutes) * time.Minute)
+
+	rec := persistence.TriggerRecord{
+		ID:            triggerID,
+		Type:          trigType,
+		BlueprintPath: blueprintPath,
+		WorkspaceID:   workspaceID,
+		Enabled:       true,
+		OneShot:       oneShot,
+		TTLExpiresAt:  sql.NullString{String: expires.Format(time.RFC3339), Valid: true},
+		CreatedBy:     a.sessionID,
+	}
+
+	// Extract type-specific fields from config
+	name, _ := cfg["name"].(string)
+	if name == "" {
+		name = trigType + "-watch"
+	}
+	rec.Name = name
+
+	switch trigType {
+	case "webhook":
+		path, _ := cfg["path"].(string)
+		if path == "" {
+			return toolError("validation_error", "config.path is required for webhook triggers"), nil
+		}
+		rec.Path = path
+	case "file_watch":
+		// paths can be a JSON array or a single string
+		switch v := cfg["paths"].(type) {
+		case []any:
+			pathsJSON, _ := json.Marshal(v)
+			rec.Path = string(pathsJSON)
+		case string:
+			rec.Path = v
+		default:
+			return toolError("validation_error", "config.paths is required for file_watch triggers"), nil
+		}
+
+		// Optional debounce
+		if d, ok := cfg["debounce"].(float64); ok && d > 0 {
+			rec.DebounceSeconds = int(d)
+		}
+
+		// Store events filter in extract_inputs
+		if events, ok := cfg["events"].(string); ok && events != "" {
+			ei, _ := json.Marshal(map[string]string{"events": events})
+			rec.ExtractInputs = sql.NullString{String: string(ei), Valid: true}
+		}
+	}
+
+	if err := a.store.CreateTrigger(ctx, rec); err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+
+	result := map[string]any{
+		"trigger_id":     triggerID,
+		"type":           trigType,
+		"name":           rec.Name,
+		"blueprint_path": blueprintPath,
+		"one_shot":       oneShot,
+		"ttl_expires_at": expires.Format(time.RFC3339),
+	}
+	if trigType == "webhook" {
+		result["webhook_url"] = "/hooks/" + rec.Path
+	}
+	return toolJSON(result), nil
+}
+
+func (a *Adapter) handleTriggerListMine(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	items, err := a.store.ListTriggersByCreatedBy(ctx, a.sessionID)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, t := range items {
+		out = append(out, map[string]any{
+			"id":             t.ID,
+			"type":           t.Type,
+			"name":           t.Name,
+			"path":           t.Path,
+			"blueprint_path": t.BlueprintPath,
+			"workspace_id":   t.WorkspaceID,
+			"enabled":        t.Enabled,
+			"one_shot":       t.OneShot,
+			"fired_count":    t.FiredCount,
+			"ttl_expires_at": nullString(t.TTLExpiresAt),
+			"created_at":     t.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return toolJSON(map[string]any{"items": out, "count": len(out), "session_id": a.sessionID}), nil
 }
 
 func (a *Adapter) handleTriggerDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

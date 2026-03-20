@@ -1,0 +1,1 @@
+ALTER TABLE triggers ADD COLUMN debounce_seconds INTEGER NOT NULL DEFAULT 5;

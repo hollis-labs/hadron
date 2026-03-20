@@ -181,6 +181,77 @@ func (s *Store) ListRegistryEntries(ctx context.Context) ([]RegistryEntry, error
 	return out, nil
 }
 
+// BlueprintVersion represents a historical version of a blueprint.
+type BlueprintVersion struct {
+	ID            int64
+	BlueprintName string
+	VersionHash   string
+	FilePath      string
+	IndexedAt     string
+}
+
+// InsertBlueprintVersion records a version snapshot. Duplicate (name,hash) pairs are silently ignored.
+func (s *Store) InsertBlueprintVersion(ctx context.Context, name, hash, filePath string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO blueprint_versions(blueprint_name, version_hash, file_path, indexed_at)
+		VALUES (?, ?, ?, datetime('now'))
+	`, name, hash, filePath)
+	if err != nil {
+		return fmt.Errorf("insert blueprint version: %w", err)
+	}
+	return nil
+}
+
+// ListBlueprintVersions returns the version history for a blueprint, newest first.
+func (s *Store) ListBlueprintVersions(ctx context.Context, name string) ([]BlueprintVersion, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, blueprint_name, version_hash, file_path, indexed_at
+		FROM blueprint_versions
+		WHERE blueprint_name = ?
+		ORDER BY indexed_at DESC
+	`, name)
+	if err != nil {
+		return nil, fmt.Errorf("list blueprint versions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BlueprintVersion
+	for rows.Next() {
+		var v BlueprintVersion
+		if err := rows.Scan(&v.ID, &v.BlueprintName, &v.VersionHash, &v.FilePath, &v.IndexedAt); err != nil {
+			return nil, fmt.Errorf("scan blueprint version: %w", err)
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list blueprint versions rows: %w", err)
+	}
+	return out, nil
+}
+
+// SetRunBlueprintHash sets the blueprint_hash on a run record.
+func (s *Store) SetRunBlueprintHash(ctx context.Context, runID, hash string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE runs SET blueprint_hash = ? WHERE id = ?
+	`, hash, runID)
+	if err != nil {
+		return fmt.Errorf("set run blueprint hash: %w", err)
+	}
+	return nil
+}
+
+// GetRegistryEntryHash returns the current version hash for a blueprint by name or slug.
+func (s *Store) GetRegistryEntryHash(ctx context.Context, nameOrSlug string) (string, error) {
+	var hash string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT version_hash FROM blueprint_registry WHERE name = ? OR slug = ? LIMIT 1
+	`, nameOrSlug, nameOrSlug).Scan(&hash)
+	if err != nil {
+		return "", fmt.Errorf("get registry entry hash: %w", err)
+	}
+	return hash, nil
+}
+
 func (s *Store) DeleteRegistryEntry(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM blueprint_registry WHERE id = ?`, id)
 	if err != nil {

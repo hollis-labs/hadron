@@ -8,11 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 )
@@ -23,6 +26,8 @@ type Store interface {
 	UpdateTriggerFired(ctx context.Context, id string) error
 	DeleteTrigger(ctx context.Context, id string) error
 	ListWebhookTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
+	ListFileWatchTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
+	DeleteExpiredTriggers(ctx context.Context, now time.Time) (int64, error)
 }
 
 // Runner enqueues blueprint runs.
@@ -30,16 +35,266 @@ type Runner interface {
 	Enqueue(ctx context.Context, req execution.Request) error
 }
 
-// Manager handles webhook trigger routing and execution.
+// Manager handles webhook trigger routing, file-watch triggers, and TTL cleanup.
 type Manager struct {
 	store  Store
 	runner Runner
 	seq    atomic.Uint64
+
+	// file watcher state
+	mu          sync.Mutex
+	watchers    map[string]*fileWatcher // trigger ID → watcher
+	watchCancel context.CancelFunc
+	watchCtx    context.Context
+
+	// TTL cleanup state
+	ttlCancel context.CancelFunc
+}
+
+type fileWatcher struct {
+	watcher  *fsnotify.Watcher
+	cancel   context.CancelFunc
+	trigID   string
+	debounce time.Duration
 }
 
 // New creates a new trigger Manager.
 func New(store Store, runner Runner) *Manager {
-	return &Manager{store: store, runner: runner}
+	return &Manager{
+		store:    store,
+		runner:   runner,
+		watchers: make(map[string]*fileWatcher),
+	}
+}
+
+// StartFileWatchers queries all file_watch triggers and starts goroutines to watch them.
+func (m *Manager) StartFileWatchers() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.watchCtx = ctx
+	m.watchCancel = cancel
+
+	triggers, err := m.store.ListFileWatchTriggers(ctx)
+	if err != nil {
+		log.Printf("trigger: failed to list file_watch triggers: %v", err)
+		return
+	}
+
+	for _, t := range triggers {
+		m.startWatcherLocked(t)
+	}
+}
+
+// startWatcherLocked starts a single file watcher goroutine. Must hold m.mu.
+func (m *Manager) startWatcherLocked(trigger persistence.TriggerRecord) {
+	if _, exists := m.watchers[trigger.ID]; exists {
+		return
+	}
+
+	// Parse paths from the trigger's Path field (JSON-encoded list).
+	var paths []string
+	if err := json.Unmarshal([]byte(trigger.Path), &paths); err != nil {
+		// Fall back to treating as a single path.
+		paths = []string{trigger.Path}
+	}
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("trigger: failed to create fsnotify watcher for %s: %v", trigger.ID, err)
+		return
+	}
+
+	for _, p := range paths {
+		if err := watcher.Add(p); err != nil {
+			log.Printf("trigger: failed to watch path %q for trigger %s: %v", p, trigger.ID, err)
+		}
+	}
+
+	debounce := time.Duration(trigger.DebounceSeconds) * time.Second
+	if debounce <= 0 {
+		debounce = 5 * time.Second
+	}
+
+	ctx, cancel := context.WithCancel(m.watchCtx)
+	fw := &fileWatcher{
+		watcher:  watcher,
+		cancel:   cancel,
+		trigID:   trigger.ID,
+		debounce: debounce,
+	}
+	m.watchers[trigger.ID] = fw
+
+	go m.runFileWatcher(ctx, fw, trigger)
+}
+
+// runFileWatcher processes fsnotify events for a single trigger with debouncing.
+func (m *Manager) runFileWatcher(ctx context.Context, fw *fileWatcher, trigger persistence.TriggerRecord) {
+	defer fw.watcher.Close()
+
+	// Parse event filter if present in extract_inputs.
+	var eventFilter map[string]bool
+	if trigger.ExtractInputs.Valid && trigger.ExtractInputs.String != "" {
+		var cfg map[string]string
+		if err := json.Unmarshal([]byte(trigger.ExtractInputs.String), &cfg); err == nil {
+			if events, ok := cfg["events"]; ok {
+				eventFilter = make(map[string]bool)
+				for _, e := range strings.Split(events, ",") {
+					eventFilter[strings.TrimSpace(e)] = true
+				}
+			}
+		}
+	}
+
+	var debounceTimer *time.Timer
+	var lastEvent fsnotify.Event
+
+	for {
+		select {
+		case <-ctx.Done():
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
+			return
+		case event, ok := <-fw.watcher.Events:
+			if !ok {
+				return
+			}
+			eventType := fsEventType(event.Op)
+			if eventFilter != nil && !eventFilter[eventType] {
+				continue
+			}
+			lastEvent = event
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
+			debounceTimer = time.AfterFunc(fw.debounce, func() {
+				m.fireFileWatch(trigger, lastEvent)
+			})
+		case err, ok := <-fw.watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Printf("trigger: fsnotify error for %s: %v", fw.trigID, err)
+		}
+	}
+}
+
+// fireFileWatch enqueues a blueprint run for a file-watch trigger event.
+func (m *Manager) fireFileWatch(trigger persistence.TriggerRecord, event fsnotify.Event) {
+	ctx := context.Background()
+
+	inputs := map[string]any{
+		"changed_file": event.Name,
+		"event_type":   fsEventType(event.Op),
+	}
+
+	n := m.seq.Add(1)
+	runID := fmt.Sprintf("fwatch-%s-%04d", time.Now().UTC().Format("20060102-150405"), n)
+	if err := m.runner.Enqueue(ctx, execution.Request{
+		RunID:         runID,
+		WorkspaceID:   trigger.WorkspaceID,
+		BlueprintPath: trigger.BlueprintPath,
+		Inputs:        inputs,
+	}); err != nil {
+		log.Printf("trigger: failed to enqueue file_watch run for %s: %v", trigger.ID, err)
+		return
+	}
+
+	_ = m.store.UpdateTriggerFired(ctx, trigger.ID)
+
+	if trigger.OneShot {
+		_ = m.store.DeleteTrigger(ctx, trigger.ID)
+		m.removeWatcher(trigger.ID)
+	}
+}
+
+// removeWatcher stops and removes a file watcher by trigger ID.
+func (m *Manager) removeWatcher(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if fw, ok := m.watchers[id]; ok {
+		fw.cancel()
+		delete(m.watchers, id)
+	}
+}
+
+// AddFileWatcher adds and starts a new file watcher for a trigger at runtime.
+func (m *Manager) AddFileWatcher(trigger persistence.TriggerRecord) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.watchCtx == nil {
+		// Not started yet; StartFileWatchers will pick it up.
+		return
+	}
+	m.startWatcherLocked(trigger)
+}
+
+// StopFileWatchers stops all file watchers.
+func (m *Manager) StopFileWatchers() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.watchCancel != nil {
+		m.watchCancel()
+	}
+	for id, fw := range m.watchers {
+		fw.cancel()
+		delete(m.watchers, id)
+	}
+}
+
+// CleanExpiredTriggers deletes triggers where ttl_expires_at < now.
+func (m *Manager) CleanExpiredTriggers(ctx context.Context) (int64, error) {
+	return m.store.DeleteExpiredTriggers(ctx, time.Now())
+}
+
+// StartTTLCleanup starts a background goroutine that cleans expired triggers every interval.
+func (m *Manager) StartTTLCleanup(interval time.Duration) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ttlCancel = cancel
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if n, err := m.CleanExpiredTriggers(ctx); err != nil {
+					log.Printf("trigger: TTL cleanup error: %v", err)
+				} else if n > 0 {
+					log.Printf("trigger: cleaned %d expired trigger(s)", n)
+				}
+			}
+		}
+	}()
+}
+
+// StopTTLCleanup stops the TTL cleanup goroutine.
+func (m *Manager) StopTTLCleanup() {
+	if m.ttlCancel != nil {
+		m.ttlCancel()
+	}
+}
+
+// fsEventType converts an fsnotify Op to a human-readable event type string.
+func fsEventType(op fsnotify.Op) string {
+	switch {
+	case op.Has(fsnotify.Create):
+		return "create"
+	case op.Has(fsnotify.Write):
+		return "modify"
+	case op.Has(fsnotify.Remove):
+		return "delete"
+	case op.Has(fsnotify.Rename):
+		return "rename"
+	case op.Has(fsnotify.Chmod):
+		return "chmod"
+	default:
+		return "unknown"
+	}
 }
 
 // RegisterWebhookRoutes registers the catch-all /hooks/ handler on the mux.

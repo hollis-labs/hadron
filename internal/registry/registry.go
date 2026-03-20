@@ -105,6 +105,9 @@ func (r *Registry) Index(dir string) (result IndexResult, err error) {
 			return nil // skip on upsert error
 		}
 
+		// Record version history (duplicate name+hash pairs are silently ignored).
+		_ = r.store.InsertBlueprintVersion(ctx, name, hash, path)
+
 		isNew := errors.Is(getErr, sql.ErrNoRows) || (getErr != nil && strings.Contains(getErr.Error(), "no rows"))
 		if isNew {
 			result.Indexed++
@@ -170,6 +173,50 @@ func (r *Registry) Show(nameOrSlug string) (*persistence.RegistryEntry, error) {
 func (r *Registry) List() ([]persistence.RegistryEntry, error) {
 	ctx := context.Background()
 	return r.store.ListRegistryEntries(ctx)
+}
+
+// Versions returns the version history for a blueprint by name, newest first.
+func (r *Registry) Versions(name string) ([]persistence.BlueprintVersion, error) {
+	ctx := context.Background()
+	return r.store.ListBlueprintVersions(ctx, name)
+}
+
+// CurrentHash returns the current content hash for a blueprint looked up by name or slug.
+func (r *Registry) CurrentHash(nameOrSlug string) (string, error) {
+	entry, err := r.Show(nameOrSlug)
+	if err != nil {
+		return "", err
+	}
+	return entry.VersionHash, nil
+}
+
+// VerifyPin checks that a blueprint file's current content hash matches the expected pinned hash.
+// Returns the file path and nil error on match, or an error describing the mismatch.
+func (r *Registry) VerifyPin(blueprintPath, pinnedHash string) error {
+	raw, err := os.ReadFile(blueprintPath)
+	if err != nil {
+		return fmt.Errorf("read blueprint for pin verification: %w", err)
+	}
+	currentHash := sha256sum(raw)
+	if currentHash != pinnedHash {
+		return fmt.Errorf("blueprint hash mismatch: pinned=%s current=%s\nThe blueprint has changed since the pin was set. Re-index and update the pin, or remove --pin to run the latest version", pinnedHash[:16], currentHash[:16])
+	}
+	return nil
+}
+
+// VerifyFileHash checks that a blueprint file's current content hash matches
+// the expected pinned hash. This is a standalone function that does not require
+// a Registry instance.
+func VerifyFileHash(blueprintPath, pinnedHash string) error {
+	raw, err := os.ReadFile(blueprintPath)
+	if err != nil {
+		return fmt.Errorf("read blueprint for pin verification: %w", err)
+	}
+	currentHash := sha256sum(raw)
+	if currentHash != pinnedHash {
+		return fmt.Errorf("blueprint hash mismatch: pinned=%s current=%s\nThe blueprint has changed since the pin was set. Re-index and update the pin, or remove --pin to run the latest version", pinnedHash[:16], currentHash[:16])
+	}
+	return nil
 }
 
 func sha256sum(data []byte) string {

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
@@ -63,6 +64,8 @@ type TriggerStore interface {
 	GetTriggerByPath(ctx context.Context, path string) (persistence.TriggerRecord, error)
 	UpdateTriggerFired(ctx context.Context, id string) error
 	ListWebhookTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
+	ListFileWatchTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
+	DeleteExpiredTriggers(ctx context.Context, now time.Time) (int64, error)
 }
 
 // ── Other interfaces ──────────────────────────────────────────────────────────
@@ -106,6 +109,7 @@ type Server struct {
 	pipelineSeq    atomic.Uint64
 	triggerSeq     atomic.Uint64
 	triggerManager *trigger.Manager
+	a2aHandler     *a2a.Handler
 }
 
 // Handler returns the underlying HTTP handler (useful for testing with httptest).
@@ -151,6 +155,13 @@ func NewServer(addr string, deps Dependencies) *Server {
 
 	// A2A Agent Card
 	mux.HandleFunc("/.well-known/agent.json", s.handleAgentCard)
+
+	// A2A Task endpoints
+	if deps.Runner != nil && deps.Runs != nil {
+		s.a2aHandler = a2a.NewHandler(deps.Runs, deps.Runner, &serverBlueprintResolver{s: s})
+		mux.HandleFunc("/a2a/tasks", s.handleA2ATasks)
+		mux.HandleFunc("/a2a/tasks/", s.handleA2ATaskByID)
+	}
 
 	// Blueprints
 	mux.HandleFunc("/v1/blueprints/validate", s.handleBlueprintValidate)
@@ -1224,6 +1235,79 @@ func (s *Server) resolveBlueprintPath(name string) (string, error) {
 	}
 
 	return "", fmt.Errorf("not found")
+}
+
+// ── A2A Tasks ─────────────────────────────────────────────────────────────────
+
+// serverBlueprintResolver adapts Server.resolveBlueprintPath to the a2a.BlueprintResolver interface.
+type serverBlueprintResolver struct {
+	s *Server
+}
+
+func (r *serverBlueprintResolver) Resolve(name string) (string, error) {
+	return r.s.resolveBlueprintPath(name)
+}
+
+func (s *Server) handleA2ATasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.a2aHandler == nil {
+		writeError(w, http.StatusServiceUnavailable, "a2a tasks unavailable")
+		return
+	}
+
+	var req a2a.TaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Skill == "" {
+		writeError(w, http.StatusBadRequest, "skill is required")
+		return
+	}
+
+	resp, err := s.a2aHandler.SubmitTask(r.Context(), req)
+	if err != nil {
+		// Distinguish "unknown skill" from internal errors.
+		if strings.Contains(err.Error(), "unknown skill") || strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (s *Server) handleA2ATaskByID(w http.ResponseWriter, r *http.Request) {
+	taskID := strings.TrimPrefix(r.URL.Path, "/a2a/tasks/")
+	if taskID == "" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.a2aHandler == nil {
+		writeError(w, http.StatusServiceUnavailable, "a2a tasks unavailable")
+		return
+	}
+
+	resp, err := s.a2aHandler.GetTask(r.Context(), taskID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ── Response helpers ──────────────────────────────────────────────────────────

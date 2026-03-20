@@ -15,7 +15,10 @@ import (
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/config"
 	"github.com/hollis-labs/hadron/internal/lint"
+	"github.com/hollis-labs/hadron/internal/pack"
+	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
+	"github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -50,6 +53,8 @@ func main() {
 		buildAgentCardCmd(),
 		buildRegistryCmd(),
 		buildTriggerCmd(),
+		buildPackCmd(),
+		buildUnpackCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -64,6 +69,7 @@ func buildRunCmd() *cobra.Command {
 		inputs      []string
 		workspaceID string
 		dryRun      bool
+		pinHash     string
 	)
 
 	cmd := &cobra.Command{
@@ -86,6 +92,14 @@ func buildRunCmd() *cobra.Command {
 						}
 					}
 				}
+			}
+
+			// Verify pin hash if specified.
+			if pinHash != "" {
+				if err := registry.VerifyFileHash(bpPath, pinHash); err != nil {
+					return err
+				}
+				fmt.Printf("pin verified: %s\n", pinHash[:16])
 			}
 
 			parsedInputs, err := parseInputs(inputs)
@@ -118,6 +132,7 @@ func buildRunCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&inputs, "input", nil, "input key=value (repeatable)")
 	cmd.Flags().StringVar(&workspaceID, "workspace", "default", "workspace ID")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "dry run (no commands executed)")
+	cmd.Flags().StringVar(&pinHash, "pin", "", "verify blueprint content hash before running")
 	return cmd
 }
 
@@ -746,6 +761,87 @@ func applyCompatAliases(src string) string {
 		src = strings.ReplaceAll(src, r[0], r[1])
 	}
 	return src
+}
+
+// ── pack / unpack ─────────────────────────────────────────────────────────────
+
+func buildPackCmd() *cobra.Command {
+	var outputPath string
+
+	cmd := &cobra.Command{
+		Use:   "pack <blueprint.yaml>",
+		Short: "Bundle a blueprint with all imports into a .hbp archive",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bpPath := args[0]
+
+			// Use registry resolver if available.
+			var resolver blueprint.ImportResolver
+			reg, cleanup, err := openRegistryForPack()
+			if err == nil {
+				defer cleanup()
+				resolver = func(nameOrSlug string) (string, error) {
+					return reg.Resolve(nameOrSlug)
+				}
+			}
+
+			if outputPath == "" {
+				bp, parseErr := blueprint.ParseFile(bpPath)
+				if parseErr != nil {
+					return parseErr
+				}
+				name := bp.Spec.Name
+				if name == "" {
+					name = bp.Spec.Slug
+				}
+				outputPath = name + ".hbp"
+			}
+
+			if err := pack.Pack(bpPath, outputPath, resolver); err != nil {
+				return err
+			}
+			fmt.Printf("packed: %s\n", outputPath)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "output file path (default: <name>.hbp)")
+	return cmd
+}
+
+func buildUnpackCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "unpack <archive.hbp> [output-dir]",
+		Short: "Extract a .hbp archive",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			archivePath := args[0]
+			outputDir := "."
+			if len(args) > 1 {
+				outputDir = args[1]
+			}
+
+			manifest, err := pack.Unpack(archivePath, outputDir)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("unpacked: %s (version %s, hash %s)\n", manifest.Name, manifest.Version, manifest.Hash[:16])
+			if len(manifest.Dependencies) > 0 {
+				fmt.Printf("dependencies: %s\n", strings.Join(manifest.Dependencies, ", "))
+			}
+			return nil
+		},
+	}
+}
+
+func openRegistryForPack() (*registry.Registry, func(), error) {
+	cfg := config.Default()
+	store, err := persistence.Open(cfg.DBPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	reg := registry.New(store)
+	cleanup := func() { store.Close() }
+	return reg, cleanup, nil
 }
 
 func parseInputs(inputs []string) (map[string]any, error) {
