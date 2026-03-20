@@ -497,6 +497,92 @@ steps:
 	}
 }
 
+func TestValidate_InvalidRetryBackoff(t *testing.T) {
+	bp := &Blueprint{
+		Spec:  BlueprintInfo{Name: "app"},
+		Steps: []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo", RetryBackoff: "random"}}}},
+	}
+	if err := Validate(bp); err == nil {
+		t.Fatal("expected error for invalid retry_backoff value")
+	}
+}
+
+func TestValidate_ValidRetryBackoffValues(t *testing.T) {
+	for _, val := range []string{"", "fixed", "exponential", "linear"} {
+		bp := &Blueprint{
+			Spec:  BlueprintInfo{Name: "app"},
+			Steps: []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo", RetryBackoff: val}}}},
+		}
+		if err := Validate(bp); err != nil {
+			t.Fatalf("expected no error for retry_backoff=%q: %v", val, err)
+		}
+	}
+}
+
+func TestValidate_NegativeRetryMaxDelay(t *testing.T) {
+	bp := &Blueprint{
+		Spec:  BlueprintInfo{Name: "app"},
+		Steps: []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo", RetryMaxDelay: -1}}}},
+	}
+	if err := Validate(bp); err == nil {
+		t.Fatal("expected error for negative retry_max_delay_seconds")
+	}
+}
+
+func TestParse_RetryBackoffYAML(t *testing.T) {
+	src := []byte(`
+version: "0.4"
+blueprint:
+  name: backoff-app
+steps:
+  - section: Main
+    tasks:
+      - name: t
+        cmd: echo
+        retry: 3
+        retry_delay_seconds: 1
+        retry_backoff: exponential
+        retry_max_delay_seconds: 10
+`)
+	bp, err := ParseBytes(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	step := bp.Steps[0].Steps[0]
+	if step.RetryBackoff != "exponential" {
+		t.Fatalf("expected retry_backoff=exponential, got %q", step.RetryBackoff)
+	}
+	if step.RetryMaxDelay != 10 {
+		t.Fatalf("expected retry_max_delay_seconds=10, got %d", step.RetryMaxDelay)
+	}
+}
+
+func TestParse_RetryBackoffCamelCaseCompat(t *testing.T) {
+	src := []byte(`
+version: "0.4"
+blueprint:
+  name: backoff-compat
+steps:
+  - section: Main
+    tasks:
+      - name: t
+        cmd: echo
+        retryBackoff: linear
+        retryMaxDelay: 5
+`)
+	bp, err := ParseBytes(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	step := bp.Steps[0].Steps[0]
+	if step.RetryBackoff != "linear" {
+		t.Fatalf("expected retryBackoff→retry_backoff=linear, got %q", step.RetryBackoff)
+	}
+	if step.RetryMaxDelay != 5 {
+		t.Fatalf("expected retryMaxDelay→retry_max_delay_seconds=5, got %d", step.RetryMaxDelay)
+	}
+}
+
 func TestCompat_RetryDelayCamelCase(t *testing.T) {
 	src := []byte(`
 version: "0.2"

@@ -536,6 +536,28 @@
           "description": "Delay between retries in seconds.",
           "minimum": 0
         },
+        "retry_backoff": {
+          "type": "string",
+          "description": "Backoff strategy for retries. Fixed uses constant delay, exponential doubles each attempt, linear increases by base delay each attempt.",
+          "enum": ["fixed", "exponential", "linear"],
+          "default": "fixed"
+        },
+        "retry_max_delay_seconds": {
+          "type": "integer",
+          "description": "Maximum delay cap for exponential/linear backoff in seconds. 0 means no cap.",
+          "minimum": 0,
+          "default": 0
+        },
+        "retryBackoff": {
+          "type": "string",
+          "description": "Alias for retry_backoff (camelCase compat).",
+          "enum": ["fixed", "exponential", "linear"]
+        },
+        "retryMaxDelay": {
+          "type": "integer",
+          "description": "Alias for retry_max_delay_seconds (camelCase compat).",
+          "minimum": 0
+        },
         "retry_delay": {
           "type": "integer",
           "description": "Alias for retry_delay_seconds (v0.2 compat).",

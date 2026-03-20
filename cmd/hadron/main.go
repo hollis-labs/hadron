@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/config"
+	"github.com/hollis-labs/hadron/internal/lint"
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/spf13/cobra"
@@ -45,6 +46,7 @@ func main() {
 		buildLintCmd(),
 		buildFmtCmd(),
 		buildPluginCmd(),
+		buildTestGenCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -566,17 +568,13 @@ func printAPIError(resp *http.Response) error {
 
 // ── lint ──────────────────────────────────────────────────────────────────────
 
-type lintResult struct {
-	File   string   `json:"file"`
-	Errors []string `json:"errors"`
-}
-
 func buildLintCmd() *cobra.Command {
-	var jsonOut bool
+	var formatJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "lint <path|dir>",
-		Short: "Lint blueprint files for errors",
+		Short: "Lint blueprint and pipeline files for best-practice issues",
+		Long:  "Runs best-practice checks beyond schema/parse validation. Checks for unused inputs, missing timeouts, duplicate step names, template syntax errors, and more.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
@@ -604,43 +602,79 @@ func buildLintCmd() *cobra.Command {
 				files = []string{target}
 			}
 
-			var results []lintResult
-			hasErrors := false
+			var allIssues []lint.Issue
 			for _, f := range files {
-				r := lintResult{File: f}
-				if _, parseErr := blueprint.ParseFile(f); parseErr != nil {
-					// Fall back to pipeline spec validation before reporting an error.
-					if _, pipeErr := pipeline.ParseFile(f); pipeErr != nil {
-						r.Errors = []string{parseErr.Error()}
-						hasErrors = true
-					}
+				rawContent, readErr := os.ReadFile(f)
+				if readErr != nil {
+					allIssues = append(allIssues, lint.Issue{
+						File:     f,
+						Severity: lint.SeverityError,
+						Rule:     "read-error",
+						Message:  readErr.Error(),
+					})
+					continue
 				}
-				results = append(results, r)
+
+				// Try blueprint first, then pipeline.
+				bp, bpErr := blueprint.ParseFile(f)
+				if bpErr == nil {
+					allIssues = append(allIssues, lint.LintBlueprint(bp, f, rawContent)...)
+					continue
+				}
+
+				spec, pipeErr := pipeline.ParseFile(f)
+				if pipeErr == nil {
+					allIssues = append(allIssues, lint.LintPipeline(spec, f, rawContent)...)
+					continue
+				}
+
+				// Neither parsed — report as error.
+				allIssues = append(allIssues, lint.Issue{
+					File:     f,
+					Severity: lint.SeverityError,
+					Rule:     "parse-error",
+					Message:  bpErr.Error(),
+				})
 			}
 
-			if jsonOut {
+			// Determine exit code: 2 = errors, 1 = warnings only, 0 = clean.
+			exitCode := 0
+			for _, issue := range allIssues {
+				if issue.Severity == lint.SeverityError {
+					exitCode = 2
+					break
+				}
+				if issue.Severity == lint.SeverityWarning && exitCode < 1 {
+					exitCode = 1
+				}
+			}
+
+			if formatJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
-				_ = enc.Encode(results)
+				_ = enc.Encode(allIssues)
 			} else {
-				for _, r := range results {
-					if len(r.Errors) == 0 {
-						fmt.Printf("ok   %s\n", r.File)
+				if len(allIssues) == 0 {
+					fmt.Println("No issues found.")
+				}
+				for _, issue := range allIssues {
+					if issue.Line > 0 {
+						fmt.Fprintf(os.Stderr, "%s:%d: %s: [%s] %s\n", issue.File, issue.Line, issue.Severity, issue.Rule, issue.Message)
 					} else {
-						for _, e := range r.Errors {
-							fmt.Fprintf(os.Stderr, "err  %s — %s\n", r.File, e)
-						}
+						fmt.Fprintf(os.Stderr, "%s: %s: [%s] %s\n", issue.File, issue.Severity, issue.Rule, issue.Message)
 					}
 				}
 			}
 
-			if hasErrors {
-				os.Exit(1)
+			if exitCode != 0 {
+				os.Exit(exitCode)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "output machine-readable JSON")
+	cmd.Flags().BoolVar(&formatJSON, "format", false, "output machine-readable JSON")
+	// Keep backward compat with old --json flag.
+	cmd.Flags().BoolVar(&formatJSON, "json", false, "output machine-readable JSON (alias for --format)")
 	return cmd
 }
 

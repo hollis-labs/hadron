@@ -180,6 +180,8 @@ steps:
           KEY: value
         retry: int          # default 0
         retry_delay_seconds: int
+        retry_backoff: fixed|exponential|linear  # default "fixed"
+        retry_max_delay_seconds: int             # cap for backoff (0 = no cap)
         timeout_seconds: int
         continue_on_error: bool
         enabled: bool       # default true — false skips the task entirely
@@ -248,14 +250,17 @@ Go `text/template` with the following context and functions.
 5. Input types: `string`, `number`, `boolean`, `array`
 6. Import aliases must be unique
 7. Each task must have `cmd`/`run` OR `call` (not both, not neither)
-8. `retry`, `retry_delay_seconds`, `timeout_seconds` must be >= 0
-9. `if`/`condition` template renders to `"true"/"false"` string OR a shell command (exit 0 = true)
+8. `retry`, `retry_delay_seconds`, `timeout_seconds`, `retry_max_delay_seconds` must be >= 0
+9. `retry_backoff` must be one of: `fixed`, `exponential`, `linear` (or empty, defaults to `fixed`)
+10. `if`/`condition` template renders to `"true"/"false"` string OR a shell command (exit 0 = true)
 
 ## Compatibility
 
 - v0.2 blueprints with `condition:` field → accepted (alias for `if:`)
 - v0.2 `retryDelay:` → accepted (alias for `retry_delay_seconds:`)
 - v0.2 `continueOnError:` → accepted (alias for `continue_on_error:`)
+- camelCase `retryBackoff:` → accepted (alias for `retry_backoff:`)
+- camelCase `retryMaxDelay:` → accepted (alias for `retry_max_delay_seconds:`)
 - v0.2 `composer: [string]` shorthand → normalized
 
 ## Reference Example

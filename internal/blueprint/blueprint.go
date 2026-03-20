@@ -18,18 +18,18 @@ import (
 // ─── Structs ──────────────────────────────────────────────────────────────────
 
 type Blueprint struct {
-	Version   string            `yaml:"version" json:"version"`
-	Blueprint BlueprintInfo     `yaml:"blueprint" json:"blueprint"`
-	Project   Project           `yaml:"project" json:"project"`
-	Env       map[string]string `yaml:"env" json:"env"`
-	Inputs    []Input           `yaml:"inputs" json:"inputs"`
-	Packages  Packages          `yaml:"packages" json:"packages"`
-	Git       Git               `yaml:"git" json:"git"`
-	Stubs     Stubs             `yaml:"stubs" json:"stubs"`
-	Tools     Tools             `yaml:"tools" json:"tools"`
-	Imports   []Import          `yaml:"imports" json:"imports"`
-	Hooks     Hooks             `yaml:"hooks" json:"hooks"`
-	Steps     []Section         `yaml:"steps" json:"steps"`
+	Version  string            `yaml:"version" json:"version"`
+	Spec     BlueprintInfo     `yaml:"blueprint" json:"blueprint"`
+	Project  Project           `yaml:"project" json:"project"`
+	Env      map[string]string `yaml:"env" json:"env"`
+	Inputs   []Input           `yaml:"inputs" json:"inputs"`
+	Packages Packages          `yaml:"packages" json:"packages"`
+	Git      Git               `yaml:"git" json:"git"`
+	Stubs    Stubs             `yaml:"stubs" json:"stubs"`
+	Tools    Tools             `yaml:"tools" json:"tools"`
+	Imports  []Import          `yaml:"imports" json:"imports"`
+	Hooks    Hooks             `yaml:"hooks" json:"hooks"`
+	Steps    []Section         `yaml:"steps" json:"steps"`
 }
 
 type BlueprintInfo struct {
@@ -249,11 +249,13 @@ type Hook struct {
 	If   string `yaml:"if" json:"if"`
 }
 
-// ─── Section / Task ───────────────────────────────────────────────────────────
+// ─── Section / Step ───────────────────────────────────────────────────────────
 
 type Section struct {
 	Section string `yaml:"section" json:"section"`
-	Tasks   []Task `yaml:"tasks" json:"tasks"`
+	// Steps holds the executable steps in this section.
+	// YAML/JSON tags remain "tasks" for backward compatibility with existing blueprints and frontend.
+	Steps []Step `yaml:"tasks" json:"tasks"`
 }
 
 type ActionHook struct {
@@ -261,8 +263,10 @@ type ActionHook struct {
 	Value string `yaml:"value" json:"value"`
 }
 
-// Task is the v0.4 task model. Custom unmarshalers normalize v0.2 compat aliases.
-type Task struct {
+// Step is a single executable command within a blueprint section.
+// (Renamed from Task to avoid collision with Volon's Task work-item type.)
+// Custom unmarshalers normalize v0.2 compat aliases.
+type Step struct {
 	Name            string            `yaml:"name" json:"name"`
 	Cmd             string            `yaml:"cmd" json:"cmd"`
 	Run             string            `yaml:"run" json:"run"`
@@ -273,6 +277,8 @@ type Task struct {
 	Env             map[string]string `yaml:"env" json:"env"`
 	Retry           int               `yaml:"retry" json:"retry"`
 	RetryDelaySecs  int               `yaml:"retry_delay_seconds" json:"retry_delay_seconds"`
+	RetryBackoff    string            `yaml:"retry_backoff" json:"retry_backoff"`                     // "fixed" (default), "exponential", "linear"
+	RetryMaxDelay   int               `yaml:"retry_max_delay_seconds" json:"retry_max_delay_seconds"` // cap for backoff
 	TimeoutSeconds  int               `yaml:"timeout_seconds" json:"timeout_seconds"`
 	ContinueOnError bool              `yaml:"continue_on_error" json:"continue_on_error"`
 	Enabled         *bool             `yaml:"enabled" json:"enabled"`
@@ -280,23 +286,27 @@ type Task struct {
 	OnFail          []ActionHook      `yaml:"on_fail" json:"on_fail"`
 }
 
-// rawTaskYAML captures both canonical and compat field names for YAML unmarshal.
-type rawTaskYAML struct {
+// rawStepYAML captures both canonical and compat field names for YAML unmarshal.
+type rawStepYAML struct {
 	Name                 string            `yaml:"name"`
 	Cmd                  string            `yaml:"cmd"`
 	Run                  string            `yaml:"run"`
 	Call                 string            `yaml:"call"`
 	If                   string            `yaml:"if"`
-	Condition            string            `yaml:"condition"`     // compat → if
+	Condition            string            `yaml:"condition"` // compat → if
 	With                 map[string]any    `yaml:"with"`
 	Dir                  string            `yaml:"dir"`
 	Env                  map[string]string `yaml:"env"`
 	Retry                int               `yaml:"retry"`
 	RetryDelaySecs       int               `yaml:"retry_delay_seconds"`
-	RetryDelay           int               `yaml:"retry_delay"`   // compat
-	RetryDelayCamel      int               `yaml:"retryDelay"`    // compat camelCase
+	RetryDelay           int               `yaml:"retry_delay"` // compat
+	RetryDelayCamel      int               `yaml:"retryDelay"`  // compat camelCase
+	RetryBackoff         string            `yaml:"retry_backoff"`
+	RetryBackoffCamel    string            `yaml:"retryBackoff"` // compat camelCase
+	RetryMaxDelay        int               `yaml:"retry_max_delay_seconds"`
+	RetryMaxDelayCamel   int               `yaml:"retryMaxDelay"` // compat camelCase
 	TimeoutSeconds       int               `yaml:"timeout_seconds"`
-	Timeout              int               `yaml:"timeout"`       // compat
+	Timeout              int               `yaml:"timeout"` // compat
 	ContinueOnError      bool              `yaml:"continue_on_error"`
 	ContinueOnErrorCamel bool              `yaml:"continueOnError"` // compat camelCase
 	Enabled              *bool             `yaml:"enabled"`
@@ -306,8 +316,8 @@ type rawTaskYAML struct {
 	OnFailCamel          []ActionHook      `yaml:"onFail"` // compat camelCase
 }
 
-func (t *Task) UnmarshalYAML(value *yaml.Node) error {
-	var raw rawTaskYAML
+func (t *Step) UnmarshalYAML(value *yaml.Node) error {
+	var raw rawStepYAML
 	if err := value.Decode(&raw); err != nil {
 		return err
 	}
@@ -330,6 +340,14 @@ func (t *Task) UnmarshalYAML(value *yaml.Node) error {
 	if t.RetryDelaySecs == 0 && raw.RetryDelayCamel != 0 {
 		t.RetryDelaySecs = raw.RetryDelayCamel
 	}
+	t.RetryBackoff = raw.RetryBackoff
+	if t.RetryBackoff == "" {
+		t.RetryBackoff = raw.RetryBackoffCamel
+	}
+	t.RetryMaxDelay = raw.RetryMaxDelay
+	if t.RetryMaxDelay == 0 && raw.RetryMaxDelayCamel != 0 {
+		t.RetryMaxDelay = raw.RetryMaxDelayCamel
+	}
 	t.TimeoutSeconds = raw.TimeoutSeconds
 	if t.TimeoutSeconds == 0 && raw.Timeout != 0 {
 		t.TimeoutSeconds = raw.Timeout
@@ -347,8 +365,8 @@ func (t *Task) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// rawTaskJSON captures compat field names for JSON unmarshal.
-type rawTaskJSON struct {
+// rawStepJSON captures compat field names for JSON unmarshal.
+type rawStepJSON struct {
 	Name                 string            `json:"name"`
 	Cmd                  string            `json:"cmd"`
 	Run                  string            `json:"run"`
@@ -362,6 +380,10 @@ type rawTaskJSON struct {
 	RetryDelaySecs       int               `json:"retry_delay_seconds"`
 	RetryDelay           int               `json:"retry_delay"`
 	RetryDelayCamel      int               `json:"retryDelay"`
+	RetryBackoff         string            `json:"retry_backoff"`
+	RetryBackoffCamel    string            `json:"retryBackoff"`
+	RetryMaxDelay        int               `json:"retry_max_delay_seconds"`
+	RetryMaxDelayCamel   int               `json:"retryMaxDelay"`
 	TimeoutSeconds       int               `json:"timeout_seconds"`
 	Timeout              int               `json:"timeout"`
 	ContinueOnError      bool              `json:"continue_on_error"`
@@ -373,8 +395,8 @@ type rawTaskJSON struct {
 	OnFailCamel          []ActionHook      `json:"onFail"`
 }
 
-func (t *Task) UnmarshalJSON(data []byte) error {
-	var raw rawTaskJSON
+func (t *Step) UnmarshalJSON(data []byte) error {
+	var raw rawStepJSON
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
@@ -396,6 +418,14 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 	}
 	if t.RetryDelaySecs == 0 && raw.RetryDelayCamel != 0 {
 		t.RetryDelaySecs = raw.RetryDelayCamel
+	}
+	t.RetryBackoff = raw.RetryBackoff
+	if t.RetryBackoff == "" {
+		t.RetryBackoff = raw.RetryBackoffCamel
+	}
+	t.RetryMaxDelay = raw.RetryMaxDelay
+	if t.RetryMaxDelay == 0 && raw.RetryMaxDelayCamel != 0 {
+		t.RetryMaxDelay = raw.RetryMaxDelayCamel
 	}
 	t.TimeoutSeconds = raw.TimeoutSeconds
 	if t.TimeoutSeconds == 0 && raw.Timeout != 0 {
@@ -469,8 +499,8 @@ func Validate(bp *Blueprint) error {
 		return errors.New("blueprint.steps: must contain at least one section")
 	}
 	for i, sec := range bp.Steps {
-		if len(sec.Tasks) == 0 {
-			return fmt.Errorf("blueprint.steps[%d] (%q): section must have at least one task", i, sec.Section)
+		if len(sec.Steps) == 0 {
+			return fmt.Errorf("blueprint.steps[%d] (%q): section must have at least one step", i, sec.Section)
 		}
 	}
 
@@ -519,26 +549,32 @@ func Validate(bp *Blueprint) error {
 	}
 
 	for si, sec := range bp.Steps {
-		for ti, task := range sec.Tasks {
-			path := fmt.Sprintf("blueprint.steps[%d].tasks[%d]", si, ti)
-			cmd := strings.TrimSpace(task.Cmd)
-			run := strings.TrimSpace(task.Run)
-			call := strings.TrimSpace(task.Call)
+		for ti, step := range sec.Steps {
+			path := fmt.Sprintf("blueprint.steps[%d].steps[%d]", si, ti)
+			cmd := strings.TrimSpace(step.Cmd)
+			run := strings.TrimSpace(step.Run)
+			call := strings.TrimSpace(step.Call)
 			// normalize run → cmd
 			if cmd == "" && run != "" {
 				cmd = run
-				bp.Steps[si].Tasks[ti].Cmd = run
+				bp.Steps[si].Steps[ti].Cmd = run
 			}
 			if cmd == "" && call == "" {
-				return fmt.Errorf("%s (%q): task must have cmd or call", path, task.Name)
+				return fmt.Errorf("%s (%q): step must have cmd or call", path, step.Name)
 			}
-			if task.Retry < 0 {
+			if step.Retry < 0 {
 				return fmt.Errorf("%s.retry: must be >= 0", path)
 			}
-			if task.RetryDelaySecs < 0 {
+			if step.RetryDelaySecs < 0 {
 				return fmt.Errorf("%s.retry_delay_seconds: must be >= 0", path)
 			}
-			if task.TimeoutSeconds < 0 {
+			if step.RetryBackoff != "" && step.RetryBackoff != "fixed" && step.RetryBackoff != "exponential" && step.RetryBackoff != "linear" {
+				return fmt.Errorf("%s.retry_backoff: must be one of fixed, exponential, linear", path)
+			}
+			if step.RetryMaxDelay < 0 {
+				return fmt.Errorf("%s.retry_max_delay_seconds: must be >= 0", path)
+			}
+			if step.TimeoutSeconds < 0 {
 				return fmt.Errorf("%s.timeout_seconds: must be >= 0", path)
 			}
 		}
@@ -685,8 +721,8 @@ func BuildTemplateContext(bp *Blueprint, blueprintPath, workspaceID string, inpu
 		},
 		"blueprint": map[string]any{
 			"name":    resolveBlueprintName(bp),
-			"slug":    bp.Blueprint.Slug,
-			"title":   bp.Blueprint.Title,
+			"slug":    bp.Spec.Slug,
+			"title":   bp.Spec.Title,
 			"version": bp.Version,
 			"path":    blueprintPath,
 		},
@@ -782,36 +818,36 @@ func RenderForExecution(bp *Blueprint, ctx map[string]any) (*Blueprint, error) {
 
 	// Render steps.
 	for si := range out.Steps {
-		for ti := range out.Steps[si].Tasks {
-			t := &out.Steps[si].Tasks[ti]
+		for ti := range out.Steps[si].Steps {
+			t := &out.Steps[si].Steps[ti]
 			if t.Cmd, err = renderString(t.Cmd, ctx); err != nil {
-				return nil, fmt.Errorf("render steps[%d].tasks[%d].cmd: %w", si, ti, err)
+				return nil, fmt.Errorf("render steps[%d].steps[%d].cmd: %w", si, ti, err)
 			}
 			if t.Run, err = renderString(t.Run, ctx); err != nil {
-				return nil, fmt.Errorf("render steps[%d].tasks[%d].run: %w", si, ti, err)
+				return nil, fmt.Errorf("render steps[%d].steps[%d].run: %w", si, ti, err)
 			}
 			if t.Call, err = renderString(t.Call, ctx); err != nil {
-				return nil, fmt.Errorf("render steps[%d].tasks[%d].call: %w", si, ti, err)
+				return nil, fmt.Errorf("render steps[%d].steps[%d].call: %w", si, ti, err)
 			}
 			if t.If, err = renderString(t.If, ctx); err != nil {
-				return nil, fmt.Errorf("render steps[%d].tasks[%d].if: %w", si, ti, err)
+				return nil, fmt.Errorf("render steps[%d].steps[%d].if: %w", si, ti, err)
 			}
 			if t.Dir, err = renderString(t.Dir, ctx); err != nil {
-				return nil, fmt.Errorf("render steps[%d].tasks[%d].dir: %w", si, ti, err)
+				return nil, fmt.Errorf("render steps[%d].steps[%d].dir: %w", si, ti, err)
 			}
 			if t.Name, err = renderString(t.Name, ctx); err != nil {
-				return nil, fmt.Errorf("render steps[%d].tasks[%d].name: %w", si, ti, err)
+				return nil, fmt.Errorf("render steps[%d].steps[%d].name: %w", si, ti, err)
 			}
 			for k, v := range t.Env {
 				rendered, rerr := renderString(v, ctx)
 				if rerr != nil {
-					return nil, fmt.Errorf("render steps[%d].tasks[%d].env.%s: %w", si, ti, k, rerr)
+					return nil, fmt.Errorf("render steps[%d].steps[%d].env.%s: %w", si, ti, k, rerr)
 				}
 				t.Env[k] = rendered
 			}
 			with, rerr := renderMapValues(t.With, ctx)
 			if rerr != nil {
-				return nil, fmt.Errorf("render steps[%d].tasks[%d].with: %w", si, ti, rerr)
+				return nil, fmt.Errorf("render steps[%d].steps[%d].with: %w", si, ti, rerr)
 			}
 			t.With = with
 		}
@@ -985,11 +1021,11 @@ func renderHookList(in []Hook, ctx map[string]any, bucket string) ([]Hook, error
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func resolveBlueprintName(bp *Blueprint) string {
-	name := strings.TrimSpace(bp.Blueprint.Name)
+	name := strings.TrimSpace(bp.Spec.Name)
 	if name != "" {
 		return name
 	}
-	return strings.TrimSpace(bp.Blueprint.Slug)
+	return strings.TrimSpace(bp.Spec.Slug)
 }
 
 func asFloat64(v any) (float64, bool) {

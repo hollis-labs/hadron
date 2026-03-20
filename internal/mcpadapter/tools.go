@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
+	"github.com/hollis-labs/hadron/internal/lint"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/scheduler"
@@ -141,6 +142,11 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithDescription("Delete a schedule by id (requires scope schedule.write)."),
 		mcp.WithString("schedule_id", mcp.Required(), mcp.Description("Schedule id")),
 	), a.handleScheduleDelete)
+
+	s.AddTool(mcp.NewTool("hadron_blueprint_lint",
+		mcp.WithDescription("Lint a blueprint or pipeline file for best-practice issues (unused inputs, missing timeouts, duplicate step names, template syntax errors, etc)."),
+		mcp.WithString("blueprint_path", mcp.Required(), mcp.Description("Path to the blueprint or pipeline file to lint")),
+	), a.handleBlueprintLint)
 
 	// Auto-register blueprint files as individual MCP tools
 	a.registerBlueprintTools(s)
@@ -840,6 +846,56 @@ func parsePipelineSpecStages(pipelinePath string) map[string]pipeline.Stage {
 		m[st.Name] = st
 	}
 	return m
+}
+
+func (a *Adapter) handleBlueprintLint(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	bpPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	if bpPath == "" {
+		return toolError("validation_error", "blueprint_path is required"), nil
+	}
+
+	rawContent, err := os.ReadFile(bpPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return toolError("not_found", "file not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+
+	var issues []lint.Issue
+
+	// Try blueprint first, then pipeline.
+	bp, bpErr := blueprint.ParseFile(bpPath)
+	if bpErr == nil {
+		issues = lint.LintBlueprint(bp, bpPath, rawContent)
+	} else {
+		spec, pipeErr := pipeline.ParseFile(bpPath)
+		if pipeErr == nil {
+			issues = lint.LintPipeline(spec, bpPath, rawContent)
+		} else {
+			return toolJSON(map[string]any{
+				"path":   bpPath,
+				"valid":  false,
+				"error":  bpErr.Error(),
+				"issues": []lint.Issue{},
+			}), nil
+		}
+	}
+
+	hasErrors := false
+	for _, issue := range issues {
+		if issue.Severity == lint.SeverityError {
+			hasErrors = true
+			break
+		}
+	}
+
+	return toolJSON(map[string]any{
+		"path":        bpPath,
+		"valid":       !hasErrors,
+		"issue_count": len(issues),
+		"issues":      issues,
+	}), nil
 }
 
 func (a *Adapter) handleBlueprintValidate(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

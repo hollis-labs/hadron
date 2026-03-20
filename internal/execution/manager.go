@@ -418,7 +418,7 @@ func (r *runExecution) runStep(ctx context.Context, section string, step bluepri
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
 		if attempt > 0 {
-			delay := time.Duration(step.RetryDelaySecs) * time.Second
+			delay := calcRetryDelay(step, attempt)
 			if delay > 0 {
 				r.emit(section, step.Name, "step_retry_wait", fmt.Sprintf("waiting %s before retry", delay))
 				select {
@@ -439,6 +439,40 @@ func (r *runExecution) runStep(ctx context.Context, section string, step bluepri
 		}
 	}
 	return lastErr
+}
+
+// calcRetryDelay computes the delay before a retry attempt based on the
+// step's backoff strategy: "fixed" (default), "exponential", or "linear".
+func calcRetryDelay(step blueprint.Step, attempt int) time.Duration {
+	base := time.Duration(step.RetryDelaySecs) * time.Second
+	if base <= 0 {
+		return 0
+	}
+
+	var delay time.Duration
+	switch step.RetryBackoff {
+	case "exponential":
+		// delay = base * 2^(attempt-1)
+		shift := attempt - 1
+		if shift < 0 {
+			shift = 0
+		}
+		delay = base << uint(shift)
+	case "linear":
+		// delay = base * (attempt)
+		delay = base * time.Duration(attempt)
+	default: // "fixed" or ""
+		delay = base
+	}
+
+	// Apply max delay cap.
+	if step.RetryMaxDelay > 0 {
+		cap := time.Duration(step.RetryMaxDelay) * time.Second
+		if delay > cap {
+			delay = cap
+		}
+	}
+	return delay
 }
 
 // execCmd runs a command via PTY and streams output to run_events.

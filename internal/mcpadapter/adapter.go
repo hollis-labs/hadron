@@ -146,6 +146,7 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_pipeline_stages":    a.handlePipelineStages,
 		"hadron_pipeline_graph":     a.handlePipelineGraph,
 		"hadron_blueprint_validate": a.handleBlueprintValidate,
+		"hadron_blueprint_lint":     a.handleBlueprintLint,
 		"hadron_blueprints_list":    a.handleBlueprintsList,
 		"hadron_blueprint_get":      a.handleBlueprintGet,
 		"hadron_schedule_delete":    a.handleScheduleDelete,
