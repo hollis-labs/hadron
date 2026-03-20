@@ -1,0 +1,17 @@
+# pipeline-v2-dag/lint.yaml — Lint stage
+#
+# Part of the pipeline-v2-dag example. Runs linters against the built output.
+#
+version: "0.4"
+
+blueprint:
+  name: pipeline-v2-dag-lint
+  title: "Pipeline v2 DAG — Lint Stage"
+  description: Runs static analysis and linting checks.
+  tags: [example, pipeline-v2]
+
+steps:
+  - section: Lint
+    tasks:
+      - name: run-linter
+        cmd: echo "[lint] Running linter..."

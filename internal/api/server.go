@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/otel/propagation"
 )
@@ -724,6 +725,8 @@ func (s *Server) handlePipelineByID(w http.ResponseWriter, r *http.Request) {
 		s.getPipeline(w, r, pipelineID)
 	case sub == "stages" && r.Method == http.MethodGet:
 		s.getPipelineStages(w, r, pipelineID)
+	case sub == "graph" && r.Method == http.MethodGet:
+		s.getPipelineGraph(w, r, pipelineID)
 	default:
 		writeError(w, http.StatusNotFound, "not found")
 	}
@@ -797,7 +800,8 @@ func (s *Server) getPipeline(w http.ResponseWriter, r *http.Request, id string) 
 }
 
 func (s *Server) getPipelineStages(w http.ResponseWriter, r *http.Request, id string) {
-	if _, err := s.deps.Pipelines.GetPipelineRun(r.Context(), id); err != nil {
+	pipelineRun, err := s.deps.Pipelines.GetPipelineRun(r.Context(), id)
+	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "pipeline run not found")
 			return
@@ -810,11 +814,101 @@ func (s *Server) getPipelineStages(w http.ResponseWriter, r *http.Request, id st
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Try to load the pipeline spec for DAG metadata (depends_on, position, outputs).
+	specStages := parsePipelineSpecStages(pipelineRun.PipelinePath)
+
 	out := make([]map[string]any, 0, len(items))
 	for _, st := range items {
-		out = append(out, toPipelineStageResponse(st))
+		entry := toPipelineStageResponse(st)
+		if spec, ok := specStages[st.StageName]; ok {
+			entry["depends_on"] = spec.DependsOn
+			if spec.Position != nil {
+				entry["position"] = map[string]any{"x": spec.Position.X, "y": spec.Position.Y}
+			} else {
+				entry["position"] = nil
+			}
+			entry["outputs"] = spec.Outputs
+		} else {
+			entry["depends_on"] = nil
+			entry["position"] = nil
+			entry["outputs"] = nil
+		}
+		out = append(out, entry)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func (s *Server) getPipelineGraph(w http.ResponseWriter, r *http.Request, id string) {
+	pipelineRun, err := s.deps.Pipelines.GetPipelineRun(r.Context(), id)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "pipeline run not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Load stage run records for status.
+	stageRuns, err := s.deps.Pipelines.ListPipelineStageRuns(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	statusMap := make(map[string]string, len(stageRuns))
+	for _, sr := range stageRuns {
+		statusMap[sr.StageName] = sr.Status
+	}
+
+	// Parse pipeline spec for DAG structure.
+	spec, parseErr := pipeline.ParseFile(pipelineRun.PipelinePath)
+	if parseErr != nil {
+		writeError(w, http.StatusUnprocessableEntity, "cannot parse pipeline spec: "+parseErr.Error())
+		return
+	}
+
+	nodes := make([]map[string]any, 0, len(spec.Stages))
+	edges := make([]map[string]any, 0)
+
+	for _, stage := range spec.Stages {
+		status := statusMap[stage.Name]
+		if status == "" {
+			status = "pending"
+		}
+
+		var pos map[string]any
+		if stage.Position != nil {
+			pos = map[string]any{"x": stage.Position.X, "y": stage.Position.Y}
+		}
+
+		outputs := map[string]string{}
+		if stage.Outputs != nil {
+			outputs = stage.Outputs
+		}
+
+		nodes = append(nodes, map[string]any{
+			"id":             stage.Name,
+			"name":           stage.Name,
+			"blueprint_path": stage.BlueprintPath,
+			"position":       pos,
+			"status":         status,
+			"outputs":        outputs,
+		})
+
+		for _, dep := range stage.DependsOn {
+			edges = append(edges, map[string]any{
+				"source":    dep,
+				"target":    stage.Name,
+				"condition": stage.If,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"nodes": nodes,
+		"edges": edges,
+	})
 }
 
 // ── Blueprints ────────────────────────────────────────────────────────────────
@@ -1043,6 +1137,24 @@ func toPipelineStageResponse(st persistence.PipelineStageRunRecord) map[string]a
 		"created_at":      st.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at":      st.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+// parsePipelineSpecStages attempts to parse a pipeline spec file and returns
+// a map of stage name → Stage for DAG metadata enrichment. Returns an empty
+// map on any parse error so callers can degrade gracefully.
+func parsePipelineSpecStages(pipelinePath string) map[string]pipeline.Stage {
+	if pipelinePath == "" {
+		return nil
+	}
+	spec, err := pipeline.ParseFile(pipelinePath)
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]pipeline.Stage, len(spec.Stages))
+	for _, st := range spec.Stages {
+		m[st.Name] = st
+	}
+	return m
 }
 
 // ── ID generators ─────────────────────────────────────────────────────────────

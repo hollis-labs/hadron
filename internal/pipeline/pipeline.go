@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/hollis-labs/hadron/internal/specparse"
 )
+
+var outputKeyPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_\-]*$`)
 
 type Spec struct {
 	Meta       Meta           `yaml:"meta" json:"meta"`
@@ -20,11 +23,19 @@ type Meta struct {
 	Name string `yaml:"name" json:"name"`
 }
 
+type Position struct {
+	X float64 `yaml:"x" json:"x"`
+	Y float64 `yaml:"y" json:"y"`
+}
+
 type Stage struct {
-	Name          string         `yaml:"name" json:"name"`
-	BlueprintPath string         `yaml:"blueprint_path" json:"blueprint_path"`
-	Inputs        map[string]any `yaml:"inputs,omitempty" json:"inputs,omitempty"`
-	If            string         `yaml:"if,omitempty" json:"if,omitempty"`
+	Name          string            `yaml:"name" json:"name"`
+	BlueprintPath string            `yaml:"blueprint_path" json:"blueprint_path"`
+	Inputs        map[string]any    `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	If            string            `yaml:"if,omitempty" json:"if,omitempty"`
+	DependsOn     []string          `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	Position      *Position         `yaml:"position,omitempty" json:"position,omitempty"`
+	Outputs       map[string]string `yaml:"outputs,omitempty" json:"outputs,omitempty"`
 }
 
 func ParseFile(path string) (*Spec, error) {
@@ -68,7 +79,70 @@ func Validate(s *Spec) error {
 		if strings.TrimSpace(st.BlueprintPath) == "" {
 			return fmt.Errorf("%s.blueprint_path: required", path)
 		}
+		for key := range st.Outputs {
+			if !outputKeyPattern.MatchString(key) {
+				return fmt.Errorf("%s.outputs: invalid key %q", path, key)
+			}
+		}
 	}
+
+	// DAG validation: build name→index map, check references, detect cycles.
+	nameIndex := make(map[string]int, len(s.Stages))
+	for i, st := range s.Stages {
+		nameIndex[st.Name] = i
+	}
+
+	hasDeps := false
+	for _, st := range s.Stages {
+		if len(st.DependsOn) > 0 {
+			hasDeps = true
+			break
+		}
+	}
+	if !hasDeps {
+		return nil
+	}
+
+	// Validate references: unknown stages and self-references.
+	for _, st := range s.Stages {
+		for _, dep := range st.DependsOn {
+			if dep == st.Name {
+				return fmt.Errorf("stage %q depends on itself", st.Name)
+			}
+			if _, ok := nameIndex[dep]; !ok {
+				return fmt.Errorf("stage %q depends on unknown stage %q", st.Name, dep)
+			}
+		}
+	}
+
+	// Cycle detection using 3-color DFS (0=white, 1=gray, 2=black).
+	color := make([]int, len(s.Stages))
+	var dfs func(idx int) error
+	dfs = func(idx int) error {
+		color[idx] = 1 // gray
+		for _, dep := range s.Stages[idx].DependsOn {
+			di := nameIndex[dep]
+			if color[di] == 1 {
+				return fmt.Errorf("cycle detected involving stage %q", dep)
+			}
+			if color[di] == 0 {
+				if err := dfs(di); err != nil {
+					return err
+				}
+			}
+		}
+		color[idx] = 2 // black
+		return nil
+	}
+
+	for i := range s.Stages {
+		if color[i] == 0 {
+			if err := dfs(i); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

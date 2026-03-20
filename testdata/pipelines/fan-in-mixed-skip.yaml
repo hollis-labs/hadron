@@ -1,0 +1,20 @@
+meta:
+  name: fan-in-mixed-skip
+stop_on_fail: false
+stages:
+  - name: root
+    blueprint_path: ../blueprints/minimal-success.yaml
+  - name: A
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - root
+  - name: B
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - root
+    if: '{{ eq .stages.root.status "failed" }}'
+  - name: C
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - A
+      - B

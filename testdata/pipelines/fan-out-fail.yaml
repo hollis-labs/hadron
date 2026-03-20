@@ -1,0 +1,18 @@
+meta:
+  name: fan-out-fail
+stages:
+  - name: root
+    blueprint_path: ../blueprints/minimal-success.yaml
+  - name: branch-a
+    blueprint_path: ../blueprints/timeout-fail.yaml
+    depends_on:
+      - root
+  - name: branch-b
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - root
+  - name: collector
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - branch-a
+      - branch-b

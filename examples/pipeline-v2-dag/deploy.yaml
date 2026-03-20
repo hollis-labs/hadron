@@ -1,0 +1,17 @@
+# pipeline-v2-dag/deploy.yaml — Deploy stage
+#
+# Part of the pipeline-v2-dag example. Deploys the built artifact.
+#
+version: "0.4"
+
+blueprint:
+  name: pipeline-v2-dag-deploy
+  title: "Pipeline v2 DAG — Deploy Stage"
+  description: Deploys the build artifact to the target environment.
+  tags: [example, pipeline-v2]
+
+steps:
+  - section: Deploy
+    tasks:
+      - name: deploy-artifact
+        cmd: echo "[deploy] Deploying artifact..."

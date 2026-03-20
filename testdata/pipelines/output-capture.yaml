@@ -1,0 +1,11 @@
+meta:
+  name: output-capture
+stages:
+  - name: producer
+    blueprint_path: ../blueprints/output-echo.yaml
+    outputs:
+      greeting: stdout
+  - name: consumer
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - producer

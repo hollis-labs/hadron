@@ -1,0 +1,7 @@
+blueprint:
+  name: output-echo
+steps:
+  - section: main
+    tasks:
+      - name: produce-output
+        cmd: echo "::set-output greeting=hello-world"

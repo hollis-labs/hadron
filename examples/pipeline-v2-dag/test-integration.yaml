@@ -1,0 +1,17 @@
+# pipeline-v2-dag/test-integration.yaml — Integration test stage
+#
+# Part of the pipeline-v2-dag example. Runs integration tests.
+#
+version: "0.4"
+
+blueprint:
+  name: pipeline-v2-dag-test-integration
+  title: "Pipeline v2 DAG — Integration Test Stage"
+  description: Runs integration tests against external dependencies.
+  tags: [example, pipeline-v2]
+
+steps:
+  - section: "Integration Tests"
+    tasks:
+      - name: run-integration-tests
+        cmd: echo "[test-integration] Running integration tests..."

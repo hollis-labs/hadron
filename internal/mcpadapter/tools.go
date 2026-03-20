@@ -115,6 +115,12 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithString("workspace_id", mcp.Description("Optional workspace scope check")),
 	), a.handlePipelineStages)
 
+	s.AddTool(mcp.NewTool("hadron_pipeline_graph",
+		mcp.WithDescription("Get the DAG graph (nodes + edges) for a pipeline run. Includes stage positions, status, and dependency edges."),
+		mcp.WithString("pipeline_run_id", mcp.Required(), mcp.Description("Pipeline run id")),
+		mcp.WithString("workspace_id", mcp.Description("Optional workspace scope check")),
+	), a.handlePipelineGraph)
+
 	s.AddTool(mcp.NewTool("hadron_blueprint_validate",
 		mcp.WithDescription("Validate blueprint YAML/JSON content."),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Blueprint YAML or JSON content")),
@@ -169,9 +175,9 @@ func (a *Adapter) registerBlueprintTools(s *server.MCPServer) {
 		}
 
 		// Derive tool name from blueprint slug or name
-		slug := bp.Blueprint.Slug
+		slug := bp.Spec.Slug
 		if slug == "" {
-			slug = bp.Blueprint.Name
+			slug = bp.Spec.Name
 		}
 		if slug == "" {
 			// Fall back to filename without extension
@@ -203,12 +209,12 @@ func (a *Adapter) registerBlueprintTools(s *server.MCPServer) {
 		registered[toolName] = struct{}{}
 
 		// Build description
-		desc := fmt.Sprintf("Run blueprint: %s", bp.Blueprint.Name)
-		if bp.Blueprint.Title != "" {
-			desc = fmt.Sprintf("Run blueprint: %s", bp.Blueprint.Title)
+		desc := fmt.Sprintf("Run blueprint: %s", bp.Spec.Name)
+		if bp.Spec.Title != "" {
+			desc = fmt.Sprintf("Run blueprint: %s", bp.Spec.Title)
 		}
-		if bp.Blueprint.Description != "" {
-			desc += " — " + bp.Blueprint.Description
+		if bp.Spec.Description != "" {
+			desc += " — " + bp.Spec.Description
 		}
 		desc += " (requires scope run.write)"
 
@@ -309,7 +315,7 @@ func (a *Adapter) registerBlueprintTools(s *server.MCPServer) {
 				"run_id":         runID,
 				"status":         "queued",
 				"workspace_id":   workspaceID,
-				"blueprint":      bpCurrent.Blueprint.Name,
+				"blueprint":      bpCurrent.Spec.Name,
 				"blueprint_path": capturedPath,
 			}), nil
 		}
@@ -400,10 +406,10 @@ func (a *Adapter) handleRunsList(ctx context.Context, req mcp.CallToolRequest) (
 	out := make([]map[string]any, 0, len(items))
 	for _, r := range items {
 		out = append(out, map[string]any{
-			"id":           r.ID,
-			"blueprint":    r.BlueprintPath,
-			"status":       r.Status,
-			"created_at":   r.CreatedAt.UTC().Format(time.RFC3339),
+			"id":         r.ID,
+			"blueprint":  r.BlueprintPath,
+			"status":     r.Status,
+			"created_at": r.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	env := budget.Apply(out, budget.Config{Limit: limit},
@@ -708,9 +714,13 @@ func (a *Adapter) handlePipelineStages(ctx context.Context, req mcp.CallToolRequ
 	if err != nil {
 		return toolError("internal_error", err.Error()), nil
 	}
+
+	// Try to load pipeline spec for DAG metadata enrichment.
+	specStages := parsePipelineSpecStages(runRec.PipelinePath)
+
 	out := make([]map[string]any, 0, len(items))
 	for _, st := range items {
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			"id":              st.ID,
 			"workspace_id":    st.WorkspaceID,
 			"pipeline_run_id": st.PipelineRunID,
@@ -720,9 +730,116 @@ func (a *Adapter) handlePipelineStages(ctx context.Context, req mcp.CallToolRequ
 			"status":          st.Status,
 			"created_at":      st.CreatedAt.UTC().Format(time.RFC3339),
 			"updated_at":      st.UpdatedAt.UTC().Format(time.RFC3339),
-		})
+		}
+		if spec, ok := specStages[st.StageName]; ok {
+			entry["depends_on"] = spec.DependsOn
+			if spec.Position != nil {
+				entry["position"] = map[string]any{"x": spec.Position.X, "y": spec.Position.Y}
+			} else {
+				entry["position"] = nil
+			}
+			entry["outputs"] = spec.Outputs
+		} else {
+			entry["depends_on"] = nil
+			entry["position"] = nil
+			entry["outputs"] = nil
+		}
+		out = append(out, entry)
 	}
 	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+}
+
+func (a *Adapter) handlePipelineGraph(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id := strings.TrimSpace(req.GetString("pipeline_run_id", ""))
+	if id == "" {
+		return toolError("validation_error", "pipeline_run_id is required"), nil
+	}
+	runRec, err := a.store.GetPipelineRun(ctx, id)
+	if err != nil {
+		if isNotFound(err) {
+			return toolError("not_found", "pipeline run not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
+		return toolError("not_found", "pipeline run not found in workspace"), nil
+	}
+
+	// Load stage run records for status.
+	stageRuns, err := a.store.ListPipelineStageRuns(ctx, id)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	statusMap := make(map[string]string, len(stageRuns))
+	for _, sr := range stageRuns {
+		statusMap[sr.StageName] = sr.Status
+	}
+
+	// Parse pipeline spec for DAG structure.
+	spec, parseErr := pipeline.ParseFile(runRec.PipelinePath)
+	if parseErr != nil {
+		return toolError("internal_error", "cannot parse pipeline spec: "+parseErr.Error()), nil
+	}
+
+	nodes := make([]map[string]any, 0, len(spec.Stages))
+	edges := make([]map[string]any, 0)
+
+	for _, stage := range spec.Stages {
+		status := statusMap[stage.Name]
+		if status == "" {
+			status = "pending"
+		}
+
+		var pos map[string]any
+		if stage.Position != nil {
+			pos = map[string]any{"x": stage.Position.X, "y": stage.Position.Y}
+		}
+
+		outputs := map[string]string{}
+		if stage.Outputs != nil {
+			outputs = stage.Outputs
+		}
+
+		nodes = append(nodes, map[string]any{
+			"id":             stage.Name,
+			"name":           stage.Name,
+			"blueprint_path": stage.BlueprintPath,
+			"position":       pos,
+			"status":         status,
+			"outputs":        outputs,
+		})
+
+		for _, dep := range stage.DependsOn {
+			edges = append(edges, map[string]any{
+				"source":    dep,
+				"target":    stage.Name,
+				"condition": stage.If,
+			})
+		}
+	}
+
+	return toolJSON(map[string]any{
+		"nodes": nodes,
+		"edges": edges,
+	}), nil
+}
+
+// parsePipelineSpecStages attempts to parse a pipeline spec file and returns
+// a map of stage name → Stage for DAG metadata enrichment. Returns nil on
+// any parse error so callers can degrade gracefully.
+func parsePipelineSpecStages(pipelinePath string) map[string]pipeline.Stage {
+	if pipelinePath == "" {
+		return nil
+	}
+	spec, err := pipeline.ParseFile(pipelinePath)
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]pipeline.Stage, len(spec.Stages))
+	for _, st := range spec.Stages {
+		m[st.Name] = st
+	}
+	return m
 }
 
 func (a *Adapter) handleBlueprintValidate(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -766,15 +883,15 @@ func (a *Adapter) handleBlueprintsList(_ context.Context, req mcp.CallToolReques
 		// Try parsing for metadata (name, tags only — summary view)
 		bp, parseErr := blueprint.ParseFile(path)
 		if parseErr == nil {
-			entry["blueprint_name"] = bp.Blueprint.Name
-			if len(bp.Blueprint.Tags) > 0 {
-				entry["tags"] = bp.Blueprint.Tags
+			entry["blueprint_name"] = bp.Spec.Name
+			if len(bp.Spec.Tags) > 0 {
+				entry["tags"] = bp.Spec.Tags
 			}
 
 			// Apply tag filter
 			if tagFilter != "" {
 				found := false
-				for _, t := range bp.Blueprint.Tags {
+				for _, t := range bp.Spec.Tags {
 					if strings.ToLower(t) == tagFilter {
 						found = true
 						break

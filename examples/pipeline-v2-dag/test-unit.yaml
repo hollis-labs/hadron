@@ -1,0 +1,17 @@
+# pipeline-v2-dag/test-unit.yaml — Unit test stage
+#
+# Part of the pipeline-v2-dag example. Runs unit tests.
+#
+version: "0.4"
+
+blueprint:
+  name: pipeline-v2-dag-test-unit
+  title: "Pipeline v2 DAG — Unit Test Stage"
+  description: Runs the unit test suite.
+  tags: [example, pipeline-v2]
+
+steps:
+  - section: "Unit Tests"
+    tasks:
+      - name: run-unit-tests
+        cmd: echo "[test-unit] Running unit tests..."

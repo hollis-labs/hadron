@@ -1,0 +1,15 @@
+meta:
+  name: conditional-skip-branch
+stop_on_fail: false
+stages:
+  - name: A
+    blueprint_path: ../blueprints/minimal-success.yaml
+  - name: B
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - A
+    if: '{{ eq .stages.A.status "failed" }}'
+  - name: C
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - A

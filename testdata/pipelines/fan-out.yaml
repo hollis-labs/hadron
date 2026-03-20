@@ -1,0 +1,13 @@
+meta:
+  name: fan-out
+stages:
+  - name: root
+    blueprint_path: ../blueprints/minimal-success.yaml
+  - name: branch-a
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - root
+  - name: branch-b
+    blueprint_path: ../blueprints/minimal-success.yaml
+    depends_on:
+      - root

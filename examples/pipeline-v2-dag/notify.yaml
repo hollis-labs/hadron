@@ -1,0 +1,17 @@
+# pipeline-v2-dag/notify.yaml — Notification stage (failure handler)
+#
+# Part of the pipeline-v2-dag example. Sends a notification when deploy fails.
+#
+version: "0.4"
+
+blueprint:
+  name: pipeline-v2-dag-notify
+  title: "Pipeline v2 DAG — Notify Stage"
+  description: Sends failure notification. Only runs when deploy fails.
+  tags: [example, pipeline-v2]
+
+steps:
+  - section: Notify
+    tasks:
+      - name: send-notification
+        cmd: echo "[notify] Deploy failed — sending notification..."

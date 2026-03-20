@@ -72,6 +72,7 @@ type PipelineStageRunRecord struct {
 	StageName     string
 	RunID         string
 	Status        string
+	OutputsJSON   string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -934,9 +935,24 @@ func (s *Store) UpdatePipelineStageRunStatus(ctx context.Context, pipelineRunID 
 	return nil
 }
 
+func (s *Store) UpdatePipelineStageRunOutputs(ctx context.Context, pipelineRunID string, stageIndex int, outputsJSON string) error {
+	if outputsJSON == "" {
+		outputsJSON = "{}"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE pipeline_stage_runs
+		SET outputs_json = ?, updated_at = ?
+		WHERE pipeline_run_id = ? AND stage_index = ?
+	`, outputsJSON, time.Now().UTC().Format(time.RFC3339), pipelineRunID, stageIndex)
+	if err != nil {
+		return fmt.Errorf("update pipeline stage run outputs: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ListPipelineStageRuns(ctx context.Context, pipelineRunID string) ([]PipelineStageRunRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_id, pipeline_run_id, stage_index, stage_name, run_id, status, created_at, updated_at
+		SELECT id, workspace_id, pipeline_run_id, stage_index, stage_name, run_id, status, outputs_json, created_at, updated_at
 		FROM pipeline_stage_runs
 		WHERE pipeline_run_id = ?
 		ORDER BY stage_index ASC
@@ -958,6 +974,7 @@ func (s *Store) ListPipelineStageRuns(ctx context.Context, pipelineRunID string)
 			&rec.StageName,
 			&rec.RunID,
 			&rec.Status,
+			&rec.OutputsJSON,
 			&created,
 			&updated,
 		); err != nil {

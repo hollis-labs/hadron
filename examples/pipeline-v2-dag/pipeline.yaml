@@ -1,0 +1,75 @@
+# pipeline-v2-dag/pipeline.yaml — DAG pipeline with fan-out, fan-in, and conditionals
+#
+# Demonstrates v2 pipeline features:
+#   - depends_on: explicit DAG edges (replaces implicit array order)
+#   - Fan-out: build feeds lint, test-unit, and test-integration in parallel
+#   - Fan-in: deploy depends on lint + test-unit (both must pass)
+#   - Conditional edge: notify runs only when deploy fails
+#   - position: x/y metadata for visual canvas layout
+#   - outputs: stages can emit named outputs consumed downstream
+#   - inputs: downstream stages reference upstream outputs via template syntax
+#   - stop_on_fail: true — pipeline halts on first unrecoverable failure
+#
+meta:
+  name: pipeline-v2-dag
+  version: 2
+
+stop_on_fail: true
+
+stages:
+  - name: build
+    blueprint_path: build.yaml
+    position:
+      x: 300
+      y: 50
+    outputs:
+      version: "1.4.0-{{ .run.id }}"
+
+  - name: lint
+    blueprint_path: lint.yaml
+    depends_on:
+      - build
+    position:
+      x: 100
+      y: 200
+    inputs:
+      build_version: "{{ .stages.build.outputs.version }}"
+
+  - name: test-unit
+    blueprint_path: test-unit.yaml
+    depends_on:
+      - build
+    position:
+      x: 300
+      y: 200
+
+  - name: test-integration
+    blueprint_path: test-integration.yaml
+    depends_on:
+      - build
+    position:
+      x: 500
+      y: 200
+
+  - name: deploy
+    blueprint_path: deploy.yaml
+    depends_on:
+      - lint
+      - test-unit
+    position:
+      x: 200
+      y: 400
+    inputs:
+      build_version: "{{ .stages.build.outputs.version }}"
+
+  - name: notify
+    blueprint_path: notify.yaml
+    depends_on:
+      - deploy
+    if: '{{ eq .stages.deploy.status "failed" }}'
+    position:
+      x: 200
+      y: 550
+    inputs:
+      deploy_status: "{{ .stages.deploy.status }}"
+      build_version: "{{ .stages.build.outputs.version }}"

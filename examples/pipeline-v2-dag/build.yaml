@@ -1,0 +1,20 @@
+# pipeline-v2-dag/build.yaml — Build stage
+#
+# Part of the pipeline-v2-dag example. Compiles the project and emits a version string.
+#
+version: "0.4"
+
+blueprint:
+  name: pipeline-v2-dag-build
+  title: "Pipeline v2 DAG — Build Stage"
+  description: Compiles the project and produces build artifacts.
+  tags: [example, pipeline-v2]
+
+steps:
+  - section: Build
+    tasks:
+      - name: compile
+        cmd: echo "[build] Compiling project..."
+
+      - name: emit-version
+        cmd: echo "[build] Build complete — version artifact ready"
