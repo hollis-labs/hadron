@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
+	hplugin "github.com/hollis-labs/hadron/internal/plugin"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/telemetry"
@@ -138,6 +139,29 @@ func runServe(args []string) error {
 		Pipeline:     pipelineRunner,
 		BlueprintDir: sett.BlueprintDir,
 	})
+
+	// Initialise plugin host and discover plugins.
+	pluginLogger := hplugin.NewLogger("hadron-plugin")
+	pluginHost := hplugin.NewHost(http.NewServeMux(), pluginLogger)
+	pluginHost.RegisterService("store", store)
+	pluginHost.RegisterService("runner", mgr)
+	pluginHost.RegisterService("scheduler", sched)
+
+	pluginsDir := "./plugins"
+	if d := os.Getenv("HADRON_PLUGINS_DIR"); d != "" {
+		pluginsDir = d
+	}
+	discovered, discoverErr := hplugin.DiscoverPlugins(pluginsDir)
+	if discoverErr != nil {
+		log.Printf("warning: plugin discovery failed: %v", discoverErr)
+	} else if len(discovered) > 0 {
+		loaded, loadErrs := hplugin.LoadDiscovered(pluginHost, discovered)
+		for _, e := range loadErrs {
+			log.Printf("warning: plugin load error: %v", e)
+		}
+		log.Printf("loaded %d plugin(s)", len(loaded))
+	}
+	defer pluginHost.Shutdown()
 
 	startMsg, _ := json.Marshal(map[string]string{
 		"level":   "info",

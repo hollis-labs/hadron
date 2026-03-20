@@ -1,9 +1,10 @@
 module github.com/hollis-labs/hadron
 
-go 1.25.0
+go 1.26.1
 
 require (
 	github.com/creack/pty v1.1.24
+	github.com/hollis-labs/fragments-engine/plugin v0.0.0
 	github.com/hollis-labs/mcp-helpers v0.0.0
 	github.com/hollis-labs/otel v0.0.0
 	github.com/mark3labs/mcp-go v0.44.1
@@ -15,9 +16,11 @@ require (
 	modernc.org/sqlite v1.46.1
 )
 
-replace github.com/hollis-labs/mcp-helpers => ../mcp-helpers
+replace github.com/hollis-labs/mcp-helpers => ../fragments-engine/libs/mcp
 
-replace github.com/hollis-labs/otel => ../otel
+replace github.com/hollis-labs/otel => ../fragments-engine/libs/otel
+
+replace github.com/hollis-labs/fragments-engine/plugin => ../fragments-engine/libs/plugin
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect

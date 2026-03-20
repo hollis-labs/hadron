@@ -44,6 +44,7 @@ func main() {
 		buildDaemonCmd(),
 		buildLintCmd(),
 		buildFmtCmd(),
+		buildPluginCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -266,7 +267,7 @@ func buildBlueprintCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("name:    %s\n", bp.Blueprint.Name)
+			fmt.Printf("name:    %s\n", bp.Spec.Name)
 			fmt.Printf("version: %s\n", bp.Version)
 			if len(bp.Inputs) > 0 {
 				fmt.Println("inputs:")
@@ -276,7 +277,7 @@ func buildBlueprintCmd() *cobra.Command {
 			}
 			fmt.Printf("sections: %d\n", len(bp.Steps))
 			for _, step := range bp.Steps {
-				fmt.Printf("  %s: %d tasks\n", step.Section, len(step.Tasks))
+				fmt.Printf("  %s: %d steps\n", step.Section, len(step.Steps))
 			}
 			return nil
 		},
