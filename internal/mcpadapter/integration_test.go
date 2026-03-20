@@ -19,7 +19,7 @@ import (
 type fakeRunner struct{}
 
 func (f *fakeRunner) Enqueue(_ context.Context, _ execution.Request) error { return nil }
-func (f *fakeRunner) Cancel(_ string) bool                                  { return false }
+func (f *fakeRunner) Cancel(_ string) bool                                 { return false }
 
 type fakePipelineRunner struct{}
 
@@ -27,10 +27,10 @@ func (f *fakePipelineRunner) Start(_ context.Context, _, _, _ string) error { re
 
 type fakeScheduler struct{}
 
-func (f *fakeScheduler) Start()                              {}
-func (f *fakeScheduler) Stop()                               {}
-func (f *fakeScheduler) TickNow(_ context.Context) error    { return nil }
-func (f *fakeScheduler) Status() scheduler.Status           { return scheduler.Status{Running: true} }
+func (f *fakeScheduler) Start()                          {}
+func (f *fakeScheduler) Stop()                           {}
+func (f *fakeScheduler) TickNow(_ context.Context) error { return nil }
+func (f *fakeScheduler) Status() scheduler.Status        { return scheduler.Status{Running: true} }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

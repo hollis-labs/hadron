@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -31,13 +32,23 @@ type Enqueuer interface {
 	Enqueue(ctx context.Context, req execution.Request) error
 }
 
+// BlueprintResolver resolves a blueprint name or slug to a file path.
+// Used for registry-backed resolution when a blueprint path doesn't exist as a file.
+type BlueprintResolver func(nameOrSlug string) (string, error)
+
 type Runner struct {
-	store    Store
-	enqueuer Enqueuer
+	store             Store
+	enqueuer          Enqueuer
+	blueprintResolver BlueprintResolver
 }
 
 func NewRunner(store Store, enq Enqueuer) *Runner {
 	return &Runner{store: store, enqueuer: enq}
+}
+
+// SetBlueprintResolver sets an optional resolver for blueprint names.
+func (r *Runner) SetBlueprintResolver(resolver BlueprintResolver) {
+	r.blueprintResolver = resolver
 }
 
 // StageResult holds captured outputs and status for a completed stage.
@@ -226,6 +237,17 @@ func (r *Runner) executeStage(ctx context.Context, p executeStageParams) (*Stage
 	blueprintPath := st.BlueprintPath
 	if !filepath.IsAbs(blueprintPath) {
 		blueprintPath = filepath.Join(p.baseDir, blueprintPath)
+	}
+
+	// If the resolved path doesn't exist as a file and the original path looks
+	// like a name (no slashes, no .yaml/.yml extension), try registry resolution.
+	if _, statErr := os.Stat(blueprintPath); statErr != nil && r.blueprintResolver != nil {
+		orig := st.BlueprintPath
+		if !strings.Contains(orig, "/") && !strings.HasSuffix(orig, ".yaml") && !strings.HasSuffix(orig, ".yml") {
+			if resolved, resolveErr := r.blueprintResolver(orig); resolveErr == nil {
+				blueprintPath = resolved
+			}
+		}
 	}
 
 	runID := fmt.Sprintf("plr-%s-%02d-%d", p.pipelineRunID, p.stageIdx, time.Now().UTC().UnixNano())

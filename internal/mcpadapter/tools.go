@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/lint"
@@ -147,6 +148,37 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithDescription("Lint a blueprint or pipeline file for best-practice issues (unused inputs, missing timeouts, duplicate step names, template syntax errors, etc)."),
 		mcp.WithString("blueprint_path", mcp.Required(), mcp.Description("Path to the blueprint or pipeline file to lint")),
 	), a.handleBlueprintLint)
+
+	s.AddTool(mcp.NewTool("hadron_agent_card",
+		mcp.WithDescription("Generate an A2A Agent Card JSON document. Returns card for a single blueprint or all blueprints in the configured directory."),
+		mcp.WithString("blueprint_path", mcp.Description("Path to a single blueprint file. Omit to generate a composite card from all blueprints.")),
+		mcp.WithString("url", mcp.Description("Base URL for the agent (default: http://localhost:8095)")),
+	), a.handleAgentCard)
+
+	// Triggers
+	s.AddTool(mcp.NewTool("hadron_triggers_list",
+		mcp.WithDescription("List all webhook triggers."),
+	), a.handleTriggersList)
+
+	s.AddTool(mcp.NewTool("hadron_trigger_create",
+		mcp.WithDescription("Create a webhook trigger (requires scope trigger.write)."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Trigger display name")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Webhook path (e.g. 'deploy-prod')")),
+		mcp.WithString("blueprint_path", mcp.Required(), mcp.Description("Blueprint file path")),
+		mcp.WithString("secret", mcp.Description("HMAC-SHA256 secret for signature validation")),
+		mcp.WithString("extract_inputs", mcp.Description("JSON config mapping input names to body/header/query paths")),
+		mcp.WithBoolean("one_shot", mcp.Description("Delete trigger after first firing (default false)")),
+		mcp.WithNumber("ttl_minutes", mcp.Description("Auto-expire trigger after N minutes")),
+		mcp.WithString("workspace_id", mcp.Description("Workspace id (default: default)")),
+	), a.handleTriggerCreate)
+
+	s.AddTool(mcp.NewTool("hadron_trigger_delete",
+		mcp.WithDescription("Delete a webhook trigger by ID (requires scope trigger.write)."),
+		mcp.WithString("trigger_id", mcp.Required(), mcp.Description("Trigger id")),
+	), a.handleTriggerDelete)
+
+	// Register blueprint registry tools
+	registerRegistryTools(s, a.registry)
 
 	// Auto-register blueprint files as individual MCP tools
 	a.registerBlueprintTools(s)
@@ -1023,6 +1055,146 @@ func (a *Adapter) handleScheduleDelete(ctx context.Context, req mcp.CallToolRequ
 		return toolError("internal_error", err.Error()), nil
 	}
 	return toolJSON(map[string]any{"schedule_id": scheduleID, "deleted": true}), nil
+}
+
+func (a *Adapter) handleAgentCard(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	bpPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	baseURL := strings.TrimSpace(req.GetString("url", ""))
+	if baseURL == "" {
+		baseURL = "http://localhost:8095"
+	}
+
+	if bpPath != "" {
+		// Single blueprint mode
+		bp, err := blueprint.ParseFile(bpPath)
+		if err != nil {
+			return toolError("validation_error", err.Error()), nil
+		}
+		skill := agentcard.SkillFromBlueprint(bp, bpPath)
+		card := &agentcard.AgentCard{
+			Name:               skill.Name,
+			Description:        skill.Description,
+			URL:                baseURL,
+			Provider:           agentcard.Provider{Organization: "Hadron"},
+			Version:            "0.4.0",
+			Capabilities:       agentcard.Capabilities{Streaming: false, PushNotifications: false},
+			DefaultInputModes:  []string{"application/json"},
+			DefaultOutputModes: []string{"application/json"},
+			Skills:             []agentcard.Skill{skill},
+		}
+		data, err := card.JSON()
+		if err != nil {
+			return toolError("internal_error", err.Error()), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	// All blueprints mode
+	dir := a.blueprintDir
+	if dir == "" {
+		return toolError("validation_error", "no blueprint directory configured"), nil
+	}
+	card, err := agentcard.FromDirectory(dir, baseURL)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	data, err := card.JSON()
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// ── Triggers ──────────────────────────────────────────────────────────────────
+
+func (a *Adapter) handleTriggersList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	items, err := a.store.ListTriggers(ctx)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, t := range items {
+		out = append(out, map[string]any{
+			"id":             t.ID,
+			"type":           t.Type,
+			"name":           t.Name,
+			"path":           t.Path,
+			"blueprint_path": t.BlueprintPath,
+			"workspace_id":   t.WorkspaceID,
+			"enabled":        t.Enabled,
+			"one_shot":       t.OneShot,
+			"fired_count":    t.FiredCount,
+			"created_at":     t.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+}
+
+func (a *Adapter) handleTriggerCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if deny := a.checkScope(ScopeTriggerWrite); deny != nil {
+		return deny, nil
+	}
+	name := strings.TrimSpace(req.GetString("name", ""))
+	if name == "" {
+		return toolError("validation_error", "name is required"), nil
+	}
+	path := strings.TrimSpace(req.GetString("path", ""))
+	if path == "" {
+		return toolError("validation_error", "path is required"), nil
+	}
+	blueprintPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	if blueprintPath == "" {
+		return toolError("validation_error", "blueprint_path is required"), nil
+	}
+	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
+
+	triggerID := fmt.Sprintf("mcp-trig-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&runSeq, 1))
+	rec := persistence.TriggerRecord{
+		ID:            triggerID,
+		Type:          "webhook",
+		Name:          name,
+		Path:          path,
+		BlueprintPath: blueprintPath,
+		WorkspaceID:   workspaceID,
+		Enabled:       true,
+		OneShot:       req.GetBool("one_shot", false),
+	}
+	if secret := strings.TrimSpace(req.GetString("secret", "")); secret != "" {
+		rec.SecretHash = sql.NullString{String: secret, Valid: true}
+	}
+	if ei := strings.TrimSpace(req.GetString("extract_inputs", "")); ei != "" {
+		rec.ExtractInputs = sql.NullString{String: ei, Valid: true}
+	}
+	ttlMinutes := req.GetFloat("ttl_minutes", 0)
+	if ttlMinutes > 0 {
+		expires := time.Now().UTC().Add(time.Duration(ttlMinutes) * time.Minute)
+		rec.TTLExpiresAt = sql.NullString{String: expires.Format(time.RFC3339), Valid: true}
+	}
+
+	if err := a.store.CreateTrigger(ctx, rec); err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(map[string]any{
+		"trigger_id":     triggerID,
+		"name":           name,
+		"path":           path,
+		"blueprint_path": blueprintPath,
+		"webhook_url":    "/hooks/" + path,
+	}), nil
+}
+
+func (a *Adapter) handleTriggerDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if deny := a.checkScope(ScopeTriggerWrite); deny != nil {
+		return deny, nil
+	}
+	triggerID := strings.TrimSpace(req.GetString("trigger_id", ""))
+	if triggerID == "" {
+		return toolError("validation_error", "trigger_id is required"), nil
+	}
+	if err := a.store.DeleteTrigger(ctx, triggerID); err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(map[string]any{"trigger_id": triggerID, "deleted": true}), nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

@@ -246,7 +246,7 @@ func TestCreateSchedule(t *testing.T) {
 	}
 }
 
-func newTestServerWithBlueprintDir(t *testing.T, bpDir string) *httptest.Server {
+func newTestServerWithTriggers(t *testing.T, bpDir string) *httptest.Server {
 	t.Helper()
 	store := openTestStore(t)
 	mgr := execution.NewManager(store, nil, 1, "", nil)
@@ -260,6 +260,7 @@ func newTestServerWithBlueprintDir(t *testing.T, bpDir string) *httptest.Server 
 		Schedules:    store,
 		Pipelines:    store,
 		Workspaces:   store,
+		Triggers:     store,
 		Runner:       mgr,
 		Scheduler:    sched,
 		Pipeline:     pipelineRunner,
@@ -272,16 +273,34 @@ func newTestServerWithBlueprintDir(t *testing.T, bpDir string) *httptest.Server 
 func TestTriggerByName(t *testing.T) {
 	bpDir := t.TempDir()
 	bpContent := "blueprint:\n  name: smoke-test\nsteps:\n  - section: main\n    tasks:\n      - name: greet\n        cmd: echo hello\n"
-	if err := os.WriteFile(filepath.Join(bpDir, "smoke-test.yaml"), []byte(bpContent), 0o644); err != nil {
+	bpPath := filepath.Join(bpDir, "smoke-test.yaml")
+	if err := os.WriteFile(bpPath, []byte(bpContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	ts := newTestServerWithBlueprintDir(t, bpDir)
+	ts := newTestServerWithTriggers(t, bpDir)
 	defer ts.Close()
 
-	resp := doRequest(t, ts, "POST", "/v1/triggers/smoke-test", map[string]any{
-		"inputs": map[string]any{},
+	// Create a webhook trigger
+	resp := doRequest(t, ts, "POST", "/v1/triggers", map[string]any{
+		"name":           "smoke",
+		"path":           "smoke-test",
+		"blueprint_path": bpPath,
 	})
+	if resp.StatusCode != http.StatusCreated {
+		var errResp map[string]any
+		decodeJSON(t, resp, &errResp)
+		t.Fatalf("expected 201, got %d: %v", resp.StatusCode, errResp)
+	}
+	var trigger map[string]any
+	decodeJSON(t, resp, &trigger)
+	trigID, _ := trigger["id"].(string)
+	if trigID == "" {
+		t.Fatal("missing trigger id")
+	}
+
+	// Fire the webhook
+	resp = doRequest(t, ts, "POST", "/hooks/smoke-test", map[string]any{})
 	if resp.StatusCode != http.StatusAccepted {
 		var errResp map[string]any
 		decodeJSON(t, resp, &errResp)
@@ -289,31 +308,28 @@ func TestTriggerByName(t *testing.T) {
 	}
 	var run map[string]any
 	decodeJSON(t, resp, &run)
-	runID, _ := run["id"].(string)
+	runID, _ := run["run_id"].(string)
 	if runID == "" {
-		t.Fatal("missing run id in trigger response")
-	}
-	if run["status"] != "queued" {
-		t.Fatalf("expected status=queued, got %v", run["status"])
+		t.Fatal("missing run_id in webhook response")
 	}
 }
 
 func TestTriggerNotFound(t *testing.T) {
 	bpDir := t.TempDir()
-	ts := newTestServerWithBlueprintDir(t, bpDir)
+	ts := newTestServerWithTriggers(t, bpDir)
 	defer ts.Close()
 
-	resp := doRequest(t, ts, "POST", "/v1/triggers/nonexistent", nil)
+	resp := doRequest(t, ts, "POST", "/hooks/nonexistent", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
 
 func TestTriggerMethodNotAllowed(t *testing.T) {
-	ts := newTestServer(t)
+	ts := newTestServerWithTriggers(t, "")
 	defer ts.Close()
 
-	resp := doRequest(t, ts, "GET", "/v1/triggers/anything", nil)
+	resp := doRequest(t, ts, "GET", "/hooks/anything", nil)
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", resp.StatusCode)
 	}
@@ -326,16 +342,28 @@ func TestTriggerSubdirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	bpContent := "blueprint:\n  name: md-to-pdf\nsteps:\n  - section: main\n    tasks:\n      - name: convert\n        cmd: echo converting\n"
-	if err := os.WriteFile(filepath.Join(subDir, "md-to-pdf.yaml"), []byte(bpContent), 0o644); err != nil {
+	bpPath := filepath.Join(subDir, "md-to-pdf.yaml")
+	if err := os.WriteFile(bpPath, []byte(bpContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	ts := newTestServerWithBlueprintDir(t, bpDir)
+	ts := newTestServerWithTriggers(t, bpDir)
 	defer ts.Close()
 
-	resp := doRequest(t, ts, "POST", "/v1/triggers/md-to-pdf", map[string]any{
-		"inputs": map[string]any{},
+	// Create trigger
+	resp := doRequest(t, ts, "POST", "/v1/triggers", map[string]any{
+		"name":           "md-to-pdf",
+		"path":           "md-to-pdf",
+		"blueprint_path": bpPath,
 	})
+	if resp.StatusCode != http.StatusCreated {
+		var errResp map[string]any
+		decodeJSON(t, resp, &errResp)
+		t.Fatalf("expected 201, got %d: %v", resp.StatusCode, errResp)
+	}
+
+	// Fire webhook
+	resp = doRequest(t, ts, "POST", "/hooks/md-to-pdf", map[string]any{})
 	if resp.StatusCode != http.StatusAccepted {
 		var errResp map[string]any
 		decodeJSON(t, resp, &errResp)

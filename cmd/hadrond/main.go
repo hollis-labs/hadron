@@ -23,6 +23,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	hplugin "github.com/hollis-labs/hadron/internal/plugin"
+	"github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/telemetry"
@@ -128,12 +129,15 @@ func runServe(args []string) error {
 	defer sched.Stop()
 
 	pipelineRunner := pipeline.NewRunner(store, mgr)
+	serveReg := registry.New(store)
+	pipelineRunner.SetBlueprintResolver(serveReg.Resolve)
 
 	srv := api.NewServer(cfg.Addr, api.Dependencies{
 		Runs:         store,
 		Schedules:    store,
 		Pipelines:    store,
 		Workspaces:   store,
+		Triggers:     store,
 		Runner:       mgr,
 		Scheduler:    sched,
 		Pipeline:     pipelineRunner,
@@ -250,6 +254,8 @@ func runMCP(args []string) error {
 	defer sched.Stop()
 
 	pipelineRunner := pipeline.NewRunner(store, mgr)
+	reg := registry.New(store)
+	pipelineRunner.SetBlueprintResolver(reg.Resolve)
 
 	var scopes []string
 	if *scopesFlag != "" {
@@ -262,7 +268,8 @@ func runMCP(args []string) error {
 	}
 
 	adapter := mcpadapter.New(store, mgr, sched, pipelineRunner, *tokenFlag, scopes,
-		mcpadapter.WithBlueprintDir(sett.BlueprintDir))
+		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
+		mcpadapter.WithRegistry(reg))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

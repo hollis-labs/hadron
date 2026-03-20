@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -31,6 +32,11 @@ type Store interface {
 	CreateSchedule(ctx context.Context, rec persistence.ScheduleRecord) error
 	UpdateScheduleEnabledAndNext(ctx context.Context, id string, enabled bool, nextRun *time.Time) error
 	DeleteSchedule(ctx context.Context, id string) error
+
+	CreateTrigger(ctx context.Context, rec persistence.TriggerRecord) error
+	GetTrigger(ctx context.Context, id string) (persistence.TriggerRecord, error)
+	ListTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
+	DeleteTrigger(ctx context.Context, id string) error
 }
 
 type Runner interface {
@@ -56,6 +62,7 @@ const (
 	ScopeSchedulerControl = "scheduler.control"
 	ScopeWorkspaceWrite   = "workspace.write"
 	ScopeScheduleWrite    = "schedule.write"
+	ScopeTriggerWrite     = "trigger.write"
 )
 
 // Adapter exposes Hadron read/query surfaces as MCP tools over stdio.
@@ -64,6 +71,7 @@ type Adapter struct {
 	runner       Runner
 	sched        SchedulerControl
 	pipeline     PipelineRunner
+	registry     *registry.Registry
 	token        string
 	scopes       map[string]struct{}
 	blueprintDir string
@@ -102,6 +110,13 @@ func WithBlueprintDir(dir string) Option {
 		if dir != "" {
 			a.blueprintDir = dir
 		}
+	}
+}
+
+// WithRegistry sets the blueprint registry for registry MCP tools.
+func WithRegistry(reg *registry.Registry) Option {
+	return func(a *Adapter) {
+		a.registry = reg
 	}
 }
 
@@ -150,6 +165,9 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_blueprints_list":    a.handleBlueprintsList,
 		"hadron_blueprint_get":      a.handleBlueprintGet,
 		"hadron_schedule_delete":    a.handleScheduleDelete,
+		"hadron_triggers_list":      a.handleTriggersList,
+		"hadron_trigger_create":     a.handleTriggerCreate,
+		"hadron_trigger_delete":     a.handleTriggerDelete,
 	}
 }
 

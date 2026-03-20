@@ -14,11 +14,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/scheduler"
+	"github.com/hollis-labs/hadron/internal/trigger"
 	"github.com/hollis-labs/otel/propagation"
 )
 
@@ -53,6 +55,16 @@ type WorkspaceStore interface {
 	ListWorkspaces(ctx context.Context) ([]persistence.WorkspaceRecord, error)
 }
 
+type TriggerStore interface {
+	CreateTrigger(ctx context.Context, rec persistence.TriggerRecord) error
+	GetTrigger(ctx context.Context, id string) (persistence.TriggerRecord, error)
+	ListTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
+	DeleteTrigger(ctx context.Context, id string) error
+	GetTriggerByPath(ctx context.Context, path string) (persistence.TriggerRecord, error)
+	UpdateTriggerFired(ctx context.Context, id string) error
+	ListWebhookTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
+}
+
 // ── Other interfaces ──────────────────────────────────────────────────────────
 
 type Runner interface {
@@ -78,6 +90,7 @@ type Dependencies struct {
 	Schedules    ScheduleStore
 	Pipelines    PipelineStore
 	Workspaces   WorkspaceStore
+	Triggers     TriggerStore
 	Runner       Runner
 	Scheduler    Scheduler
 	Pipeline     PipelineRunner
@@ -85,12 +98,14 @@ type Dependencies struct {
 }
 
 type Server struct {
-	httpServer  *http.Server
-	handler     http.Handler
-	deps        Dependencies
-	runSeq      atomic.Uint64
-	scheduleSeq atomic.Uint64
-	pipelineSeq atomic.Uint64
+	httpServer     *http.Server
+	handler        http.Handler
+	deps           Dependencies
+	runSeq         atomic.Uint64
+	scheduleSeq    atomic.Uint64
+	pipelineSeq    atomic.Uint64
+	triggerSeq     atomic.Uint64
+	triggerManager *trigger.Manager
 }
 
 // Handler returns the underlying HTTP handler (useful for testing with httptest).
@@ -101,6 +116,11 @@ func (s *Server) Handler() http.Handler {
 func NewServer(addr string, deps Dependencies) *Server {
 	s := &Server{deps: deps}
 	mux := http.NewServeMux()
+
+	// Create trigger manager if trigger store is available
+	if deps.Triggers != nil && deps.Runner != nil {
+		s.triggerManager = trigger.New(deps.Triggers, deps.Runner)
+	}
 
 	mux.HandleFunc("/v1/health", s.handleHealth)
 
@@ -120,8 +140,17 @@ func NewServer(addr string, deps Dependencies) *Server {
 	mux.HandleFunc("/v1/pipelines", s.handlePipelines)
 	mux.HandleFunc("/v1/pipelines/", s.handlePipelineByID)
 
-	// Triggers (blueprint-name-based run creation)
-	mux.HandleFunc("/v1/triggers/", s.handleTrigger)
+	// Triggers — CRUD for webhook trigger definitions
+	mux.HandleFunc("/v1/triggers", s.handleWebhookTriggers)
+	mux.HandleFunc("/v1/triggers/", s.handleWebhookTriggerByID)
+
+	// Webhook catch-all — incoming webhook requests
+	if s.triggerManager != nil {
+		s.triggerManager.RegisterWebhookRoutes(mux)
+	}
+
+	// A2A Agent Card
+	mux.HandleFunc("/.well-known/agent.json", s.handleAgentCard)
 
 	// Blueprints
 	mux.HandleFunc("/v1/blueprints/validate", s.handleBlueprintValidate)
@@ -178,6 +207,34 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"version": "0.4.0",
 		"service": "hadrond",
 	})
+}
+
+// ── A2A Agent Card ────────────────────────────────────────────────────────────
+
+func (s *Server) handleAgentCard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	dir := s.deps.BlueprintDir
+	if dir == "" {
+		writeError(w, http.StatusServiceUnavailable, "blueprint directory not configured")
+		return
+	}
+	baseURL := "http://" + s.httpServer.Addr
+	card, err := agentcard.FromDirectory(dir, baseURL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build agent card: "+err.Error())
+		return
+	}
+	data, err := card.JSON()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to marshal agent card: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
@@ -935,45 +992,83 @@ func (s *Server) handleBlueprintValidate(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true})
 }
 
-// ── Triggers ──────────────────────────────────────────────────────────────────
+// ── Webhook Triggers ──────────────────────────────────────────────────────────
 
-func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+func (s *Server) handleWebhookTriggers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.listWebhookTriggers(w, r)
+	case http.MethodPost:
+		s.createWebhookTrigger(w, r)
+	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) handleWebhookTriggerByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/v1/triggers/")
+	id = strings.TrimRight(id, "/")
+	if id == "" {
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	switch r.Method {
+	case http.MethodGet:
+		s.getWebhookTrigger(w, r, id)
+	case http.MethodDelete:
+		s.deleteWebhookTrigger(w, r, id)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
 
-	name := strings.TrimPrefix(r.URL.Path, "/v1/triggers/")
-	name = strings.TrimRight(name, "/")
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "blueprint name is required")
+func (s *Server) listWebhookTriggers(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Triggers == nil {
+		writeError(w, http.StatusServiceUnavailable, "triggers unavailable")
 		return
 	}
-
-	// Optional bearer token auth
-	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
-		// Accept but don't enforce — future: check against configured token
-		_ = authHeader
-	}
-
-	// Resolve blueprint name to file path
-	bpPath, err := s.resolveBlueprintPath(name)
+	items, err := s.deps.Triggers.ListTriggers(r.Context())
 	if err != nil {
-		writeError(w, http.StatusNotFound, "blueprint not found: "+name)
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	// Parse request body for inputs
-	var body struct {
-		WorkspaceID string         `json:"workspace_id"`
-		Inputs      map[string]any `json:"inputs"`
-		DryRun      bool           `json:"dry_run"`
+	out := make([]map[string]any, 0, len(items))
+	for _, t := range items {
+		out = append(out, toTriggerResponse(t))
 	}
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": nil})
+}
+
+func (s *Server) createWebhookTrigger(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Triggers == nil {
+		writeError(w, http.StatusServiceUnavailable, "triggers unavailable")
+		return
+	}
+	var body struct {
+		Name          string            `json:"name"`
+		Path          string            `json:"path"`
+		BlueprintPath string            `json:"blueprint_path"`
+		WorkspaceID   string            `json:"workspace_id"`
+		Secret        string            `json:"secret"`
+		ExtractInputs map[string]string `json:"extract_inputs"`
+		OneShot       bool              `json:"one_shot"`
+		TTLMinutes    int               `json:"ttl_minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if body.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if body.Path == "" {
+		writeError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	if body.BlueprintPath == "" {
+		writeError(w, http.StatusBadRequest, "blueprint_path is required")
+		return
 	}
 
 	wsID := body.WorkspaceID
@@ -981,35 +1076,105 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		wsID = "default"
 	}
 
-	bp, err := blueprint.ParseFile(bpPath)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "invalid blueprint: "+err.Error())
-		return
-	}
-	normalized, err := blueprint.NormalizeInputs(bp, body.Inputs)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "invalid inputs: "+err.Error())
-		return
-	}
+	triggerID := s.nextTriggerID()
 
-	runID := s.nextRunID()
-	if err := s.deps.Runner.Enqueue(r.Context(), execution.Request{
-		RunID:         runID,
+	rec := persistence.TriggerRecord{
+		ID:            triggerID,
+		Type:          "webhook",
+		Name:          body.Name,
+		Path:          body.Path,
+		BlueprintPath: body.BlueprintPath,
 		WorkspaceID:   wsID,
-		BlueprintPath: bpPath,
-		Inputs:        normalized,
-		DryRun:        body.DryRun,
-	}); err != nil {
+		Enabled:       true,
+		OneShot:       body.OneShot,
+	}
+	if body.Secret != "" {
+		rec.SecretHash = sql.NullString{String: body.Secret, Valid: true}
+	}
+	if body.ExtractInputs != nil {
+		eiJSON, _ := json.Marshal(body.ExtractInputs)
+		rec.ExtractInputs = sql.NullString{String: string(eiJSON), Valid: true}
+	}
+	if body.TTLMinutes > 0 {
+		expires := time.Now().UTC().Add(time.Duration(body.TTLMinutes) * time.Minute)
+		rec.TTLExpiresAt = sql.NullString{String: expires.Format(time.RFC3339), Valid: true}
+	}
+
+	if err := s.deps.Triggers.CreateTrigger(r.Context(), rec); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	rec, err := s.deps.Runs.GetRun(r.Context(), runID)
+	created, err := s.deps.Triggers.GetTrigger(r.Context(), triggerID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, toRunResponse(rec))
+	writeJSON(w, http.StatusCreated, toTriggerResponse(created))
+}
+
+func (s *Server) getWebhookTrigger(w http.ResponseWriter, r *http.Request, id string) {
+	if s.deps.Triggers == nil {
+		writeError(w, http.StatusServiceUnavailable, "triggers unavailable")
+		return
+	}
+	rec, err := s.deps.Triggers.GetTrigger(r.Context(), id)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "trigger not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toTriggerResponse(rec))
+}
+
+func (s *Server) deleteWebhookTrigger(w http.ResponseWriter, r *http.Request, id string) {
+	if s.deps.Triggers == nil {
+		writeError(w, http.StatusServiceUnavailable, "triggers unavailable")
+		return
+	}
+	if _, err := s.deps.Triggers.GetTrigger(r.Context(), id); err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "trigger not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.deps.Triggers.DeleteTrigger(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func toTriggerResponse(t persistence.TriggerRecord) map[string]any {
+	resp := map[string]any{
+		"id":             t.ID,
+		"type":           t.Type,
+		"name":           t.Name,
+		"path":           t.Path,
+		"blueprint_path": t.BlueprintPath,
+		"workspace_id":   t.WorkspaceID,
+		"enabled":        t.Enabled,
+		"one_shot":       t.OneShot,
+		"fired_count":    t.FiredCount,
+		"created_at":     t.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":     t.UpdatedAt.UTC().Format(time.RFC3339),
+		"last_fired_at":  nullableString(t.LastFiredAt),
+		"ttl_expires_at": nullableString(t.TTLExpiresAt),
+	}
+	if t.ExtractInputs.Valid {
+		resp["extract_inputs"] = t.ExtractInputs.String
+	}
+	return resp
+}
+
+func (s *Server) nextTriggerID() string {
+	n := s.triggerSeq.Add(1)
+	return fmt.Sprintf("trig-%s-%04d", time.Now().UTC().Format("20060102-150405"), n)
 }
 
 // resolveBlueprintPath resolves a blueprint name to a file path within BlueprintDir.

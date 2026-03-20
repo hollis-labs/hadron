@@ -47,6 +47,9 @@ func main() {
 		buildFmtCmd(),
 		buildPluginCmd(),
 		buildTestGenCmd(),
+		buildAgentCardCmd(),
+		buildRegistryCmd(),
+		buildTriggerCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

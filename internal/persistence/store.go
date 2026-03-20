@@ -77,6 +77,24 @@ type PipelineStageRunRecord struct {
 	UpdatedAt     time.Time
 }
 
+type TriggerRecord struct {
+	ID            string
+	Type          string
+	Name          string
+	Path          string
+	BlueprintPath string
+	WorkspaceID   string
+	SecretHash    sql.NullString
+	ExtractInputs sql.NullString
+	Enabled       bool
+	OneShot       bool
+	TTLExpiresAt  sql.NullString
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	FiredCount    int
+	LastFiredAt   sql.NullString
+}
+
 type WorkspaceRecord struct {
 	ID        string
 	Name      string
@@ -1069,6 +1087,258 @@ func (s *Store) GetWorkspace(ctx context.Context, id string) (WorkspaceRecord, e
 	updatedAt, err := time.Parse(time.RFC3339, updated)
 	if err != nil {
 		return WorkspaceRecord{}, fmt.Errorf("parse workspace updated_at: %w", err)
+	}
+	rec.CreatedAt = createdAt
+	rec.UpdatedAt = updatedAt
+	return rec, nil
+}
+
+// ── Triggers ──────────────────────────────────────────────────────────────────
+
+func (s *Store) CreateTrigger(ctx context.Context, rec TriggerRecord) error {
+	if rec.WorkspaceID == "" {
+		rec.WorkspaceID = "default"
+	}
+	if rec.Type == "" {
+		rec.Type = "webhook"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO triggers(id, type, name, path, blueprint_path, workspace_id, secret_hash, extract_inputs, enabled, one_shot, ttl_expires_at, created_at, updated_at, fired_count, last_fired_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		rec.ID,
+		rec.Type,
+		rec.Name,
+		rec.Path,
+		rec.BlueprintPath,
+		rec.WorkspaceID,
+		rec.SecretHash,
+		rec.ExtractInputs,
+		boolToInt(rec.Enabled),
+		boolToInt(rec.OneShot),
+		rec.TTLExpiresAt,
+		now,
+		now,
+		rec.FiredCount,
+		rec.LastFiredAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create trigger: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetTrigger(ctx context.Context, id string) (TriggerRecord, error) {
+	var rec TriggerRecord
+	var created, updated string
+	var enabled, oneShot int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT id, type, name, path, blueprint_path, workspace_id, secret_hash, extract_inputs, enabled, one_shot, ttl_expires_at, created_at, updated_at, fired_count, last_fired_at
+		FROM triggers
+		WHERE id = ?
+	`, id).Scan(
+		&rec.ID,
+		&rec.Type,
+		&rec.Name,
+		&rec.Path,
+		&rec.BlueprintPath,
+		&rec.WorkspaceID,
+		&rec.SecretHash,
+		&rec.ExtractInputs,
+		&enabled,
+		&oneShot,
+		&rec.TTLExpiresAt,
+		&created,
+		&updated,
+		&rec.FiredCount,
+		&rec.LastFiredAt,
+	); err != nil {
+		return TriggerRecord{}, fmt.Errorf("get trigger: %w", err)
+	}
+	rec.Enabled = enabled == 1
+	rec.OneShot = oneShot == 1
+	createdAt, err := time.Parse(time.RFC3339, created)
+	if err != nil {
+		return TriggerRecord{}, fmt.Errorf("parse trigger created_at: %w", err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339, updated)
+	if err != nil {
+		return TriggerRecord{}, fmt.Errorf("parse trigger updated_at: %w", err)
+	}
+	rec.CreatedAt = createdAt
+	rec.UpdatedAt = updatedAt
+	return rec, nil
+}
+
+func (s *Store) ListTriggers(ctx context.Context) ([]TriggerRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, type, name, path, blueprint_path, workspace_id, secret_hash, extract_inputs, enabled, one_shot, ttl_expires_at, created_at, updated_at, fired_count, last_fired_at
+		FROM triggers
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list triggers: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]TriggerRecord, 0)
+	for rows.Next() {
+		var rec TriggerRecord
+		var created, updated string
+		var enabled, oneShot int
+		if err := rows.Scan(
+			&rec.ID,
+			&rec.Type,
+			&rec.Name,
+			&rec.Path,
+			&rec.BlueprintPath,
+			&rec.WorkspaceID,
+			&rec.SecretHash,
+			&rec.ExtractInputs,
+			&enabled,
+			&oneShot,
+			&rec.TTLExpiresAt,
+			&created,
+			&updated,
+			&rec.FiredCount,
+			&rec.LastFiredAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan trigger: %w", err)
+		}
+		rec.Enabled = enabled == 1
+		rec.OneShot = oneShot == 1
+		createdAt, err := time.Parse(time.RFC3339, created)
+		if err != nil {
+			return nil, fmt.Errorf("parse trigger created_at: %w", err)
+		}
+		updatedAt, err := time.Parse(time.RFC3339, updated)
+		if err != nil {
+			return nil, fmt.Errorf("parse trigger updated_at: %w", err)
+		}
+		rec.CreatedAt = createdAt
+		rec.UpdatedAt = updatedAt
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list triggers rows: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Store) DeleteTrigger(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM triggers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete trigger: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateTriggerFired(ctx context.Context, id string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE triggers
+		SET fired_count = fired_count + 1, last_fired_at = ?, updated_at = ?
+		WHERE id = ?
+	`, now, now, id)
+	if err != nil {
+		return fmt.Errorf("update trigger fired: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListWebhookTriggers(ctx context.Context) ([]TriggerRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, type, name, path, blueprint_path, workspace_id, secret_hash, extract_inputs, enabled, one_shot, ttl_expires_at, created_at, updated_at, fired_count, last_fired_at
+		FROM triggers
+		WHERE type = 'webhook' AND enabled = 1
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list webhook triggers: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]TriggerRecord, 0)
+	for rows.Next() {
+		var rec TriggerRecord
+		var created, updated string
+		var enabled, oneShot int
+		if err := rows.Scan(
+			&rec.ID,
+			&rec.Type,
+			&rec.Name,
+			&rec.Path,
+			&rec.BlueprintPath,
+			&rec.WorkspaceID,
+			&rec.SecretHash,
+			&rec.ExtractInputs,
+			&enabled,
+			&oneShot,
+			&rec.TTLExpiresAt,
+			&created,
+			&updated,
+			&rec.FiredCount,
+			&rec.LastFiredAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan webhook trigger: %w", err)
+		}
+		rec.Enabled = enabled == 1
+		rec.OneShot = oneShot == 1
+		createdAt, err := time.Parse(time.RFC3339, created)
+		if err != nil {
+			return nil, fmt.Errorf("parse webhook trigger created_at: %w", err)
+		}
+		updatedAt, err := time.Parse(time.RFC3339, updated)
+		if err != nil {
+			return nil, fmt.Errorf("parse webhook trigger updated_at: %w", err)
+		}
+		rec.CreatedAt = createdAt
+		rec.UpdatedAt = updatedAt
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list webhook triggers rows: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Store) GetTriggerByPath(ctx context.Context, path string) (TriggerRecord, error) {
+	var rec TriggerRecord
+	var created, updated string
+	var enabled, oneShot int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT id, type, name, path, blueprint_path, workspace_id, secret_hash, extract_inputs, enabled, one_shot, ttl_expires_at, created_at, updated_at, fired_count, last_fired_at
+		FROM triggers
+		WHERE path = ? AND enabled = 1
+	`, path).Scan(
+		&rec.ID,
+		&rec.Type,
+		&rec.Name,
+		&rec.Path,
+		&rec.BlueprintPath,
+		&rec.WorkspaceID,
+		&rec.SecretHash,
+		&rec.ExtractInputs,
+		&enabled,
+		&oneShot,
+		&rec.TTLExpiresAt,
+		&created,
+		&updated,
+		&rec.FiredCount,
+		&rec.LastFiredAt,
+	); err != nil {
+		return TriggerRecord{}, fmt.Errorf("get trigger by path: %w", err)
+	}
+	rec.Enabled = enabled == 1
+	rec.OneShot = oneShot == 1
+	createdAt, err := time.Parse(time.RFC3339, created)
+	if err != nil {
+		return TriggerRecord{}, fmt.Errorf("parse trigger created_at: %w", err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339, updated)
+	if err != nil {
+		return TriggerRecord{}, fmt.Errorf("parse trigger updated_at: %w", err)
 	}
 	rec.CreatedAt = createdAt
 	rec.UpdatedAt = updatedAt
