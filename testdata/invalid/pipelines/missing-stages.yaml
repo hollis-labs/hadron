@@ -1,0 +1,3 @@
+# Invalid: pipeline has no stages
+meta:
+  name: missing-stages

@@ -1,0 +1,8 @@
+# Invalid: blueprint block has neither name nor slug
+blueprint:
+  description: "no name or slug"
+steps:
+  - section: main
+    tasks:
+      - name: hello
+        cmd: echo hello

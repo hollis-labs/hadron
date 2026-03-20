@@ -1,0 +1,11 @@
+# Invalid: input type "map" is not in the allowed enum
+blueprint:
+  name: invalid-input-type
+inputs:
+  - name: foo
+    type: map
+steps:
+  - section: main
+    tasks:
+      - name: hello
+        cmd: echo hello

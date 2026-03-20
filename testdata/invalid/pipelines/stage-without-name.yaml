@@ -1,0 +1,5 @@
+# Invalid: stage missing required "name" field
+meta:
+  name: stage-no-name
+stages:
+  - blueprint_path: ../blueprints/minimal-success.yaml

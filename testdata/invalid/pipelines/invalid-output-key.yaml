@@ -1,0 +1,8 @@
+# Invalid: output key starts with a number (violates pattern)
+meta:
+  name: bad-output-key
+stages:
+  - name: producer
+    blueprint_path: build.yaml
+    outputs:
+      9bad-key: "some value"

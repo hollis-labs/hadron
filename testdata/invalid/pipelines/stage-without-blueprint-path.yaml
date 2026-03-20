@@ -1,0 +1,5 @@
+# Invalid: stage missing required "blueprint_path" field
+meta:
+  name: stage-no-bp
+stages:
+  - name: broken

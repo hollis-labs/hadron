@@ -1,0 +1,623 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hadron.dev/schemas/blueprint-v0.4.schema.json",
+  "title": "Hadron Blueprint v0.4",
+  "description": "Schema for Hadron blueprint files (YAML/JSON). Defines project scaffolding, automation steps, inputs, packages, hooks, and imports.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Blueprint spec version. Defaults to \"0.4\" if omitted.",
+      "default": "0.4"
+    },
+    "blueprint": {
+      "$ref": "#/$defs/BlueprintInfo"
+    },
+    "inputs": {
+      "type": "array",
+      "description": "Parameterized inputs for the blueprint.",
+      "items": {
+        "$ref": "#/$defs/Input"
+      }
+    },
+    "project": {
+      "$ref": "#/$defs/Project"
+    },
+    "env": {
+      "type": "object",
+      "description": "Environment variables (string keys and string values).",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "packages": {
+      "$ref": "#/$defs/Packages"
+    },
+    "git": {
+      "$ref": "#/$defs/Git"
+    },
+    "stubs": {
+      "$ref": "#/$defs/Stubs"
+    },
+    "tools": {
+      "$ref": "#/$defs/Tools"
+    },
+    "imports": {
+      "type": "array",
+      "description": "Import other blueprint files.",
+      "items": {
+        "$ref": "#/$defs/Import"
+      }
+    },
+    "hooks": {
+      "$ref": "#/$defs/Hooks"
+    },
+    "steps": {
+      "type": "array",
+      "description": "Execution steps grouped into sections. At least one section required.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Section"
+      }
+    }
+  },
+  "required": ["blueprint", "steps"],
+  "additionalProperties": false,
+  "$defs": {
+    "BlueprintInfo": {
+      "type": "object",
+      "description": "Blueprint metadata. Either name or slug must be provided.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Blueprint name (required unless slug is provided)."
+        },
+        "slug": {
+          "type": "string",
+          "description": "URL-safe identifier. Used as name fallback."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable display name."
+        },
+        "description": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "homepage": {
+          "type": "string"
+        }
+      },
+      "anyOf": [
+        { "required": ["name"] },
+        { "required": ["slug"] }
+      ],
+      "additionalProperties": false
+    },
+    "Input": {
+      "type": "object",
+      "description": "A parameterized input for the blueprint.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Input variable name. Must match the pattern ^[a-zA-Z][a-zA-Z0-9_\\-]*$.",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_\\-]*$"
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable label for the input."
+        },
+        "description": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "Input data type.",
+          "enum": ["string", "number", "boolean", "array"]
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether this input must be provided.",
+          "default": false
+        },
+        "default": {
+          "description": "Default value if the input is not provided."
+        },
+        "enum": {
+          "type": "array",
+          "description": "Allowed values for this input."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "UI prompt text shown when requesting this input."
+        },
+        "short_flag": {
+          "type": "string",
+          "description": "CLI short flag (e.g. \"n\" for -n)."
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regex pattern for string-type inputs."
+        },
+        "min_length": {
+          "type": "integer",
+          "description": "Minimum string length (string-type inputs).",
+          "minimum": 0
+        },
+        "max_length": {
+          "type": "integer",
+          "description": "Maximum string length (string-type inputs).",
+          "minimum": 0
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum value (number-type inputs)."
+        },
+        "max": {
+          "type": "number",
+          "description": "Maximum value (number-type inputs)."
+        },
+        "items_type": {
+          "type": "string",
+          "description": "Element type for array-type inputs.",
+          "enum": ["string", "number", "boolean"]
+        }
+      },
+      "required": ["name", "type"],
+      "additionalProperties": false
+    },
+    "Project": {
+      "type": "object",
+      "description": "Project context for the blueprint.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Project type (e.g. app, lib, tool)."
+        },
+        "name": {
+          "type": "string"
+        },
+        "dir": {
+          "type": "string",
+          "description": "Working directory."
+        },
+        "path": {
+          "type": "string",
+          "description": "Base path for project creation."
+        },
+        "php_version": {
+          "type": "string",
+          "description": "PHP version (e.g. \"8.3\")."
+        },
+        "node": {
+          "type": "boolean",
+          "description": "Whether Node.js is used."
+        },
+        "vars": {
+          "type": "object",
+          "description": "Arbitrary key-value pairs accessible in templates.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "Packages": {
+      "type": "object",
+      "description": "Package manager declarations.",
+      "properties": {
+        "composer": {
+          "description": "Composer packages. Can be an object with require/require_dev or an array shorthand (normalized to composer.require).",
+          "oneOf": [
+            { "$ref": "#/$defs/ComposerPackages" },
+            {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          ]
+        },
+        "composerDev": {
+          "type": "array",
+          "description": "Compat shorthand: merged into composer.require_dev.",
+          "items": { "type": "string" }
+        },
+        "npm": {
+          "description": "NPM packages. Can be an object with deps/dev or an array shorthand (normalized to npm.deps).",
+          "oneOf": [
+            { "$ref": "#/$defs/NPMPackages" },
+            {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          ]
+        },
+        "npmDev": {
+          "type": "array",
+          "description": "Compat shorthand: merged into npm.dev.",
+          "items": { "type": "string" }
+        },
+        "pip": {
+          "$ref": "#/$defs/PipPackages"
+        },
+        "brew": {
+          "description": "Homebrew packages. Can be an object with formulae/casks/taps or an array shorthand (normalized to brew.formulae).",
+          "oneOf": [
+            { "$ref": "#/$defs/BrewPackages" },
+            {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          ]
+        },
+        "go": {
+          "$ref": "#/$defs/GoPackages"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ComposerPackages": {
+      "type": "object",
+      "properties": {
+        "require": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "require_dev": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "NPMPackages": {
+      "type": "object",
+      "properties": {
+        "deps": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "dev": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PipPackages": {
+      "type": "object",
+      "properties": {
+        "deps": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "dev": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "BrewPackages": {
+      "type": "object",
+      "properties": {
+        "formulae": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "casks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "taps": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GoPackages": {
+      "type": "object",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Git": {
+      "type": "object",
+      "description": "Git configuration.",
+      "properties": {
+        "init": {
+          "type": "boolean",
+          "description": "Initialize a git repository."
+        },
+        "create_github_repo": {
+          "type": "boolean",
+          "description": "Create a GitHub repository."
+        },
+        "visibility": {
+          "type": "string",
+          "description": "Repository visibility.",
+          "enum": ["public", "private"]
+        },
+        "remote": {
+          "type": "string",
+          "description": "Git remote URL."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Default branch name."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Stubs": {
+      "type": "object",
+      "description": "File stub configuration.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "search_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "strict_match": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Tools": {
+      "type": "object",
+      "description": "Tool installation configuration.",
+      "properties": {
+        "install": {
+          "$ref": "#/$defs/ToolInstall"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ToolInstall": {
+      "type": "object",
+      "properties": {
+        "homebrew": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "apt": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "custom": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Import": {
+      "type": "object",
+      "description": "Import another blueprint file.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path to the blueprint file to import."
+        },
+        "alias": {
+          "type": "string",
+          "description": "Alias for referencing this import in step.call."
+        },
+        "with": {
+          "type": "object",
+          "description": "Input overrides passed to the imported blueprint.",
+          "additionalProperties": true
+        }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
+    "Hooks": {
+      "type": "object",
+      "description": "Blueprint-level lifecycle hooks.",
+      "properties": {
+        "before_run": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Hook" }
+        },
+        "after_run": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Hook" }
+        },
+        "on_error": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Hook" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Hook": {
+      "type": "object",
+      "description": "A lifecycle hook command.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "cmd": {
+          "type": "string",
+          "description": "Shell command to execute."
+        },
+        "if": {
+          "type": "string",
+          "description": "Template condition; truthy string or shell exit 0 means true."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Section": {
+      "type": "object",
+      "description": "A named section containing executable steps.",
+      "properties": {
+        "section": {
+          "type": "string",
+          "description": "Section label."
+        },
+        "tasks": {
+          "type": "array",
+          "description": "Executable steps in this section. At least one required.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Step"
+          }
+        }
+      },
+      "required": ["section", "tasks"],
+      "additionalProperties": false
+    },
+    "Step": {
+      "type": "object",
+      "description": "A single executable step. Must have either cmd/run or call (not both, not neither).",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Step name."
+        },
+        "cmd": {
+          "type": "string",
+          "description": "Shell command to execute."
+        },
+        "run": {
+          "type": "string",
+          "description": "Alias for cmd (v0.2 compat)."
+        },
+        "call": {
+          "type": "string",
+          "description": "Invoke an imported blueprint by alias. Mutually exclusive with cmd/run."
+        },
+        "if": {
+          "type": "string",
+          "description": "Condition template. Truthy string or shell exit 0 means true."
+        },
+        "condition": {
+          "type": "string",
+          "description": "Alias for if (v0.2 compat)."
+        },
+        "dir": {
+          "type": "string",
+          "description": "Working directory for this step."
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variables for this step.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "retry": {
+          "type": "integer",
+          "description": "Number of retry attempts.",
+          "minimum": 0,
+          "default": 0
+        },
+        "retry_delay_seconds": {
+          "type": "integer",
+          "description": "Delay between retries in seconds.",
+          "minimum": 0
+        },
+        "retry_delay": {
+          "type": "integer",
+          "description": "Alias for retry_delay_seconds (v0.2 compat).",
+          "minimum": 0
+        },
+        "retryDelay": {
+          "type": "integer",
+          "description": "Alias for retry_delay_seconds (camelCase compat).",
+          "minimum": 0
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "description": "Timeout in seconds for this step.",
+          "minimum": 0
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Alias for timeout_seconds (v0.2 compat).",
+          "minimum": 0
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "description": "If true, continue execution even if this step fails."
+        },
+        "continueOnError": {
+          "type": "boolean",
+          "description": "Alias for continue_on_error (camelCase compat)."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "If false, skip this step entirely. Default true."
+        },
+        "with": {
+          "type": "object",
+          "description": "Key-value parameters passed when using call.",
+          "additionalProperties": true
+        },
+        "on_success": {
+          "type": "array",
+          "description": "Per-step hooks executed on success.",
+          "items": { "$ref": "#/$defs/ActionHook" }
+        },
+        "onSuccess": {
+          "type": "array",
+          "description": "Alias for on_success (camelCase compat).",
+          "items": { "$ref": "#/$defs/ActionHook" }
+        },
+        "on_fail": {
+          "type": "array",
+          "description": "Per-step hooks executed on failure.",
+          "items": { "$ref": "#/$defs/ActionHook" }
+        },
+        "onFail": {
+          "type": "array",
+          "description": "Alias for on_fail (camelCase compat).",
+          "items": { "$ref": "#/$defs/ActionHook" }
+        }
+      },
+      "required": ["name"],
+      "anyOf": [
+        { "required": ["cmd"] },
+        { "required": ["run"] },
+        { "required": ["call"] }
+      ],
+      "additionalProperties": false
+    },
+    "ActionHook": {
+      "type": "object",
+      "description": "A per-step action hook (on_success / on_fail).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Hook action type.",
+          "enum": ["cmd", "error", "step", "blueprint", "call"]
+        },
+        "value": {
+          "type": "string",
+          "description": "Command, error message, step name, blueprint path, or import alias depending on type."
+        }
+      },
+      "required": ["type", "value"],
+      "additionalProperties": false
+    }
+  }
+}

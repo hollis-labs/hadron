@@ -1,0 +1,7 @@
+# Invalid: step has name but no cmd, run, or call
+blueprint:
+  name: step-no-cmd
+steps:
+  - section: main
+    tasks:
+      - name: empty-step

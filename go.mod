@@ -9,6 +9,7 @@ require (
 	github.com/hollis-labs/otel v0.0.0
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/wailsapp/wails/v2 v2.10.2
 	go.opentelemetry.io/otel v1.41.0

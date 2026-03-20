@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hadron.dev/schemas/pipeline-v2.schema.json",
+  "title": "Hadron Pipeline Spec v2",
+  "description": "Schema for Hadron pipeline YAML/JSON files. Validates both v1 (linear) and v2 (DAG) pipelines. Source of truth: internal/pipeline/pipeline.go Spec, Meta, Stage, Position structs.",
+  "type": "object",
+  "required": ["meta", "stages"],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "$ref": "#/$defs/Meta"
+    },
+    "stop_on_fail": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true, a stage failure prevents downstream stages from running. Defaults to true if omitted."
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Stage"
+      },
+      "description": "Ordered list of pipeline stages. In v1 (no depends_on), stages run sequentially by array order. In v2, stages form a DAG via depends_on."
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Pipeline-level inputs: string keys with values of any type, available to all stages as template context."
+    }
+  },
+  "$defs": {
+    "Meta": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name identifying this pipeline."
+        },
+        "version": {
+          "type": "integer",
+          "description": "Pipeline spec version. 1 = linear (array-order), 2 = DAG (depends_on). Optional; defaults to 1 semantics when omitted."
+        }
+      }
+    },
+    "Position": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number",
+          "description": "Horizontal pixel coordinate for visual canvas layout."
+        },
+        "y": {
+          "type": "number",
+          "description": "Vertical pixel coordinate for visual canvas layout."
+        }
+      }
+    },
+    "Stage": {
+      "type": "object",
+      "required": ["name", "blueprint_path"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique name for this stage within the pipeline. Referenced by depends_on in other stages."
+        },
+        "blueprint_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to the Hadron blueprint YAML file to execute for this stage."
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Key-value pairs passed into the stage blueprint as template context. Values may reference upstream outputs via template syntax (e.g. {{ .stages.build.outputs.version }})."
+        },
+        "if": {
+          "type": "string",
+          "description": "Conditional execution template. The stage is skipped when this evaluates to false or an empty string. Evaluated after all depends_on stages complete."
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Stage names that must complete before this stage runs. Defines DAG edges. Note: cross-reference validation (ensuring referenced names exist) cannot be enforced by JSON Schema alone and is handled at runtime."
+        },
+        "position": {
+          "$ref": "#/$defs/Position",
+          "description": "Layout metadata for visual canvas rendering. Has no effect on execution."
+        },
+        "outputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-zA-Z][a-zA-Z0-9_\\-]*$": {
+              "type": "string"
+            }
+          },
+          "description": "Named key-value pairs emitted by the stage. Keys must match ^[a-zA-Z][a-zA-Z0-9_\\-]*$. Values are template strings evaluated after the stage completes."
+        }
+      }
+    }
+  }
+}

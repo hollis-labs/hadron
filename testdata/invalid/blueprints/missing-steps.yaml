@@ -1,0 +1,3 @@
+# Invalid: blueprint has no steps array
+blueprint:
+  name: missing-steps
