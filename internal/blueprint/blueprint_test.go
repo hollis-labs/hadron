@@ -22,8 +22,8 @@ steps:
 	if err != nil {
 		t.Fatalf("ParseBytes yaml: %v", err)
 	}
-	if bp.Blueprint.Name != "my-app" {
-		t.Fatalf("expected name my-app, got %q", bp.Blueprint.Name)
+	if bp.Spec.Name != "my-app" {
+		t.Fatalf("expected name my-app, got %q", bp.Spec.Name)
 	}
 }
 
@@ -45,8 +45,8 @@ func TestParse_ValidJSONC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseBytes jsonc: %v", err)
 	}
-	if bp.Blueprint.Name != "jsonc-app" {
-		t.Fatalf("expected jsonc-app, got %q", bp.Blueprint.Name)
+	if bp.Spec.Name != "jsonc-app" {
+		t.Fatalf("expected jsonc-app, got %q", bp.Spec.Name)
 	}
 }
 
@@ -72,7 +72,7 @@ steps:
 	if err != nil {
 		t.Fatalf("parse v0.2 compat: %v", err)
 	}
-	task := bp.Steps[0].Tasks[0]
+	task := bp.Steps[0].Steps[0]
 	if task.If != "true" {
 		t.Fatalf("expected condition→if='true', got %q", task.If)
 	}
@@ -140,8 +140,8 @@ steps:
 	if err != nil {
 		t.Fatalf("parse all fields: %v", err)
 	}
-	if bp.Blueprint.License != "MIT" {
-		t.Fatalf("expected license MIT, got %q", bp.Blueprint.License)
+	if bp.Spec.License != "MIT" {
+		t.Fatalf("expected license MIT, got %q", bp.Spec.License)
 	}
 	if bp.Packages.Composer == nil || len(bp.Packages.Composer.Require) == 0 {
 		t.Fatalf("expected composer.require populated")
@@ -161,7 +161,7 @@ steps:
 
 func TestValidate_MissingName(t *testing.T) {
 	bp := &Blueprint{
-		Steps: []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo"}}}},
+		Steps: []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo"}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for missing blueprint.name")
@@ -170,7 +170,7 @@ func TestValidate_MissingName(t *testing.T) {
 
 func TestValidate_EmptySteps(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
+		Spec: BlueprintInfo{Name: "app"},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for empty steps")
@@ -179,8 +179,8 @@ func TestValidate_EmptySteps(t *testing.T) {
 
 func TestValidate_SectionNoTasks(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Steps:     []Section{{Section: "Empty"}},
+		Spec:  BlueprintInfo{Name: "app"},
+		Steps: []Section{{Section: "Empty"}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for section with no tasks")
@@ -189,8 +189,8 @@ func TestValidate_SectionNoTasks(t *testing.T) {
 
 func TestValidate_TaskNeitherCmdNorCall(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Steps:     []Section{{Section: "Main", Tasks: []Task{{Name: "bad"}}}},
+		Spec:  BlueprintInfo{Name: "app"},
+		Steps: []Section{{Section: "Main", Steps: []Step{{Name: "bad"}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for task without cmd or call")
@@ -199,12 +199,12 @@ func TestValidate_TaskNeitherCmdNorCall(t *testing.T) {
 
 func TestValidate_DuplicateInputName(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
+		Spec: BlueprintInfo{Name: "app"},
 		Inputs: []Input{
 			{Name: "x", Type: "string"},
 			{Name: "x", Type: "string"},
 		},
-		Steps: []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo"}}}},
+		Steps: []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo"}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for duplicate input name")
@@ -213,9 +213,9 @@ func TestValidate_DuplicateInputName(t *testing.T) {
 
 func TestValidate_InvalidInputType(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Inputs:    []Input{{Name: "x", Type: "custom"}},
-		Steps:     []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo"}}}},
+		Spec:   BlueprintInfo{Name: "app"},
+		Inputs: []Input{{Name: "x", Type: "custom"}},
+		Steps:  []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo"}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for invalid input type")
@@ -224,9 +224,9 @@ func TestValidate_InvalidInputType(t *testing.T) {
 
 func TestValidate_InvalidRegexPattern(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Inputs:    []Input{{Name: "x", Type: "string", Pattern: "[invalid"}},
-		Steps:     []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo"}}}},
+		Spec:   BlueprintInfo{Name: "app"},
+		Inputs: []Input{{Name: "x", Type: "string", Pattern: "[invalid"}},
+		Steps:  []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo"}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for invalid regex pattern")
@@ -237,9 +237,9 @@ func TestValidate_MinGreaterThanMax(t *testing.T) {
 	minV := 10.0
 	maxV := 5.0
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Inputs:    []Input{{Name: "x", Type: "number", Min: &minV, Max: &maxV}},
-		Steps:     []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo"}}}},
+		Spec:   BlueprintInfo{Name: "app"},
+		Inputs: []Input{{Name: "x", Type: "number", Min: &minV, Max: &maxV}},
+		Steps:  []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo"}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for min > max")
@@ -250,9 +250,9 @@ func TestValidate_MinLengthGreaterThanMaxLength(t *testing.T) {
 	minL := 10
 	maxL := 5
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Inputs:    []Input{{Name: "x", Type: "string", MinLength: &minL, MaxLength: &maxL}},
-		Steps:     []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo"}}}},
+		Spec:   BlueprintInfo{Name: "app"},
+		Inputs: []Input{{Name: "x", Type: "string", MinLength: &minL, MaxLength: &maxL}},
+		Steps:  []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo"}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for min_length > max_length")
@@ -261,12 +261,12 @@ func TestValidate_MinLengthGreaterThanMaxLength(t *testing.T) {
 
 func TestValidate_DuplicateImportAlias(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
+		Spec: BlueprintInfo{Name: "app"},
 		Imports: []Import{
 			{Path: "a.yaml", Alias: "shared"},
 			{Path: "b.yaml", Alias: "shared"},
 		},
-		Steps: []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo"}}}},
+		Steps: []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo"}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for duplicate import alias")
@@ -275,8 +275,8 @@ func TestValidate_DuplicateImportAlias(t *testing.T) {
 
 func TestValidate_RetryNegative(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Steps:     []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo", Retry: -1}}}},
+		Spec:  BlueprintInfo{Name: "app"},
+		Steps: []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo", Retry: -1}}}},
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for negative retry")
@@ -285,8 +285,8 @@ func TestValidate_RetryNegative(t *testing.T) {
 
 func TestValidate_ValidBlueprintAllOptionalAbsent(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "minimal"},
-		Steps:     []Section{{Section: "Main", Tasks: []Task{{Name: "t", Cmd: "echo ok"}}}},
+		Spec:  BlueprintInfo{Name: "minimal"},
+		Steps: []Section{{Section: "Main", Steps: []Step{{Name: "t", Cmd: "echo ok"}}}},
 	}
 	if err := Validate(bp); err != nil {
 		t.Fatalf("expected no error for valid minimal blueprint: %v", err)
@@ -297,8 +297,8 @@ func TestValidate_ValidBlueprintAllOptionalAbsent(t *testing.T) {
 
 func TestRenderForExecution_InputsInCmd(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Steps: []Section{{Section: "Main", Tasks: []Task{
+		Spec: BlueprintInfo{Name: "app"},
+		Steps: []Section{{Section: "Main", Steps: []Step{
 			{Name: "t", Cmd: "echo {{ index .inputs \"name\" }}"},
 		}}},
 	}
@@ -309,15 +309,15 @@ func TestRenderForExecution_InputsInCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderForExecution: %v", err)
 	}
-	if out.Steps[0].Tasks[0].Cmd != "echo world" {
-		t.Fatalf("expected 'echo world', got %q", out.Steps[0].Tasks[0].Cmd)
+	if out.Steps[0].Steps[0].Cmd != "echo world" {
+		t.Fatalf("expected 'echo world', got %q", out.Steps[0].Steps[0].Cmd)
 	}
 }
 
 func TestRenderForExecution_ProjectVarsInDir(t *testing.T) {
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Steps: []Section{{Section: "Main", Tasks: []Task{
+		Spec: BlueprintInfo{Name: "app"},
+		Steps: []Section{{Section: "Main", Steps: []Step{
 			{Name: "t", Cmd: "echo", Dir: `{{ index (index .project "vars") "app_name" }}`},
 		}}},
 	}
@@ -330,17 +330,17 @@ func TestRenderForExecution_ProjectVarsInDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderForExecution dir: %v", err)
 	}
-	if out.Steps[0].Tasks[0].Dir != "myapp" {
-		t.Fatalf("expected 'myapp', got %q", out.Steps[0].Tasks[0].Dir)
+	if out.Steps[0].Steps[0].Dir != "myapp" {
+		t.Fatalf("expected 'myapp', got %q", out.Steps[0].Steps[0].Dir)
 	}
 }
 
 func TestRenderForExecution_EnvFunc(t *testing.T) {
 	t.Setenv("TEST_HAD_HOME", "/test/home")
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Env:       map[string]string{"MY_HOME": `{{ env "TEST_HAD_HOME" }}`},
-		Steps: []Section{{Section: "Main", Tasks: []Task{
+		Spec: BlueprintInfo{Name: "app"},
+		Env:  map[string]string{"MY_HOME": `{{ env "TEST_HAD_HOME" }}`},
+		Steps: []Section{{Section: "Main", Steps: []Step{
 			{Name: "t", Cmd: "echo"},
 		}}},
 	}
@@ -371,8 +371,8 @@ func TestRenderForExecution_ReadFileSizeGuard(t *testing.T) {
 	_ = f.Close()
 
 	bp := &Blueprint{
-		Blueprint: BlueprintInfo{Name: "app"},
-		Steps: []Section{{Section: "Main", Tasks: []Task{
+		Spec: BlueprintInfo{Name: "app"},
+		Steps: []Section{{Section: "Main", Steps: []Step{
 			{Name: "t", Cmd: `{{ readFile "` + f.Name() + `" }}`},
 		}}},
 	}
@@ -471,8 +471,8 @@ steps:
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if bp.Steps[0].Tasks[0].If != "true" {
-		t.Fatalf("expected condition→if, got %q", bp.Steps[0].Tasks[0].If)
+	if bp.Steps[0].Steps[0].If != "true" {
+		t.Fatalf("expected condition→if, got %q", bp.Steps[0].Steps[0].If)
 	}
 }
 
@@ -492,7 +492,7 @@ steps:
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if !bp.Steps[0].Tasks[0].ContinueOnError {
+	if !bp.Steps[0].Steps[0].ContinueOnError {
 		t.Fatalf("expected continueOnError→continue_on_error=true")
 	}
 }
@@ -513,8 +513,8 @@ steps:
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if bp.Steps[0].Tasks[0].RetryDelaySecs != 3 {
-		t.Fatalf("expected retryDelay→retry_delay_seconds=3, got %d", bp.Steps[0].Tasks[0].RetryDelaySecs)
+	if bp.Steps[0].Steps[0].RetryDelaySecs != 3 {
+		t.Fatalf("expected retryDelay→retry_delay_seconds=3, got %d", bp.Steps[0].Steps[0].RetryDelaySecs)
 	}
 }
 
@@ -546,11 +546,15 @@ steps:
 // ─── Integration Test ─────────────────────────────────────────────────────────
 
 func TestIntegration_ReferenceBlueprint(t *testing.T) {
-	bp, err := ParseFile("../../../reference-only/nanite-spec-v0.2/reference-blueprint.yaml")
+	const refPath = "../../../reference-only/nanite-spec-v0.2/reference-blueprint.yaml"
+	if _, err := os.Stat(refPath); os.IsNotExist(err) {
+		t.Skip("reference blueprint not available on this machine")
+	}
+	bp, err := ParseFile(refPath)
 	if err != nil {
 		t.Fatalf("parse reference blueprint: %v", err)
 	}
-	if bp.Blueprint.Name == "" && bp.Blueprint.Slug == "" {
+	if bp.Spec.Name == "" && bp.Spec.Slug == "" {
 		t.Fatal("reference blueprint has no name or slug")
 	}
 	if len(bp.Steps) == 0 {
