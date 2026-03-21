@@ -139,7 +139,7 @@ steps:
 	events := getRunEvents(t, store, runID)
 	retryCount := 0
 	for _, e := range events {
-		if e.EventType == "task_retry" {
+		if e.EventType == "step_retry" {
 			retryCount++
 		}
 	}
@@ -187,13 +187,13 @@ steps:
 	events := getRunEvents(t, store, runID)
 	skipped := false
 	for _, e := range events {
-		if e.EventType == "task_skipped_condition" {
+		if e.EventType == "step_skipped_condition" {
 			skipped = true
 			break
 		}
 	}
 	if !skipped {
-		t.Fatalf("expected task_skipped_condition event; got events: %v", eventTypes(events))
+		t.Fatalf("expected step_skipped_condition event; got events: %v", eventTypes(events))
 	}
 }
 

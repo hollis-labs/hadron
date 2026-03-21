@@ -1,8 +1,12 @@
-.PHONY: build test lint run-daemon e2e app app-dev
+.PHONY: build install test lint run-daemon e2e app app-dev
 
 build:
 	go build -o bin/hadrond ./cmd/hadrond
 	go build -o bin/hadron ./cmd/hadron
+
+install:
+	go install ./cmd/hadrond
+	go install ./cmd/hadron
 
 test:
 	go test ./...

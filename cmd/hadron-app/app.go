@@ -32,7 +32,7 @@ type BlueprintInput struct {
 	Name        string   `json:"name"`
 	Label       string   `json:"label"`
 	Description string   `json:"description"`
-	Type        string   `json:"type"`    // string|number|boolean|array
+	Type        string   `json:"type"` // string|number|boolean|array
 	Required    bool     `json:"required"`
 	Default     string   `json:"default"` // stringified for simplicity
 	Enum        []string `json:"enum"`    // stringified
@@ -356,14 +356,14 @@ func (a *App) GetBlueprintMetadata(path string) (string, error) {
 	}
 	totalTasks := 0
 	for _, s := range bp.Steps {
-		totalTasks += len(s.Tasks)
+		totalTasks += len(s.Steps)
 	}
 	meta := BlueprintMetaSummary{
-		Name:         bp.Blueprint.Name,
-		Slug:         bp.Blueprint.Slug,
-		Title:        bp.Blueprint.Title,
-		Description:  bp.Blueprint.Description,
-		Tags:         bp.Blueprint.Tags,
+		Name:         bp.Spec.Name,
+		Slug:         bp.Spec.Slug,
+		Title:        bp.Spec.Title,
+		Description:  bp.Spec.Description,
+		Tags:         bp.Spec.Tags,
 		Version:      bp.Version,
 		InputCount:   len(bp.Inputs),
 		StepCount:    totalTasks,
