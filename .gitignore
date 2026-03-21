@@ -24,3 +24,13 @@ vendor/
 .idea/
 .vscode/
 *.swp
+
+# Node / Frontend
+node_modules/
+cmd/hadron-app/frontend/dist/
+
+# Wails build output
+cmd/hadron-app/build/bin/
+
+# Agent transient
+.agentrc/.session-unclean.flag
