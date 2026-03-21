@@ -1,0 +1,57 @@
+# lefthook.yml — Fragments Engine shared pre-commit/pre-push hooks
+# Reference copy lives in mentat repo; copied to all FE projects.
+# Target: all checks complete in <15 seconds on staged files only.
+
+pre-commit:
+  parallel: true
+  commands:
+
+    # ── Go parallel group ─────────────────────────────────────────────
+    # These three run simultaneously on staged .go files.
+
+    go-format:
+      # Fail if any staged Go file is not gofmt + goimports clean.
+      glob: "*.go"
+      skip_empty: true
+      run: |
+        unformatted=$(gofmt -l {staged_files} 2>/dev/null)
+        if command -v goimports >/dev/null 2>&1; then
+          unformatted="$unformatted$(goimports -l {staged_files} 2>/dev/null)"
+        fi
+        if [ -n "$unformatted" ]; then
+          echo "Unformatted files:"
+          echo "$unformatted" | sort -u
+          exit 1
+        fi
+
+    go-lint:
+      # Only lints new/modified code so existing warnings don't block commits.
+      glob: "*.go"
+      skip_empty: true
+      run: golangci-lint run --new --timeout 30s
+
+    go-vet:
+      glob: "*.go"
+      skip_empty: true
+      run: go vet ./...
+
+    # ── Frontend parallel group (optional) ────────────────────────────
+    # Runs only when a ui/, web/, or frontend/ directory exists.
+    # Safe to leave in Go-only repos — skip conditions prevent errors.
+
+    frontend-lint:
+      glob: "*.{ts,tsx,js,jsx}"
+      skip_empty: true
+      run: npx biome check --no-errors-on-unmatched {staged_files}
+      # Skip entirely if none of the common frontend dirs exist.
+      skip:
+        - run: "test ! -d ui && test ! -d web && test ! -d frontend"
+
+pre-push:
+  commands:
+
+    go-test:
+      # Full test suite gate before code reaches the remote.
+      glob: "*.go"
+      skip_empty: true
+      run: go test ./...
