@@ -248,25 +248,25 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <AppHeader
-        page={PAGE_TITLES[phase]}
-        phase={phase}
-        daemonStatus={daemonStatus}
-        daemonAddr={daemonAddr}
-        workspaces={workspaces}
-        selectedWorkspaceId={selectedWorkspaceId}
-        onSelectWorkspace={handleSelectWorkspace}
-        onCreateWorkspace={handleCreateWorkspace}
-        onNavigate={handleNav}
-        activeRunStartedAt={activeRunStartedAt}
-        demoMode={demoEnabled}
-        onToggleDemo={handleToggleDemo}
-      />
+      <AppNav current={phase} onNavigate={handleNav} />
 
-      <div className="app-body">
-        <AppNav current={phase} onNavigate={handleNav} />
+      <div className="main">
+        <AppHeader
+          page={PAGE_TITLES[phase]}
+          phase={phase}
+          daemonStatus={daemonStatus}
+          daemonAddr={daemonAddr}
+          workspaces={workspaces}
+          selectedWorkspaceId={selectedWorkspaceId}
+          onSelectWorkspace={handleSelectWorkspace}
+          onCreateWorkspace={handleCreateWorkspace}
+          onNavigate={handleNav}
+          activeRunStartedAt={activeRunStartedAt}
+          demoMode={demoEnabled}
+          onToggleDemo={handleToggleDemo}
+        />
 
-        <main className="app-content">
+        <main className="content">
           {phase === 'dashboard' && (
             <DashboardPage
               daemonStatus={daemonStatus}
@@ -362,9 +362,9 @@ export default function App() {
             />
           )}
         </main>
-      </div>
 
-      <AppFooter phase={phase} />
+        <AppFooter phase={phase} />
+      </div>
 
       {/* Workspace creation modal */}
       {showWorkspaceModal && (
@@ -382,12 +382,12 @@ export default function App() {
                   style={{ width: '100%', boxSizing: 'border-box' }}
                   autoFocus
                 />
-                <div style={{ fontSize: '0.68rem', color: 'rgb(var(--muted))', marginTop: '0.2rem' }}>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', marginTop: '0.2rem' }}>
                   Letters, numbers, and hyphens only
                 </div>
               </div>
               <div style={{ marginBottom: '1rem' }}>
-                <label className="hud-label">Display Name <span style={{ color: 'rgb(var(--muted))' }}>(optional)</span></label>
+                <label className="hud-label">Display Name <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span></label>
                 <input
                   className="hud-input"
                   placeholder="My Workspace"
@@ -402,7 +402,7 @@ export default function App() {
                   className="hud-button"
                   onClick={handleSubmitWorkspace}
                   disabled={!wsFormId.trim() || wsCreating}
-                  style={{ borderColor: 'rgba(var(--ok) / 0.5)', color: 'rgb(var(--ok))' }}
+                  style={{ borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
                 >
                   {wsCreating ? 'Creating...' : 'Create'}
                 </button>
@@ -416,10 +416,10 @@ export default function App() {
         position="bottom-right"
         toastOptions={{
           style: {
-            background: 'rgb(var(--panel2))',
-            border: '1px solid rgb(var(--border))',
-            color: 'rgb(var(--text))',
-            fontFamily: "'Share Tech Mono', monospace",
+            background: 'var(--bg-raised)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-ui)',
             fontSize: '13px',
           },
         }}

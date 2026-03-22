@@ -5,7 +5,9 @@ import { useRunEvents } from '../hooks/useRunEvents';
 import { getRun, cancelRun } from '../api/client';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Spinner } from '../components/ui/Spinner';
-import { ChevronLeft, ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Square, RefreshCw } from 'lucide-react';
+import { formatDuration } from '../utils/format';
+import { shortPath } from '../utils/path';
 import type { RunEvent } from '../api/types';
 
 interface RunDetailPageProps {
@@ -14,20 +16,6 @@ interface RunDetailPageProps {
 }
 
 const TERMINAL = new Set(['success', 'failed', 'canceled', 'cancelled']);
-
-function formatDuration(startedAt?: string | null, endedAt?: string | null): string {
-  if (!startedAt) return '—';
-  const end = endedAt ? new Date(endedAt) : new Date();
-  const ms = end.getTime() - new Date(startedAt).getTime();
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-}
-
-function shortPath(p: string): string {
-  const parts = p.split(/[/\\]/);
-  return parts.slice(-2).join('/');
-}
 
 // ── Task grouping ────────────────────────────────────────────────────
 
@@ -68,39 +56,17 @@ function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
   return order.map(step => groups.get(step)!);
 }
 
-function statusIcon(status: string): { char: string; color: string } {
-  switch (status) {
-    case 'success': return { char: '\u2713', color: 'rgb(var(--ok))' };
-    case 'failed': return { char: '\u2717', color: 'rgb(var(--danger))' };
-    case 'running': return { char: '\u21BB', color: 'rgb(var(--warn))' };
-    default: return { char: '\u25FB', color: 'rgb(var(--muted))' };
-  }
-}
-
-// ── Raw event row (for fallback view) ────────────────────────────────
+const TASK_ICON: Record<string, { char: string; cls: string }> = {
+  success: { char: '✓', cls: 'success' },
+  failed: { char: '✗', cls: 'failed' },
+  running: { char: '↻', cls: 'running' },
+};
 
 function eventTypeColor(eventType: string): string {
-  if (eventType.includes('error') || eventType.includes('fail')) return 'rgb(var(--danger))';
-  if (eventType.includes('start') || eventType.includes('queued')) return 'rgb(var(--ok))';
-  if (eventType.includes('complete') || eventType.includes('success')) return 'rgb(var(--ok))';
-  if (eventType.includes('log')) return 'rgb(var(--muted))';
-  return 'rgb(var(--accent))';
-}
-
-function EventRow({ ev }: { ev: RunEvent }) {
-  return (
-    <div className="event-row">
-      <span className="event-type" style={{ color: eventTypeColor(ev.event_type) }}>
-        [{ev.event_type}]
-      </span>
-      <span className="event-msg">
-        {ev.step_name && (
-          <span style={{ color: 'rgb(var(--accent))' }}>{ev.step_name} </span>
-        )}
-        {ev.message ?? ''}
-      </span>
-    </div>
-  );
+  if (eventType.includes('error') || eventType.includes('fail')) return 'var(--status-failed)';
+  if (eventType.includes('start') || eventType.includes('complete') || eventType.includes('success')) return 'var(--status-success)';
+  if (eventType.includes('log')) return 'var(--text-tertiary)';
+  return 'var(--accent)';
 }
 
 // ── Main component ───────────────────────────────────────────────────
@@ -116,7 +82,6 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
 
   const taskGroups = useMemo(() => groupEventsByStep(events), [events]);
 
-  // Auto-expand running tasks
   useEffect(() => {
     const running = taskGroups.filter(g => g.status === 'running').map(g => g.stepName);
     if (running.length > 0) {
@@ -128,7 +93,6 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
     }
   }, [taskGroups]);
 
-  // Auto-scroll
   useEffect(() => {
     if (!isTerminal && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -139,9 +103,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
     try {
       await cancelRun(runId);
       toast.success('Run canceled');
-    } catch {
-      // Ignore
-    }
+    } catch { /* ignore */ }
   };
 
   const toggleGroup = (stepName: string) => {
@@ -152,152 +114,177 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
     });
   };
 
-  // Progress calculation
   const realGroups = taskGroups.filter(g => g.stepName !== '__global__');
   const completedCount = realGroups.filter(g => g.status === 'success' || g.status === 'failed').length;
   const progress = realGroups.length > 0 ? (completedCount / realGroups.length) * 100 : 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
-      {/* Header */}
-      <div className="page-header" style={{ gap: '0.5rem' }}>
-        <button className="hud-button-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-          <ChevronLeft size={13} /> Back
-        </button>
-        <span className="page-title">Run Detail</span>
-        {run && !isTerminal && <Spinner size={14} />}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
-          <button
-            className={viewMode === 'grouped' ? 'hud-button' : 'hud-button-ghost'}
-            onClick={() => setViewMode('grouped')}
-            style={{ fontSize: '0.68rem', padding: '0.2rem 0.5rem' }}
-          >
-            Grouped
-          </button>
-          <button
-            className={viewMode === 'raw' ? 'hud-button' : 'hud-button-ghost'}
-            onClick={() => setViewMode('raw')}
-            style={{ fontSize: '0.68rem', padding: '0.2rem 0.5rem' }}
-          >
-            Raw
-          </button>
-        </div>
-      </div>
-
-      {/* Run meta */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 'var(--space-4)' }}>
+      {/* Run header */}
       {run && (
-        <div className="hud-panel" style={{ padding: '0.75rem 1rem' }}>
-          <div className="run-meta">
-            <div className="run-meta-item">
-              <strong>{shortPath(run.blueprint_path)}</strong>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <h1 className="mono" style={{ fontSize: 'var(--text-xl)', fontWeight: 600, letterSpacing: '-0.01em' }}>
+                {shortPath(run.blueprint_path)}
+              </h1>
+              <StatusBadge status={run.status} />
+              {!isTerminal && <Spinner size={14} />}
             </div>
-            <div className="run-meta-item">
-              Status: <StatusBadge status={run.status} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
+              <span>Duration: <strong style={{ color: 'var(--text-secondary)' }}>{formatDuration(run.started_at, run.ended_at)}</strong></span>
+              <span className="mono" style={{ fontSize: 'var(--text-xs)', background: 'var(--bg-raised)', padding: '2px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                {runId.slice(-8)}
+              </span>
             </div>
-            <div className="run-meta-item">
-              Duration: <strong>{formatDuration(run.started_at, run.ended_at)}</strong>
-            </div>
-            <div className="run-meta-item" style={{ color: 'rgb(var(--muted))', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-              {runId}
-            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
             {!isTerminal && (
-              <button
-                className="hud-button"
-                onClick={handleCancel}
-                style={{ marginLeft: 'auto', color: 'rgb(var(--danger))', borderColor: 'rgba(var(--danger) / 0.4)' }}
-              >
-                Cancel
+              <button className="btn btn-danger" onClick={handleCancel}>
+                <Square size={12} /> Cancel
               </button>
             )}
+            <button className="btn" onClick={() => { /* rerun placeholder */ }}>
+              <RefreshCw size={12} /> Rerun
+            </button>
           </div>
-          {run.error_message && (
-            <div style={{ marginTop: '0.5rem', color: 'rgb(var(--danger))', fontSize: '0.8rem' }}>
-              Error: {run.error_message}
-            </div>
-          )}
         </div>
       )}
 
       {/* Progress bar */}
       {realGroups.length > 0 && (
-        <div className="run-progress-bar">
-          <div className="run-progress-fill" style={{ width: `${progress}%` }} />
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', fontWeight: 500 }}>Task Progress</span>
+            <span className="mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>{completedCount} / {realGroups.length} tasks</span>
+          </div>
+          <div style={{ height: 4, background: 'var(--bg-overlay)', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', borderRadius: 2, width: `${progress}%`,
+              background: isTerminal && run?.status === 'failed' ? 'var(--status-failed)' : isTerminal ? 'var(--status-success)' : 'var(--status-running)',
+              transition: 'width 0.5s ease',
+            }} />
+          </div>
         </div>
       )}
 
-      {/* Fetch error */}
+      {/* Error banner */}
+      {run?.error_message && (
+        <div className="section" style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--status-failed)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+          {run.error_message}
+        </div>
+      )}
       {runError && (
-        <div style={{ color: 'rgb(var(--danger))', fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'rgba(var(--danger) / 0.1)', borderRadius: '4px', border: '1px solid rgba(var(--danger) / 0.3)' }}>
+        <div className="section" style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--status-failed)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
           Error fetching run: {runError.message}
         </div>
       )}
 
-      {/* Event display */}
-      <div
-        ref={logRef}
-        className="event-log"
-        style={{ flex: 1, minHeight: 0 }}
-      >
+      {/* View toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>Tasks</span>
+        <div style={{ display: 'flex', background: 'var(--bg-raised)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: 2, gap: 2 }}>
+          <button
+            onClick={() => setViewMode('grouped')}
+            style={{
+              padding: '4px 12px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)',
+              fontWeight: 500, fontFamily: 'var(--font-ui)', border: 'none', cursor: 'pointer',
+              background: viewMode === 'grouped' ? 'var(--bg-active)' : 'transparent',
+              color: viewMode === 'grouped' ? 'var(--text-primary)' : 'var(--text-tertiary)',
+            }}
+          >Grouped</button>
+          <button
+            onClick={() => setViewMode('raw')}
+            style={{
+              padding: '4px 12px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)',
+              fontWeight: 500, fontFamily: 'var(--font-ui)', border: 'none', cursor: 'pointer',
+              background: viewMode === 'raw' ? 'var(--bg-active)' : 'transparent',
+              color: viewMode === 'raw' ? 'var(--text-primary)' : 'var(--text-tertiary)',
+            }}
+          >Raw</button>
+        </div>
+      </div>
+
+      {/* Task list */}
+      <div ref={logRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         {events.length === 0 ? (
-          <span style={{ color: 'rgb(var(--muted))' }}>
-            {!run
-              ? 'Loading\u2026'
-              : isTerminal
-                ? 'No events recorded.'
-                : 'Waiting for events\u2026'}
-          </span>
+          <div style={{ color: 'var(--text-tertiary)', padding: 'var(--space-8)', textAlign: 'center' }}>
+            {!run ? 'Loading…' : isTerminal ? 'No events recorded.' : 'Waiting for events…'}
+          </div>
         ) : viewMode === 'raw' ? (
-          events.map(ev => <EventRow key={ev.id} ev={ev} />)
+          <div className="section" style={{ padding: 'var(--space-4)' }}>
+            {events.map(ev => (
+              <div key={ev.id} style={{ display: 'flex', gap: 'var(--space-3)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', lineHeight: 1.6, padding: '1px 0' }}>
+                <span style={{ color: eventTypeColor(ev.event_type), flexShrink: 0, fontSize: 'var(--text-xs)', minWidth: 90 }}>
+                  [{ev.event_type}]
+                </span>
+                <span style={{
+                  color: ev.event_type === 'stderr' || ev.event_type.includes('error') ? 'var(--status-failed)' : 'var(--text-secondary)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                }}>
+                  {ev.step_name && <span style={{ color: 'var(--accent)' }}>{ev.step_name} </span>}
+                  {ev.message ?? ''}
+                </span>
+              </div>
+            ))}
+          </div>
         ) : (
           taskGroups.map(group => {
-            const icon = statusIcon(group.status);
+            const icon = TASK_ICON[group.status] ?? { char: '◻', cls: 'queued' };
             const isExpanded = expandedGroups.has(group.stepName);
             const displayName = group.stepName === '__global__' ? 'Global' : group.stepName;
-            const duration = group.startedAt
-              ? formatDuration(group.startedAt, group.endedAt)
-              : '';
+            const duration = group.startedAt ? formatDuration(group.startedAt, group.endedAt) : '';
+            const isRunning = group.status === 'running';
 
             return (
-              <div key={group.stepName} className="run-task-group">
-                <div className="run-task-header" onClick={() => toggleGroup(group.stepName)}>
-                  {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                  <span style={{ color: icon.color, fontSize: '1rem', lineHeight: 1, width: '16px', textAlign: 'center' }}>
-                    {group.status === 'running' ? <span className="pulse-running">{icon.char}</span> : icon.char}
-                  </span>
-                  <span style={{ flex: 1, fontSize: '0.82rem', fontFamily: 'monospace' }}>{displayName}</span>
-                  <span style={{ fontSize: '0.72rem', color: 'rgb(var(--muted))' }}>
-                    {group.status === 'running' ? '(running)' : duration}
+              <div key={group.stepName} className="section" style={isRunning ? { borderColor: 'rgba(245, 158, 11, 0.2)' } : undefined}>
+                <div
+                  onClick={() => toggleGroup(group.stepName)}
+                  style={{
+                    display: 'flex', alignItems: 'center', padding: 'var(--space-3) var(--space-4)',
+                    gap: 'var(--space-3)', cursor: 'pointer', transition: 'background 0.1s ease',
+                  }}
+                >
+                  <div className={`badge badge-${icon.cls}`} style={{ width: 20, height: 20, borderRadius: '50%', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>
+                    {isRunning ? <Spinner size={12} /> : icon.char}
+                  </div>
+                  <span style={{ flex: 1, fontSize: 'var(--text-md)', fontWeight: 500 }}>{displayName}</span>
+                  <span className="mono" style={{ fontSize: 'var(--text-sm)', color: isRunning ? 'var(--status-running)' : 'var(--text-tertiary)' }}>
+                    {isRunning ? '(running)' : duration}
                   </span>
                   <button
-                    className="hud-button-ghost"
+                    className="btn btn-ghost"
                     onClick={(e) => {
                       e.stopPropagation();
                       const text = group.events.map(ev => ev.message ?? '').filter(Boolean).join('\n');
                       navigator.clipboard.writeText(text);
                       toast.success('Output copied');
                     }}
-                    style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem', opacity: 0.6 }}
-                    title="Copy output to clipboard"
+                    style={{ padding: '2px 6px' }}
+                    title="Copy output"
                   >
-                    Copy
+                    <Copy size={13} />
                   </button>
+                  <span style={{ color: 'var(--text-tertiary)', transition: 'transform 0.2s ease', transform: isExpanded ? 'rotate(180deg)' : 'none' }}>
+                    <ChevronDown size={14} />
+                  </span>
                 </div>
 
                 {isExpanded && (
-                  <div className="run-task-logs">
+                  <div style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-base)', padding: 'var(--space-4)', maxHeight: 300, overflowY: 'auto' }}>
                     {group.events.map(ev => (
-                      <div key={ev.id} style={{ padding: '0.1rem 0' }}>
-                        <span style={{ color: eventTypeColor(ev.event_type), fontSize: '0.68rem', marginRight: '0.4rem' }}>
-                          [{ev.event_type}]
+                      <div key={ev.id} style={{ display: 'flex', gap: 'var(--space-3)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', lineHeight: 1.6, padding: '1px 0' }}>
+                        <span style={{ color: 'var(--text-tertiary)', flexShrink: 0, fontSize: 'var(--text-xs)', minWidth: 72, userSelect: 'none' }}>
+                          {ev.created_at ? new Date(ev.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}
                         </span>
                         <span style={{
-                          fontSize: '0.78rem',
-                          ...(ev.event_type === 'stderr' || ev.event_type.includes('error') || ev.event_type.includes('fail')
-                            ? { color: 'rgb(var(--danger))' }
-                            : ev.event_type === 'stdout'
-                              ? { fontFamily: 'monospace' }
-                              : {}),
-                        }}>{ev.message ?? ''}</span>
+                          whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                          color: ev.event_type === 'stderr' || ev.event_type.includes('error') ? 'var(--status-failed)'
+                            : ev.event_type.includes('success') || ev.event_type.includes('complete') ? 'var(--status-success)'
+                            : 'var(--text-secondary)',
+                        }}>
+                          {ev.message ?? ''}
+                        </span>
                       </div>
                     ))}
                   </div>

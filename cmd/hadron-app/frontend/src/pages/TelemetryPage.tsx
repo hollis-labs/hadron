@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { RefreshCw } from 'lucide-react';
 import { listTelemetryRuns, readTelemetryLog, deleteTelemetryLog } from '../api/client';
 import { EmptyState } from '../components/ui/EmptyState';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import type { TelemetryRunSummary, TelemetryLogEntry } from '../api/types';
 
 // Error boundary to prevent page from crashing the whole app
@@ -12,14 +13,14 @@ class TelemetryErrorBoundary extends Component<{ children: ReactNode; onRetry: (
   render() {
     if (this.state.error) {
       return (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
-          <div style={{ color: 'rgb(var(--danger))', marginBottom: '0.5rem', fontWeight: 600 }}>
+        <div style={{ padding: 'var(--space-8)', textAlign: 'center' }}>
+          <div style={{ color: 'var(--status-failed)', marginBottom: 'var(--space-2)', fontWeight: 600 }}>
             Activity Log encountered an error
           </div>
-          <div style={{ fontSize: '0.78rem', color: 'rgb(var(--muted))', marginBottom: '1rem', fontFamily: 'monospace' }}>
+          <div className="mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-4)' }}>
             {this.state.error.message}
           </div>
-          <button className="hud-button" onClick={() => { this.setState({ error: null }); this.props.onRetry(); }}>
+          <button className="btn btn-primary" onClick={() => { this.setState({ error: null }); this.props.onRetry(); }}>
             Retry
           </button>
         </div>
@@ -34,38 +35,16 @@ interface TelemetryPageProps {
 }
 
 const LEVEL_COLORS: Record<string, string> = {
-  info: 'rgb(var(--accent))',
-  warn: 'rgb(var(--warn))',
-  error: 'rgb(var(--danger))',
-  debug: 'rgb(var(--muted))',
+  info: 'var(--accent)',
+  warn: 'var(--status-running)',
+  error: 'var(--status-failed)',
+  debug: 'var(--text-tertiary)',
 };
 
 const LEVEL_FILTERS = ['all', 'info', 'warn', 'error', 'debug'] as const;
 type LevelFilter = typeof LEVEL_FILTERS[number];
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(ts: string): string {
-  if (!ts) return '—';
-  try {
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) return '—';
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  } catch { return '—'; }
-}
-
-function formatTimestamp(ts: string): string {
-  if (!ts) return '—';
-  try {
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) return '—';
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as Intl.DateTimeFormatOptions);
-  } catch { return '—'; }
-}
+import { formatFileSize, formatDate, formatTimestamp } from '../utils/format';
 
 export function TelemetryPage(props: TelemetryPageProps) {
   const [retryKey, setRetryKey] = useState(0);
@@ -175,61 +154,50 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
     return (
       <div>
         <div className="page-header">
-          <button className="hud-button-ghost" onClick={handleBack} style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
-            ← Back
-          </button>
-          <span className="page-title" style={{ marginLeft: '0.5rem' }}>
-            Run {selectedRunId.slice(-8)}
-          </span>
-          <button
-            className="hud-button-ghost"
-            onClick={() => onOpenRun(selectedRunId)}
-            style={{ marginLeft: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
-          >
-            View Run →
-          </button>
+          <div>
+            <div className="page-title">Run {selectedRunId.slice(-8)}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+            <button className="btn btn-ghost" onClick={handleBack}>Back</button>
+            <button className="btn" onClick={() => onOpenRun(selectedRunId)}>View Run</button>
+          </div>
         </div>
 
-        {/* Level summary */}
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          {LEVEL_FILTERS.map(lf => {
-            const count = lf === 'all' ? entries.length : (levelCounts[lf] || 0);
-            return (
-              <button
-                key={lf}
-                className={levelFilter === lf ? 'hud-button' : 'hud-button-ghost'}
-                onClick={() => setLevelFilter(lf)}
-                style={{
-                  padding: '0.25rem 0.6rem',
-                  fontSize: '0.7rem',
-                  ...(levelFilter === lf && lf === 'error' ? { borderColor: 'rgb(var(--danger))', color: 'rgb(var(--danger))' } : {}),
-                  ...(levelFilter === lf && lf === 'warn' ? { borderColor: 'rgb(var(--warn))', color: 'rgb(var(--warn))' } : {}),
-                  ...(levelFilter === lf && lf === 'info' ? { borderColor: 'rgb(var(--accent))', color: 'rgb(var(--accent))' } : {}),
-                }}
-              >
-                {lf === 'all' ? 'All' : lf.charAt(0).toUpperCase() + lf.slice(1)}
-                {count > 0 && <span style={{ marginLeft: '0.3rem', opacity: 0.6 }}>({count})</span>}
-              </button>
-            );
-          })}
-
+        {/* Level filters */}
+        <div style={{ display: 'flex', gap: 'var(--space-3)', marginBottom: 'var(--space-4)', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+            {LEVEL_FILTERS.map(lf => {
+              const count = lf === 'all' ? entries.length : (levelCounts[lf] || 0);
+              const isActive = levelFilter === lf;
+              const color = isActive && lf !== 'all' ? LEVEL_COLORS[lf] : undefined;
+              return (
+                <button
+                  key={lf}
+                  className={`btn ${isActive ? '' : 'btn-ghost'}`}
+                  onClick={() => setLevelFilter(lf)}
+                  style={{ padding: '4px 12px', fontSize: 'var(--text-xs)', ...(color ? { borderColor: color, color } : {}) }}
+                >
+                  {lf === 'all' ? 'All' : lf.charAt(0).toUpperCase() + lf.slice(1)}
+                  {count > 0 && <span style={{ opacity: 0.6 }}>({count})</span>}
+                </button>
+              );
+            })}
+          </div>
           <input
             className="hud-input"
             type="text"
             placeholder="Search events, messages, steps..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ flex: 1, minWidth: '180px' }}
+            style={{ flex: 1, minWidth: 180 }}
           />
           {search && (
-            <button className="hud-button-ghost" onClick={() => setSearch('')} style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem' }}>
-              Clear
-            </button>
+            <button className="btn btn-ghost" onClick={() => setSearch('')} style={{ fontSize: 'var(--text-xs)' }}>Clear</button>
           )}
         </div>
 
         {/* Log entries table */}
-        <div className="hud-panel" style={{ overflow: 'hidden' }}>
+        <div className="section">
           {entriesLoading ? (
             <EmptyState message="Loading log entries..." />
           ) : filteredEntries.length === 0 ? (
@@ -238,46 +206,30 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
               sub={entries.length > 0 ? `${entries.length} entries total` : undefined}
             />
           ) : (
-            <table className="hud-table">
+            <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: '100px' }}>Time</th>
-                  <th style={{ width: '55px' }}>Level</th>
-                  <th style={{ width: '120px' }}>Event</th>
-                  <th style={{ width: '100px' }}>Section</th>
-                  <th style={{ width: '120px' }}>Step</th>
-                  <th>Message</th>
+                  <th className="col-shrink">Time</th>
+                  <th className="col-shrink">Level</th>
+                  <th className="col-shrink">Event</th>
+                  <th className="col-shrink">Section</th>
+                  <th className="col-shrink">Step</th>
+                  <th className="col-primary">Message</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredEntries.map((entry, i) => (
                   <tr key={i} style={{ cursor: 'default' }}>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'rgb(var(--muted))' }}>
-                      {formatTimestamp(entry.ts)}
-                    </td>
+                    <td className="mono" style={{ color: 'var(--text-tertiary)' }}>{formatTimestamp(entry.ts)}</td>
                     <td>
-                      <span style={{
-                        fontSize: '0.7rem',
-                        fontWeight: 600,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        color: LEVEL_COLORS[entry.level] ?? 'rgb(var(--text))',
-                      }}>
+                      <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: LEVEL_COLORS[entry.level] ?? 'var(--text-primary)' }}>
                         {entry.level}
                       </span>
                     </td>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'rgb(var(--accent))' }}>
-                      {entry.event}
-                    </td>
-                    <td style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))' }}>
-                      {entry.section || '—'}
-                    </td>
-                    <td style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))' }}>
-                      {entry.step || '—'}
-                    </td>
-                    <td style={{ fontSize: '0.75rem', wordBreak: 'break-word' }}>
-                      {entry.msg || '—'}
-                    </td>
+                    <td className="mono" style={{ color: 'var(--accent)' }}>{entry.event}</td>
+                    <td style={{ color: 'var(--text-tertiary)' }}>{entry.section || '—'}</td>
+                    <td style={{ color: 'var(--text-tertiary)' }}>{entry.step || '—'}</td>
+                    <td style={{ wordBreak: 'break-word' }}>{entry.msg || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -286,7 +238,7 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
         </div>
 
         {entries.length > 0 && (
-          <div style={{ fontSize: '0.7rem', color: 'rgb(var(--muted))', marginTop: '0.5rem' }}>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)' }}>
             Showing {filteredEntries.length} of {entries.length} entries
           </div>
         )}
@@ -298,55 +250,44 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
   return (
     <div>
       <div className="page-header">
-        <span className="page-title">Telemetry</span>
-        <button
-          className="hud-button-ghost"
-          onClick={fetchRuns}
-          title="Refresh (R)"
-          style={{ display: 'flex', alignItems: 'center', padding: '0.25rem' }}
-        >
+        <div>
+          <div className="page-title">Telemetry</div>
+          {loading && <div className="page-subtitle">Loading…</div>}
+        </div>
+        <button className="btn btn-ghost" onClick={fetchRuns} title="Refresh (R)">
           <RefreshCw size={14} />
         </button>
-        {loading && <span style={{ fontSize: '0.7rem', color: 'rgb(var(--muted))' }}>Loading…</span>}
       </div>
 
-      <div className="hud-panel" style={{ overflow: 'hidden' }}>
+      <div className="section">
         {runs.length === 0 ? (
           <EmptyState
             message="No telemetry logs"
             sub="Run a blueprint to generate telemetry data"
           />
         ) : (
-          <table className="hud-table">
+          <table className="table">
             <thead>
               <tr>
-                <th>Run ID</th>
-                <th>Events</th>
-                <th>Size</th>
-                <th>Last Modified</th>
-                <th style={{ width: '60px' }}></th>
+                <th className="col-primary">Run ID</th>
+                <th className="col-shrink col-right">Events</th>
+                <th className="col-shrink col-right">Size</th>
+                <th className="col-shrink col-right">Modified</th>
+                <th className="col-shrink"></th>
               </tr>
             </thead>
             <tbody>
               {runs.map(run => (
                 <tr key={run.run_id} onClick={() => handleSelectRun(run.run_id)}>
-                  <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                    {run.run_id.slice(-12)}
-                  </td>
-                  <td style={{ fontSize: '0.8rem' }}>
-                    <span style={{ color: 'rgb(var(--accent))' }}>{run.event_count}</span>
-                  </td>
-                  <td style={{ fontSize: '0.8rem', color: 'rgb(var(--muted))' }}>
-                    {formatFileSize(run.file_size)}
-                  </td>
-                  <td style={{ fontSize: '0.8rem', color: 'rgb(var(--muted))' }}>
-                    {formatDate(run.modified_at)}
-                  </td>
+                  <td className="mono col-primary">{run.run_id.slice(-12)}</td>
+                  <td className="col-shrink col-right"><span style={{ color: 'var(--accent)' }}>{run.event_count}</span></td>
+                  <td className="col-shrink col-right" style={{ color: 'var(--text-tertiary)' }}>{formatFileSize(run.file_size)}</td>
+                  <td style={{ color: 'var(--text-tertiary)' }}>{formatDate(run.modified_at)}</td>
                   <td>
                     <button
-                      className="hud-button-ghost"
+                      className="btn btn-ghost"
                       onClick={(e) => { e.stopPropagation(); setDeleteConfirm(run.run_id); }}
-                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem', color: 'rgb(var(--danger))' }}
+                      style={{ padding: '2px 8px', fontSize: 'var(--text-xs)', color: 'var(--status-failed)' }}
                     >
                       Del
                     </button>
@@ -359,33 +300,20 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
       </div>
 
       {runs.length > 0 && (
-        <div style={{ fontSize: '0.7rem', color: 'rgb(var(--muted))', marginTop: '0.5rem' }}>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)' }}>
           {runs.length} log file{runs.length !== 1 ? 's' : ''} · {formatFileSize(runs.reduce((s, r) => s + r.file_size, 0))} total
         </div>
       )}
 
-      {/* Delete confirmation modal */}
       {deleteConfirm && (
-        <div className="hud-modal-overlay" onClick={() => setDeleteConfirm(null)}>
-          <div className="hud-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <div style={{ padding: '1.25rem' }}>
-              <div style={{ marginBottom: '0.75rem', fontWeight: 600 }}>Delete telemetry log?</div>
-              <div style={{ fontSize: '0.8rem', color: 'rgb(var(--muted))', marginBottom: '1rem' }}>
-                This will permanently delete the log file for run <span style={{ fontFamily: 'monospace', color: 'rgb(var(--accent))' }}>{deleteConfirm.slice(-12)}</span>.
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button className="hud-button-ghost" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-                <button
-                  className="hud-button"
-                  style={{ borderColor: 'rgb(var(--danger))', color: 'rgb(var(--danger))' }}
-                  onClick={() => handleDelete(deleteConfirm)}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Delete telemetry log?"
+          message={`This will permanently delete the log file for run ${deleteConfirm.slice(-12)}.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => handleDelete(deleteConfirm)}
+          onCancel={() => setDeleteConfirm(null)}
+        />
       )}
     </div>
   );

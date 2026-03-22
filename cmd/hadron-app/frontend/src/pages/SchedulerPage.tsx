@@ -5,23 +5,14 @@ import { usePoll } from '../hooks/usePoll';
 import { listSchedules, createSchedule, patchSchedule, deleteSchedule, selectBlueprintFile } from '../api/client';
 import { EmptyState } from '../components/ui/EmptyState';
 import { CronBuilder } from '../components/ui/CronBuilder';
+import { Modal } from '../components/ui/Modal';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { formatNextRun } from '../utils/format';
+import { shortPath } from '../utils/path';
 import type { Schedule, CreateScheduleRequest } from '../api/types';
 
 interface SchedulerPageProps {
   daemonStatus: string;
-}
-
-function formatNextRun(ts: string | null | undefined): string {
-  if (!ts) return '—';
-  return new Date(ts).toLocaleString([], {
-    month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-}
-
-function shortPath(p: string): string {
-  const parts = p.split(/[/\\]/);
-  return parts.slice(-2).join('/');
 }
 
 type ScheduleMode = 'cron' | 'once';
@@ -187,94 +178,65 @@ export function SchedulerPage({ daemonStatus }: SchedulerPageProps) {
 
   return (
     <div>
-      {/* Header */}
       <div className="page-header">
-        <span className="page-title">Schedules</span>
-        <button
-          className="hud-button-ghost"
-          onClick={refresh}
-          title="Refresh (R)"
-          style={{ display: 'flex', alignItems: 'center', padding: '0.25rem' }}
-        >
-          <RefreshCw size={14} />
-        </button>
-        {loading && <span style={{ fontSize: '0.7rem', color: 'rgb(var(--muted))' }}>Refreshing…</span>}
-        <button
-          className="hud-button"
-          onClick={() => setShowModal(true)}
-          style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-        >
-          <Plus size={14} /> New Schedule
-        </button>
+        <div>
+          <div className="page-title">Schedules</div>
+          {loading && <div className="page-subtitle">Refreshing…</div>}
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <button className="btn btn-ghost" onClick={refresh} title="Refresh (R)">
+            <RefreshCw size={14} />
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+            <Plus size={14} /> New Schedule
+          </button>
+        </div>
       </div>
 
-      {/* Schedule table */}
-      <div className="hud-panel" style={{ overflow: 'hidden' }}>
+      <div className="section">
         {schedules.length === 0 ? (
-          <EmptyState
-            message="No schedules"
-            sub="Create a schedule to run blueprints on a cron expression"
-          />
+          <EmptyState message="No schedules" sub="Create a schedule to run blueprints on a cron expression" />
         ) : (
-          <table className="hud-table">
+          <table className="table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Blueprint</th>
-                <th>Cron</th>
-                <th>Enabled</th>
-                <th>Next Run</th>
-                <th style={{ width: '2rem' }}></th>
+                <th className="col-shrink"></th>
+                <th className="col-primary">Schedule</th>
+                <th className="col-shrink">Cron</th>
+                <th className="col-shrink col-right">Next Run</th>
+                <th className="col-shrink"></th>
               </tr>
             </thead>
             <tbody>
               {schedules.map(schedule => (
-                <tr key={schedule.id}>
-                  <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
-                    {schedule.name || <span style={{ color: 'rgb(var(--muted))' }}>{schedule.id.slice(-8)}</span>}
-                  </td>
-                  <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'rgb(var(--muted))' }}>
-                    {shortPath(schedule.blueprint_path)}
-                  </td>
-                  <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                    {schedule.cron_expr || <span style={{ color: 'rgb(var(--accent))', fontStyle: 'italic', fontFamily: 'inherit' }}>one-time</span>}
-                  </td>
-                  <td>
+                <tr key={schedule.id} style={{ cursor: 'default' }}>
+                  <td className="col-shrink">
                     <button
-                      className="hud-button-ghost"
+                      className="btn btn-ghost"
                       onClick={() => handleToggle(schedule)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: '0.3rem',
-                        color: schedule.enabled ? 'rgb(var(--ok))' : 'rgb(var(--muted))',
-                        fontSize: '0.75rem',
-                        padding: '0.15rem 0.4rem',
-                      }}
+                      style={{ padding: '2px 8px', fontSize: 'var(--text-xs)', color: schedule.enabled ? 'var(--accent)' : 'var(--text-tertiary)' }}
                       title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
                     >
-                      {schedule.enabled
-                        ? <><ToggleRight size={15} /> ON</>
-                        : <><ToggleLeft size={15} /> OFF</>
-                      }
+                      {schedule.enabled ? <><ToggleRight size={15} /> ON</> : <><ToggleLeft size={15} /> OFF</>}
                     </button>
                   </td>
-                  <td style={{ color: 'rgb(var(--muted))', fontSize: '0.8rem' }}>
-                    {formatNextRun(schedule.next_run_at)}
+                  <td className="col-primary">
+                    <div style={{ fontWeight: 500 }}>
+                      {schedule.name || <span style={{ color: 'var(--text-tertiary)' }}>{schedule.id.slice(-8)}</span>}
+                    </div>
+                    <div className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                      {shortPath(schedule.blueprint_path)}
+                    </div>
                   </td>
-                  <td style={{ display: 'flex', gap: '0.2rem' }}>
-                    <button
-                      className="hud-button-ghost"
-                      onClick={() => handleEdit(schedule)}
-                      style={{ padding: '0.15rem 0.35rem' }}
-                      title="Edit schedule"
-                    >
+                  <td className="mono col-shrink">
+                    {schedule.cron_expr || <span style={{ color: 'var(--accent)', fontStyle: 'italic' }}>one-time</span>}
+                  </td>
+                  <td className="col-shrink col-right" style={{ color: 'var(--text-tertiary)' }}>{formatNextRun(schedule.next_run_at)}</td>
+                  <td className="col-shrink" style={{ display: 'flex', gap: 4 }}>
+                    <button className="btn btn-ghost" onClick={() => handleEdit(schedule)} style={{ padding: '2px 6px' }} title="Edit">
                       <Pencil size={13} />
                     </button>
-                    <button
-                      className="hud-button-ghost"
-                      onClick={() => handleDelete(schedule)}
-                      style={{ color: 'rgb(var(--danger))', padding: '0.15rem 0.35rem' }}
-                      title="Delete schedule"
-                    >
+                    <button className="btn btn-ghost" onClick={() => handleDelete(schedule)} style={{ padding: '2px 6px', color: 'var(--status-failed)' }} title="Delete">
                       <Trash2 size={13} />
                     </button>
                   </td>
@@ -287,274 +249,131 @@ export function SchedulerPage({ daemonStatus }: SchedulerPageProps) {
 
       {/* New Schedule modal */}
       {showModal && (
-        <div className="hud-modal-overlay" onClick={handleModalClose}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
-              <CalendarClock size={16} style={{ color: 'rgb(var(--accent))' }} />
-              <span style={{ fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em' }}>New Schedule</span>
+        <Modal onClose={handleModalClose} maxWidth="520px">
+          <div style={{ padding: 'var(--space-5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
+              <CalendarClock size={16} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>New Schedule</span>
             </div>
 
-            {/* Name */}
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label className="hud-label">Name <span style={{ color: 'rgb(var(--muted))' }}>(optional)</span></label>
-              <input
-                className="hud-input"
-                placeholder="e.g. daily-cleanup"
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                style={{ width: '100%', boxSizing: 'border-box' }}
-              />
-            </div>
-
-            {/* Blueprint path */}
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label className="hud-label">Blueprint Path</label>
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <input
-                  className="hud-input"
-                  placeholder="/path/to/blueprint.yaml"
-                  value={form.blueprint_path}
-                  onChange={e => setForm(f => ({ ...f, blueprint_path: e.target.value }))}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  className="hud-button-ghost"
-                  onClick={handleBrowse}
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', whiteSpace: 'nowrap', fontSize: '0.78rem' }}
-                >
-                  <FolderOpen size={13} /> Browse
-                </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Name <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span></label>
+                <input className="hud-input" placeholder="e.g. daily-cleanup" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box' }} />
               </div>
-            </div>
 
-            {/* Schedule type toggle */}
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label className="hud-label">Type</label>
-              <div style={{ display: 'flex', gap: '0.25rem' }}>
-                <button
-                  className={schedMode === 'cron' ? 'hud-button' : 'hud-button-ghost'}
-                  onClick={() => setSchedMode('cron')}
-                  style={{ fontSize: '0.72rem', padding: '0.2rem 0.6rem' }}
-                  type="button"
-                >
-                  Recurring (Cron)
-                </button>
-                <button
-                  className={schedMode === 'once' ? 'hud-button' : 'hud-button-ghost'}
-                  onClick={() => setSchedMode('once')}
-                  style={{ fontSize: '0.72rem', padding: '0.2rem 0.6rem' }}
-                  type="button"
-                >
-                  One-Time
-                </button>
-              </div>
-            </div>
-
-            {/* Cron expression (recurring) */}
-            {schedMode === 'cron' && (
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label className="hud-label">Cron Expression</label>
-                <CronBuilder
-                  value={form.cron_expr || '* * * * *'}
-                  onChange={cron => setForm(f => ({ ...f, cron_expr: cron }))}
-                />
-              </div>
-            )}
-
-            {/* Date/time picker (one-time) */}
-            {schedMode === 'once' && (
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label className="hud-label">Run At</label>
-                <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  <input
-                    className="hud-input"
-                    type="date"
-                    value={form.run_at_date}
-                    onChange={e => setForm(f => ({ ...f, run_at_date: e.target.value }))}
-                    style={{ flex: 1 }}
-                  />
-                  <input
-                    className="hud-input"
-                    type="time"
-                    value={form.run_at_time}
-                    onChange={e => setForm(f => ({ ...f, run_at_time: e.target.value }))}
-                    style={{ flex: 1 }}
-                  />
-                </div>
-                <div style={{ fontSize: '0.7rem', color: 'rgb(var(--muted))', marginTop: '0.3rem' }}>
-                  Schedule will run once at the specified date and time, then disable itself.
+              <div>
+                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Blueprint Path</label>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <input className="hud-input" placeholder="/path/to/blueprint.yaml" value={form.blueprint_path} onChange={e => setForm(f => ({ ...f, blueprint_path: e.target.value }))} style={{ flex: 1 }} />
+                  <button className="btn btn-ghost" onClick={handleBrowse}><FolderOpen size={13} /> Browse</button>
                 </div>
               </div>
-            )}
 
-            {/* Enabled checkbox */}
-            <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                id="sched-enabled"
-                checked={form.enabled}
-                onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))}
-                style={{ accentColor: 'rgb(var(--ok))' }}
-              />
-              <label htmlFor="sched-enabled" style={{ fontSize: '0.82rem', color: 'rgb(var(--text))', cursor: 'pointer' }}>
-                Enabled
+              <div>
+                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Type</label>
+                <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                  <button className={`btn ${schedMode === 'cron' ? '' : 'btn-ghost'}`} onClick={() => setSchedMode('cron')} type="button" style={{ fontSize: 'var(--text-xs)' }}>Recurring (Cron)</button>
+                  <button className={`btn ${schedMode === 'once' ? '' : 'btn-ghost'}`} onClick={() => setSchedMode('once')} type="button" style={{ fontSize: 'var(--text-xs)' }}>One-Time</button>
+                </div>
+              </div>
+
+              {schedMode === 'cron' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Cron Expression</label>
+                  <CronBuilder value={form.cron_expr || '* * * * *'} onChange={cron => setForm(f => ({ ...f, cron_expr: cron }))} />
+                </div>
+              )}
+
+              {schedMode === 'once' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Run At</label>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                    <input className="hud-input" type="date" value={form.run_at_date} onChange={e => setForm(f => ({ ...f, run_at_date: e.target.value }))} style={{ flex: 1 }} />
+                    <input className="hud-input" type="time" value={form.run_at_time} onChange={e => setForm(f => ({ ...f, run_at_time: e.target.value }))} style={{ flex: 1 }} />
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)' }}>Runs once then disables itself.</div>
+                </div>
+              )}
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} style={{ accentColor: 'var(--accent)' }} />
+                <span style={{ fontSize: 'var(--text-md)' }}>Enabled</span>
               </label>
+
+              {formError && (
+                <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-sm)', padding: 'var(--space-2) var(--space-3)', background: 'var(--status-failed-bg)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                  {formError}
+                </div>
+              )}
             </div>
 
-            {/* Error */}
-            {formError && (
-              <div style={{
-                color: 'rgb(var(--danger))',
-                fontSize: '0.78rem',
-                marginBottom: '0.75rem',
-                padding: '0.4rem 0.6rem',
-                background: 'rgba(var(--danger) / 0.1)',
-                borderRadius: '4px',
-                border: '1px solid rgba(var(--danger) / 0.3)',
-              }}>
-                {formError}
-              </div>
-            )}
-
-            {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button className="hud-button-ghost" onClick={handleModalClose}>
-                Cancel
-              </button>
-              <button
-                className="hud-button"
-                onClick={handleCreate}
-                disabled={creating}
-              >
-                {creating ? 'Creating…' : 'Create'}
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
+              <button className="btn btn-ghost" onClick={handleModalClose}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>{creating ? 'Creating…' : 'Create'}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Edit Schedule modal */}
       {editSchedule && (
-        <div className="hud-modal-overlay" onClick={() => setEditSchedule(null)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
-              <Pencil size={16} style={{ color: 'rgb(var(--accent))' }} />
-              <span style={{ fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em' }}>Edit Schedule</span>
+        <Modal onClose={() => setEditSchedule(null)} maxWidth="520px">
+          <div style={{ padding: 'var(--space-5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
+              <Pencil size={16} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>Edit Schedule</span>
             </div>
 
-            {/* Name */}
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label className="hud-label">Name <span style={{ color: 'rgb(var(--muted))' }}>(optional)</span></label>
-              <input
-                className="hud-input"
-                placeholder="e.g. daily-cleanup"
-                value={editForm.name}
-                onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
-                style={{ width: '100%', boxSizing: 'border-box' }}
-              />
-            </div>
-
-            {/* Blueprint path */}
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label className="hud-label">Blueprint Path</label>
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <input
-                  className="hud-input"
-                  placeholder="/path/to/blueprint.yaml"
-                  value={editForm.blueprint_path}
-                  onChange={e => setEditForm(f => ({ ...f, blueprint_path: e.target.value }))}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  className="hud-button-ghost"
-                  onClick={handleEditBrowse}
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', whiteSpace: 'nowrap', fontSize: '0.78rem' }}
-                >
-                  <FolderOpen size={13} /> Browse
-                </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Name <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span></label>
+                <input className="hud-input" placeholder="e.g. daily-cleanup" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box' }} />
               </div>
-            </div>
 
-            {/* Cron expression */}
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label className="hud-label">Cron Expression</label>
-              <CronBuilder
-                value={editForm.cron_expr || '* * * * *'}
-                onChange={cron => setEditForm(f => ({ ...f, cron_expr: cron }))}
-              />
-            </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Blueprint Path</label>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <input className="hud-input" placeholder="/path/to/blueprint.yaml" value={editForm.blueprint_path} onChange={e => setEditForm(f => ({ ...f, blueprint_path: e.target.value }))} style={{ flex: 1 }} />
+                  <button className="btn btn-ghost" onClick={handleEditBrowse}><FolderOpen size={13} /> Browse</button>
+                </div>
+              </div>
 
-            {/* Enabled checkbox */}
-            <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                id="edit-sched-enabled"
-                checked={editForm.enabled}
-                onChange={e => setEditForm(f => ({ ...f, enabled: e.target.checked }))}
-                style={{ accentColor: 'rgb(var(--ok))' }}
-              />
-              <label htmlFor="edit-sched-enabled" style={{ fontSize: '0.82rem', color: 'rgb(var(--text))', cursor: 'pointer' }}>
-                Enabled
+              <div>
+                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Cron Expression</label>
+                <CronBuilder value={editForm.cron_expr || '* * * * *'} onChange={cron => setEditForm(f => ({ ...f, cron_expr: cron }))} />
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={editForm.enabled} onChange={e => setEditForm(f => ({ ...f, enabled: e.target.checked }))} style={{ accentColor: 'var(--accent)' }} />
+                <span style={{ fontSize: 'var(--text-md)' }}>Enabled</span>
               </label>
+
+              {editError && (
+                <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-sm)', padding: 'var(--space-2) var(--space-3)', background: 'var(--status-failed-bg)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                  {editError}
+                </div>
+              )}
             </div>
 
-            {/* Error */}
-            {editError && (
-              <div style={{
-                color: 'rgb(var(--danger))',
-                fontSize: '0.78rem',
-                marginBottom: '0.75rem',
-                padding: '0.4rem 0.6rem',
-                background: 'rgba(var(--danger) / 0.1)',
-                borderRadius: '4px',
-                border: '1px solid rgba(var(--danger) / 0.3)',
-              }}>
-                {editError}
-              </div>
-            )}
-
-            {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button className="hud-button-ghost" onClick={() => setEditSchedule(null)}>
-                Cancel
-              </button>
-              <button
-                className="hud-button"
-                onClick={handleEditSave}
-                disabled={editSaving}
-                style={{ borderColor: 'rgba(var(--ok) / 0.5)', color: 'rgb(var(--ok))' }}
-              >
-                {editSaving ? 'Saving…' : 'Save'}
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
+              <button className="btn btn-ghost" onClick={() => setEditSchedule(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleEditSave} disabled={editSaving}>{editSaving ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* Delete confirmation modal */}
+      {/* Delete confirmation */}
       {deleteTarget && (
-        <div className="hud-modal-overlay" onClick={() => setDeleteTarget(null)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <div style={{ padding: '1.25rem' }}>
-              <div style={{ marginBottom: '0.75rem', fontWeight: 600 }}>Delete Schedule</div>
-              <div style={{ fontSize: '0.8rem', color: 'rgb(var(--muted))', marginBottom: '1rem' }}>
-                Delete schedule <span style={{ fontFamily: 'monospace', color: 'rgb(var(--accent))' }}>
-                  {deleteTarget.name || deleteTarget.id.slice(-8)}
-                </span>? This cannot be undone.
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button className="hud-button-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
-                <button
-                  className="hud-button"
-                  style={{ borderColor: 'rgb(var(--danger))', color: 'rgb(var(--danger))' }}
-                  onClick={confirmDelete}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Delete Schedule"
+          message={`Delete schedule "${deleteTarget.name || deleteTarget.id.slice(-8)}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );

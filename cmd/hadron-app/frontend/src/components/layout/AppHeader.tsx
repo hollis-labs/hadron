@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Plus, ChevronRight, MoreVertical, Settings, HelpCircle, FlaskConical } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, FlaskConical, Folder, MoreVertical } from 'lucide-react';
 import type { Workspace } from '../../api/types';
 import type { NavPage } from './AppNav';
 
@@ -9,7 +9,9 @@ function getBreadcrumbs(phase: NavPage): Breadcrumb[] {
   switch (phase) {
     case 'blueprintDetail': return [{ label: 'Blueprints', page: 'blueprints' }, { label: 'Detail' }];
     case 'blueprintWizard': return [{ label: 'Blueprints', page: 'blueprints' }, { label: 'Wizard' }];
-    case 'runDetail': return [{ label: 'Run Log', page: 'runs' }, { label: 'Detail' }];
+    case 'runDetail': return [{ label: 'Runs', page: 'runs' }, { label: 'Detail' }];
+    case 'pipelineDetail': return [{ label: 'Pipelines', page: 'pipelines' }, { label: 'Detail' }];
+    case 'flowBuilder': return [{ label: 'Pipelines', page: 'pipelines' }, { label: 'Flow Builder' }];
     default: return [];
   }
 }
@@ -43,10 +45,10 @@ function ElapsedTimer({ startedAt }: { startedAt: string }) {
     return () => clearInterval(timer);
   }, [startedAt]);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'rgb(var(--warn))' }}>
-      <span className="pulse-running" style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: 'rgb(var(--warn))' }} />
-      <span style={{ fontFamily: 'monospace' }}>{elapsed}</span>
-    </div>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: 'var(--text-sm)', color: 'var(--status-running)' }}>
+      <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--status-running)', animation: 'badge-pulse 1.8s ease-in-out infinite' }} />
+      <span className="mono">{elapsed}</span>
+    </span>
   );
 }
 
@@ -65,133 +67,66 @@ export function AppHeader({
   onToggleDemo,
 }: AppHeaderProps) {
   const breadcrumbs = getBreadcrumbs(phase);
-  const [open, setOpen] = useState(false);
+  const hasBack = breadcrumbs.length > 0;
+  const [wsOpen, setWsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdowns on outside click
   useEffect(() => {
-    if (!open && !menuOpen) return;
+    if (!wsOpen && !menuOpen) return;
     const handler = (e: MouseEvent) => {
-      if (open && dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-      if (menuOpen && menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
+      if (wsOpen && wsRef.current && !wsRef.current.contains(e.target as Node)) setWsOpen(false);
+      if (menuOpen && menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [open, menuOpen]);
+  }, [wsOpen, menuOpen]);
 
   return (
-    <header className="app-header">
-      <span className="app-header-logo">HADRON</span>
-      <span className="app-header-title" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-        {breadcrumbs.length > 0 ? (
-          <>
-            {breadcrumbs.map((bc, i) => (
-              <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                {i > 0 && <ChevronRight size={11} style={{ color: 'rgb(var(--border))' }} />}
-                {bc.page ? (
-                  <span
-                    style={{ cursor: 'pointer', color: 'rgb(var(--accent))' }}
-                    onClick={() => onNavigate(bc.page!)}
-                  >{bc.label}</span>
-                ) : (
-                  <span>{bc.label}</span>
-                )}
-              </span>
-            ))}
-          </>
-        ) : page}
-      </span>
+    <header className="header">
+      {/* Back button for detail pages */}
+      {hasBack && (
+        <button
+          className="btn-ghost btn"
+          onClick={() => breadcrumbs[0].page && onNavigate(breadcrumbs[0].page)}
+          style={{ padding: '4px 6px' }}
+        >
+          <ChevronLeft size={16} />
+        </button>
+      )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginLeft: 'auto' }}>
-        {/* Workspace selector */}
-        <div ref={dropdownRef} style={{ position: 'relative' }}>
-          <button
-            className="hud-button-ghost"
-            onClick={() => setOpen(o => !o)}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-          >
-            <span style={{ fontFamily: 'monospace' }}>{selectedWorkspaceId}</span>
-            <ChevronDown size={12} />
-          </button>
-
-          {open && (
-            <div
-              className="hud-panel"
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                right: 0,
-                minWidth: '160px',
-                zIndex: 100,
-                padding: '0.25rem 0',
-              }}
-            >
-              {workspaces.map(ws => (
-                <button
-                  key={ws.id}
-                  className="hud-button-ghost"
-                  onClick={() => { onSelectWorkspace(ws.id); setOpen(false); }}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    fontSize: '0.78rem',
-                    padding: '0.3rem 0.75rem',
-                    borderRadius: 0,
-                  }}
-                >
-                  <span style={{ fontFamily: 'monospace', flex: 1 }}>{ws.id}</span>
-                  {ws.id === selectedWorkspaceId && (
-                    <span style={{ color: 'rgb(var(--ok))', fontSize: '0.7rem' }}>✓</span>
-                  )}
-                </button>
-              ))}
-
-              {workspaces.length > 0 && (
-                <div style={{ borderTop: '1px solid rgba(var(--text) / 0.1)', margin: '0.2rem 0' }} />
-              )}
-
-              <button
-                className="hud-button-ghost"
-                onClick={() => { setOpen(false); onCreateWorkspace(); }}
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  fontSize: '0.78rem',
-                  padding: '0.3rem 0.75rem',
-                  borderRadius: 0,
-                  color: 'rgb(var(--accent))',
-                }}
-              >
-                <Plus size={12} /> New Workspace
-              </button>
-            </div>
+      {/* Title / Breadcrumbs */}
+      {breadcrumbs.length > 0 ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span className="header-breadcrumb">
+            {breadcrumbs[0].page ? (
+              <span
+                style={{ cursor: 'pointer' }}
+                onClick={() => breadcrumbs[0].page && onNavigate(breadcrumbs[0].page)}
+              >{breadcrumbs[0].label}</span>
+            ) : breadcrumbs[0].label}
+          </span>
+          {breadcrumbs.length > 1 && (
+            <>
+              <ChevronRight size={11} style={{ color: 'var(--text-tertiary)' }} />
+              <span className="header-title">{breadcrumbs[1].label}</span>
+            </>
           )}
         </div>
+      ) : (
+        <span className="header-title">{page}</span>
+      )}
 
+      <div className="header-spacer" />
+
+      <div className="header-actions">
         {/* Demo mode indicator */}
-        {demoMode && (
+        {demoMode && onToggleDemo && (
           <button
-            className="hud-button-ghost"
+            className="btn btn-ghost"
             onClick={onToggleDemo}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '0.3rem',
-              fontSize: '0.68rem', padding: '0.15rem 0.5rem',
-              color: 'rgb(var(--warn))',
-              borderColor: 'rgba(var(--warn) / 0.4)',
-              background: 'rgba(var(--warn) / 0.08)',
-            }}
+            style={{ color: 'var(--status-running)', fontSize: 'var(--text-xs)', padding: '2px 8px', border: '1px solid rgba(245, 158, 11, 0.3)', background: 'rgba(245, 158, 11, 0.08)' }}
           >
             <FlaskConical size={12} /> DEMO
           </button>
@@ -200,85 +135,97 @@ export function AppHeader({
         {/* Active run timer */}
         {activeRunStartedAt && <ElapsedTimer startedAt={activeRunStartedAt} />}
 
-        {/* Daemon indicator */}
-        <div className="app-header-daemon">
-          <span className={`daemon-dot ${daemonStatus}`} />
-          <span>
-            {daemonStatus === 'running'
-              ? `daemon ${daemonAddr}`
-              : daemonStatus === 'error'
-              ? 'daemon error'
-              : 'daemon starting...'}
-          </span>
+        {/* Daemon status */}
+        <div className="daemon-status">
+          <span
+            className="daemon-dot"
+            style={{
+              background: daemonStatus === 'running' ? 'var(--accent)' : daemonStatus === 'error' ? 'var(--status-failed)' : 'var(--text-tertiary)',
+              boxShadow: daemonStatus === 'running' ? '0 0 6px rgba(59, 130, 246, 0.5)' : 'none',
+            }}
+          />
+          <span>{daemonAddr}</span>
         </div>
 
-        {/* App menu */}
+        {/* Workspace selector */}
+        <div ref={wsRef} style={{ position: 'relative' }}>
+          <button className="workspace-btn" onClick={() => setWsOpen(o => !o)}>
+            <Folder size={14} />
+            {selectedWorkspaceId}
+            <ChevronDown size={12} />
+          </button>
+
+          {wsOpen && (
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+              minWidth: 180, zIndex: 100, padding: '4px 0',
+              background: 'var(--bg-overlay)', border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)', boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            }}>
+              {workspaces.map(ws => (
+                <button
+                  key={ws.id}
+                  className="btn btn-ghost"
+                  onClick={() => { onSelectWorkspace(ws.id); setWsOpen(false); }}
+                  style={{
+                    width: '100%', textAlign: 'left', borderRadius: 0,
+                    fontSize: 'var(--text-sm)', padding: '6px 12px', border: 'none',
+                  }}
+                >
+                  <span className="mono" style={{ flex: 1 }}>{ws.id}</span>
+                  {ws.id === selectedWorkspaceId && <span style={{ color: 'var(--accent)', fontSize: 'var(--text-xs)' }}>✓</span>}
+                </button>
+              ))}
+              <div style={{ borderTop: '1px solid var(--border-default)', margin: '4px 0' }} />
+              <button
+                className="btn btn-ghost"
+                onClick={() => { setWsOpen(false); onCreateWorkspace(); }}
+                style={{
+                  width: '100%', textAlign: 'left', borderRadius: 0,
+                  fontSize: 'var(--text-sm)', padding: '6px 12px', border: 'none',
+                  color: 'var(--accent)',
+                }}
+              >
+                <Plus size={12} /> New Workspace
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* App menu (demo toggle, version) */}
         <div ref={menuRef} style={{ position: 'relative' }}>
-          <button
-            className="hud-button-ghost"
-            onClick={() => setMenuOpen(o => !o)}
-            style={{ padding: '0.2rem 0.35rem', border: 'none' }}
-          >
+          <button className="btn btn-ghost" onClick={() => setMenuOpen(o => !o)} style={{ padding: '4px 6px' }}>
             <MoreVertical size={15} />
           </button>
           {menuOpen && (
-            <div
-              className="hud-panel"
-              style={{
-                position: 'absolute', top: 'calc(100% + 4px)', right: 0,
-                minWidth: '150px', zIndex: 100, padding: '0.25rem 0',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-              }}
-            >
-              <button
-                className="hud-button-ghost"
-                onClick={() => { setMenuOpen(false); onNavigate('settings'); }}
-                style={{
-                  width: '100%', textAlign: 'left', display: 'flex',
-                  alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem',
-                  padding: '0.4rem 0.75rem', borderRadius: 0, border: 'none',
-                }}
-              >
-                <Settings size={13} /> Settings
-              </button>
-              <button
-                className="hud-button-ghost"
-                onClick={() => { setMenuOpen(false); onNavigate('help'); }}
-                style={{
-                  width: '100%', textAlign: 'left', display: 'flex',
-                  alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem',
-                  padding: '0.4rem 0.75rem', borderRadius: 0, border: 'none',
-                }}
-              >
-                <HelpCircle size={13} /> Help
-              </button>
-              <div style={{ borderTop: '1px solid rgba(var(--text) / 0.1)', margin: '0.2rem 0' }} />
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+              minWidth: 170, zIndex: 100, padding: '4px 0',
+              background: 'var(--bg-overlay)', border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)', boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            }}>
               {onToggleDemo && (
                 <button
-                  className="hud-button-ghost"
+                  className="btn btn-ghost"
                   onClick={() => { setMenuOpen(false); onToggleDemo(); }}
                   style={{
-                    width: '100%', textAlign: 'left', display: 'flex',
-                    alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem',
-                    padding: '0.4rem 0.75rem', borderRadius: 0, border: 'none',
-                    color: demoMode ? 'rgb(var(--warn))' : undefined,
+                    width: '100%', textAlign: 'left', borderRadius: 0,
+                    fontSize: 'var(--text-sm)', padding: '6px 12px', border: 'none',
+                    color: demoMode ? 'var(--status-running)' : undefined,
                   }}
                 >
-                  <FlaskConical size={13} /> {demoMode ? 'Disable Demo Mode' : 'Enable Demo Mode'}
+                  <FlaskConical size={13} /> {demoMode ? 'Disable Demo' : 'Enable Demo'}
                 </button>
               )}
-              <div style={{ borderTop: '1px solid rgba(var(--text) / 0.1)', margin: '0.2rem 0' }} />
-              <div style={{
-                padding: '0.4rem 0.75rem', fontSize: '0.68rem',
-                color: 'rgb(var(--muted))', lineHeight: '1.4',
-              }}>
-                <div style={{ color: 'rgb(var(--ok))', fontWeight: 700, marginBottom: '0.1rem' }}>HADRON v0.4.0</div>
+              <div style={{ borderTop: '1px solid var(--border-default)', margin: '4px 0' }} />
+              <div style={{ padding: '6px 12px', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                <div style={{ color: 'var(--accent)', fontWeight: 600, marginBottom: 2 }}>hadron v0.4.0</div>
                 <div>Hollis Labs</div>
               </div>
             </div>
           )}
         </div>
-      </div>
+        </div>
     </header>
   );
 }

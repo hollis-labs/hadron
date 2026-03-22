@@ -328,7 +328,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
         <span className="page-title">Blueprints</span>
         {currentDir && (
           <button
-            className="hud-button-ghost"
+            className="btn btn-ghost"
             onClick={() => loadDir(currentDir)}
             title="Refresh (R)"
             style={{ display: 'flex', alignItems: 'center', padding: '0.25rem' }}
@@ -337,28 +337,28 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
           </button>
         )}
         {canGoBack && (
-          <button className="hud-button-ghost" onClick={handleBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <button className="btn btn-ghost" onClick={handleBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
             <ChevronLeft size={13} /> Up
           </button>
         )}
         {onNewBlueprint && (
-          <button className="hud-button" onClick={onNewBlueprint} style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: 'rgba(var(--ok) / 0.5)', color: 'rgb(var(--ok))' }}>
+          <button className="btn btn-primary" onClick={onNewBlueprint} style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}>
             <Plus size={14} /> New Blueprint
           </button>
         )}
         {currentDir && (
-          <button className="hud-button-ghost" onClick={handleNewFolder} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <button className="btn btn-ghost" onClick={handleNewFolder} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <FolderPlus size={14} /> New Folder
           </button>
         )}
-        <button className="hud-button" onClick={handleOpenFolder} style={{ marginLeft: (!onNewBlueprint && !currentDir) ? 'auto' : undefined, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+        <button className="btn btn-primary" onClick={handleOpenFolder} style={{ marginLeft: (!onNewBlueprint && !currentDir) ? 'auto' : undefined, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <FolderOpen size={14} /> Open Folder
         </button>
       </div>
 
       {/* Current path */}
       {currentDir && (
-        <div style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
           {currentDir}
         </div>
       )}
@@ -375,7 +375,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
             style={{ flex: 1 }}
           />
           {search && (
-            <button className="hud-button-ghost" onClick={() => setSearch('')} style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem' }}>
+            <button className="btn btn-ghost" onClick={() => setSearch('')} style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem' }}>
               Clear
             </button>
           )}
@@ -389,12 +389,12 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
             <option value="name-desc">Name Z-A</option>
           </select>
           {entries.some(e => !e.isDir) && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontSize: '0.7rem', color: 'rgb(var(--muted))' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>
               <input
                 type="checkbox"
                 checked={selected.size > 0 && selected.size === entries.filter(e => !e.isDir).length}
                 onChange={selectAllFiles}
-                style={{ accentColor: 'rgb(var(--ok))' }}
+                style={{ accentColor: 'var(--status-success)' }}
               />
               All
             </label>
@@ -404,7 +404,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
 
       {/* Error */}
       {error && (
-        <div style={{ color: 'rgb(var(--danger))', fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'rgba(var(--danger) / 0.1)', borderRadius: '4px', border: '1px solid rgba(var(--danger) / 0.3)' }}>
+        <div style={{ color: 'var(--status-failed)', fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           {error}
         </div>
       )}
@@ -413,40 +413,40 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
       {selected.size > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.5rem',
-          padding: '0.4rem 0.75rem', background: 'rgba(var(--ok) / 0.08)',
+          padding: '0.4rem 0.75rem', background: 'rgba(59, 130, 246, 0.08)',
           border: '1px solid rgba(var(--ok) / 0.2)', borderRadius: '4px',
         }}>
-          <span style={{ fontSize: '0.78rem', color: 'rgb(var(--ok))' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--status-success)' }}>
             {selected.size} selected
           </span>
-          <button className="hud-button-ghost" onClick={handleBatchValidate} style={{ fontSize: '0.7rem' }}>
+          <button className="btn btn-ghost" onClick={handleBatchValidate} style={{ fontSize: '0.7rem' }}>
             Validate All
           </button>
           <button
-            className="hud-button-ghost"
+            className="btn btn-ghost"
             onClick={handleBatchRun}
             disabled={daemonStatus !== 'running'}
             style={{ fontSize: '0.7rem' }}
           >
             Run All
           </button>
-          <button className="hud-button-ghost" onClick={handleBatchMove} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <button className="btn btn-ghost" onClick={handleBatchMove} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <MoveRight size={11} /> Move
           </button>
-          <button className="hud-button-ghost" onClick={handleBatchCopy} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <button className="btn btn-ghost" onClick={handleBatchCopy} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <Copy size={11} /> Copy
           </button>
-          <button className="hud-button-ghost" onClick={handleBatchArchive} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <button className="btn btn-ghost" onClick={handleBatchArchive} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <Archive size={11} /> Archive
           </button>
           <button
-            className="hud-button-ghost"
+            className="btn btn-ghost"
             onClick={() => setBatchDeleteConfirm(true)}
-            style={{ fontSize: '0.7rem', color: 'rgb(var(--danger))' }}
+            style={{ fontSize: '0.7rem', color: 'var(--status-failed)' }}
           >
             Delete Selected
           </button>
-          <button className="hud-button-ghost" onClick={() => setSelected(new Set())} style={{ fontSize: '0.7rem', marginLeft: 'auto' }}>
+          <button className="btn btn-ghost" onClick={() => setSelected(new Set())} style={{ fontSize: '0.7rem', marginLeft: 'auto' }}>
             Clear
           </button>
         </div>
@@ -471,7 +471,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                 onClick={() => entry.isDir ? handleDrillDown(entry) : undefined}
                 style={{
                   cursor: entry.isDir ? 'pointer' : 'default',
-                  ...(i === focusIndex ? { background: 'rgba(var(--text), 0.05)', outline: '1px solid rgba(var(--accent), 0.3)' } : {}),
+                  ...(i === focusIndex ? { background: 'var(--bg-hover)', outline: '1px solid rgba(var(--accent), 0.3)' } : {}),
                 }}
               >
                 {/* Checkbox (files only) */}
@@ -481,24 +481,24 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                     checked={selected.has(entry.path)}
                     onChange={() => toggleSelect(entry.path)}
                     onClick={e => e.stopPropagation()}
-                    style={{ accentColor: 'rgb(var(--ok))', flexShrink: 0, cursor: 'pointer' }}
+                    style={{ accentColor: 'var(--status-success)', flexShrink: 0, cursor: 'pointer' }}
                   />
                 )}
 
                 {/* Icon */}
-                <span style={{ color: entry.isDir ? 'rgb(var(--warn))' : 'rgb(var(--ok))', flexShrink: 0 }}>
+                <span style={{ color: entry.isDir ? 'var(--status-running)' : 'var(--status-success)', flexShrink: 0 }}>
                   {entry.isDir ? <Folder size={15} /> : <FileCode size={15} />}
                 </span>
 
                 {/* Name + metadata */}
                 <div
                   className="file-row-name"
-                  style={{ color: entry.isDir ? 'rgb(var(--text))' : undefined, cursor: !entry.isDir ? 'pointer' : undefined }}
+                  style={{ color: entry.isDir ? 'var(--text-primary)' : undefined, cursor: !entry.isDir ? 'pointer' : undefined }}
                   onClick={() => { if (!entry.isDir && onOpenBlueprint) onOpenBlueprint(entry.path); }}
                 >
                   <span>
                     {entry.name}
-                    {entry.isDir && <span style={{ color: 'rgb(var(--muted))', fontSize: '0.75rem', marginLeft: '0.3rem' }}>/</span>}
+                    {entry.isDir && <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem', marginLeft: '0.3rem' }}>/</span>}
                   </span>
                   {!entry.isDir && metaCache[entry.path] && (() => {
                     const meta = metaCache[entry.path];
@@ -531,7 +531,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                 {!entry.isDir && validateResult && (
                   <span style={{
                     fontSize: '0.7rem',
-                    color: validateResult.valid ? 'rgb(var(--ok))' : 'rgb(var(--danger))',
+                    color: validateResult.valid ? 'var(--status-success)' : 'var(--status-failed)',
                     letterSpacing: '0.06em',
                     flexShrink: 0,
                   }}>
@@ -543,14 +543,14 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                 {!entry.isDir && (
                   <div className="file-row-actions" onClick={e => e.stopPropagation()}>
                     <button
-                      className="hud-button-ghost"
+                      className="btn btn-ghost"
                       onClick={() => handleValidate(entry)}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem' }}
                     >
                       <CheckCircle size={12} /> Validate
                     </button>
                     <button
-                      className="hud-button"
+                      className="btn btn-primary"
                       onClick={() => handleRun(entry)}
                       disabled={daemonStatus !== 'running' || isRunning}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem' }}
@@ -558,11 +558,11 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                       <Play size={12} /> {isRunning ? 'Running…' : 'Run'}
                     </button>
                     <button
-                      className="hud-button-ghost"
+                      className="btn btn-ghost"
                       onClick={() => setDeleteConfirm(entry.path)}
                       style={{ padding: '0.3rem', display: 'flex', alignItems: 'center' }}
                     >
-                      <Trash2 size={12} style={{ color: 'rgb(var(--danger))' }} />
+                      <Trash2 size={12} style={{ color: 'var(--status-failed)' }} />
                     </button>
                   </div>
                 )}
@@ -591,14 +591,14 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
         <div className="hud-modal-overlay" onClick={() => setBatchDeleteConfirm(false)}>
           <div className="hud-modal" onClick={e => e.stopPropagation()}>
             <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Delete {selected.size} Blueprints</h3>
-            <p style={{ fontSize: '0.8rem', color: 'rgb(var(--muted))', marginBottom: '0.5rem' }}>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
               Are you sure you want to delete {selected.size} selected blueprint{selected.size !== 1 ? 's' : ''}? This cannot be undone.
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="hud-button-ghost" onClick={() => setBatchDeleteConfirm(false)}>Cancel</button>
+              <button className="btn btn-ghost" onClick={() => setBatchDeleteConfirm(false)}>Cancel</button>
               <button
-                className="hud-button"
-                style={{ borderColor: 'rgb(var(--danger))', color: 'rgb(var(--danger))' }}
+                className="btn btn-primary"
+                style={{ borderColor: 'var(--status-failed)', color: 'var(--status-failed)' }}
                 onClick={handleBatchDelete}
               >
                 Delete {selected.size}
@@ -614,14 +614,14 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
           <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
             <div style={{ padding: '1.25rem' }}>
               <div style={{ marginBottom: '0.75rem', fontWeight: 600 }}>Run blueprint?</div>
-              <div style={{ fontSize: '0.8rem', color: 'rgb(var(--muted))', marginBottom: '1rem' }}>
-                Execute <span style={{ fontFamily: 'monospace', color: 'rgb(var(--accent))' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
+                Execute <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>
                   {confirmEntry.name}
                 </span> with no inputs?
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button className="hud-button-ghost" onClick={() => setConfirmEntry(null)}>Cancel</button>
-                <button className="hud-button" style={{ borderColor: 'rgba(var(--ok) / 0.5)', color: 'rgb(var(--ok))' }}
+                <button className="btn btn-ghost" onClick={() => setConfirmEntry(null)}>Cancel</button>
+                <button className="btn btn-primary" style={{ borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
                   onClick={() => { const e = confirmEntry; setConfirmEntry(null); doEnqueue(e, {}); }}>
                   Run
                 </button>
@@ -636,17 +636,17 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
         <div className="hud-modal-overlay" onClick={() => setDeleteConfirm(null)}>
           <div className="hud-modal" onClick={e => e.stopPropagation()}>
             <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Delete Blueprint</h3>
-            <p style={{ fontSize: '0.8rem', color: 'rgb(var(--muted))', marginBottom: '0.5rem' }}>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
               Are you sure you want to delete this blueprint? This cannot be undone.
             </p>
-            <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'rgb(var(--muted))', wordBreak: 'break-all' }}>
+            <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
               {deleteConfirm}
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="hud-button-ghost" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+              <button className="btn btn-ghost" onClick={() => setDeleteConfirm(null)}>Cancel</button>
               <button
-                className="hud-button"
-                style={{ borderColor: 'rgb(var(--danger))', color: 'rgb(var(--danger))' }}
+                className="btn btn-primary"
+                style={{ borderColor: 'var(--status-failed)', color: 'var(--status-failed)' }}
                 onClick={() => handleDelete(deleteConfirm)}
               >
                 Delete

@@ -1,0 +1,8 @@
+# Hadron project role config
+# Overrides/extends ~/.agentrc/config.yaml
+
+roles:
+  frontend:
+    file: frontend.md
+
+default_role: frontend

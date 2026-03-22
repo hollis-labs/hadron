@@ -32,119 +32,17 @@ interface FlowBuilderPageProps {
   workspaceId?: string;
 }
 
-// ── Pipeline YAML parsing (reused shape) ──────────────────────────────
-
-interface ParsedStage {
-  name: string;
-  blueprint_path: string;
-  condition: string;
-  depends_on?: string[];
-  position?: { x: number; y: number };
-  outputs?: string[];
-  inputs: Record<string, string>;
-}
+import { parsePipelineYaml, type ParsedPipelineStage } from '../utils/yaml';
 
 interface ParsedPipeline {
   name: string;
-  stages: ParsedStage[];
-}
-
-function unquote(v: string): string {
-  return v.trim().replace(/^["']/, '').replace(/["']$/, '');
+  stages: ParsedPipelineStage[];
 }
 
 function parsePipelineForFlow(content: string): ParsedPipeline | null {
-  try {
-    const pipeline: ParsedPipeline = { name: '', stages: [] };
-    const lines = content.split('\n');
-
-    type Section = 'none' | 'meta' | 'stages' | 'inputs';
-    let section: Section = 'none';
-    let currentStage: ParsedStage | null = null;
-    let inStageInputs = false;
-    let inDependsOn = false;
-    let inPosition = false;
-    let inOutputs = false;
-
-    for (const line of lines) {
-      if (line.trim() === '' || line.trim().startsWith('#')) continue;
-      const indent = line.search(/\S/);
-      const trimmed = line.trim();
-
-      if (indent === 0) {
-        if (currentStage) { pipeline.stages.push(currentStage); currentStage = null; }
-        inStageInputs = false; inDependsOn = false; inPosition = false; inOutputs = false;
-
-        if (trimmed === 'meta:') { section = 'meta'; continue; }
-        if (trimmed === 'stages:') { section = 'stages'; continue; }
-        if (trimmed === 'inputs:') { section = 'inputs'; continue; }
-        section = 'none'; continue;
-      }
-
-      if (section === 'meta' && indent >= 2) {
-        if (trimmed.startsWith('name:')) pipeline.name = unquote(trimmed.slice(5));
-        continue;
-      }
-
-      if (section === 'stages') {
-        if (trimmed.startsWith('- ')) {
-          if (currentStage) pipeline.stages.push(currentStage);
-          inStageInputs = false; inDependsOn = false; inPosition = false; inOutputs = false;
-          currentStage = { name: '', blueprint_path: '', condition: '', inputs: {} };
-          const after = trimmed.slice(2).trim();
-          if (after.startsWith('name:')) currentStage.name = unquote(after.slice(5));
-          continue;
-        }
-
-        if (currentStage && indent >= 4) {
-          // Sub-blocks at indent 6+
-          if (inStageInputs && indent >= 6) {
-            const ci = trimmed.indexOf(':');
-            if (ci > 0) currentStage.inputs[trimmed.slice(0, ci).trim()] = unquote(trimmed.slice(ci + 1));
-            continue;
-          }
-          if (inDependsOn && indent >= 6) {
-            if (trimmed.startsWith('- ')) {
-              if (!currentStage.depends_on) currentStage.depends_on = [];
-              currentStage.depends_on.push(unquote(trimmed.slice(2)));
-            }
-            continue;
-          }
-          if (inPosition && indent >= 6) {
-            if (!currentStage.position) currentStage.position = { x: 0, y: 0 };
-            if (trimmed.startsWith('x:')) currentStage.position.x = parseFloat(unquote(trimmed.slice(2))) || 0;
-            if (trimmed.startsWith('y:')) currentStage.position.y = parseFloat(unquote(trimmed.slice(2))) || 0;
-            continue;
-          }
-          if (inOutputs && indent >= 6) {
-            if (trimmed.startsWith('- ')) {
-              if (!currentStage.outputs) currentStage.outputs = [];
-              currentStage.outputs.push(unquote(trimmed.slice(2)));
-            }
-            continue;
-          }
-
-          // Reset sub-block flags at indent 4
-          inStageInputs = false; inDependsOn = false; inPosition = false; inOutputs = false;
-
-          if (trimmed.startsWith('blueprint_path:')) currentStage.blueprint_path = unquote(trimmed.slice(15));
-          else if (trimmed.startsWith('name:')) currentStage.name = unquote(trimmed.slice(5));
-          else if (trimmed.startsWith('if:')) currentStage.condition = unquote(trimmed.slice(3));
-          else if (trimmed === 'inputs:') inStageInputs = true;
-          else if (trimmed === 'depends_on:') inDependsOn = true;
-          else if (trimmed === 'position:') inPosition = true;
-          else if (trimmed === 'outputs:') inOutputs = true;
-          continue;
-        }
-        continue;
-      }
-    }
-
-    if (currentStage) pipeline.stages.push(currentStage);
-    return pipeline;
-  } catch {
-    return null;
-  }
+  const raw = parsePipelineYaml(content);
+  if (!raw) return null;
+  return { name: raw.name, stages: raw.stages };
 }
 
 // ── Convert parsed pipeline to React Flow nodes/edges ─────────────────
@@ -368,18 +266,15 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-header" style={{ gap: '0.5rem', flexShrink: 0 }}>
-        <button className="hud-button-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-          <ChevronLeft size={13} /> Back
-        </button>
         <span className="page-title">Flow Builder</span>
       </div>
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{
-          background: 'rgb(var(--panel))', border: '1px solid rgb(var(--border))',
+          background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
           borderRadius: 'var(--radius-lg)', padding: '1.5rem', width: '380px',
         }}>
-          <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgb(var(--muted))', marginBottom: '0.75rem' }}>
+          <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--text-tertiary)', marginBottom: '0.75rem' }}>
             Open Pipeline
           </div>
 
@@ -389,7 +284,7 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
               size={12}
               style={{
                 position: 'absolute', left: '0.5rem', top: '50%', transform: 'translateY(-50%)',
-                color: 'rgb(var(--muted))', pointerEvents: 'none',
+                color: 'var(--text-tertiary)', pointerEvents: 'none',
               }}
             />
             <input
@@ -408,12 +303,12 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
           {/* File list */}
           <div style={{
             maxHeight: '220px', overflow: 'auto', marginBottom: '0.75rem',
-            border: '1px solid rgb(var(--border))', borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
           }}>
             {loadingFiles ? (
-              <div style={{ padding: '0.75rem', textAlign: 'center', color: 'rgb(var(--muted))', fontSize: '0.75rem' }}>Loading...</div>
+              <div style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>Loading...</div>
             ) : filtered.length === 0 ? (
-              <div style={{ padding: '0.75rem', textAlign: 'center', color: 'rgb(var(--muted))', fontSize: '0.75rem' }}>
+              <div style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>
                 {files.length === 0 ? 'No pipeline files found' : 'No matches'}
               </div>
             ) : (
@@ -425,13 +320,13 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
                     display: 'flex', alignItems: 'center', gap: '0.4rem', width: '100%',
                     padding: '0.4rem 0.6rem', background: 'none', border: 'none',
                     borderBottom: '1px solid rgba(var(--border) / 0.5)',
-                    color: 'rgb(var(--text))', cursor: 'pointer', fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
                     fontSize: '0.78rem', textAlign: 'left', transition: 'background 0.1s',
                   }}
                   onMouseOver={e => (e.currentTarget.style.background = 'rgba(var(--panel2) / 0.8)')}
                   onMouseOut={e => (e.currentTarget.style.background = 'none')}
                 >
-                  <FileCode size={13} style={{ color: 'rgb(var(--accent))', flexShrink: 0 }} />
+                  <FileCode size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
                   {f.name}
                 </button>
               ))
@@ -441,7 +336,7 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
           {/* Actions */}
           <div style={{ display: 'flex', gap: '0.4rem' }}>
             <button
-              className="hud-button"
+              className="btn btn-primary"
               onClick={handleNew}
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem' }}
             >
@@ -787,7 +682,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
         <div className="page-header">
-          <button className="hud-button-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
             <ChevronLeft size={13} /> Back
           </button>
           <span className="page-title">Loading...</span>
@@ -801,12 +696,12 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
         <div className="page-header">
-          <button className="hud-button-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
             <ChevronLeft size={13} /> Back
           </button>
           <span className="page-title">Error</span>
         </div>
-        <div style={{ color: 'rgb(var(--danger))', fontSize: '0.8rem', padding: '0.75rem', background: 'rgba(var(--danger) / 0.1)', borderRadius: '4px', border: '1px solid rgba(var(--danger) / 0.3)' }}>
+        <div style={{ color: 'var(--status-failed)', fontSize: '0.8rem', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           {error}
         </div>
       </div>
@@ -817,16 +712,13 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
       <div className="page-header" style={{ gap: '0.5rem', flexShrink: 0 }}>
-        <button className="hud-button-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-          <ChevronLeft size={13} /> Back
-        </button>
-        <span className="page-title">{pipelineName}</span>
-        <span style={{ fontSize: '0.72rem', color: 'rgb(var(--muted))', fontFamily: 'monospace' }}>
-          Flow Builder
+        <span className="page-title">Flow Builder</span>
+        <span className="mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
+          {pipelineName}
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.35rem' }}>
           <button
-            className="hud-button-ghost"
+            className="btn btn-ghost"
             onClick={() => setShowYamlPreview(!showYamlPreview)}
             style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}
             title="YAML Preview"
@@ -834,7 +726,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
             <Code size={12} /> YAML
           </button>
           <button
-            className="hud-button-ghost"
+            className="btn btn-ghost"
             onClick={handleSaveAs}
             disabled={saving}
             style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}
@@ -842,21 +734,21 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
             Save As
           </button>
           <button
-            className="hud-button"
+            className="btn btn-primary"
             onClick={handleSave}
             disabled={saving}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', borderColor: 'rgba(var(--ok) / 0.5)', color: 'rgb(var(--ok))' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
           >
             <Save size={12} /> {saving ? 'Saving...' : 'Save'}
           </button>
           <button
-            className="hud-button"
+            className="btn btn-primary"
             onClick={handleRun}
             disabled={daemonStatus !== 'running' || running}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.3rem',
-              borderColor: running ? 'rgba(var(--warn) / 0.5)' : 'rgba(var(--ok) / 0.5)',
-              color: running ? 'rgb(var(--warn))' : 'rgb(var(--ok))',
+              borderColor: running ? 'rgba(var(--warn) / 0.5)' : 'rgba(59, 130, 246, 0.5)',
+              color: running ? 'var(--status-running)' : 'var(--status-success)',
             }}
           >
             <Play size={12} /> {running ? 'Running...' : 'Run'}
@@ -868,7 +760,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <NodePalette onAddBlankNode={handleAddBlankNode} />
 
-        <div style={{ flex: 1, borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid rgb(var(--border))' }}>
+        <div style={{ flex: 1, borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-default)' }}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -888,15 +780,15 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
             maxZoom={2}
             proOptions={{ hideAttribution: true }}
           >
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgb(var(--border))" />
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border-default)" />
             <MiniMap
-              nodeColor="rgb(var(--border))"
+              nodeColor="var(--border-default)"
               maskColor="rgba(0, 0, 0, 0.6)"
-              style={{ borderRadius: 'var(--radius-md)', border: '1px solid rgb(var(--border))' }}
+              style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}
             />
             <Controls
               showInteractive={false}
-              style={{ borderRadius: 'var(--radius-md)', border: '1px solid rgb(var(--border))' }}
+              style={{ borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}
             />
           </ReactFlow>
         </div>
@@ -917,8 +809,8 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
       {(showRunLog || runEvents.length > 0) && (
         <div style={{
           flexShrink: 0,
-          borderTop: '1px solid rgb(var(--border))',
-          background: 'rgb(var(--panel))',
+          borderTop: '1px solid var(--border-default)',
+          background: 'var(--bg-surface)',
           display: 'flex',
           flexDirection: 'column',
           maxHeight: showRunLog ? '200px' : '28px',
@@ -931,7 +823,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
             style={{
               display: 'flex', alignItems: 'center', gap: '0.4rem',
               padding: '0.3rem 0.75rem', background: 'none', border: 'none',
-              color: 'rgb(var(--muted))', cursor: 'pointer', fontFamily: 'var(--font-mono)',
+              color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
               fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.1em',
               flexShrink: 0,
             }}
@@ -939,7 +831,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
             {showRunLog ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
             Run Log ({runEvents.length} events)
             {running && (
-              <span className="pulse-running" style={{ color: 'rgb(var(--warn))', marginLeft: '0.3rem' }}>
+              <span className="pulse-running" style={{ color: 'var(--status-running)', marginLeft: '0.3rem' }}>
                 running
               </span>
             )}
@@ -952,7 +844,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
               style={{
                 flex: 1, overflow: 'auto', padding: '0 0.75rem 0.5rem',
                 fontFamily: "'Courier New', monospace", fontSize: '0.72rem',
-                lineHeight: '1.5', color: 'rgb(var(--muted))',
+                lineHeight: '1.5', color: 'var(--text-tertiary)',
               }}
             >
               {runEvents.length === 0 ? (
@@ -963,8 +855,8 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
                 runEvents.map((evt, i) => (
                   <div key={i} className="event-row">
                     <span className="event-type" style={{
-                      color: evt.event_type === 'error' ? 'rgb(var(--danger))'
-                        : evt.event_type === 'step_end' ? 'rgb(var(--ok))'
+                      color: evt.event_type === 'error' ? 'var(--status-failed)'
+                        : evt.event_type === 'step_end' ? 'var(--status-success)'
                         : undefined,
                     }}>
                       {evt.step_name ?? evt.event_type}
@@ -987,22 +879,22 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
             style={{ maxWidth: '900px', width: '90vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgb(var(--muted))' }}>
+              <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
                 Pipeline YAML Preview (live)
               </span>
               <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button className="hud-button-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
+                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
                   <Copy size={12} /> Copy
                 </button>
-                <button className="hud-button-ghost" onClick={() => setShowYamlPreview(false)} style={{ padding: '0.25rem' }}>
+                <button className="btn btn-ghost" onClick={() => setShowYamlPreview(false)} style={{ padding: '0.25rem' }}>
                   <X size={15} />
                 </button>
               </div>
             </div>
             <pre style={{
               flex: 1, overflow: 'auto', padding: '0.75rem',
-              background: 'rgb(var(--bg))', borderRadius: '4px',
-              border: '1px solid rgb(var(--border))',
+              background: 'var(--bg-base)', borderRadius: '4px',
+              border: '1px solid var(--border-default)',
               fontSize: '0.78rem', lineHeight: '1.6', whiteSpace: 'pre-wrap',
               wordBreak: 'break-all',
             }}>

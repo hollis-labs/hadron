@@ -6,53 +6,53 @@ interface AppFooterProps {
 
 const HINTS: Partial<Record<NavPage, { key: string; desc: string }[]>> = {
   dashboard: [
-    { key: 'R', desc: 'refresh' },
+    { key: 'R', desc: 'Refresh' },
   ],
   blueprints: [
-    { key: 'R', desc: 'refresh' },
-    { key: 'N', desc: 'new blueprint' },
-    { key: 'Esc', desc: 'go up' },
+    { key: 'R', desc: 'Refresh' },
+    { key: 'N', desc: 'New blueprint' },
+    { key: '↑↓', desc: 'Navigate' },
+    { key: 'Space', desc: 'Select' },
+    { key: 'Enter', desc: 'Open' },
   ],
   blueprintDetail: [
-    { key: 'Esc', desc: 'back to list' },
+    { key: 'Esc', desc: 'Back' },
   ],
   blueprintWizard: [
-    { key: 'Esc', desc: 'back to list' },
+    { key: 'Esc', desc: 'Back' },
   ],
   runs: [
-    { key: 'R', desc: 'refresh' },
+    { key: 'R', desc: 'Refresh' },
+    { key: '↑↓', desc: 'Navigate' },
+    { key: 'Enter', desc: 'Open' },
   ],
   runDetail: [
-    { key: 'Esc', desc: 'back to log' },
-    { key: 'R', desc: 'refresh' },
+    { key: 'Esc', desc: 'Back' },
+    { key: 'R', desc: 'Refresh' },
   ],
   schedules: [
-    { key: 'R', desc: 'refresh' },
+    { key: 'R', desc: 'Refresh' },
   ],
   pipelines: [
-    { key: 'R', desc: 'refresh' },
+    { key: 'R', desc: 'Refresh' },
   ],
   telemetry: [
-    { key: 'R', desc: 'refresh' },
-    { key: 'Esc', desc: 'back to list' },
+    { key: 'R', desc: 'Refresh' },
+    { key: 'Esc', desc: 'Back' },
   ],
 };
 
 export function AppFooter({ phase }: AppFooterProps) {
   const hints = phase ? HINTS[phase] ?? [] : [];
   return (
-    <footer className="app-footer">
+    <footer className="footer">
       {hints.map(({ key, desc }) => (
         <span key={key + desc} className="footer-hint">
-          <kbd>{key}</kbd> {desc}
+          <span className="kbd">{key}</span> {desc}
         </span>
       ))}
-      <span className="footer-hint" style={{ marginLeft: 'auto' }}>
-        <kbd>?</kbd> help
-      </span>
-      <span className="footer-hint" style={{ color: 'rgb(var(--muted))' }}>
-        Hadron v0.4.0 · Hollis Labs
-      </span>
+      <div className="footer-spacer" />
+      <span className="footer-meta">hadron v0.4.0</span>
     </footer>
   );
 }

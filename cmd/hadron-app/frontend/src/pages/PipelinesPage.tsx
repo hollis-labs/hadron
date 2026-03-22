@@ -4,6 +4,9 @@ import { FolderOpen, Play, ChevronLeft, Folder, FileCode, X, Layers, Plus, Penci
 import { usePoll } from '../hooks/usePoll';
 import { openDirectoryDialog, listFilesInDir, enqueuePipeline, listPipelines, getPipelineStages, readBlueprintFile, saveBlueprintFile, createBlueprintFile, deleteBlueprintFile, selectBlueprintFile } from '../api/client';
 import { EmptyState } from '../components/ui/EmptyState';
+import { formatDuration, formatTime } from '../utils/format';
+import { shortPath } from '../utils/path';
+import { parsePipelineYaml } from '../utils/yaml';
 import type { FileEntry, Pipeline, PipelineStage } from '../api/types';
 
 interface PipelinesPageProps {
@@ -12,24 +15,6 @@ interface PipelinesPageProps {
   onOpenRun: (runId: string) => void;
   onOpenPipeline?: (path: string) => void;
   onOpenFlowBuilder?: (path: string) => void;
-}
-
-function formatDuration(start?: string | null, end?: string | null): string {
-  if (!start || !end) return '—';
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  if (ms < 0) return '—';
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function formatTime(ts?: string | null): string {
-  if (!ts) return '—';
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function shortPath(p: string): string {
-  const parts = p.split(/[/\\]/);
-  return parts.slice(-2).join('/');
 }
 
 // Pipeline editor types
@@ -81,139 +66,23 @@ function serializePipeline(form: PipelineForm): string {
   return yaml.trimEnd() + '\n';
 }
 
-// Helper: strip quotes from a YAML value
-function unquote(v: string): string {
-  return v.trim().replace(/^["']/, '').replace(/["']$/, '');
-}
 
-// Indentation-aware YAML parser for pipeline spec
-function parsePipelineYaml(content: string): PipelineForm | null {
-  try {
-    const form: PipelineForm = { name: '', stop_on_fail: true, stages: [], inputs: {} };
-    const lines = content.split('\n');
-
-    // State machine: track which top-level block we're in
-    type Section = 'none' | 'meta' | 'stages' | 'inputs';
-    let section: Section = 'none';
-    let currentStage: PipelineStageForm | null = null;
-    let inStageInputs = false;
-
-    for (const line of lines) {
-      // Skip blank lines and comments
-      if (line.trim() === '' || line.trim().startsWith('#')) continue;
-
-      // Measure indentation (number of leading spaces)
-      const indent = line.search(/\S/);
-
-      // Top-level keys (indent 0)
-      if (indent === 0) {
-        const trimmed = line.trim();
-        if (trimmed === 'meta:') {
-          // Flush any pending stage
-          if (currentStage) { form.stages.push(currentStage); currentStage = null; }
-          inStageInputs = false;
-          section = 'meta';
-          continue;
-        }
-        if (trimmed.startsWith('stop_on_fail:')) {
-          if (currentStage) { form.stages.push(currentStage); currentStage = null; }
-          inStageInputs = false;
-          section = 'none';
-          form.stop_on_fail = trimmed.includes('true');
-          continue;
-        }
-        if (trimmed === 'stages:') {
-          if (currentStage) { form.stages.push(currentStage); currentStage = null; }
-          inStageInputs = false;
-          section = 'stages';
-          continue;
-        }
-        if (trimmed === 'inputs:') {
-          if (currentStage) { form.stages.push(currentStage); currentStage = null; }
-          inStageInputs = false;
-          section = 'inputs';
-          continue;
-        }
-        // Unknown top-level key — skip
-        section = 'none';
-        continue;
-      }
-
-      // meta: block (indent 2)
-      if (section === 'meta' && indent >= 2) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('name:')) {
-          form.name = unquote(trimmed.slice(5));
-        }
-        continue;
-      }
-
-      // stages: block
-      if (section === 'stages') {
-        const trimmed = line.trim();
-
-        // New stage item: "  - name: ..."
-        if (trimmed.startsWith('- ')) {
-          if (currentStage) form.stages.push(currentStage);
-          inStageInputs = false;
-          currentStage = { name: '', blueprint_path: '', inputs: {}, condition: '' };
-          // The "- " prefix may contain name: on same line
-          const after = trimmed.slice(2).trim();
-          if (after.startsWith('name:')) {
-            currentStage.name = unquote(after.slice(5));
-          }
-          continue;
-        }
-
-        // Stage properties (indent 4+)
-        if (currentStage && indent >= 4) {
-          if (inStageInputs && indent >= 6) {
-            // key: value inside stage inputs
-            const colonIdx = trimmed.indexOf(':');
-            if (colonIdx > 0) {
-              const key = trimmed.slice(0, colonIdx).trim();
-              const val = unquote(trimmed.slice(colonIdx + 1));
-              currentStage.inputs[key] = val;
-            }
-            continue;
-          }
-          // Not inside inputs (or back to indent 4)
-          inStageInputs = false;
-          if (trimmed.startsWith('blueprint_path:')) {
-            currentStage.blueprint_path = unquote(trimmed.slice(15));
-          } else if (trimmed.startsWith('name:')) {
-            currentStage.name = unquote(trimmed.slice(5));
-          } else if (trimmed.startsWith('if:')) {
-            currentStage.condition = unquote(trimmed.slice(3));
-          } else if (trimmed === 'inputs:') {
-            inStageInputs = true;
-          }
-          continue;
-        }
-        continue;
-      }
-
-      // Top-level inputs: block (indent 2)
-      if (section === 'inputs' && indent >= 2) {
-        const trimmed = line.trim();
-        const colonIdx = trimmed.indexOf(':');
-        if (colonIdx > 0) {
-          const key = trimmed.slice(0, colonIdx).trim();
-          const val = unquote(trimmed.slice(colonIdx + 1));
-          form.inputs[key] = val;
-        }
-        continue;
-      }
-    }
-
-    // Flush last stage
-    if (currentStage) form.stages.push(currentStage);
-    if (form.stages.length === 0) form.stages.push({ ...EMPTY_STAGE });
-
-    return form;
-  } catch {
-    return null;
-  }
+function parsePipelineToForm(content: string): PipelineForm | null {
+  const raw = parsePipelineYaml(content);
+  if (!raw) return null;
+  const form: PipelineForm = {
+    name: raw.name,
+    stop_on_fail: raw.stop_on_fail,
+    stages: raw.stages.map(s => ({
+      name: s.name,
+      blueprint_path: s.blueprint_path,
+      inputs: s.inputs,
+      condition: s.condition,
+    })),
+    inputs: raw.inputs,
+  };
+  if (form.stages.length === 0) form.stages.push({ ...EMPTY_STAGE });
+  return form;
 }
 
 export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipeline, onOpenFlowBuilder }: PipelinesPageProps) {
@@ -322,7 +191,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
   const handleEditPipeline = async (entry: FileEntry) => {
     try {
       const content = await readBlueprintFile(entry.path);
-      const form = parsePipelineYaml(content);
+      const form = parsePipelineToForm(content);
       if (!form) {
         toast.error('Failed to parse pipeline file');
         return;
@@ -479,17 +348,17 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
       <div className="page-header" style={{ gap: '0.5rem' }}>
         <span className="page-title">Pipelines</span>
         {canGoBack && (
-          <button className="hud-button-ghost" onClick={handleBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <button className="btn btn-ghost" onClick={handleBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
             <ChevronLeft size={13} /> Up
           </button>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.35rem' }}>
           {currentDir && (
-            <button className="hud-button" onClick={handleNewPipeline} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <button className="btn btn-primary" onClick={handleNewPipeline} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <Plus size={14} /> New Pipeline
             </button>
           )}
-          <button className="hud-button" onClick={handleOpenFolder} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <button className="btn btn-primary" onClick={handleOpenFolder} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <FolderOpen size={14} /> Open Folder
           </button>
         </div>
@@ -497,14 +366,14 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
 
       {/* Current path */}
       {currentDir && (
-        <div style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
           {currentDir}
         </div>
       )}
 
       {/* Dir error */}
       {dirError && (
-        <div style={{ color: 'rgb(var(--danger))', fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'rgba(var(--danger) / 0.1)', borderRadius: '4px', border: '1px solid rgba(var(--danger) / 0.3)' }}>
+        <div style={{ color: 'var(--status-failed)', fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           {dirError}
         </div>
       )}
@@ -525,27 +394,27 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                 onClick={() => entry.isDir ? handleDrillDown(entry) : onOpenPipeline?.(entry.path)}
                 style={{ cursor: 'pointer' }}
               >
-                <span style={{ color: entry.isDir ? 'rgb(var(--warn))' : 'rgb(var(--accent))', flexShrink: 0 }}>
+                <span style={{ color: entry.isDir ? 'var(--status-running)' : 'var(--accent)', flexShrink: 0 }}>
                   {entry.isDir ? <Folder size={15} /> : <FileCode size={15} />}
                 </span>
-                <span className="file-row-name" style={{ color: entry.isDir ? 'rgb(var(--text))' : undefined }}>
+                <span className="file-row-name" style={{ color: entry.isDir ? 'var(--text-primary)' : undefined }}>
                   {entry.name}
-                  {entry.isDir && <span style={{ color: 'rgb(var(--muted))', fontSize: '0.75rem', marginLeft: '0.3rem' }}>/</span>}
+                  {entry.isDir && <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem', marginLeft: '0.3rem' }}>/</span>}
                 </span>
                 {!entry.isDir && (
                   <div className="file-row-actions" onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: '0.25rem' }}>
                     {onOpenFlowBuilder && (
                       <button
-                        className="hud-button-ghost"
+                        className="btn btn-ghost"
                         onClick={() => onOpenFlowBuilder(entry.path)}
                         title="Open in Flow Builder"
-                        style={{ padding: '0.15rem 0.3rem', color: 'rgb(var(--accent))' }}
+                        style={{ padding: '0.15rem 0.3rem', color: 'var(--accent)' }}
                       >
                         <Workflow size={12} />
                       </button>
                     )}
                     <button
-                      className="hud-button-ghost"
+                      className="btn btn-ghost"
                       onClick={() => handleEditPipeline(entry)}
                       title="Edit pipeline"
                       style={{ padding: '0.15rem 0.3rem' }}
@@ -553,15 +422,15 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                       <Pencil size={12} />
                     </button>
                     <button
-                      className="hud-button-ghost"
+                      className="btn btn-ghost"
                       onClick={() => setDeleteTarget(entry)}
                       title="Delete pipeline"
-                      style={{ padding: '0.15rem 0.3rem', color: 'rgb(var(--danger))' }}
+                      style={{ padding: '0.15rem 0.3rem', color: 'var(--status-failed)' }}
                     >
                       <Trash2 size={12} />
                     </button>
                     <button
-                      className="hud-button"
+                      className="btn btn-primary"
                       onClick={() => handleRun(entry)}
                       disabled={daemonStatus !== 'running' || isRunning}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem' }}
@@ -578,14 +447,14 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
 
       {/* Recent pipeline runs */}
       <div style={{ marginTop: '0.5rem' }}>
-        <div style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgb(var(--muted))', marginBottom: '0.4rem' }}>
+        <div style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '0.4rem' }}>
           Recent Pipeline Runs
         </div>
-        <div className="hud-panel" style={{ overflow: 'hidden' }}>
+        <div className="section" style={{ overflow: 'hidden' }}>
           {pipelines.length === 0 ? (
             <EmptyState message="No pipeline runs yet" sub="Run a pipeline file above to see results here" />
           ) : (
-            <table className="hud-table">
+            <table className="table">
               <thead>
                 <tr>
                   <th>Pipeline</th>
@@ -598,30 +467,30 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
               <tbody>
                 {pipelines.map(p => (
                   <tr key={p.id}>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'rgb(var(--muted))' }}>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
                       {shortPath(p.pipeline_path)}
                     </td>
                     <td>
                       <span style={{
                         fontSize: '0.72rem',
-                        color: p.status === 'success' ? 'rgb(var(--ok))'
-                          : p.status === 'failed' ? 'rgb(var(--danger))'
-                          : p.status === 'running' ? 'rgb(var(--accent))'
-                          : 'rgb(var(--muted))',
+                        color: p.status === 'success' ? 'var(--status-success)'
+                          : p.status === 'failed' ? 'var(--status-failed)'
+                          : p.status === 'running' ? 'var(--accent)'
+                          : 'var(--text-tertiary)',
                         letterSpacing: '0.05em',
                       }}>
                         {p.status}
                       </span>
                     </td>
-                    <td style={{ fontSize: '0.78rem', color: 'rgb(var(--muted))' }}>
+                    <td style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>
                       {formatTime(p.started_at)}
                     </td>
-                    <td style={{ fontSize: '0.78rem', color: 'rgb(var(--muted))' }}>
+                    <td style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>
                       {formatDuration(p.started_at, p.ended_at)}
                     </td>
                     <td>
                       <button
-                        className="hud-button-ghost"
+                        className="btn btn-ghost"
                         onClick={() => handleShowStages(p)}
                         disabled={stagesLoading}
                         style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem' }}
@@ -643,10 +512,10 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
           <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', width: '100%' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
               <div>
-                <div style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgb(var(--muted))' }}>Pipeline Stages</div>
-                <div style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'rgb(var(--muted))', marginTop: '0.15rem' }}>{stageModal.pipelineId}</div>
+                <div style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>Pipeline Stages</div>
+                <div style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>{stageModal.pipelineId}</div>
               </div>
-              <button className="hud-button-ghost" onClick={() => setStageModal(null)} style={{ padding: '0.25rem' }}>
+              <button className="btn btn-ghost" onClick={() => setStageModal(null)} style={{ padding: '0.25rem' }}>
                 <X size={15} />
               </button>
             </div>
@@ -654,7 +523,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
             {stageModal.stages.length === 0 ? (
               <EmptyState message="No stages" sub="This pipeline run has no recorded stages yet" />
             ) : (
-              <table className="hud-table">
+              <table className="table">
                 <thead>
                   <tr>
                     <th>#</th>
@@ -666,16 +535,16 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                 <tbody>
                   {stageModal.stages.map(stage => (
                     <tr key={stage.id}>
-                      <td style={{ color: 'rgb(var(--muted))', fontSize: '0.8rem' }}>{stage.stage_index + 1}</td>
+                      <td style={{ color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>{stage.stage_index + 1}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{stage.stage_name}</td>
                       <td>
                         <span style={{
                           fontSize: '0.72rem',
-                          color: stage.status === 'success' ? 'rgb(var(--ok))'
-                            : stage.status === 'failed' ? 'rgb(var(--danger))'
-                            : stage.status === 'running' ? 'rgb(var(--accent))'
-                            : stage.status === 'skipped' ? 'rgb(var(--warn))'
-                            : 'rgb(var(--muted))',
+                          color: stage.status === 'success' ? 'var(--status-success)'
+                            : stage.status === 'failed' ? 'var(--status-failed)'
+                            : stage.status === 'running' ? 'var(--accent)'
+                            : stage.status === 'skipped' ? 'var(--status-running)'
+                            : 'var(--text-tertiary)',
                         }}>
                           {stage.status}
                         </span>
@@ -683,14 +552,14 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                       <td>
                         {stage.run_id ? (
                           <button
-                            className="hud-button-ghost"
+                            className="btn btn-ghost"
                             onClick={() => { setStageModal(null); onOpenRun(stage.run_id); }}
                             style={{ fontFamily: 'monospace', fontSize: '0.72rem', padding: '0.1rem 0.3rem' }}
                           >
                             {stage.run_id.slice(-8)}
                           </button>
                         ) : (
-                          <span style={{ color: 'rgb(var(--muted))', fontSize: '0.78rem' }}>—</span>
+                          <span style={{ color: 'var(--text-tertiary)', fontSize: '0.78rem' }}>—</span>
                         )}
                       </td>
                     </tr>
@@ -700,7 +569,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="hud-button-ghost" onClick={() => setStageModal(null)}>Close</button>
+              <button className="btn btn-ghost" onClick={() => setStageModal(null)}>Close</button>
             </div>
           </div>
         </div>
@@ -711,7 +580,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
         <div className="hud-modal-overlay" onClick={() => setEditorMode(null)}>
           <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', width: '100%' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
-              <Layers size={16} style={{ color: 'rgb(var(--accent))' }} />
+              <Layers size={16} style={{ color: 'var(--accent)' }} />
               <span style={{ fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em' }}>
                 {editorMode === 'create' ? 'New Pipeline' : 'Edit Pipeline'}
               </span>
@@ -737,9 +606,9 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                 id="pl-stop-on-fail"
                 checked={editorForm.stop_on_fail}
                 onChange={e => setEditorForm(f => ({ ...f, stop_on_fail: e.target.checked }))}
-                style={{ accentColor: 'rgb(var(--ok))' }}
+                style={{ accentColor: 'var(--status-success)' }}
               />
-              <label htmlFor="pl-stop-on-fail" style={{ fontSize: '0.82rem', color: 'rgb(var(--text))', cursor: 'pointer' }}>
+              <label htmlFor="pl-stop-on-fail" style={{ fontSize: '0.82rem', color: 'var(--text-primary)', cursor: 'pointer' }}>
                 Stop on first failure
               </label>
             </div>
@@ -750,7 +619,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                 <label className="hud-label" style={{ margin: 0 }}>Stages</label>
                 <button
                   type="button"
-                  className="hud-button-ghost"
+                  className="btn btn-ghost"
                   onClick={addStage}
                   style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.7rem', padding: '0.15rem 0.4rem' }}
                 >
@@ -764,13 +633,13 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                     key={i}
                     style={{
                       padding: '0.5rem',
-                      background: 'rgb(var(--panel2))',
+                      background: 'var(--bg-raised)',
                       borderRadius: '4px',
-                      border: '1px solid rgb(var(--border))',
+                      border: '1px solid var(--border-default)',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
-                      <span style={{ fontSize: '0.68rem', color: 'rgb(var(--muted))', fontWeight: 600, width: '1.5rem', textAlign: 'center' }}>
+                      <span style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', fontWeight: 600, width: '1.5rem', textAlign: 'center' }}>
                         {i + 1}
                       </span>
                       <input
@@ -782,7 +651,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                       />
                       <button
                         type="button"
-                        className="hud-button-ghost"
+                        className="btn btn-ghost"
                         onClick={() => moveStage(i, -1)}
                         disabled={i === 0}
                         style={{ padding: '0.1rem' }}
@@ -792,7 +661,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                       </button>
                       <button
                         type="button"
-                        className="hud-button-ghost"
+                        className="btn btn-ghost"
                         onClick={() => moveStage(i, 1)}
                         disabled={i === editorForm.stages.length - 1}
                         style={{ padding: '0.1rem' }}
@@ -803,9 +672,9 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                       {editorForm.stages.length > 1 && (
                         <button
                           type="button"
-                          className="hud-button-ghost"
+                          className="btn btn-ghost"
                           onClick={() => removeStage(i)}
-                          style={{ padding: '0.1rem', color: 'rgb(var(--danger))' }}
+                          style={{ padding: '0.1rem', color: 'var(--status-failed)' }}
                           title="Remove stage"
                         >
                           <X size={12} />
@@ -822,7 +691,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                       />
                       <button
                         type="button"
-                        className="hud-button-ghost"
+                        className="btn btn-ghost"
                         onClick={() => browseStagePath(i)}
                         style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', whiteSpace: 'nowrap' }}
                       >
@@ -839,7 +708,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                           ...f,
                           stages: f.stages.map((s, si) => si === i ? { ...s, condition: e.target.value } : s),
                         }))}
-                        style={{ flex: 1, fontSize: '0.72rem', padding: '0.2rem 0.35rem', fontFamily: 'monospace', color: stage.condition ? 'rgb(var(--warn))' : undefined }}
+                        style={{ flex: 1, fontSize: '0.72rem', padding: '0.2rem 0.35rem', fontFamily: 'monospace', color: stage.condition ? 'var(--status-running)' : undefined }}
                       />
                     </div>
                     {/* Stage inputs */}
@@ -855,7 +724,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                                 onChange={e => updateStageInput(i, key, e.target.value, val)}
                                 style={{ width: '35%', fontSize: '0.72rem', padding: '0.2rem 0.35rem', fontFamily: 'monospace' }}
                               />
-                              <span style={{ color: 'rgb(var(--muted))', fontSize: '0.7rem' }}>=</span>
+                              <span style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem' }}>=</span>
                               <input
                                 className="hud-input"
                                 placeholder="value"
@@ -865,9 +734,9 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                               />
                               <button
                                 type="button"
-                                className="hud-button-ghost"
+                                className="btn btn-ghost"
                                 onClick={() => removeStageInput(i, key)}
-                                style={{ padding: '0.1rem', color: 'rgb(var(--danger))' }}
+                                style={{ padding: '0.1rem', color: 'var(--status-failed)' }}
                               >
                                 <X size={10} />
                               </button>
@@ -877,9 +746,9 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                       )}
                       <button
                         type="button"
-                        className="hud-button-ghost"
+                        className="btn btn-ghost"
                         onClick={() => addStageInput(i)}
-                        style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', color: 'rgb(var(--muted))' }}
+                        style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', color: 'var(--text-tertiary)' }}
                       >
                         <Plus size={10} /> Input
                       </button>
@@ -895,7 +764,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                 <label className="hud-label" style={{ margin: 0 }}>Pipeline Inputs</label>
                 <button
                   type="button"
-                  className="hud-button-ghost"
+                  className="btn btn-ghost"
                   onClick={addPipelineInput}
                   style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.7rem', padding: '0.15rem 0.4rem' }}
                 >
@@ -913,7 +782,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                         onChange={e => updatePipelineInput(key, e.target.value, val)}
                         style={{ width: '35%', fontSize: '0.78rem', padding: '0.25rem 0.4rem', fontFamily: 'monospace' }}
                       />
-                      <span style={{ color: 'rgb(var(--muted))', fontSize: '0.75rem' }}>=</span>
+                      <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>=</span>
                       <input
                         className="hud-input"
                         placeholder="value / default"
@@ -923,9 +792,9 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                       />
                       <button
                         type="button"
-                        className="hud-button-ghost"
+                        className="btn btn-ghost"
                         onClick={() => removePipelineInput(key)}
-                        style={{ padding: '0.15rem', color: 'rgb(var(--danger))' }}
+                        style={{ padding: '0.15rem', color: 'var(--status-failed)' }}
                       >
                         <X size={12} />
                       </button>
@@ -933,7 +802,7 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
                   ))}
                 </div>
               ) : (
-                <div style={{ fontSize: '0.72rem', color: 'rgb(var(--muted))', fontStyle: 'italic' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
                   No pipeline-level inputs defined
                 </div>
               )}
@@ -942,13 +811,13 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
             {/* Error */}
             {editorError && (
               <div style={{
-                color: 'rgb(var(--danger))',
+                color: 'var(--status-failed)',
                 fontSize: '0.78rem',
                 marginBottom: '0.75rem',
                 padding: '0.4rem 0.6rem',
-                background: 'rgba(var(--danger) / 0.1)',
+                background: 'var(--status-failed-bg)',
                 borderRadius: '4px',
-                border: '1px solid rgba(var(--danger) / 0.3)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
               }}>
                 {editorError}
               </div>
@@ -956,14 +825,14 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
 
             {/* Actions */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button className="hud-button-ghost" onClick={() => setEditorMode(null)}>
+              <button className="btn btn-ghost" onClick={() => setEditorMode(null)}>
                 Cancel
               </button>
               <button
-                className="hud-button"
+                className="btn btn-primary"
                 onClick={handleEditorSave}
                 disabled={editorSaving}
-                style={{ borderColor: 'rgba(var(--ok) / 0.5)', color: 'rgb(var(--ok))' }}
+                style={{ borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
               >
                 {editorSaving ? 'Saving...' : editorMode === 'create' ? 'Create' : 'Save'}
               </button>
@@ -978,14 +847,14 @@ export function PipelinesPage({ daemonStatus, workspaceId, onOpenRun, onOpenPipe
           <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
             <div style={{ padding: '1.25rem' }}>
               <div style={{ marginBottom: '0.75rem', fontWeight: 600 }}>Delete Pipeline</div>
-              <div style={{ fontSize: '0.8rem', color: 'rgb(var(--muted))', marginBottom: '1rem' }}>
-                Delete <span style={{ fontFamily: 'monospace', color: 'rgb(var(--accent))' }}>{deleteTarget.name}</span>? This cannot be undone.
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
+                Delete <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>{deleteTarget.name}</span>? This cannot be undone.
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button className="hud-button-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
+                <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
                 <button
-                  className="hud-button"
-                  style={{ borderColor: 'rgb(var(--danger))', color: 'rgb(var(--danger))' }}
+                  className="btn btn-primary"
+                  style={{ borderColor: 'var(--status-failed)', color: 'var(--status-failed)' }}
                   onClick={handleDeletePipeline}
                 >
                   Delete

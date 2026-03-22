@@ -4,6 +4,8 @@ import { usePoll } from '../hooks/usePoll';
 import { listRuns } from '../api/client';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
+import { formatRunDuration, formatTime } from '../utils/format';
+import { shortPath } from '../utils/path';
 import type { Run } from '../api/types';
 
 interface RunsPageProps {
@@ -14,36 +16,21 @@ interface RunsPageProps {
 const STATUS_FILTERS = ['all', 'running', 'success', 'failed', 'canceled'] as const;
 type StatusFilter = typeof STATUS_FILTERS[number];
 
-function formatDuration(run: Run): string {
-  if (!run.started_at) return '—';
-  const end = run.ended_at ? new Date(run.ended_at) : new Date();
-  const start = new Date(run.started_at);
-  const ms = end.getTime() - start.getTime();
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-}
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function shortPath(p: string): string {
-  const parts = p.split(/[/\\]/);
-  return parts.slice(-2).join('/');
-}
+const FILTER_COLORS: Record<string, string> = {
+  running: 'var(--status-running)',
+  success: 'var(--status-success)',
+  failed: 'var(--status-failed)',
+};
 
 export function RunsPage({ daemonStatus, onOpenRun }: RunsPageProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
-
   const [focusIndex, setFocusIndex] = useState(-1);
   const focusRef = useRef<HTMLTableRowElement>(null);
 
   const fetcher = useCallback(() => listRuns({ limit: 100 }), []);
   const { data, loading, refresh } = usePoll(fetcher, 3000, daemonStatus === 'running');
 
-  // Listen for global refresh shortcut (R key)
   useEffect(() => {
     const handler = () => refresh();
     window.addEventListener('hadron:refresh', handler);
@@ -61,7 +48,6 @@ export function RunsPage({ daemonStatus, onOpenRun }: RunsPageProps) {
     return true;
   });
 
-  // Arrow key navigation
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -81,71 +67,67 @@ export function RunsPage({ daemonStatus, onOpenRun }: RunsPageProps) {
   return (
     <div>
       <div className="page-header">
-        <span className="page-title">Run Log</span>
-        <button
-          className="hud-button-ghost"
-          onClick={refresh}
-          title="Refresh (R)"
-          style={{ display: 'flex', alignItems: 'center', padding: '0.25rem' }}
-        >
+        <div>
+          <div className="page-title">Runs</div>
+          {loading && <div className="page-subtitle">Refreshing…</div>}
+        </div>
+        <button className="btn btn-ghost" onClick={refresh} title="Refresh (R)">
           <RefreshCw size={14} />
         </button>
-        {loading && <span style={{ fontSize: '0.7rem', color: 'rgb(var(--muted))' }}>Refreshing…</span>}
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-        {/* Status chips */}
-        <div style={{ display: 'flex', gap: '0.25rem' }}>
-          {STATUS_FILTERS.map(sf => (
-            <button
-              key={sf}
-              className={statusFilter === sf ? 'hud-button' : 'hud-button-ghost'}
-              onClick={() => setStatusFilter(sf)}
-              style={{
-                padding: '0.25rem 0.6rem',
-                fontSize: '0.7rem',
-                ...(statusFilter === sf && sf === 'running' ? { borderColor: 'rgb(var(--warn))', color: 'rgb(var(--warn))' } : {}),
-                ...(statusFilter === sf && sf === 'success' ? { borderColor: 'rgb(var(--ok))', color: 'rgb(var(--ok))' } : {}),
-                ...(statusFilter === sf && sf === 'failed' ? { borderColor: 'rgb(var(--danger))', color: 'rgb(var(--danger))' } : {}),
-              }}
-            >
-              {sf === 'all' ? 'All' : sf.charAt(0).toUpperCase() + sf.slice(1)}
-            </button>
-          ))}
+      <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          {STATUS_FILTERS.map(sf => {
+            const isActive = statusFilter === sf;
+            const color = isActive && sf !== 'all' ? FILTER_COLORS[sf] : undefined;
+            return (
+              <button
+                key={sf}
+                className={`btn ${isActive ? '' : 'btn-ghost'}`}
+                onClick={() => setStatusFilter(sf)}
+                style={{
+                  padding: '4px 12px',
+                  fontSize: 'var(--text-xs)',
+                  ...(color ? { borderColor: color, color } : {}),
+                }}
+              >
+                {sf === 'all' ? 'All' : sf.charAt(0).toUpperCase() + sf.slice(1)}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Search */}
         <input
           className="hud-input"
           type="text"
           placeholder="Search by blueprint or run ID..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: '180px' }}
+          style={{ flex: 1, minWidth: 180 }}
         />
         {search && (
-          <button className="hud-button-ghost" onClick={() => setSearch('')} style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem' }}>
+          <button className="btn btn-ghost" onClick={() => setSearch('')} style={{ fontSize: 'var(--text-xs)' }}>
             Clear
           </button>
         )}
       </div>
 
-      <div className="hud-panel" style={{ overflow: 'hidden' }}>
+      <div className="section">
         {filteredRuns.length === 0 ? (
           <EmptyState
             message={runs.length === 0 ? 'No runs' : 'No matching runs'}
-            sub={runs.length === 0 ? 'Run a blueprint to see history here' : `No runs matching "${statusFilter !== 'all' ? statusFilter : ''}${search ? (statusFilter !== 'all' ? ' + ' : '') + search : ''}"`}
+            sub={runs.length === 0 ? 'Run a blueprint to see history here' : `No runs matching current filters`}
           />
         ) : (
-          <table className="hud-table">
+          <table className="table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Blueprint</th>
-                <th>Status</th>
-                <th>Started</th>
-                <th>Duration</th>
+                <th className="col-primary">Blueprint</th>
+                <th className="col-shrink">Status</th>
+                <th className="col-shrink col-right">Started</th>
+                <th className="col-shrink col-right">Duration</th>
               </tr>
             </thead>
             <tbody>
@@ -154,22 +136,20 @@ export function RunsPage({ daemonStatus, onOpenRun }: RunsPageProps) {
                   key={run.id}
                   onClick={() => onOpenRun(run.id)}
                   ref={i === focusIndex ? focusRef : undefined}
-                  style={i === focusIndex ? { background: 'rgba(var(--text), 0.05)', outline: '1px solid rgba(var(--accent), 0.3)' } : undefined}
+                  style={i === focusIndex ? { background: 'var(--bg-active)', outline: '1px solid var(--border-focus)' } : undefined}
                 >
-                  <td style={{ color: 'rgb(var(--muted))', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-                    {run.id.slice(-8)}
+                  <td className="col-primary">
+                    <div className="mono">{shortPath(run.blueprint_path)}</div>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 1 }}>{run.id.slice(-8)}</div>
                   </td>
-                  <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                    {shortPath(run.blueprint_path)}
-                  </td>
-                  <td>
+                  <td className="col-shrink">
                     <StatusBadge status={run.status} />
                   </td>
-                  <td style={{ color: 'rgb(var(--muted))', fontSize: '0.8rem' }}>
+                  <td className="col-shrink col-right" style={{ color: 'var(--text-tertiary)' }}>
                     {run.started_at ? formatTime(run.started_at) : '—'}
                   </td>
-                  <td style={{ color: 'rgb(var(--muted))', fontSize: '0.8rem' }}>
-                    {formatDuration(run)}
+                  <td className="mono col-shrink col-right">
+                    {formatRunDuration(run)}
                   </td>
                 </tr>
               ))}
@@ -178,9 +158,8 @@ export function RunsPage({ daemonStatus, onOpenRun }: RunsPageProps) {
         )}
       </div>
 
-      {/* Count label */}
       {runs.length > 0 && (
-        <div style={{ fontSize: '0.7rem', color: 'rgb(var(--muted))', marginTop: '0.5rem' }}>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)' }}>
           Showing {filteredRuns.length} of {runs.length} runs
         </div>
       )}

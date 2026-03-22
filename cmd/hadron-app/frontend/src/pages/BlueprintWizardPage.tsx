@@ -411,7 +411,7 @@ function KVEditor({ data, onChange, keyPlaceholder, valuePlaceholder }: {
         <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '0.5rem', marginBottom: '0.4rem', alignItems: 'center' }}>
           <input className="hud-input" value={key} placeholder={keyPlaceholder || 'key'} onChange={e => updateKey(key, e.target.value, value)} />
           <input className="hud-input" value={value} placeholder={valuePlaceholder || 'value'} onChange={e => updateValue(key, e.target.value)} />
-          <button className="hud-button-ghost" onClick={() => remove(key)} style={{ padding: '0.3rem' }}><Trash2 size={13} style={{ color: 'rgb(var(--danger))' }} /></button>
+          <button className="btn btn-ghost" onClick={() => remove(key)} style={{ padding: '0.3rem' }}><Trash2 size={13} style={{ color: 'var(--status-failed)' }} /></button>
         </div>
       ))}
       <button className="wizard-add-btn" onClick={add}><Plus size={14} /> Add</button>
@@ -527,7 +527,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
   const renderMetadata = () => {
     return (
       <div>
-        <h3 style={{ fontSize: '0.85rem', color: 'rgb(var(--ok))', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Metadata</h3>
+        <h3 style={{ fontSize: '0.85rem', color: 'var(--status-success)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Metadata</h3>
         <div className="wizard-grid-2">
           <div className="wizard-field">
             <label>Name *</label>
@@ -590,7 +590,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
   const renderProject = () => (
     <div>
-      <h3 style={{ fontSize: '0.85rem', color: 'rgb(var(--ok))', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Project Configuration</h3>
+      <h3 style={{ fontSize: '0.85rem', color: 'var(--status-success)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Project Configuration</h3>
       <div className="wizard-grid-2">
         <div className="wizard-field">
           <label>Project Type</label>
@@ -618,7 +618,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
           <input className="hud-input" value={data.project.php_version} onChange={e => updateProject('php_version', e.target.value)} placeholder="8.2" />
         </div>
         <div className="wizard-field" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.2rem' }}>
-          <input type="checkbox" checked={data.project.node} onChange={e => updateProject('node', e.target.checked)} style={{ accentColor: 'rgb(var(--ok))' }} />
+          <input type="checkbox" checked={data.project.node} onChange={e => updateProject('node', e.target.checked)} style={{ accentColor: 'var(--status-success)' }} />
           <span style={{ fontSize: '0.8rem' }}>Node.js project</span>
         </div>
       </div>
@@ -631,8 +631,8 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
   const renderEnv = () => (
     <div>
-      <h3 style={{ fontSize: '0.85rem', color: 'rgb(var(--ok))', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Environment Variables</h3>
-      <p style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))', marginBottom: '1rem' }}>
+      <h3 style={{ fontSize: '0.85rem', color: 'var(--status-success)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Environment Variables</h3>
+      <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
         {'Available to all tasks via {{ .env.KEY }}.'}
       </p>
       <KVEditor data={data.env} onChange={env => setData(prev => ({ ...prev, env }))} keyPlaceholder="ENV_VAR" valuePlaceholder="value" />
@@ -651,8 +651,8 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
     return (
       <div>
-        <h3 style={{ fontSize: '0.85rem', color: 'rgb(var(--ok))', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Packages</h3>
-        <p style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))', marginBottom: '1rem' }}>Declare dependencies. Press Enter to add.</p>
+        <h3 style={{ fontSize: '0.85rem', color: 'var(--status-success)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Packages</h3>
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>Declare dependencies. Press Enter to add.</p>
         {pkgSections.map(sec => (
           <div key={sec.label} style={{ marginBottom: '1rem' }}>
             <div className="hud-label" style={{ marginBottom: '0.3rem' }}>{sec.label}</div>
@@ -708,16 +708,16 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
     return (
       <div>
-        <h3 style={{ fontSize: '0.85rem', color: 'rgb(var(--ok))', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Inputs</h3>
-        <p style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))', marginBottom: '1rem' }}>
+        <h3 style={{ fontSize: '0.85rem', color: 'var(--status-success)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Inputs</h3>
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
           {'Parameters users provide when running. Available as {{ .inputs.name }}.'}
         </p>
         {data.inputs.map((inp, idx) => (
           <div key={idx} className="wizard-list-item">
             <div className="wizard-list-item-header">
-              <span style={{ fontSize: '0.8rem', color: 'rgb(var(--accent))' }}>Input {idx + 1}{inp.name ? `: ${inp.name}` : ''}</span>
-              <button className="hud-button-ghost" onClick={() => removeInput(idx)} style={{ padding: '0.2rem' }}>
-                <Trash2 size={13} style={{ color: 'rgb(var(--danger))' }} />
+              <span style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>Input {idx + 1}{inp.name ? `: ${inp.name}` : ''}</span>
+              <button className="btn btn-ghost" onClick={() => removeInput(idx)} style={{ padding: '0.2rem' }}>
+                <Trash2 size={13} style={{ color: 'var(--status-failed)' }} />
               </button>
             </div>
             <div className="wizard-grid-2">
@@ -734,7 +734,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
             </div>
             <div className="wizard-grid-2">
               <div className="wizard-field" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-                <input type="checkbox" checked={inp.required} onChange={e => updateInput(idx, 'required', e.target.checked)} style={{ accentColor: 'rgb(var(--ok))' }} />
+                <input type="checkbox" checked={inp.required} onChange={e => updateInput(idx, 'required', e.target.checked)} style={{ accentColor: 'var(--status-success)' }} />
                 <span style={{ fontSize: '0.78rem' }}>Required</span>
               </div>
               <div className="wizard-field"><label>Default</label><input className="hud-input" value={inp.default_value} onChange={e => updateInput(idx, 'default_value', e.target.value)} /></div>
@@ -808,8 +808,8 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
     return (
       <div>
-        <h3 style={{ fontSize: '0.85rem', color: 'rgb(var(--ok))', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Steps & Tasks</h3>
-        <p style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))', marginBottom: '1rem' }}>Organize tasks into sections. Tasks execute in order.</p>
+        <h3 style={{ fontSize: '0.85rem', color: 'var(--status-success)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Steps & Tasks</h3>
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>Organize tasks into sections. Tasks execute in order.</p>
         {data.steps.map((section, si) => (
           <div key={si} className="wizard-list-item">
             <div className="wizard-list-item-header">
@@ -817,17 +817,17 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
                 <span className="hud-label">Section</span>
                 <input className="hud-input" value={section.section} onChange={e => updateSectionName(si, e.target.value)} placeholder="section-name" style={{ width: '200px' }} />
               </div>
-              <button className="hud-button-ghost" onClick={() => removeSection(si)} disabled={data.steps.length <= 1} style={{ padding: '0.2rem' }}>
+              <button className="btn btn-ghost" onClick={() => removeSection(si)} disabled={data.steps.length <= 1} style={{ padding: '0.2rem' }}>
                 <Trash2 size={13} />
               </button>
             </div>
 
             {section.tasks.map((task, ti) => (
-              <div key={ti} style={{ background: 'rgb(var(--bg))', border: '1px solid rgb(var(--border))', borderRadius: '4px', padding: '0.75rem', marginBottom: '0.5rem' }}>
+              <div key={ti} style={{ background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: '4px', padding: '0.75rem', marginBottom: '0.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'rgb(var(--accent))' }}>Task {ti + 1}{task.name ? `: ${task.name}` : ''}</span>
-                  <button className="hud-button-ghost" onClick={() => removeTask(si, ti)} style={{ padding: '0.2rem' }}>
-                    <Trash2 size={12} style={{ color: 'rgb(var(--danger))' }} />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>Task {ti + 1}{task.name ? `: ${task.name}` : ''}</span>
+                  <button className="btn btn-ghost" onClick={() => removeTask(si, ti)} style={{ padding: '0.2rem' }}>
+                    <Trash2 size={12} style={{ color: 'var(--status-failed)' }} />
                   </button>
                 </div>
                 <div className="wizard-field">
@@ -842,7 +842,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
                 <div className="wizard-grid-2">
                   <div className="wizard-field"><label>Working Dir</label><input className="hud-input" value={task.dir} onChange={e => updateTask(si, ti, 'dir', e.target.value)} /></div>
                   <div className="wizard-field" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem', marginTop: '1.2rem' }}>
-                    <input type="checkbox" checked={task.enabled} onChange={e => updateTask(si, ti, 'enabled', e.target.checked)} style={{ accentColor: 'rgb(var(--ok))' }} />
+                    <input type="checkbox" checked={task.enabled} onChange={e => updateTask(si, ti, 'enabled', e.target.checked)} style={{ accentColor: 'var(--status-success)' }} />
                     <span style={{ fontSize: '0.78rem' }}>Enabled</span>
                   </div>
                 </div>
@@ -853,7 +853,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
                   <div className="wizard-field"><label>Timeout (s)</label><input className="hud-input" type="number" min="0" value={task.timeout_seconds} onChange={e => updateTask(si, ti, 'timeout_seconds', e.target.value)} /></div>
                 </div>
                 <div className="wizard-field" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
-                  <input type="checkbox" checked={task.continue_on_error} onChange={e => updateTask(si, ti, 'continue_on_error', e.target.checked)} style={{ accentColor: 'rgb(var(--ok))' }} />
+                  <input type="checkbox" checked={task.continue_on_error} onChange={e => updateTask(si, ti, 'continue_on_error', e.target.checked)} style={{ accentColor: 'var(--status-success)' }} />
                   <span style={{ fontSize: '0.78rem' }}>Continue on error</span>
                 </div>
                 {/* Per-task hooks */}
@@ -861,7 +861,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
                   <summary className="hud-label" style={{ cursor: 'pointer', fontSize: '0.72rem' }}>
                     Hooks
                     {((task.on_success?.length || 0) + (task.on_fail?.length || 0)) > 0 &&
-                      <span style={{ color: 'rgb(var(--accent))', marginLeft: '0.3rem' }}>
+                      <span style={{ color: 'var(--accent)', marginLeft: '0.3rem' }}>
                         ({(task.on_success?.length || 0) + (task.on_fail?.length || 0)})
                       </span>
                     }
@@ -875,7 +875,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
                             <option value="cmd">cmd</option><option value="call">call</option>
                           </select>
                           <input className="hud-input" value={hook.value} onChange={e => updateTaskHook(si, ti, 'on_success', hi, 'value', e.target.value)} placeholder="command or alias" />
-                          <button className="hud-button-ghost" onClick={() => removeTaskHook(si, ti, 'on_success', hi)}><Trash2 size={12} /></button>
+                          <button className="btn btn-ghost" onClick={() => removeTaskHook(si, ti, 'on_success', hi)}><Trash2 size={12} /></button>
                         </div>
                       ))}
                       <button className="wizard-add-btn" onClick={() => addTaskHook(si, ti, 'on_success')}><Plus size={12} /> Add</button>
@@ -888,7 +888,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
                             <option value="cmd">cmd</option><option value="call">call</option>
                           </select>
                           <input className="hud-input" value={hook.value} onChange={e => updateTaskHook(si, ti, 'on_fail', hi, 'value', e.target.value)} placeholder="command or alias" />
-                          <button className="hud-button-ghost" onClick={() => removeTaskHook(si, ti, 'on_fail', hi)}><Trash2 size={12} /></button>
+                          <button className="btn btn-ghost" onClick={() => removeTaskHook(si, ti, 'on_fail', hi)}><Trash2 size={12} /></button>
                         </div>
                       ))}
                       <button className="wizard-add-btn" onClick={() => addTaskHook(si, ti, 'on_fail')}><Plus size={12} /> Add</button>
@@ -955,19 +955,19 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <h3 style={{ fontSize: '0.85rem', color: 'rgb(var(--ok))', marginBottom: '0', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Advanced</h3>
+        <h3 style={{ fontSize: '0.85rem', color: 'var(--status-success)', marginBottom: '0', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Advanced</h3>
 
         {/* Git */}
-        <details className="hud-panel" style={{ padding: '0.75rem 1rem' }}>
+        <details className="section" style={{ padding: '0.75rem 1rem' }}>
           <summary className="bp-meta-section-title" style={{ cursor: 'pointer', userSelect: 'none' }}>Git</summary>
           <div style={{ paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={data.git.init} onChange={e => updateGit('init', e.target.checked)} style={{ accentColor: 'rgb(var(--ok))' }} />
+                <input type="checkbox" checked={data.git.init} onChange={e => updateGit('init', e.target.checked)} style={{ accentColor: 'var(--status-success)' }} />
                 <span style={{ fontSize: '0.82rem' }}>Initialize git repo</span>
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={data.git.create_github_repo} onChange={e => updateGit('create_github_repo', e.target.checked)} style={{ accentColor: 'rgb(var(--ok))' }} />
+                <input type="checkbox" checked={data.git.create_github_repo} onChange={e => updateGit('create_github_repo', e.target.checked)} style={{ accentColor: 'var(--status-success)' }} />
                 <span style={{ fontSize: '0.82rem' }}>Create GitHub repo</span>
               </label>
             </div>
@@ -991,16 +991,16 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
         </details>
 
         {/* Stubs */}
-        <details className="hud-panel" style={{ padding: '0.75rem 1rem' }}>
+        <details className="section" style={{ padding: '0.75rem 1rem' }}>
           <summary className="bp-meta-section-title" style={{ cursor: 'pointer', userSelect: 'none' }}>Stubs</summary>
           <div style={{ paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={data.stubs.enabled} onChange={e => updateStubs('enabled', e.target.checked)} style={{ accentColor: 'rgb(var(--ok))' }} />
+                <input type="checkbox" checked={data.stubs.enabled} onChange={e => updateStubs('enabled', e.target.checked)} style={{ accentColor: 'var(--status-success)' }} />
                 <span style={{ fontSize: '0.82rem' }}>Enable stubs</span>
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={data.stubs.strict_match} onChange={e => updateStubs('strict_match', e.target.checked)} style={{ accentColor: 'rgb(var(--ok))' }} />
+                <input type="checkbox" checked={data.stubs.strict_match} onChange={e => updateStubs('strict_match', e.target.checked)} style={{ accentColor: 'var(--status-success)' }} />
                 <span style={{ fontSize: '0.82rem' }}>Strict match</span>
               </label>
             </div>
@@ -1009,7 +1009,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
               {data.stubs.search_paths.map((sp, i) => (
                 <div key={i} style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.3rem' }}>
                   <input className="hud-input" value={sp} onChange={e => updateStubSearchPath(i, e.target.value)} placeholder="./stubs" style={{ flex: 1 }} />
-                  <button className="hud-button-ghost" onClick={() => removeStubSearchPath(i)}><Trash2 size={12} /></button>
+                  <button className="btn btn-ghost" onClick={() => removeStubSearchPath(i)}><Trash2 size={12} /></button>
                 </div>
               ))}
               <button className="wizard-add-btn" onClick={addStubSearchPath}><Plus size={12} /> Add search path</button>
@@ -1018,16 +1018,16 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
         </details>
 
         {/* Imports */}
-        <details className="hud-panel" style={{ padding: '0.75rem 1rem' }}>
+        <details className="section" style={{ padding: '0.75rem 1rem' }}>
           <summary className="bp-meta-section-title" style={{ cursor: 'pointer', userSelect: 'none' }}>
-            Imports {data.imports.length > 0 && <span style={{ color: 'rgb(var(--muted))', fontWeight: 400 }}>({data.imports.length})</span>}
+            Imports {data.imports.length > 0 && <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>({data.imports.length})</span>}
           </summary>
           <div style={{ paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {data.imports.map((imp, i) => (
-              <div key={i} className="wizard-task-card" style={{ background: 'rgb(var(--bg))', border: '1px solid rgb(var(--border))', borderRadius: '4px', padding: '0.75rem' }}>
+              <div key={i} className="wizard-task-card" style={{ background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: '4px', padding: '0.75rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))' }}>Import {i + 1}</span>
-                  <button className="hud-button-ghost" onClick={() => removeImport(i)}><Trash2 size={12} /></button>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Import {i + 1}</span>
+                  <button className="btn btn-ghost" onClick={() => removeImport(i)}><Trash2 size={12} /></button>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.5rem' }}>
                   <div className="wizard-field"><label>Path</label><input className="hud-input" value={imp.path} onChange={e => updateImport(i, 'path', e.target.value)} placeholder="./base.yaml" /></div>
@@ -1044,7 +1044,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
         </details>
 
         {/* Hooks */}
-        <details className="hud-panel" style={{ padding: '0.75rem 1rem' }}>
+        <details className="section" style={{ padding: '0.75rem 1rem' }}>
           <summary className="bp-meta-section-title" style={{ cursor: 'pointer', userSelect: 'none' }}>Hooks</summary>
           <div style={{ paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {(['before_run', 'after_run', 'on_error'] as HookBucket[]).map(bucket => (
@@ -1055,7 +1055,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
                     <input className="hud-input" value={hook.name} onChange={e => updateHook(bucket, hi, 'name', e.target.value)} placeholder="name" />
                     <input className="hud-input" value={hook.cmd} onChange={e => updateHook(bucket, hi, 'cmd', e.target.value)} placeholder="command" />
                     <input className="hud-input" value={hook.if_expr} onChange={e => updateHook(bucket, hi, 'if_expr', e.target.value)} placeholder="if condition" />
-                    <button className="hud-button-ghost" onClick={() => removeHook(bucket, hi)}><Trash2 size={12} /></button>
+                    <button className="btn btn-ghost" onClick={() => removeHook(bucket, hi)}><Trash2 size={12} /></button>
                   </div>
                 ))}
                 <button className="wizard-add-btn" onClick={() => addHook(bucket)}><Plus size={12} /> Add</button>
@@ -1084,14 +1084,14 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
     return (
       <div>
-        <h3 style={{ fontSize: '0.85rem', color: 'rgb(var(--ok))', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Review</h3>
-        <div className="hud-panel" style={{ padding: '0.75rem 1rem', marginBottom: '1rem' }}>
+        <h3 style={{ fontSize: '0.85rem', color: 'var(--status-success)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Review</h3>
+        <div className="section" style={{ padding: '0.75rem 1rem', marginBottom: '1rem' }}>
           <div style={{ fontSize: '0.82rem', marginBottom: '0.3rem' }}>
             <strong>{data.blueprint.name || data.blueprint.slug || '(unnamed)'}</strong> <span className="bp-badge bp-badge-info">v{data.version}</span>
           </div>
-          {data.blueprint.description && <div style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))', marginBottom: '0.3rem' }}>{data.blueprint.description}</div>}
+          {data.blueprint.description && <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginBottom: '0.3rem' }}>{data.blueprint.description}</div>}
           {data.blueprint.tags.length > 0 && <div style={{ marginBottom: '0.3rem' }}>{data.blueprint.tags.map((t, i) => <span key={i} className="bp-tag">{t}</span>)}</div>}
-          <div style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
             {data.inputs.length} inputs ({requiredInputs} required) · {data.steps.length} sections · {totalTasks} tasks
             {Object.keys(data.env).length > 0 && ` · ${Object.keys(data.env).length} env vars`}
           </div>
@@ -1099,16 +1099,16 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
         {warnings.length > 0 && (
           <div style={{ padding: '0.5rem 0.75rem', background: 'rgba(var(--warn), 0.1)', border: '1px solid rgba(var(--warn), 0.3)', borderRadius: '4px', marginBottom: '1rem' }}>
-            <div style={{ fontSize: '0.72rem', color: 'rgb(var(--warn))', textTransform: 'uppercase', marginBottom: '0.3rem' }}>Warnings</div>
-            {warnings.map((w, i) => <div key={i} style={{ fontSize: '0.75rem', color: 'rgb(var(--warn))' }}>- {w}</div>)}
+            <div style={{ fontSize: '0.72rem', color: 'var(--status-running)', textTransform: 'uppercase', marginBottom: '0.3rem' }}>Warnings</div>
+            {warnings.map((w, i) => <div key={i} style={{ fontSize: '0.75rem', color: 'var(--status-running)' }}>- {w}</div>)}
           </div>
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
           <span className="hud-label">YAML Preview</span>
-          <button className="hud-button-ghost" onClick={() => { navigator.clipboard.writeText(yaml); toast.success('YAML copied'); }} style={{ fontSize: '0.7rem' }}>Copy</button>
+          <button className="btn btn-ghost" onClick={() => { navigator.clipboard.writeText(yaml); toast.success('YAML copied'); }} style={{ fontSize: '0.7rem' }}>Copy</button>
         </div>
-        <pre style={{ padding: '0.75rem', background: 'rgb(var(--bg))', border: '1px solid rgb(var(--border))', borderRadius: '4px', fontSize: '0.75rem', lineHeight: '1.5', overflow: 'auto', maxHeight: '50vh', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+        <pre style={{ padding: '0.75rem', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: '4px', fontSize: '0.75rem', lineHeight: '1.5', overflow: 'auto', maxHeight: '50vh', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
           {yaml}
         </pre>
       </div>
@@ -1121,7 +1121,7 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
     <div className="wizard-shell">
       {/* Header */}
       <div className="page-header" style={{ padding: '0 0 0.5rem 0', gap: '0.5rem' }}>
-        <button className="hud-button-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+        <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
           <ChevronLeft size={13} /> Back
         </button>
         <span className="page-title">{editPath ? 'Edit Blueprint' : 'New Blueprint'}</span>
@@ -1150,15 +1150,15 @@ export function BlueprintWizardPage({ editPath, onBack }: BlueprintWizardPagePro
 
       {/* Footer */}
       <div className="wizard-footer">
-        <button className="hud-button-ghost" onClick={() => setCurrentStep(Math.max(0, currentStep - 1))} disabled={currentStep === 0}>
+        <button className="btn btn-ghost" onClick={() => setCurrentStep(Math.max(0, currentStep - 1))} disabled={currentStep === 0}>
           Previous
         </button>
-        <span style={{ fontSize: '0.75rem', color: 'rgb(var(--muted))' }}>Step {currentStep + 1} of {WIZARD_STEPS.length}</span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Step {currentStep + 1} of {WIZARD_STEPS.length}</span>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="hud-button-ghost" onClick={() => setCurrentStep(Math.min(WIZARD_STEPS.length - 1, currentStep + 1))} disabled={currentStep === WIZARD_STEPS.length - 1}>
+          <button className="btn btn-ghost" onClick={() => setCurrentStep(Math.min(WIZARD_STEPS.length - 1, currentStep + 1))} disabled={currentStep === WIZARD_STEPS.length - 1}>
             Next
           </button>
-          <button className="hud-button" onClick={handleSave} disabled={saving} style={{ borderColor: 'rgba(var(--ok) / 0.5)', color: 'rgb(var(--ok))' }}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ borderColor: 'rgba(var(--ok) / 0.5)', color: 'var(--status-success)' }}>
             {saving ? 'Saving...' : 'Save'}
           </button>
         </div>

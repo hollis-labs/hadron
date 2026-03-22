@@ -4,35 +4,14 @@ import { usePoll } from '../hooks/usePoll';
 import { listRuns } from '../api/client';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
+import { formatRunDuration, formatMs, formatTime, computeAvgDuration } from '../utils/format';
+import { shortPath } from '../utils/path';
 import type { Run } from '../api/types';
 
 interface DashboardPageProps {
   daemonStatus: string;
   daemonAddr: string;
   onOpenRun: (runId: string) => void;
-}
-
-function formatDuration(run: Run): string {
-  if (!run.started_at) return '—';
-  const end = run.ended_at ? new Date(run.ended_at) : new Date();
-  const start = new Date(run.started_at);
-  const ms = end.getTime() - start.getTime();
-  return formatMs(ms);
-}
-
-function formatMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-}
-
-function computeAvgDuration(runs: Run[]): number {
-  const completed = runs.filter(r => r.started_at && r.ended_at);
-  if (completed.length === 0) return 0;
-  const totalMs = completed.reduce((sum, r) => {
-    return sum + (new Date(r.ended_at!).getTime() - new Date(r.started_at!).getTime());
-  }, 0);
-  return Math.round(totalMs / completed.length);
 }
 
 interface BlueprintStats {
@@ -69,15 +48,6 @@ function computePerBlueprint(runs: Run[]): BlueprintStats[] {
   }
 
   return stats.sort((a, b) => b.total - a.total).slice(0, 10);
-}
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function shortPath(p: string): string {
-  const parts = p.split(/[/\\]/);
-  return parts.slice(-2).join('/');
 }
 
 export function DashboardPage({ daemonStatus, daemonAddr, onOpenRun }: DashboardPageProps) {
@@ -132,194 +102,161 @@ export function DashboardPage({ daemonStatus, daemonAddr, onOpenRun }: Dashboard
   return (
     <div>
       <div className="page-header">
-        <span className="page-title">Dashboard</span>
-        <button
-          className="hud-button-ghost"
-          onClick={refresh}
-          title="Refresh (R)"
-          style={{ display: 'flex', alignItems: 'center', padding: '0.25rem' }}
-        >
-          <RefreshCw size={14} />
+        <div>
+          <div className="page-title">Overview</div>
+          <div className="page-subtitle">Last 24 hours</div>
+        </div>
+        <button className="btn" onClick={refresh} title="Refresh (R)">
+          <RefreshCw size={14} /> Refresh
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="stats-grid">
+      {/* Stat cards */}
+      <div className="stat-grid">
         <div className="stat-card">
-          <div className="stat-label">Total Runs</div>
-          <div className="stat-value">{total}</div>
+          <span className="stat-label">Total Runs</span>
+          <span className="stat-value">{total.toLocaleString()}</span>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Running</div>
-          <div className="stat-value" style={{ color: running > 0 ? 'rgb(var(--warn))' : undefined }}>
-            {running}
-          </div>
+          <span className="stat-label">Running</span>
+          <span className={`stat-value${running > 0 ? ' running' : ''}`}>{running}</span>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Failed</div>
-          <div className="stat-value" style={{ color: failed > 0 ? 'rgb(var(--danger))' : undefined }}>
-            {failed}
-          </div>
+          <span className="stat-label">Succeeded</span>
+          <span className={`stat-value${succeeded > 0 ? ' success' : ''}`}>{succeeded.toLocaleString()}</span>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Succeeded</div>
-          <div className="stat-value" style={{ color: succeeded > 0 ? 'rgb(var(--ok))' : undefined }}>
-            {succeeded}
-          </div>
+          <span className="stat-label">Failed</span>
+          <span className={`stat-value${failed > 0 ? ' failed' : ''}`}>{failed}</span>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Success Rate</div>
-          <div className="stat-value" style={{ color: total === 0 ? undefined : successRate >= 80 ? 'rgb(var(--ok))' : successRate >= 50 ? 'rgb(var(--warn))' : 'rgb(var(--danger))' }}>
+          <span className="stat-label">Success Rate</span>
+          <span className={`stat-value${total > 0 ? (successRate >= 80 ? ' success' : ' failed') : ''}`}>
             {total > 0 ? `${successRate}%` : '—'}
-          </div>
+          </span>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Avg Duration</div>
-          <div className="stat-value" style={{ fontSize: '1.2rem' }}>
+          <span className="stat-label">Avg Duration</span>
+          <span className="stat-value" style={{ fontSize: 'var(--text-xl)' }}>
             {avgDuration > 0 ? formatMs(avgDuration) : '—'}
-          </div>
+          </span>
         </div>
       </div>
 
-      {/* Daemon info */}
+      {/* Daemon warning */}
       {daemonStatus !== 'running' && (
-        <div className="hud-panel" style={{ padding: '0.75rem 1rem', marginBottom: '1rem', color: 'rgb(var(--warn))' }}>
+        <div className="section" style={{ padding: 'var(--space-4) var(--space-5)', marginBottom: 'var(--space-4)', color: 'var(--status-running)' }}>
           {daemonStatus === 'error' ? 'Daemon error — check that hadrond is installed.' : 'Daemon starting…'}
         </div>
       )}
 
-      {/* Recent runs */}
-      <div style={{ marginBottom: '0.5rem' }}>
-        <span className="hud-label">Recent Runs</span>
-      </div>
-      <div className="hud-panel" style={{ overflow: 'hidden' }}>
-        {recent.length === 0 ? (
-          <EmptyState
-            message="No runs yet"
-            sub={daemonStatus === 'running' ? `daemon running at ${daemonAddr}` : undefined}
-          />
-        ) : (
-          <table className="hud-table">
-            <thead>
-              <tr>
-                <th>Blueprint</th>
-                <th>Status</th>
-                <th>Started</th>
-                <th>Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recent.map(run => (
-                <tr key={run.id} onClick={() => onOpenRun(run.id)}>
-                  <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                    {shortPath(run.blueprint_path)}
-                  </td>
-                  <td>
-                    <StatusBadge status={run.status} />
-                  </td>
-                  <td style={{ color: 'rgb(var(--muted))', fontSize: '0.8rem' }}>
-                    {run.started_at ? formatTime(run.started_at) : '—'}
-                  </td>
-                  <td style={{ color: 'rgb(var(--muted))', fontSize: '0.8rem' }}>
-                    {formatDuration(run)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Activity timeline */}
-      {runs.length > 0 && (() => {
-        const maxCount = Math.max(...timeline.map(b => b.success + b.failed + b.other), 1);
-        return (
-          <>
-            <div style={{ marginBottom: '0.5rem', marginTop: '1.25rem' }}>
-              <span className="hud-label">Activity — Last 24 Hours</span>
-            </div>
-            <div className="hud-panel" style={{ padding: '0.75rem 1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '80px' }}>
-                {timeline.map((bucket, i) => {
-                  const total = bucket.success + bucket.failed + bucket.other;
-                  const barH = total > 0 ? Math.max((total / maxCount) * 80, 4) : 0;
-                  return (
-                    <div
-                      key={i}
-                      style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}
-                      title={`${bucket.label}:00 — ${total} run${total !== 1 ? 's' : ''} (${bucket.success} ok, ${bucket.failed} fail)`}
-                    >
-                      {total > 0 && (
-                        <div style={{ width: '100%', height: `${barH}px`, display: 'flex', flexDirection: 'column', borderRadius: '2px', overflow: 'hidden' }}>
-                          {bucket.failed > 0 && (
-                            <div style={{ flex: bucket.failed, background: 'rgb(var(--danger))' }} />
-                          )}
-                          {bucket.other > 0 && (
-                            <div style={{ flex: bucket.other, background: 'rgb(var(--warn))' }} />
-                          )}
-                          {bucket.success > 0 && (
-                            <div style={{ flex: bucket.success, background: 'rgb(var(--ok))' }} />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              {/* Hour labels — show every 4th */}
-              <div style={{ display: 'flex', gap: '2px', marginTop: '0.3rem' }}>
-                {timeline.map((bucket, i) => (
-                  <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: '0.58rem', color: 'rgb(var(--muted))' }}>
-                    {i % 4 === 0 ? bucket.label : ''}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        );
-      })()}
-
-      {/* Per-blueprint stats */}
-      {perBlueprint.length > 0 && (
-        <>
-          <div style={{ marginBottom: '0.5rem', marginTop: '1.25rem' }}>
-            <span className="hud-label">Blueprint Stats</span>
+      {/* Two-column: Recent Runs + Activity */}
+      <div className="section-grid">
+        {/* Recent Runs */}
+        <div className="section">
+          <div className="section-header">
+            <span className="section-title">Recent Runs</span>
+            <span className="section-action">View all</span>
           </div>
-          <div className="hud-panel" style={{ overflow: 'hidden' }}>
-            <table className="hud-table">
+          {recent.length === 0 ? (
+            <EmptyState
+              message="No runs yet"
+              sub={daemonStatus === 'running' ? `daemon running at ${daemonAddr}` : undefined}
+            />
+          ) : (
+            <table className="table">
               <thead>
                 <tr>
-                  <th>Blueprint</th>
-                  <th>Runs</th>
-                  <th>Success</th>
-                  <th>Avg Duration</th>
+                  <th className="col-primary">Blueprint</th>
+                  <th className="col-shrink">Status</th>
+                  <th className="col-shrink col-right">Started</th>
+                  <th className="col-shrink col-right">Duration</th>
                 </tr>
               </thead>
               <tbody>
-                {perBlueprint.map(bp => (
-                  <tr key={bp.path} style={{ cursor: 'default' }}>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                      {bp.name}
-                    </td>
-                    <td style={{ fontSize: '0.8rem' }}>{bp.total}</td>
-                    <td>
-                      <span style={{
-                        fontSize: '0.8rem',
-                        color: bp.successRate >= 80 ? 'rgb(var(--ok))' : bp.successRate >= 50 ? 'rgb(var(--warn))' : 'rgb(var(--danger))',
-                      }}>
-                        {bp.successRate}%
-                      </span>
-                    </td>
-                    <td style={{ color: 'rgb(var(--muted))', fontSize: '0.8rem' }}>
-                      {bp.avgMs > 0 ? formatMs(bp.avgMs) : '—'}
-                    </td>
+                {recent.map(run => (
+                  <tr key={run.id} onClick={() => onOpenRun(run.id)}>
+                    <td className="mono col-primary">{shortPath(run.blueprint_path)}</td>
+                    <td className="col-shrink"><StatusBadge status={run.status} /></td>
+                    <td className="col-shrink col-right" style={{ color: 'var(--text-tertiary)' }}>{run.started_at ? formatTime(run.started_at) : '—'}</td>
+                    <td className="mono col-shrink col-right">{formatRunDuration(run)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+
+        {/* Activity Timeline */}
+        <div className="section">
+          <div className="section-header">
+            <span className="section-title">Activity</span>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>24h</span>
           </div>
-        </>
-      )}
+          {runs.length > 0 && (() => {
+            const maxCount = Math.max(...timeline.map(b => b.success + b.failed + b.other), 1);
+            return (
+              <>
+                <div className="timeline-chart">
+                  {timeline.map((bucket, i) => {
+                    const bTotal = bucket.success + bucket.failed + bucket.other;
+                    const pct = bTotal > 0 ? Math.max((bTotal / maxCount) * 100, 5) : 0;
+                    const cls = bTotal === 0 ? '' : bucket.failed > 0 && bucket.success > 0 ? 'mixed' : bucket.failed > 0 ? 'failed' : 'success';
+                    return (
+                      <div
+                        key={i}
+                        className={`timeline-bar ${cls}`}
+                        style={{ height: `${pct}%` }}
+                        title={`${bucket.label}:00 — ${bTotal} run${bTotal !== 1 ? 's' : ''}`}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="timeline-labels">
+                  {timeline.map((bucket, i) => (
+                    <span key={i}>{i % 4 === 0 ? bucket.label : ''}</span>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
+
+          {/* Per-blueprint stats below the chart */}
+          {perBlueprint.length > 0 && (
+            <>
+              <div className="section-header" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                <span className="section-title">Top Blueprints</span>
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th className="col-primary">Blueprint</th>
+                    <th className="col-shrink col-right">Runs</th>
+                    <th className="col-shrink col-right">Success</th>
+                    <th className="col-shrink col-right">Avg</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perBlueprint.map(bp => (
+                    <tr key={bp.path} style={{ cursor: 'default' }}>
+                      <td className="mono col-primary">{bp.name}</td>
+                      <td className="mono col-shrink col-right">{bp.total}</td>
+                      <td className="col-shrink col-right">
+                        <span style={{
+                          color: bp.successRate >= 80 ? 'var(--status-success)' : bp.successRate >= 50 ? 'var(--status-running)' : 'var(--status-failed)',
+                        }}>
+                          {bp.successRate}%
+                        </span>
+                      </td>
+                      <td className="mono col-shrink col-right">{bp.avgMs > 0 ? formatMs(bp.avgMs) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

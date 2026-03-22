@@ -25,12 +25,11 @@
 }
 
 body {
-  font-family: var(--font-body);
+  font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   background-color: rgb(var(--bg));
   color: rgb(var(--text));
   overflow: hidden;
-  letter-spacing: 0.02em;
   font-size: 14px;
 }
 
@@ -198,69 +197,189 @@ body {
 /* ── App layout ──────────────────────────────────────────────────────── */
 .app-shell {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100vh;
   width: 100vw;
-  background: rgb(var(--bg));
+  background: var(--bg-base);
   overflow: hidden;
 }
 
-.app-body {
-  display: flex;
+.main {
   flex: 1;
-  overflow: hidden;
-}
-
-.app-sidebar {
-  width: 200px;
-  min-width: 200px;
-  background: rgb(var(--panel));
-  border-right: 1px solid rgb(var(--border));
   display: flex;
   flex-direction: column;
-  padding: 0.75rem 0;
+  min-width: 0;
 }
 
-.app-content {
-  flex: 1;
-  overflow: auto;
-  padding: 1.25rem;
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
+.sidebar {
+  width: var(--sidebar-width);
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  z-index: 10;
 }
 
-/* ── AppHeader ───────────────────────────────────────────────────────── */
-.app-header {
-  height: 44px;
-  background: rgb(var(--panel));
-  border-bottom: 1px solid rgb(var(--border));
+.sidebar-logo {
+  height: var(--header-height);
   display: flex;
   align-items: center;
-  padding: 0 1rem;
-  gap: 1rem;
+  justify-content: center;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.sidebar-logo svg {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+
+.sidebar-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2) 0;
+  gap: 2px;
+}
+
+.sidebar-footer {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  margin: 0 6px;
+  border-radius: var(--radius-md);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  position: relative;
+  transition: all 0.15s ease;
+  background: transparent;
+  border: none;
+  font-family: var(--font-ui);
+}
+
+.nav-item:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.nav-item.active {
+  color: var(--text-primary);
+  background: var(--bg-active);
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
+
+.nav-item svg {
+  width: 18px;
+  height: 18px;
+}
+
+.nav-item .tooltip {
+  display: none;
+  position: absolute;
+  left: calc(100% + 12px);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.nav-item:hover .tooltip {
+  display: block;
+}
+
+/* ── Content area ────────────────────────────────────────────────────── */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6);
+  background-image:
+    linear-gradient(var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: -1px -1px;
+}
+
+.content::-webkit-scrollbar { width: 6px; }
+.content::-webkit-scrollbar-track { background: transparent; }
+.content::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+.content::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+/* Legacy aliases — keep until all pages are migrated */
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+.header {
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-6);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  gap: var(--space-3);
   flex-shrink: 0;
 }
 
-.app-header-logo {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: rgb(var(--ok));
+.header-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
-.app-header-title {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: rgb(var(--muted));
-  flex: 1;
+.header-breadcrumb {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
 }
 
-.app-header-daemon {
+.header-breadcrumb span {
+  color: var(--text-secondary);
+}
+
+.header-spacer { flex: 1; }
+
+.header-actions {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.75rem;
-  color: rgb(var(--muted));
+  gap: var(--space-3);
+}
+
+.daemon-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
 }
 
 .daemon-dot {
@@ -270,36 +389,31 @@ body {
   flex-shrink: 0;
 }
 
-.daemon-dot.running { background: rgb(var(--ok)); box-shadow: 0 0 6px rgb(var(--ok)); }
-.daemon-dot.stopped { background: rgb(var(--muted)); }
-.daemon-dot.error   { background: rgb(var(--danger)); }
-
-/* ── AppNav ──────────────────────────────────────────────────────────── */
-.nav-item {
+.workspace-btn {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 1rem;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: rgb(var(--muted));
+  gap: var(--space-2);
+  padding: 5px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-  border: none;
-  background: none;
-  width: 100%;
-  text-align: left;
+  transition: all 0.15s ease;
 }
 
-.nav-item:hover {
-  color: rgb(var(--text));
-  background: rgba(var(--panel2) / 0.6);
+.workspace-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-focus);
+  color: var(--text-primary);
 }
 
-.nav-item.active {
-  color: rgb(var(--ok));
-  background: rgba(var(--ok) / 0.08);
+.workspace-btn svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
 }
 
 .nav-item svg {
@@ -679,16 +793,16 @@ body {
 
 /* ── React Flow dark theme overrides ───────────────────────────────── */
 .react-flow {
-  --xy-background-color: rgb(var(--bg));
-  --xy-edge-stroke: rgb(var(--border));
+  --xy-background-color: var(--bg-base);
+  --xy-edge-stroke: var(--border-default);
   --xy-edge-stroke-width: 1.5px;
-  --xy-minimap-background-color: rgb(var(--panel));
+  --xy-minimap-background-color: var(--bg-surface);
   --xy-minimap-mask-background-color: rgba(0, 0, 0, 0.6);
-  --xy-minimap-node-background-color: rgb(var(--border));
-  --xy-controls-button-background-color: rgb(var(--panel2));
-  --xy-controls-button-border-color: rgb(var(--border));
-  --xy-controls-button-color: rgb(var(--muted));
-  --xy-controls-button-background-color-hover: rgb(var(--border));
+  --xy-minimap-node-background-color: var(--border-default);
+  --xy-controls-button-background-color: var(--bg-raised);
+  --xy-controls-button-border-color: var(--border-default);
+  --xy-controls-button-color: var(--text-tertiary);
+  --xy-controls-button-background-color-hover: var(--bg-hover);
   --xy-attribution-background-color: transparent;
 }
 
