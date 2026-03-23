@@ -1,0 +1,76 @@
+# 07-retry-cascade — Retry logic and conditional error recovery
+#
+# Demo: Load in flow builder canvas to show:
+#   - Primary path: fetch → process → store
+#   - Retry with backoff on process stage
+#   - Conditional fallback: if process fails, route to fallback-process
+#   - Recovery convergence: both paths feed into validate
+#   - Final notify stage always runs
+#
+meta:
+  name: demo-retry-cascade
+  version: 2
+
+stop_on_fail: false
+
+stages:
+  - name: fetch-data
+    blueprint_path: fetch.yaml
+    position:
+      x: 300
+      y: 0
+    outputs:
+      payload_size: "2.4MB"
+      source: "api.example.com"
+
+  - name: process
+    blueprint_path: process.yaml
+    depends_on:
+      - fetch-data
+    position:
+      x: 180
+      y: 150
+    inputs:
+      payload_size: "{{ .stages.fetch-data.outputs.payload_size }}"
+
+  - name: fallback-process
+    blueprint_path: fallback-process.yaml
+    depends_on:
+      - process
+    if: '{{ eq .stages.process.status "failed" }}'
+    position:
+      x: 420
+      y: 150
+    inputs:
+      payload_size: "{{ .stages.fetch-data.outputs.payload_size }}"
+      error_reason: "{{ .stages.process.status }}"
+
+  - name: validate
+    blueprint_path: validate.yaml
+    depends_on:
+      - process
+      - fallback-process
+    position:
+      x: 300
+      y: 310
+    inputs:
+      source: "{{ .stages.fetch-data.outputs.source }}"
+
+  - name: store
+    blueprint_path: store.yaml
+    depends_on:
+      - validate
+    position:
+      x: 300
+      y: 440
+
+  - name: notify
+    blueprint_path: notify.yaml
+    depends_on:
+      - store
+    position:
+      x: 300
+      y: 560
+    inputs:
+      source: "{{ .stages.fetch-data.outputs.source }}"
+      final_status: "{{ .stages.store.status }}"

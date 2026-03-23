@@ -1,0 +1,14 @@
+version: "0.4"
+
+blueprint:
+  name: demo-ci-lint
+  title: "CI — Lint"
+  tags: [demo, ci-pipeline]
+
+steps:
+  - section: Lint
+    tasks:
+      - name: run-lint
+        cmd: echo "[lint] Running linters on artifact..."
+      - name: lint-result
+        cmd: echo "[lint] All checks passed"

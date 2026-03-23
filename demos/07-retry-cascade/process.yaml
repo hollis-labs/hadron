@@ -1,0 +1,16 @@
+version: "0.4"
+
+blueprint:
+  name: demo-retry-process
+  title: "Retry Cascade — Process (Primary)"
+  tags: [demo, retry-cascade]
+
+steps:
+  - section: Process
+    tasks:
+      - name: transform
+        cmd: echo "[process] Transforming payload..."
+        retry: 3
+        retry_delay_seconds: 2
+      - name: enrich
+        cmd: echo "[process] Enriching data with metadata..."

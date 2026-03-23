@@ -1,0 +1,50 @@
+version: "0.4"
+
+blueprint:
+  name: swarm-report
+  title: "Security Swarm — Report"
+  tags: [demo, security-swarm]
+
+steps:
+  - section: Incident Report
+    tasks:
+      - name: generate-report
+        cmd: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║            SECURITY INCIDENT REPORT                        ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║  Alert ID      : ALT-2026-0322-001                         ║"
+          echo "║  Classification: Data Exfiltration (Compromised Creds)      ║"
+          echo "║  Severity      : CRITICAL                                   ║"
+          echo "║  Confidence    : 92%                                        ║"
+          echo "║  Timeline      : 7 correlated events                        ║"
+          echo "║                                                              ║"
+          echo "║  Attack Vector : Credential compromise → lateral movement   ║"
+          echo "║                  → data staging → exfil via Tor             ║"
+          echo "║                                                              ║"
+          echo "║  Data at Risk  : internal-docs, customer-data repos         ║"
+          echo "║  Est. Exfil    : 3.2 GB                                     ║"
+          echo "║                                                              ║"
+          echo "║  Actions Taken : 5/5 containment steps completed            ║"
+          echo "║    - Host isolated, egress blocked, account disabled        ║"
+          echo "║    - Credentials rotated, persistence removed               ║"
+          echo "║                                                              ║"
+          echo "║  MITRE ATT&CK  : T1041, T1078, T1059                       ║"
+          echo "║  Campaign Link  : APT-41 cluster (72% similarity)           ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║  Next Steps:                                                 ║"
+          echo "║    1. Forensic image of 10.0.4.37, .38, .41                 ║"
+          echo "║    2. Contact jsmith for account recovery                   ║"
+          echo "║    3. Scope data exposure (customer PII assessment)         ║"
+          echo "║    4. Notify legal/compliance within 24h                    ║"
+          echo "╚══════════════════════════════════════════════════════════════╝"
+
+      - name: notify-stakeholders
+        cmd: |
+          echo ""
+          echo "[report] Notifications sent:"
+          echo "  → #security-incidents (Slack)"
+          echo "  → SOC on-call (PagerDuty)"
+          echo "  → CISO briefing queued"
+          echo "  → Cortex context memory updated with incident record"

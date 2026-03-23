@@ -1,0 +1,85 @@
+# 06-ci-pipeline — DAG pipeline for visual flow builder demo
+#
+# Demo: Load in flow builder canvas to show:
+#   - Fan-out: build feeds lint, test-unit, test-integration in parallel
+#   - Fan-in: deploy waits for lint + all tests
+#   - Conditional edge: notify only fires on deploy failure
+#   - Stage outputs flowing downstream
+#   - Canvas positions for clean visual layout
+#
+meta:
+  name: demo-ci-pipeline
+  version: 2
+
+stop_on_fail: true
+
+stages:
+  - name: checkout
+    blueprint_path: checkout.yaml
+    position:
+      x: 300
+      y: 0
+    outputs:
+      commit_sha: "abc1234-{{ .run.id }}"
+      branch: "main"
+
+  - name: build
+    blueprint_path: build.yaml
+    depends_on:
+      - checkout
+    position:
+      x: 300
+      y: 120
+    outputs:
+      artifact: "dist/app-{{ .stages.checkout.outputs.commit_sha }}.tar.gz"
+
+  - name: lint
+    blueprint_path: lint.yaml
+    depends_on:
+      - build
+    position:
+      x: 80
+      y: 260
+    inputs:
+      artifact: "{{ .stages.build.outputs.artifact }}"
+
+  - name: test-unit
+    blueprint_path: test-unit.yaml
+    depends_on:
+      - build
+    position:
+      x: 300
+      y: 260
+
+  - name: test-integration
+    blueprint_path: test-integration.yaml
+    depends_on:
+      - build
+    position:
+      x: 520
+      y: 260
+
+  - name: deploy
+    blueprint_path: deploy.yaml
+    depends_on:
+      - lint
+      - test-unit
+      - test-integration
+    position:
+      x: 300
+      y: 400
+    inputs:
+      artifact: "{{ .stages.build.outputs.artifact }}"
+      branch: "{{ .stages.checkout.outputs.branch }}"
+
+  - name: notify-failure
+    blueprint_path: notify.yaml
+    depends_on:
+      - deploy
+    if: '{{ eq .stages.deploy.status "failed" }}'
+    position:
+      x: 300
+      y: 540
+    inputs:
+      deploy_status: "{{ .stages.deploy.status }}"
+      commit_sha: "{{ .stages.checkout.outputs.commit_sha }}"

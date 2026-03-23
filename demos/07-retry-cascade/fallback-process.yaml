@@ -1,0 +1,17 @@
+version: "0.4"
+
+blueprint:
+  name: demo-retry-fallback
+  title: "Retry Cascade — Fallback Process"
+  tags: [demo, retry-cascade]
+
+steps:
+  - section: Fallback
+    tasks:
+      - name: degrade
+        cmd: echo "[fallback] Primary processing failed — using degraded pipeline..."
+      - name: simple-transform
+        cmd: echo "[fallback] Applying simple transform (no enrichment)"
+        on_success:
+          - type: cmd
+            value: echo "[fallback] Degraded processing succeeded"

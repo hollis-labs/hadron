@@ -1,0 +1,18 @@
+version: "0.4"
+
+blueprint:
+  name: demo-ci-test-integration
+  title: "CI — Integration Tests"
+  tags: [demo, ci-pipeline]
+
+steps:
+  - section: Integration Tests
+    tasks:
+      - name: setup-env
+        cmd: echo "[test-integration] Starting test database..."
+      - name: run-tests
+        cmd: echo "[test-integration] Running 12 integration tests..."
+      - name: results
+        cmd: echo "[test-integration] 12/12 passed"
+      - name: teardown
+        cmd: echo "[test-integration] Tearing down test environment"

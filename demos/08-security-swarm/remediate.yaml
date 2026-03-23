@@ -1,0 +1,36 @@
+version: "0.4"
+
+blueprint:
+  name: swarm-remediate
+  title: "Security Swarm — Remediate"
+  tags: [demo, security-swarm]
+
+steps:
+  - section: Containment
+    tasks:
+      - name: isolate-host
+        cmd: |
+          echo "[remediate] CONTAINMENT ACTIONS:"
+          echo "  [1/5] Isolating host 10.0.4.37 from network... DONE"
+        continue_on_error: true
+
+      - name: block-ip
+        cmd: echo "  [2/5] Blocking egress to 185.220.101.0/24 at firewall... DONE"
+        continue_on_error: true
+
+      - name: disable-account
+        cmd: echo "  [3/5] Disabling jsmith account across all systems... DONE"
+        continue_on_error: true
+
+      - name: rotate-credentials
+        cmd: echo "  [4/5] Rotating service account credentials on affected hosts... DONE"
+        continue_on_error: true
+
+      - name: remove-persistence
+        cmd: |
+          echo "  [5/5] Removing persistence artifacts..."
+          echo "         Deleted: /tmp/.cache/svchost"
+          echo "         Deleted: /tmp/.cache/.env"
+          echo "         Removed: unauthorized SSH key"
+          echo "         DONE"
+        continue_on_error: true

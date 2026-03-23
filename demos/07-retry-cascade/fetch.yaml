@@ -1,0 +1,16 @@
+version: "0.4"
+
+blueprint:
+  name: demo-retry-fetch
+  title: "Retry Cascade — Fetch"
+  tags: [demo, retry-cascade]
+
+steps:
+  - section: Fetch
+    tasks:
+      - name: fetch
+        cmd: echo "[fetch] Pulling data from upstream API..."
+        retry: 2
+        retry_delay_seconds: 1
+      - name: size
+        cmd: echo "[fetch] Received 2.4MB payload"

@@ -1,0 +1,23 @@
+version: "0.4"
+
+blueprint:
+  name: swarm-triage
+  title: "Security Swarm — Triage"
+  tags: [demo, security-swarm]
+
+steps:
+  - section: Classification
+    tasks:
+      - name: classify
+        cmd: |
+          echo "[triage] Classifying alert ALT-2026-0322-001..."
+          echo "  Pattern match : data-exfiltration-attempt (confidence 0.87)"
+          echo "  Severity      : HIGH"
+          echo "  IOCs extracted: 4"
+          echo "    - Dest IP     : 185.220.101.42 (Tor exit node)"
+          echo "    - Dest port   : 443 (encrypted channel)"
+          echo "    - User agent  : curl/7.88.1 (unusual for this host)"
+          echo "    - Volume      : 3.2GB outbound (10x baseline)"
+
+      - name: escalate
+        cmd: echo "[triage] Severity HIGH — dispatching analysis swarm"

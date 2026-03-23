@@ -1,0 +1,14 @@
+version: "0.4"
+
+blueprint:
+  name: demo-ci-deploy
+  title: "CI — Deploy"
+  tags: [demo, ci-pipeline]
+
+steps:
+  - section: Deploy
+    tasks:
+      - name: push-artifact
+        cmd: echo "[deploy] Pushing artifact to staging..."
+      - name: health-check
+        cmd: echo "[deploy] Health check passed — deployment live"

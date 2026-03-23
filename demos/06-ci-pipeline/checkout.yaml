@@ -1,0 +1,14 @@
+version: "0.4"
+
+blueprint:
+  name: demo-ci-checkout
+  title: "CI — Checkout"
+  tags: [demo, ci-pipeline]
+
+steps:
+  - section: Checkout
+    tasks:
+      - name: clone
+        cmd: echo "[checkout] Cloning repository..."
+      - name: sha
+        cmd: echo "[checkout] HEAD at $(git rev-parse --short HEAD 2>/dev/null || echo 'abc1234')"

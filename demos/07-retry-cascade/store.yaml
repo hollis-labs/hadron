@@ -1,0 +1,14 @@
+version: "0.4"
+
+blueprint:
+  name: demo-retry-store
+  title: "Retry Cascade — Store"
+  tags: [demo, retry-cascade]
+
+steps:
+  - section: Store
+    tasks:
+      - name: persist
+        cmd: echo "[store] Writing validated data to database..."
+      - name: confirm
+        cmd: echo "[store] 1 record written successfully"

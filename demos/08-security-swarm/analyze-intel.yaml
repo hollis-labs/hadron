@@ -1,0 +1,33 @@
+version: "0.4"
+
+blueprint:
+  name: swarm-analyze-intel
+  title: "Security Swarm — Threat Intelligence"
+  tags: [demo, security-swarm]
+
+steps:
+  - section: Threat Intel Lookup
+    tasks:
+      - name: ioc-lookup
+        cmd: |
+          echo "[intel] Cross-referencing IOCs against threat feeds..."
+          echo "  185.220.101.42:"
+          echo "    - Known Tor exit node (TorProject list)"
+          echo "    - Flagged in AlienVault OTX: data exfil campaigns"
+          echo "    - Last seen: 2026-03-20 (APT-41 cluster)"
+
+      - name: pattern-match
+        cmd: |
+          echo "[intel] Pattern matching against known TTPs..."
+          echo "  MITRE ATT&CK matches:"
+          echo "    - T1041 : Exfiltration Over C2 Channel"
+          echo "    - T1078 : Valid Accounts (compromised creds)"
+          echo "    - T1059 : Command and Scripting Interpreter"
+          echo "  Campaign match: 72% similarity to APT-41 toolkit (2026-Q1)"
+
+      - name: cortex-context
+        cmd: |
+          echo "[intel] Querying Cortex context memory..."
+          echo "  Prior incidents from 185.220.101.x: 0 (first contact)"
+          echo "  jsmith flagged in prior audit: YES (password policy violation, 2026-01)"
+        continue_on_error: true

@@ -1,0 +1,14 @@
+version: "0.4"
+
+blueprint:
+  name: demo-ci-build
+  title: "CI — Build"
+  tags: [demo, ci-pipeline]
+
+steps:
+  - section: Build
+    tasks:
+      - name: compile
+        cmd: echo "[build] Compiling project..."
+      - name: package
+        cmd: echo "[build] Packaging artifact..."

@@ -1,0 +1,32 @@
+version: "0.4"
+
+blueprint:
+  name: swarm-analyze-host
+  title: "Security Swarm — Host Analysis"
+  tags: [demo, security-swarm]
+
+steps:
+  - section: Host Forensics
+    tasks:
+      - name: process-scan
+        cmd: |
+          echo "[host] Scanning processes on 10.0.4.37..."
+          echo "  Suspicious process : /tmp/.cache/svchost (PID 48201)"
+          echo "  Parent             : bash (PID 48199)"
+          echo "  Started            : 2026-03-22T14:27:53Z"
+          echo "  Binary hash        : sha256:e3b0c44298fc1c14...d535 (NOT in known-good list)"
+
+      - name: file-scan
+        cmd: |
+          echo "[host] Checking filesystem changes (last 2h)..."
+          echo "  Modified : /tmp/.cache/svchost (binary, 2.1MB)"
+          echo "  Modified : /tmp/.cache/.env (config file)"
+          echo "  Created  : /var/log/.audit_bypass (empty)"
+          echo "  Assessment: Likely staged exfiltration toolkit"
+
+      - name: persistence-check
+        cmd: |
+          echo "[host] Checking persistence mechanisms..."
+          echo "  Crontab     : CLEAN"
+          echo "  Systemd     : CLEAN"
+          echo "  SSH keys    : 1 unauthorized key added 2h ago"

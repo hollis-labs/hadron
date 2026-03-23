@@ -1,0 +1,14 @@
+version: "0.4"
+
+blueprint:
+  name: demo-ci-test-unit
+  title: "CI — Unit Tests"
+  tags: [demo, ci-pipeline]
+
+steps:
+  - section: Unit Tests
+    tasks:
+      - name: run-tests
+        cmd: echo "[test-unit] Running 47 unit tests..."
+      - name: results
+        cmd: echo "[test-unit] 47/47 passed"

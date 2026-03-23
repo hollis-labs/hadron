@@ -1,0 +1,18 @@
+version: "0.4"
+
+blueprint:
+  name: swarm-detect
+  title: "Security Swarm — Detect"
+  tags: [demo, security-swarm]
+
+steps:
+  - section: Alert Ingestion
+    tasks:
+      - name: ingest-alert
+        cmd: |
+          echo "[detect] Alert received from monitoring"
+          echo "  Alert ID  : ALT-2026-0322-001"
+          echo "  Type      : anomalous-egress"
+          echo "  Source IP : 10.0.4.37"
+          echo "  Time      : 2026-03-22T14:32:18Z"
+          echo "  Trigger   : Outbound traffic spike — 3.2GB in 4 minutes to unknown external host"

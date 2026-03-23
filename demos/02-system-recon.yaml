@@ -1,0 +1,75 @@
+# 02-system-recon.yaml — Parameterized system reconnaissance
+#
+# Demo: Typed inputs, conditionals, template expressions, env vars.
+# Time: ~5 seconds
+#
+# Run:
+#   hadron run demos/02-system-recon.yaml -i target_dir=~/Projects-apps -i check_docker=true
+#
+version: "0.4"
+
+blueprint:
+  name: demo-system-recon
+  title: System Recon
+  description: Gathers system info with parameterized inputs and conditional execution.
+  author: Hollis Labs
+  tags: [demo, inputs, conditionals]
+
+inputs:
+  - name: target_dir
+    label: Target Directory
+    description: Directory to inspect.
+    type: string
+    default: "."
+
+  - name: check_docker
+    label: Check Docker?
+    description: Whether to include Docker status in the report.
+    type: boolean
+    default: false
+
+  - name: depth
+    label: Scan Depth
+    description: How many levels deep to scan the directory.
+    type: number
+    default: 2
+    min: 1
+    max: 5
+
+steps:
+  - section: System Info
+    tasks:
+      - name: os-info
+        cmd: 'echo "OS: $(uname -s) $(uname -r) | Arch: $(uname -m)"'
+
+      - name: hostname
+        cmd: 'echo "Host: $(hostname)"'
+
+      - name: uptime
+        cmd: uptime
+
+  - section: Target Scan
+    tasks:
+      - name: scan-dir
+        cmd: |
+          echo "Scanning {{ .inputs.target_dir }} (depth {{ .inputs.depth }})..."
+          find {{ .inputs.target_dir }} -maxdepth {{ .inputs.depth }} -type d | head -30
+        env:
+          SCAN_TARGET: "{{ .inputs.target_dir }}"
+
+      - name: disk-usage
+        cmd: du -sh {{ .inputs.target_dir }} 2>/dev/null || echo "Cannot read directory"
+        continue_on_error: true
+
+  - section: Docker
+    tasks:
+      - name: docker-status
+        if: "test '{{ .inputs.check_docker }}' = 'true' && which docker"
+        cmd: |
+          echo "=== Docker Status ==="
+          docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null || echo "Docker not running"
+        continue_on_error: true
+
+      - name: docker-skip
+        if: "test '{{ .inputs.check_docker }}' = 'false'"
+        cmd: echo "Docker check skipped (check_docker=false)"

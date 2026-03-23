@@ -1,0 +1,30 @@
+version: "0.4"
+
+blueprint:
+  name: swarm-analyze-network
+  title: "Security Swarm — Network Analysis"
+  tags: [demo, security-swarm]
+
+steps:
+  - section: Network Forensics
+    tasks:
+      - name: traffic-analysis
+        cmd: |
+          echo "[network] Analyzing traffic from 10.0.4.37..."
+          echo "  Connections last 24h : 847 (baseline: 120)"
+          echo "  Unique dest IPs     : 3 external (1 flagged)"
+          echo "  Protocol breakdown  : HTTPS 94%, DNS 4%, SSH 2%"
+
+      - name: dns-analysis
+        cmd: |
+          echo "[network] DNS query analysis..."
+          echo "  Suspicious queries : 12 to known DGA domains"
+          echo "  DNS tunneling      : NEGATIVE"
+
+      - name: flow-summary
+        cmd: |
+          echo "[network] Flow summary:"
+          echo "  14:28 — First connection to 185.220.101.42"
+          echo "  14:30 — Bulk transfer begins (HTTPS)"
+          echo "  14:34 — Transfer ends (3.2GB total)"
+          echo "  14:35 — Connection closed, no further activity"

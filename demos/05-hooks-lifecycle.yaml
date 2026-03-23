@@ -1,0 +1,64 @@
+# 05-hooks-lifecycle.yaml — Full hook lifecycle demo
+#
+# Demo: Shows all hook types firing in sequence.
+#   - before_run / after_run / on_error (blueprint-level)
+#   - on_success / on_fail (per-task)
+#   - Intentional failure to trigger error hooks
+# Time: ~5 seconds
+#
+version: "0.4"
+
+blueprint:
+  name: demo-hooks-lifecycle
+  title: Hooks Lifecycle
+  description: Demonstrates every hook type in Hadron — blueprint-level and per-task.
+  author: Hollis Labs
+  tags: [demo, hooks, lifecycle]
+
+hooks:
+  before_run:
+    - name: pre-flight
+      cmd: echo "[HOOK before_run] Pre-flight checks passed — starting demo"
+
+  after_run:
+    - name: wrap-up
+      cmd: echo "[HOOK after_run] All sections complete — demo finished cleanly"
+
+  on_error:
+    - name: error-handler
+      cmd: echo "[HOOK on_error] Blueprint-level error caught"
+
+steps:
+  - section: Happy Path
+    tasks:
+      - name: task-a
+        cmd: echo "Task A running..."
+        on_success:
+          - type: cmd
+            value: echo "[on_success] Task A completed"
+
+      - name: task-b
+        cmd: echo "Task B running..."
+        on_success:
+          - type: cmd
+            value: echo "[on_success] Task B completed"
+        on_fail:
+          - type: cmd
+            value: echo "[on_fail] Task B failed (you won't see this)"
+
+  - section: Error Recovery
+    tasks:
+      - name: risky-task
+        cmd: "false"
+        continue_on_error: true
+        on_fail:
+          - type: cmd
+            value: echo "[on_fail] Risky task failed — but continue_on_error lets us proceed"
+          - type: error
+            value: "risky-task intentionally failed (logged as error event)"
+
+      - name: recovery
+        cmd: echo "Execution continues after handled failure"
+        on_success:
+          - type: cmd
+            value: echo "[on_success] Recovery task confirmed pipeline resilience"

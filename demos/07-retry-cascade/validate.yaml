@@ -1,0 +1,14 @@
+version: "0.4"
+
+blueprint:
+  name: demo-retry-validate
+  title: "Retry Cascade — Validate"
+  tags: [demo, retry-cascade]
+
+steps:
+  - section: Validate
+    tasks:
+      - name: schema-check
+        cmd: echo "[validate] Schema validation passed"
+      - name: integrity-check
+        cmd: echo "[validate] Data integrity verified"

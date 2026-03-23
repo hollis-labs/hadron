@@ -1,0 +1,12 @@
+version: "0.4"
+
+blueprint:
+  name: demo-retry-notify
+  title: "Retry Cascade — Notify"
+  tags: [demo, retry-cascade]
+
+steps:
+  - section: Notify
+    tasks:
+      - name: report
+        cmd: echo "[notify] Pipeline complete — sending summary report"

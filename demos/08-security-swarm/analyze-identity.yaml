@@ -1,0 +1,30 @@
+version: "0.4"
+
+blueprint:
+  name: swarm-analyze-identity
+  title: "Security Swarm — Identity Analysis"
+  tags: [demo, security-swarm]
+
+steps:
+  - section: Identity Forensics
+    tasks:
+      - name: auth-audit
+        cmd: |
+          echo "[identity] Auditing authentication for 10.0.4.37..."
+          echo "  Active sessions : 2 (user: deploy-bot, user: jsmith)"
+          echo "  deploy-bot      : Service account, normal activity"
+          echo "  jsmith          : Last login from UNKNOWN IP 203.0.113.12 at 14:25"
+
+      - name: lateral-movement
+        cmd: |
+          echo "[identity] Checking lateral movement..."
+          echo "  jsmith SSH'd to: 10.0.4.37 (this host), 10.0.4.38, 10.0.4.41"
+          echo "  Accessed repos  : internal-docs, customer-data (SENSITIVE)"
+          echo "  Privilege escalation: sudo used 3x in 10 minutes (unusual)"
+
+      - name: credential-status
+        cmd: |
+          echo "[identity] Credential assessment:"
+          echo "  jsmith password  : Last changed 180d ago (OVERDUE)"
+          echo "  jsmith MFA       : TOTP enrolled, but no MFA challenge logged at 14:25"
+          echo "  FINDING: Possible credential compromise — no MFA on suspicious login"

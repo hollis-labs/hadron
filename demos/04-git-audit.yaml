@@ -1,0 +1,92 @@
+# 04-git-audit.yaml — Multi-repo git health check
+#
+# Demo: Practical blueprint that scans project repos for uncommitted work,
+#        stale branches, and recent activity. Real output, real value.
+# Time: ~10 seconds
+#
+version: "0.4"
+
+blueprint:
+  name: demo-git-audit
+  title: Git Repo Audit
+  description: Scans project repositories for uncommitted changes, stale branches, and recent commits.
+  author: Hollis Labs
+  tags: [demo, git, audit, practical]
+
+inputs:
+  - name: projects_dir
+    label: Projects Directory
+    description: Root directory containing project repos.
+    type: string
+    default: "~/Projects-apps"
+
+  - name: max_repos
+    label: Max Repos to Scan
+    type: number
+    default: 6
+    min: 1
+    max: 20
+
+steps:
+  - section: Discovery
+    tasks:
+      - name: find-repos
+        cmd: |
+          echo "=== Git Repos in {{ .inputs.projects_dir }} ==="
+          find {{ .inputs.projects_dir }} -maxdepth 2 -name ".git" -type d 2>/dev/null | \
+            head -{{ .inputs.max_repos }} | \
+            sed 's|/.git||' | \
+            while read repo; do
+              echo "  $(basename $repo)"
+            done
+
+  - section: Health Check
+    tasks:
+      - name: dirty-repos
+        cmd: |
+          echo "=== Repos with Uncommitted Changes ==="
+          find {{ .inputs.projects_dir }} -maxdepth 2 -name ".git" -type d 2>/dev/null | \
+            head -{{ .inputs.max_repos }} | \
+            sed 's|/.git||' | \
+            while read repo; do
+              changes=$(cd "$repo" && git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+              if [ "$changes" -gt "0" ]; then
+                branch=$(cd "$repo" && git branch --show-current 2>/dev/null)
+                echo "  $(basename $repo) ($branch): $changes uncommitted changes"
+              fi
+            done
+          echo "---"
+        continue_on_error: true
+
+      - name: recent-activity
+        cmd: |
+          echo "=== Recent Commits (last 48h) ==="
+          find {{ .inputs.projects_dir }} -maxdepth 2 -name ".git" -type d 2>/dev/null | \
+            head -{{ .inputs.max_repos }} | \
+            sed 's|/.git||' | \
+            while read repo; do
+              count=$(cd "$repo" && git log --oneline --since="48 hours ago" 2>/dev/null | wc -l | tr -d ' ')
+              if [ "$count" -gt "0" ]; then
+                latest=$(cd "$repo" && git log --oneline -1 2>/dev/null)
+                echo "  $(basename $repo): $count commits — latest: $latest"
+              fi
+            done
+          echo "---"
+        continue_on_error: true
+
+      - name: stale-branches
+        cmd: |
+          echo "=== Stale Branches (no commits in 30d) ==="
+          find {{ .inputs.projects_dir }} -maxdepth 2 -name ".git" -type d 2>/dev/null | \
+            head -{{ .inputs.max_repos }} | \
+            sed 's|/.git||' | \
+            while read repo; do
+              stale=$(cd "$repo" && git for-each-ref --sort=committerdate --format='%(refname:short) %(committerdate:relative)' refs/heads/ 2>/dev/null | \
+                grep -E '(months?|year)' | head -3)
+              if [ -n "$stale" ]; then
+                echo "  $(basename $repo):"
+                echo "$stale" | sed 's/^/    /'
+              fi
+            done
+          echo "---"
+        continue_on_error: true

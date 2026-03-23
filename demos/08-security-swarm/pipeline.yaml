@@ -1,0 +1,144 @@
+# 08-security-swarm — Multi-agent security incident response
+#
+# CONCEPT DEMO — walk through the blueprint and emulated output.
+# This pipeline models an automated security incident response swarm:
+#
+#   1. DETECT — Ingest alert from monitoring (webhook, log anomaly, etc.)
+#   2. TRIAGE — Classify severity, extract IOCs (indicators of compromise)
+#   3. Fan-out to parallel analysis agents:
+#      - NETWORK — Analyze network traffic patterns
+#      - HOST — Scan affected hosts for compromise indicators
+#      - IDENTITY — Check for credential abuse, lateral movement
+#      - INTEL — Cross-reference threat intelligence feeds
+#   4. Fan-in: CORRELATE — Merge findings, build incident timeline
+#   5. REMEDIATE — Execute containment actions (block IPs, rotate creds, isolate hosts)
+#   6. REPORT — Generate incident report, notify stakeholders
+#
+# In production this would call real MCP tools:
+#   - Cortex for threat intelligence context
+#   - Engine for task tracking
+#   - External MCP servers for SIEM/EDR integration
+#
+meta:
+  name: demo-security-swarm
+  version: 2
+
+stop_on_fail: false
+
+stages:
+  - name: detect
+    blueprint_path: detect.yaml
+    position:
+      x: 350
+      y: 0
+    outputs:
+      alert_id: "ALT-2026-0322-001"
+      alert_type: "anomalous-egress"
+      source_ip: "10.0.4.37"
+      timestamp: "2026-03-22T14:32:18Z"
+
+  - name: triage
+    blueprint_path: triage.yaml
+    depends_on:
+      - detect
+    position:
+      x: 350
+      y: 120
+    inputs:
+      alert_id: "{{ .stages.detect.outputs.alert_id }}"
+      alert_type: "{{ .stages.detect.outputs.alert_type }}"
+      source_ip: "{{ .stages.detect.outputs.source_ip }}"
+    outputs:
+      severity: "high"
+      ioc_count: "4"
+      classification: "data-exfiltration-attempt"
+
+  # ── Parallel analysis swarm ──
+
+  - name: network-analysis
+    blueprint_path: analyze-network.yaml
+    depends_on:
+      - triage
+    position:
+      x: 80
+      y: 280
+    inputs:
+      source_ip: "{{ .stages.detect.outputs.source_ip }}"
+      alert_id: "{{ .stages.detect.outputs.alert_id }}"
+
+  - name: host-analysis
+    blueprint_path: analyze-host.yaml
+    depends_on:
+      - triage
+    position:
+      x: 280
+      y: 280
+    inputs:
+      source_ip: "{{ .stages.detect.outputs.source_ip }}"
+
+  - name: identity-analysis
+    blueprint_path: analyze-identity.yaml
+    depends_on:
+      - triage
+    position:
+      x: 480
+      y: 280
+    inputs:
+      source_ip: "{{ .stages.detect.outputs.source_ip }}"
+
+  - name: threat-intel
+    blueprint_path: analyze-intel.yaml
+    depends_on:
+      - triage
+    position:
+      x: 680
+      y: 280
+    inputs:
+      classification: "{{ .stages.triage.outputs.classification }}"
+      alert_type: "{{ .stages.detect.outputs.alert_type }}"
+
+  # ── Correlation & response ──
+
+  - name: correlate
+    blueprint_path: correlate.yaml
+    depends_on:
+      - network-analysis
+      - host-analysis
+      - identity-analysis
+      - threat-intel
+    position:
+      x: 350
+      y: 440
+    inputs:
+      alert_id: "{{ .stages.detect.outputs.alert_id }}"
+      severity: "{{ .stages.triage.outputs.severity }}"
+    outputs:
+      confidence: "0.92"
+      confirmed_threat: "true"
+      timeline_entries: "7"
+
+  - name: remediate
+    blueprint_path: remediate.yaml
+    depends_on:
+      - correlate
+    if: '{{ eq .stages.correlate.outputs.confirmed_threat "true" }}'
+    position:
+      x: 350
+      y: 580
+    inputs:
+      source_ip: "{{ .stages.detect.outputs.source_ip }}"
+      severity: "{{ .stages.triage.outputs.severity }}"
+      confidence: "{{ .stages.correlate.outputs.confidence }}"
+
+  - name: report
+    blueprint_path: report.yaml
+    depends_on:
+      - remediate
+    position:
+      x: 350
+      y: 720
+    inputs:
+      alert_id: "{{ .stages.detect.outputs.alert_id }}"
+      severity: "{{ .stages.triage.outputs.severity }}"
+      confirmed_threat: "{{ .stages.correlate.outputs.confirmed_threat }}"
+      timeline_entries: "{{ .stages.correlate.outputs.timeline_entries }}"

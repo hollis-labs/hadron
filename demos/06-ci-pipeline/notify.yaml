@@ -1,0 +1,12 @@
+version: "0.4"
+
+blueprint:
+  name: demo-ci-notify
+  title: "CI — Failure Notification"
+  tags: [demo, ci-pipeline]
+
+steps:
+  - section: Notify
+    tasks:
+      - name: alert
+        cmd: echo "[notify] ALERT — Deploy failed. Sending notification to #incidents..."

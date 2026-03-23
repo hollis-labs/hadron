@@ -1,0 +1,25 @@
+# 01-hello-world.yaml — "It works" proof
+#
+# Demo: Minimal blueprint execution. Run it, see output, done.
+# Time: ~2 seconds
+#
+version: "0.4"
+
+blueprint:
+  name: demo-hello-world
+  title: Hello World
+  description: Minimal blueprint — proves Hadron runs and produces output.
+  author: Hollis Labs
+  tags: [demo, minimal]
+
+steps:
+  - section: Greet
+    tasks:
+      - name: hello
+        cmd: echo "Hello from Hadron!"
+
+      - name: timestamp
+        cmd: echo "Run completed at $(date '+%Y-%m-%d %H:%M:%S')"
+
+      - name: version-check
+        cmd: hadron version 2>/dev/null || echo "hadron CLI available"

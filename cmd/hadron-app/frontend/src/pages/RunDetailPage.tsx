@@ -27,11 +27,23 @@ interface TaskGroup {
   endedAt?: string;
 }
 
+// Status priority: higher number = more terminal. Only allow forward transitions.
+const STATUS_RANK: Record<string, number> = {
+  pending: 0,
+  running: 1,
+  success: 2,
+  skipped: 2,
+  failed: 2,
+};
+
 function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
+  // Events may arrive in DESC order from the API — sort ascending by id for correct status progression.
+  const sorted = [...events].sort((a, b) => a.id - b.id);
+
   const groups = new Map<string, TaskGroup>();
   const order: string[] = [];
 
-  for (const event of events) {
+  for (const event of sorted) {
     const step = event.step_name || '__global__';
     if (!groups.has(step)) {
       groups.set(step, { stepName: step, status: 'pending', events: [] });
@@ -41,15 +53,29 @@ function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
     group.events.push(event);
 
     const t = event.event_type;
+    let nextStatus: TaskGroup['status'] | null = null;
+
     if (t === 'step_start' || t === 'task_start') {
-      group.status = 'running';
+      nextStatus = 'running';
       if (!group.startedAt) group.startedAt = event.created_at;
-    } else if (t === 'step_end' || t === 'task_end' || t === 'success' || t.includes('complete')) {
-      group.status = 'success';
+    } else if (t === 'step_success' || t === 'step_call_success' || t === 'step_end' || t === 'task_end' || t === 'success' || t.includes('complete')) {
+      nextStatus = 'success';
       group.endedAt = event.created_at;
-    } else if (t === 'error' || t === 'failed' || t.includes('fail')) {
-      group.status = 'failed';
+    } else if (t === 'step_skipped' || t === 'step_skipped_condition') {
+      nextStatus = 'skipped';
       group.endedAt = event.created_at;
+    } else if (t === 'step_skipped_error') {
+      // continue_on_error was set — override prior step_error, mark as success (non-fatal)
+      nextStatus = 'success';
+      group.endedAt = event.created_at;
+    } else if (t === 'step_error' || t === 'step_call_error' || t === 'error' || t === 'failed') {
+      nextStatus = 'failed';
+      group.endedAt = event.created_at;
+    }
+
+    // Only allow forward status transitions (pending → running → terminal)
+    if (nextStatus && (STATUS_RANK[nextStatus] ?? 0) >= (STATUS_RANK[group.status] ?? 0)) {
+      group.status = nextStatus;
     }
   }
 
@@ -60,6 +86,7 @@ const TASK_ICON: Record<string, { char: string; cls: string }> = {
   success: { char: '✓', cls: 'success' },
   failed: { char: '✗', cls: 'failed' },
   running: { char: '↻', cls: 'running' },
+  skipped: { char: '—', cls: 'queued' },
 };
 
 function eventTypeColor(eventType: string): string {
@@ -83,14 +110,20 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
   const taskGroups = useMemo(() => groupEventsByStep(events), [events]);
 
   useEffect(() => {
-    const running = taskGroups.filter(g => g.status === 'running').map(g => g.stepName);
-    if (running.length > 0) {
-      setExpandedGroups(prev => {
-        const next = new Set(prev);
-        running.forEach(s => next.add(s));
-        return next;
-      });
-    }
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const g of taskGroups) {
+        if (g.status === 'running' && !next.has(g.stepName)) {
+          next.add(g.stepName);
+          changed = true;
+        } else if ((g.status === 'success' || g.status === 'failed' || g.status === 'skipped') && next.has(g.stepName)) {
+          next.delete(g.stepName);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   }, [taskGroups]);
 
   useEffect(() => {
@@ -115,7 +148,7 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
   };
 
   const realGroups = taskGroups.filter(g => g.stepName !== '__global__');
-  const completedCount = realGroups.filter(g => g.status === 'success' || g.status === 'failed').length;
+  const completedCount = realGroups.filter(g => g.status === 'success' || g.status === 'failed' || g.status === 'skipped').length;
   const progress = realGroups.length > 0 ? (completedCount / realGroups.length) * 100 : 0;
 
   return (
