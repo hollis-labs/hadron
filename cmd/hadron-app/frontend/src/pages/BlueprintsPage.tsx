@@ -358,7 +358,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
 
       {/* Current path */}
       {currentDir && (
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
           {currentDir}
         </div>
       )}
@@ -375,7 +375,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
             style={{ flex: 1 }}
           />
           {search && (
-            <button className="btn btn-ghost" onClick={() => setSearch('')} style={{ padding: '0.3rem 0.5rem', fontSize: '0.7rem' }}>
+            <button className="btn btn-ghost" onClick={() => setSearch('')} style={{ padding: '0.3rem 0.5rem', fontSize: 'var(--text-xs)' }}>
               Clear
             </button>
           )}
@@ -389,7 +389,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
             <option value="name-desc">Name Z-A</option>
           </select>
           {entries.some(e => !e.isDir) && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
               <input
                 type="checkbox"
                 checked={selected.size > 0 && selected.size === entries.filter(e => !e.isDir).length}
@@ -404,7 +404,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
 
       {/* Error */}
       {error && (
-        <div style={{ color: 'var(--status-failed)', fontSize: '0.8rem', padding: '0.5rem 0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+        <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-md)', padding: '0.5rem 0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           {error}
         </div>
       )}
@@ -416,37 +416,37 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
           padding: '0.4rem 0.75rem', background: 'rgba(59, 130, 246, 0.08)',
           border: '1px solid rgba(var(--ok) / 0.2)', borderRadius: '4px',
         }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--status-success)' }}>
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--status-success)' }}>
             {selected.size} selected
           </span>
-          <button className="btn btn-ghost" onClick={handleBatchValidate} style={{ fontSize: '0.7rem' }}>
+          <button className="btn btn-ghost" onClick={handleBatchValidate} style={{ fontSize: 'var(--text-xs)' }}>
             Validate All
           </button>
           <button
             className="btn btn-ghost"
             onClick={handleBatchRun}
             disabled={daemonStatus !== 'running'}
-            style={{ fontSize: '0.7rem' }}
+            style={{ fontSize: 'var(--text-xs)' }}
           >
             Run All
           </button>
-          <button className="btn btn-ghost" onClick={handleBatchMove} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <button className="btn btn-ghost" onClick={handleBatchMove} style={{ fontSize: 'var(--text-xs)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <MoveRight size={11} /> Move
           </button>
-          <button className="btn btn-ghost" onClick={handleBatchCopy} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <button className="btn btn-ghost" onClick={handleBatchCopy} style={{ fontSize: 'var(--text-xs)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <Copy size={11} /> Copy
           </button>
-          <button className="btn btn-ghost" onClick={handleBatchArchive} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <button className="btn btn-ghost" onClick={handleBatchArchive} style={{ fontSize: 'var(--text-xs)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <Archive size={11} /> Archive
           </button>
           <button
             className="btn btn-ghost"
             onClick={() => setBatchDeleteConfirm(true)}
-            style={{ fontSize: '0.7rem', color: 'var(--status-failed)' }}
+            style={{ fontSize: 'var(--text-xs)', color: 'var(--status-failed)' }}
           >
             Delete Selected
           </button>
-          <button className="btn btn-ghost" onClick={() => setSelected(new Set())} style={{ fontSize: '0.7rem', marginLeft: 'auto' }}>
+          <button className="btn btn-ghost" onClick={() => setSelected(new Set())} style={{ fontSize: 'var(--text-xs)', marginLeft: 'auto' }}>
             Clear
           </button>
         </div>
@@ -498,7 +498,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                 >
                   <span>
                     {entry.name}
-                    {entry.isDir && <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem', marginLeft: '0.3rem' }}>/</span>}
+                    {entry.isDir && <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)', marginLeft: '0.3rem' }}>/</span>}
                   </span>
                   {!entry.isDir && metaCache[entry.path] && (() => {
                     const meta = metaCache[entry.path];
@@ -530,7 +530,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                 {/* Validate result badge */}
                 {!entry.isDir && validateResult && (
                   <span style={{
-                    fontSize: '0.7rem',
+                    fontSize: 'var(--text-xs)',
                     color: validateResult.valid ? 'var(--status-success)' : 'var(--status-failed)',
                     letterSpacing: '0.06em',
                     flexShrink: 0,
@@ -545,7 +545,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                     <button
                       className="btn btn-ghost"
                       onClick={() => handleValidate(entry)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-xs)' }}
                     >
                       <CheckCircle size={12} /> Validate
                     </button>
@@ -553,7 +553,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                       className="btn btn-primary"
                       onClick={() => handleRun(entry)}
                       disabled={daemonStatus !== 'running' || isRunning}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-xs)' }}
                     >
                       <Play size={12} /> {isRunning ? 'Running…' : 'Run'}
                     </button>
@@ -590,8 +590,8 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
       {batchDeleteConfirm && (
         <div className="hud-modal-overlay" onClick={() => setBatchDeleteConfirm(false)}>
           <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Delete {selected.size} Blueprints</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+            <h3 style={{ fontSize: 'var(--text-base)', marginBottom: '0.5rem' }}>Delete {selected.size} Blueprints</h3>
+            <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
               Are you sure you want to delete {selected.size} selected blueprint{selected.size !== 1 ? 's' : ''}? This cannot be undone.
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
@@ -614,7 +614,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
           <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
             <div style={{ padding: '1.25rem' }}>
               <div style={{ marginBottom: '0.75rem', fontWeight: 600 }}>Run blueprint?</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
+              <div style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
                 Execute <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>
                   {confirmEntry.name}
                 </span> with no inputs?
@@ -635,11 +635,11 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
       {deleteConfirm && (
         <div className="hud-modal-overlay" onClick={() => setDeleteConfirm(null)}>
           <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Delete Blueprint</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+            <h3 style={{ fontSize: 'var(--text-base)', marginBottom: '0.5rem' }}>Delete Blueprint</h3>
+            <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
               Are you sure you want to delete this blueprint? This cannot be undone.
             </p>
-            <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
+            <p style={{ fontFamily: 'monospace', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
               {deleteConfirm}
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>

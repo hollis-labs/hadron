@@ -347,7 +347,7 @@ export function HelpPage() {
             key={t.key}
             className={tab === t.key ? 'hud-button' : 'hud-button-ghost'}
             onClick={() => setTab(t.key)}
-            style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
+            style={{ fontSize: 'var(--text-sm)', padding: '0.3rem 0.75rem' }}
           >
             {t.label}
           </button>
@@ -359,11 +359,11 @@ export function HelpPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '960px' }}>
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>About</div>
-            <div style={{ fontSize: '0.85rem', marginBottom: '0.3rem' }}>
+            <div style={{ fontSize: 'var(--text-md)', marginBottom: '0.3rem' }}>
               <strong style={{ color: 'var(--status-success)' }}>HADRON</strong>
               <span style={{ color: 'var(--text-tertiary)', marginLeft: '0.5rem' }}>by Hollis Labs</span>
             </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.5' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.5' }}>
               A local-first, agent-first blueprint automation runner. Create, inspect, and run YAML blueprints
               that orchestrate multi-step workflows with inputs, conditions, retries, and more.
             </div>
@@ -371,7 +371,7 @@ export function HelpPage() {
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Quick Start</div>
-            <ol style={{ fontSize: '0.8rem', lineHeight: '1.7', paddingLeft: '1.2rem', color: 'var(--text-primary)' }}>
+            <ol style={{ fontSize: 'var(--text-md)', lineHeight: '1.7', paddingLeft: '1.2rem', color: 'var(--text-primary)' }}>
               <li>Go to <strong>Blueprints</strong> and click <strong>Open Folder</strong> to select a directory containing .yaml blueprints</li>
               <li>Click a blueprint name to view its details, inputs, and step timeline</li>
               <li>Click <strong>Run</strong> to execute a blueprint (fill in inputs if required)</li>
@@ -399,11 +399,11 @@ export function HelpPage() {
                     <td style={{ padding: '0.3rem 0', width: '120px' }}>
                       <kbd style={{
                         background: 'var(--bg-raised)', border: '1px solid var(--border-default)',
-                        borderRadius: '3px', padding: '2px 8px', fontSize: '0.75rem',
+                        borderRadius: '3px', padding: '2px 8px', fontSize: 'var(--text-sm)',
                         fontFamily: 'var(--font-mono)',
                       }}>{key}</kbd>
                     </td>
-                    <td style={{ padding: '0.3rem 0', fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>{desc}</td>
+                    <td style={{ padding: '0.3rem 0', fontSize: 'var(--text-md)', color: 'var(--text-tertiary)' }}>{desc}</td>
                   </tr>
                 ))}
               </tbody>
@@ -412,7 +412,7 @@ export function HelpPage() {
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Pages Overview</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               <div><strong style={{ color: 'var(--accent)' }}>Dashboard</strong> — Run stats, activity timeline, blueprint success rates</div>
               <div><strong style={{ color: 'var(--accent)' }}>Blueprints</strong> — Browse, create, edit, run, and manage blueprint YAML files</div>
               <div><strong style={{ color: 'var(--accent)' }}>Pipelines</strong> — Chain blueprints into multi-stage workflows</div>
@@ -434,7 +434,7 @@ export function HelpPage() {
                 ['Archive', '~/.hadron/archive/'],
                 ['Preferences', '~/.hadron/preferences.json'],
               ].map(([label, path]) => (
-                <div key={label} style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
+                <div key={label} style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)' }}>
                   {label}: <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>{path}</span>
                 </div>
               ))}
@@ -448,7 +448,7 @@ export function HelpPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '960px' }}>
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>What are Blueprints?</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               Blueprints are YAML files that define multi-step automation workflows. Each blueprint can declare
               inputs, environment variables, conditional steps, retries, and hooks. Hadron executes them locally
               using Go&apos;s text/template engine for dynamic values.
@@ -457,7 +457,7 @@ export function HelpPage() {
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Blueprint Schema (v0.4)</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               <div><strong style={{ color: 'var(--accent)' }}>version:</strong> Schema version (currently "0.4")</div>
               <div><strong style={{ color: 'var(--accent)' }}>blueprint:</strong> name, slug, title, description, author, license, tags, homepage</div>
               <div><strong style={{ color: 'var(--accent)' }}>project:</strong> type, name, dir, path, php_version, node, vars</div>
@@ -474,7 +474,7 @@ export function HelpPage() {
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Template Variables</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               <div style={{ marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
                 Blueprints use Go text/template syntax. Available variables:
               </div>
@@ -492,10 +492,10 @@ export function HelpPage() {
                   ].map(([variable, desc]) => (
                     <tr key={variable}>
                       <td style={{
-                        padding: '0.25rem 0', fontFamily: 'monospace', fontSize: '0.75rem',
+                        padding: '0.25rem 0', fontFamily: 'monospace', fontSize: 'var(--text-sm)',
                         color: 'var(--accent)', whiteSpace: 'nowrap', width: '220px',
                       }}>{variable}</td>
-                      <td style={{ padding: '0.25rem 0', fontSize: '0.78rem' }}>{desc}</td>
+                      <td style={{ padding: '0.25rem 0', fontSize: 'var(--text-sm)' }}>{desc}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -505,7 +505,7 @@ export function HelpPage() {
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Template Functions</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.3rem 1.5rem' }}>
                 {[
                   ['upper', 'Convert to uppercase'],
@@ -524,8 +524,8 @@ export function HelpPage() {
                   ['json', 'Marshal to JSON'],
                 ].map(([fn, desc]) => (
                   <div key={fn} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline' }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--accent)' }}>{fn}</span>
-                    <span style={{ fontSize: '0.72rem' }}>{desc}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 'var(--text-sm)', color: 'var(--accent)' }}>{fn}</span>
+                    <span style={{ fontSize: 'var(--text-sm)' }}>{desc}</span>
                   </div>
                 ))}
               </div>
@@ -534,7 +534,7 @@ export function HelpPage() {
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Task Options</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               <div><strong style={{ color: 'var(--accent)' }}>cmd</strong> — Shell command to execute</div>
               <div><strong style={{ color: 'var(--accent)' }}>call</strong> — Call another blueprint by path</div>
               <div><strong style={{ color: 'var(--accent)' }}>if</strong> — Conditional expression (template syntax)</div>
@@ -555,7 +555,7 @@ export function HelpPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '960px' }}>
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>What are Pipelines?</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               Pipelines chain multiple blueprints together into a sequential workflow. Each stage runs a blueprint,
               and (by default) the pipeline stops on the first failure. Use pipelines to orchestrate multi-step
               deployments, build chains, or any workflow that requires ordered execution.
@@ -564,7 +564,7 @@ export function HelpPage() {
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Pipeline Schema</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               <div><strong style={{ color: 'var(--accent)' }}>meta.name</strong> — Pipeline display name</div>
               <div><strong style={{ color: 'var(--accent)' }}>stop_on_fail</strong> — Stop pipeline if a stage fails (default: true)</div>
               <div><strong style={{ color: 'var(--accent)' }}>stages[]</strong> — Ordered list of stages to execute:</div>
@@ -580,7 +580,7 @@ export function HelpPage() {
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Example Pipeline</div>
             <pre style={{
-              fontSize: '0.75rem', lineHeight: '1.5', color: 'var(--text-primary)',
+              fontSize: 'var(--text-sm)', lineHeight: '1.5', color: 'var(--text-primary)',
               background: 'var(--bg-raised)', padding: '0.75rem', borderRadius: '4px',
               border: '1px solid var(--border-default)', overflow: 'auto',
               fontFamily: 'monospace', whiteSpace: 'pre', margin: 0,
@@ -602,7 +602,7 @@ stages:
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>How to Use</div>
-            <ol style={{ fontSize: '0.8rem', lineHeight: '1.7', paddingLeft: '1.2rem', color: 'var(--text-primary)' }}>
+            <ol style={{ fontSize: 'var(--text-md)', lineHeight: '1.7', paddingLeft: '1.2rem', color: 'var(--text-primary)' }}>
               <li>Navigate to the <strong>Pipelines</strong> page from the sidebar</li>
               <li>Click <strong>Open Folder</strong> to select a directory containing pipeline YAML files</li>
               <li>Click <strong>New Pipeline</strong> to create a pipeline with the visual editor</li>
@@ -615,7 +615,7 @@ stages:
 
           <div className="section" style={{ padding: '1rem' }}>
             <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Execution Behavior</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
               <div>Stages execute <strong style={{ color: 'var(--text-primary)' }}>sequentially</strong> — each stage waits for the previous one to complete.</div>
               <div style={{ marginTop: '0.3rem' }}>With <strong style={{ color: 'var(--accent)' }}>stop_on_fail: true</strong> (default), the pipeline halts when any stage fails.</div>
               <div style={{ marginTop: '0.3rem' }}>With <strong style={{ color: 'var(--accent)' }}>stop_on_fail: false</strong>, all stages run regardless of failures.</div>
@@ -629,7 +629,7 @@ stages:
       {/* ══════════════ Tab: Examples ══════════════ */}
       {tab === 'examples' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '960px' }}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', lineHeight: '1.5' }}>
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.5' }}>
             Sample blueprints and pipelines for common use cases. <strong style={{ color: 'var(--text-primary)' }}>View</strong> to
             see the full YAML, <strong style={{ color: 'var(--text-primary)' }}>Copy</strong> to clipboard,
             or <strong style={{ color: 'var(--text-primary)' }}>Add</strong> to save directly to your blueprints folder.
@@ -642,7 +642,7 @@ stages:
                 key={f}
                 className={exampleFilter === f ? 'hud-button' : 'hud-button-ghost'}
                 onClick={() => setExampleFilter(f)}
-                style={{ fontSize: '0.72rem', padding: '0.2rem 0.6rem' }}
+                style={{ fontSize: 'var(--text-sm)', padding: '0.2rem 0.6rem' }}
               >
                 {f === 'all' ? 'All' : f === 'blueprint' ? 'Blueprints' : 'Pipelines'}
               </button>
@@ -653,21 +653,21 @@ stages:
             <div key={sample.filename} className="section" style={{ padding: '0.75rem 1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
                 <span style={{
-                  fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.08em',
+                  fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.08em',
                   textTransform: 'uppercase', padding: '0.1rem 0.35rem', borderRadius: '3px',
                   background: sample.kind === 'pipeline' ? 'rgba(var(--accent) / 0.15)' : 'rgba(var(--ok) / 0.15)',
                   color: sample.kind === 'pipeline' ? 'var(--accent)' : 'var(--status-success)',
                 }}>
                   {sample.kind}
                 </span>
-                <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: 'var(--text-md)', color: 'var(--text-primary)', flex: 1 }}>
                   {sample.title}
                 </div>
                 <div style={{ display: 'flex', gap: '0.25rem' }}>
                   <button
                     className="btn btn-ghost"
                     onClick={() => setViewingSample(sample)}
-                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }}
+                    style={{ fontSize: 'var(--text-xs)', padding: '0.2rem 0.5rem' }}
                   >
                     View
                   </button>
@@ -677,23 +677,23 @@ stages:
                       navigator.clipboard.writeText(sample.yaml);
                       toast.success('Copied to clipboard');
                     }}
-                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }}
+                    style={{ fontSize: 'var(--text-xs)', padding: '0.2rem 0.5rem' }}
                   >
                     Copy
                   </button>
                   <button
                     className="btn btn-primary"
                     onClick={() => addFileToBlueprints(sample)}
-                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                    style={{ fontSize: 'var(--text-xs)', padding: '0.2rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
                   >
                     <FolderPlus size={11} /> Add
                   </button>
                 </div>
               </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
                 {sample.description}
               </div>
-              <div style={{ fontSize: '0.68rem', fontFamily: 'monospace', color: 'var(--accent)', marginTop: '0.2rem' }}>
+              <div style={{ fontSize: 'var(--text-xs)', fontFamily: 'monospace', color: 'var(--accent)', marginTop: '0.2rem' }}>
                 {sample.filename}
               </div>
             </div>
@@ -709,16 +709,16 @@ stages:
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <span style={{
-                    fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.08em',
+                    fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.08em',
                     textTransform: 'uppercase', padding: '0.1rem 0.35rem', borderRadius: '3px',
                     background: viewingSample.kind === 'pipeline' ? 'rgba(var(--accent) / 0.15)' : 'rgba(var(--ok) / 0.15)',
                     color: viewingSample.kind === 'pipeline' ? 'var(--accent)' : 'var(--status-success)',
                   }}>
                     {viewingSample.kind}
                   </span>
-                  <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{viewingSample.title}</span>
+                  <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>{viewingSample.title}</span>
                 </div>
-                <div style={{ fontSize: '0.72rem', fontFamily: 'monospace', color: 'var(--accent)' }}>{viewingSample.filename}</div>
+                <div style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--accent)' }}>{viewingSample.filename}</div>
               </div>
               <div style={{ display: 'flex', gap: '0.3rem' }}>
                 <button
@@ -727,21 +727,21 @@ stages:
                     navigator.clipboard.writeText(viewingSample.yaml);
                     toast.success('Copied to clipboard');
                   }}
-                  style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem' }}
+                  style={{ fontSize: 'var(--text-sm)', padding: '0.25rem 0.6rem' }}
                 >
                   Copy
                 </button>
                 <button
                   className="btn btn-primary"
                   onClick={() => addFileToBlueprints(viewingSample)}
-                  style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                  style={{ fontSize: 'var(--text-sm)', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
                 >
                   <FolderPlus size={11} /> Add to Blueprints
                 </button>
               </div>
             </div>
             <pre style={{
-              fontSize: '0.75rem', lineHeight: '1.5', color: 'var(--text-primary)',
+              fontSize: 'var(--text-sm)', lineHeight: '1.5', color: 'var(--text-primary)',
               background: 'var(--bg-raised)', padding: '0.75rem', borderRadius: '4px',
               border: '1px solid var(--border-default)', overflow: 'auto',
               fontFamily: 'monospace', whiteSpace: 'pre', margin: 0, maxHeight: '60vh',

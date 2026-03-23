@@ -274,7 +274,7 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
           background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
           borderRadius: 'var(--radius-lg)', padding: '1.5rem', width: '380px',
         }}>
-          <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--text-tertiary)', marginBottom: '0.75rem' }}>
+          <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--text-tertiary)', marginBottom: '0.75rem' }}>
             Open Pipeline
           </div>
 
@@ -294,7 +294,7 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
               placeholder="Search pipelines..."
               autoFocus
               style={{
-                width: '100%', boxSizing: 'border-box', fontSize: '0.8rem',
+                width: '100%', boxSizing: 'border-box', fontSize: 'var(--text-md)',
                 padding: '0.4rem 0.6rem 0.4rem 1.6rem',
               }}
             />
@@ -306,9 +306,9 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
             border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
           }}>
             {loadingFiles ? (
-              <div style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>Loading...</div>
+              <div style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>Loading...</div>
             ) : filtered.length === 0 ? (
-              <div style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>
+              <div style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
                 {files.length === 0 ? 'No pipeline files found' : 'No matches'}
               </div>
             ) : (
@@ -321,7 +321,7 @@ function FlowBuilderLanding({ onOpen, onBack }: { onOpen: (path: string) => void
                     padding: '0.4rem 0.6rem', background: 'none', border: 'none',
                     borderBottom: '1px solid rgba(var(--border) / 0.5)',
                     color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                    fontSize: '0.78rem', textAlign: 'left', transition: 'background 0.1s',
+                    fontSize: 'var(--text-sm)', textAlign: 'left', transition: 'background 0.1s',
                   }}
                   onMouseOver={e => (e.currentTarget.style.background = 'rgba(var(--panel2) / 0.8)')}
                   onMouseOut={e => (e.currentTarget.style.background = 'none')}
@@ -701,7 +701,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
           </button>
           <span className="page-title">Error</span>
         </div>
-        <div style={{ color: 'var(--status-failed)', fontSize: '0.8rem', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+        <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-md)', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           {error}
         </div>
       </div>
@@ -824,7 +824,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
               display: 'flex', alignItems: 'center', gap: '0.4rem',
               padding: '0.3rem 0.75rem', background: 'none', border: 'none',
               color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-              fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.1em',
+              fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.1em',
               flexShrink: 0,
             }}
           >
@@ -843,7 +843,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
               ref={runLogRef}
               style={{
                 flex: 1, overflow: 'auto', padding: '0 0.75rem 0.5rem',
-                fontFamily: "'Courier New', monospace", fontSize: '0.72rem',
+                fontFamily: "'Courier New', monospace", fontSize: 'var(--text-sm)',
                 lineHeight: '1.5', color: 'var(--text-tertiary)',
               }}
             >
@@ -879,11 +879,11 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
             style={{ maxWidth: '900px', width: '90vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
+              <span style={{ fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
                 Pipeline YAML Preview (live)
               </span>
               <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
+                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-sm)' }}>
                   <Copy size={12} /> Copy
                 </button>
                 <button className="btn btn-ghost" onClick={() => setShowYamlPreview(false)} style={{ padding: '0.25rem' }}>
@@ -895,7 +895,7 @@ function FlowBuilderInner({ path: pathProp, onBack, daemonStatus = 'stopped', wo
               flex: 1, overflow: 'auto', padding: '0.75rem',
               background: 'var(--bg-base)', borderRadius: '4px',
               border: '1px solid var(--border-default)',
-              fontSize: '0.78rem', lineHeight: '1.6', whiteSpace: 'pre-wrap',
+              fontSize: 'var(--text-sm)', lineHeight: '1.6', whiteSpace: 'pre-wrap',
               wordBreak: 'break-all',
             }}>
               {yamlPreview}

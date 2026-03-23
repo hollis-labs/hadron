@@ -1,8 +1,23 @@
-# Hadron project role config
-# Overrides/extends ~/.agentrc/config.yaml
+# Project agentrc config — hadron
+agentrc_version: 2.2.0
 
-roles:
-  frontend:
-    file: frontend.md
+agents:
+  hadron-backend:
+    name: Hadron Backend Engineer
+    description: Go service development for the Hadron blueprint automation engine
+    roles: [backend, go]
+    skills: [go-build, go-lint, go-test]
+    context: agents/backend.md
 
-default_role: frontend
+  hadron-frontend:
+    name: Hadron Frontend Developer
+    description: React/Wails frontend development for the Hadron desktop app
+    roles: [frontend, react]
+    plugins: [vercel]
+    context: agents/frontend.md
+
+  hadron-reviewer:
+    name: Hadron Code Reviewer
+    description: Code review for Hadron PRs
+    roles: [code-review, go]
+    skills: [go-lint, go-test]

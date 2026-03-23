@@ -72,7 +72,7 @@ export function NodePalette({ onAddBlankNode }: NodePaletteProps) {
           onClick={onAddBlankNode}
           style={{
             width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            gap: '0.3rem', fontSize: '0.72rem',
+            gap: '0.3rem', fontSize: 'var(--text-sm)',
           }}
         >
           <Plus size={12} /> Add Stage
@@ -95,7 +95,7 @@ export function NodePalette({ onAddBlankNode }: NodePaletteProps) {
             onChange={e => setSearch(e.target.value)}
             placeholder="Search blueprints..."
             style={{
-              width: '100%', boxSizing: 'border-box', fontSize: '0.7rem',
+              width: '100%', boxSizing: 'border-box', fontSize: 'var(--text-xs)',
               padding: '0.25rem 0.4rem 0.25rem 1.4rem',
             }}
           />
@@ -105,12 +105,12 @@ export function NodePalette({ onAddBlankNode }: NodePaletteProps) {
       {/* Blueprint list */}
       <div className="node-palette-list">
         {loading && (
-          <div style={{ fontSize: '0.72rem', color: 'rgb(var(--muted))', padding: '0.5rem', textAlign: 'center' }}>
+          <div style={{ fontSize: 'var(--text-sm)', color: 'rgb(var(--muted))', padding: '0.5rem', textAlign: 'center' }}>
             Loading...
           </div>
         )}
         {!loading && filtered.length === 0 && (
-          <div style={{ fontSize: '0.72rem', color: 'rgb(var(--muted))', padding: '0.5rem', textAlign: 'center' }}>
+          <div style={{ fontSize: 'var(--text-sm)', color: 'rgb(var(--muted))', padding: '0.5rem', textAlign: 'center' }}>
             {blueprints.length === 0 ? 'No blueprints found' : 'No matches'}
           </div>
         )}

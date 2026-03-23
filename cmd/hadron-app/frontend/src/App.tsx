@@ -371,7 +371,7 @@ export default function App() {
         <div className="hud-modal-overlay" onClick={() => setShowWorkspaceModal(false)}>
           <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
             <div style={{ padding: '1.25rem' }}>
-              <div style={{ marginBottom: '1rem', fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em' }}>New Workspace</div>
+              <div style={{ marginBottom: '1rem', fontWeight: 600, fontSize: 'var(--text-base)', letterSpacing: '0.05em' }}>New Workspace</div>
               <div style={{ marginBottom: '0.75rem' }}>
                 <label className="hud-label">Workspace ID</label>
                 <input
@@ -382,7 +382,7 @@ export default function App() {
                   style={{ width: '100%', boxSizing: 'border-box' }}
                   autoFocus
                 />
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', marginTop: '0.2rem' }}>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: '0.2rem' }}>
                   Letters, numbers, and hyphens only
                 </div>
               </div>

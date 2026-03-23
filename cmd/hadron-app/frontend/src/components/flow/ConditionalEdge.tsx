@@ -71,7 +71,7 @@ function ConditionalEdgeComponent({
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
               pointerEvents: 'all',
-              fontSize: '0.6rem',
+              fontSize: 'var(--text-xs)',
               fontFamily: 'var(--font-mono)',
               color: 'rgb(var(--warn))',
               background: 'rgb(var(--panel))',

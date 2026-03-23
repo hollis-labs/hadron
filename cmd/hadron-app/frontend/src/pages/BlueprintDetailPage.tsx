@@ -150,7 +150,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
           </button>
           <span className="page-title">Error</span>
         </div>
-        <div style={{ color: 'var(--status-failed)', fontSize: '0.8rem', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+        <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-md)', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           {error || 'Failed to load blueprint'}
         </div>
       </div>
@@ -198,7 +198,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                   display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
                   padding: '0.5rem 0.75rem', background: 'none', border: 'none',
                   color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  fontSize: '0.8rem', textAlign: 'left',
+                  fontSize: 'var(--text-md)', textAlign: 'left',
                 }}
               >
                 <Copy size={13} /> View YAML
@@ -210,7 +210,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                     display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
                     padding: '0.5rem 0.75rem', background: 'none', border: 'none',
                     color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                    fontSize: '0.8rem', textAlign: 'left',
+                    fontSize: 'var(--text-md)', textAlign: 'left',
                   }}
                 >
                   <Pencil size={13} /> Edit
@@ -222,7 +222,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                   display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
                   padding: '0.5rem 0.75rem', background: 'none', border: 'none',
                   color: 'var(--status-failed)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  fontSize: '0.8rem', textAlign: 'left',
+                  fontSize: 'var(--text-md)', textAlign: 'left',
                 }}
               >
                 <Trash2 size={13} /> Delete
@@ -251,7 +251,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
             {bp.blueprint.description && (
               <div className="bp-meta-field" style={{ flexDirection: 'column' }}>
                 <span className="bp-meta-field-label">Description</span>
-                <span style={{ color: 'var(--text-primary)', fontSize: '0.78rem', lineHeight: '1.4' }}>{bp.blueprint.description}</span>
+                <span style={{ color: 'var(--text-primary)', fontSize: 'var(--text-sm)', lineHeight: '1.4' }}>{bp.blueprint.description}</span>
               </div>
             )}
             {bp.blueprint.author && (
@@ -261,7 +261,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
               <div className="bp-meta-field"><span className="bp-meta-field-label">License</span><span>{bp.blueprint.license}</span></div>
             )}
             {bp.blueprint.homepage && (
-              <div className="bp-meta-field"><span className="bp-meta-field-label">Homepage</span><span style={{ wordBreak: 'break-all', fontSize: '0.75rem' }}>{bp.blueprint.homepage}</span></div>
+              <div className="bp-meta-field"><span className="bp-meta-field-label">Homepage</span><span style={{ wordBreak: 'break-all', fontSize: 'var(--text-sm)' }}>{bp.blueprint.homepage}</span></div>
             )}
             {bp.blueprint.tags && bp.blueprint.tags.length > 0 && (
               <div style={{ marginTop: '0.35rem' }}>
@@ -276,23 +276,23 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
           <div className="bp-meta-section">
             <div className="bp-meta-section-title">Inputs ({bp.inputs?.length ?? 0})</div>
             {(!bp.inputs || bp.inputs.length === 0) ? (
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>No inputs defined</div>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>No inputs defined</div>
             ) : (
               bp.inputs.map((inp, i) => (
                 <div key={i} style={{ padding: '0.35rem 0', borderBottom: i < bp.inputs.length - 1 ? '1px solid rgba(var(--border), 0.5)' : 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
-                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{inp.name}</span>
+                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 'var(--text-md)' }}>{inp.name}</span>
                     <span className="bp-badge bp-badge-info">{inp.type}</span>
-                    {inp.required && <span style={{ color: 'var(--status-failed)', fontSize: '0.7rem' }}>*</span>}
+                    {inp.required && <span style={{ color: 'var(--status-failed)', fontSize: 'var(--text-xs)' }}>*</span>}
                   </div>
                   {inp.description && (
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>{inp.description}</div>
+                    <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>{inp.description}</div>
                   )}
                   {inp.default != null && inp.default !== '' && (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: '0.1rem' }}>Default: <span style={{ fontFamily: 'monospace' }}>{String(inp.default)}</span></div>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: '0.1rem' }}>Default: <span style={{ fontFamily: 'monospace' }}>{String(inp.default)}</span></div>
                   )}
                   {inp.enum && inp.enum.length > 0 && (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: '0.1rem' }}>Enum: {inp.enum.join(', ')}</div>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: '0.1rem' }}>Enum: {inp.enum.join(', ')}</div>
                   )}
                 </div>
               ))
@@ -310,20 +310,20 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                   border: '1px solid var(--border-default)',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: '0.82rem', fontWeight: 700 }}>
+                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 'var(--text-md)', fontWeight: 700 }}>
                       {imp.alias || '(unnamed)'}
                     </span>
                     <span className="bp-badge bp-badge-info">import</span>
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '0.15rem', wordBreak: 'break-all' }}>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '0.15rem', wordBreak: 'break-all' }}>
                     {imp.path}
                   </div>
                   {imp.with && Object.keys(imp.with).length > 0 && (
                     <div style={{ marginTop: '0.3rem', paddingTop: '0.25rem', borderTop: '1px solid rgba(var(--border), 0.5)' }}>
-                      <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>with</span>
+                      <span style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>with</span>
                       <div style={{ marginTop: '0.15rem' }}>
                         {Object.entries(imp.with).map(([k, v]) => (
-                          <div key={k} style={{ fontSize: '0.72rem', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
+                          <div key={k} style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
                             <span style={{ color: 'var(--text-tertiary)' }}>{k}:</span> {String(v)}
                           </div>
                         ))}
@@ -362,7 +362,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                 <span style={{ color: 'var(--status-success)' }}>
                   {section.section || `Section ${si + 1}`}
                 </span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
                   {section.tasks.length} task{section.tasks.length !== 1 ? 's' : ''}
                 </span>
               </div>
@@ -382,7 +382,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                       <div className={`bp-task-dot ${isDisabled ? 'disabled' : hasCondition ? 'conditional' : 'enabled'}`} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
-                          <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                          <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 'var(--text-md)' }}>
                             {task.name || `task-${ti + 1}`}
                           </span>
                           {isDisabled && <span className="bp-badge bp-badge-muted">disabled</span>}
@@ -396,7 +396,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                           {task.on_fail && task.on_fail.length > 0 && <span className="bp-badge bp-badge-danger">on_fail</span>}
                         </div>
                         {cmdPreview && (
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {cmdPreview}
                           </div>
                         )}
@@ -417,7 +417,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                             <div className="hud-label">Call</div>
                             <pre>{task.call}</pre>
                             {bp.imports && bp.imports.some(imp => imp.alias === task.call) && (
-                              <div style={{ fontSize: '0.72rem', color: 'var(--status-success)', marginTop: '0.15rem' }}>
+                              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--status-success)', marginTop: '0.15rem' }}>
                                 Resolves to import: <span style={{ fontFamily: 'monospace' }}>{bp.imports.find(imp => imp.alias === task.call)?.path}</span>
                               </div>
                             )}
@@ -430,12 +430,12 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                           </>
                         )}
                         {task.dir && (
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.25rem' }}>
+                          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginTop: '0.25rem' }}>
                             <span className="hud-label">Dir: </span>{task.dir}
                           </div>
                         )}
                         {task.if && (
-                          <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                          <div style={{ fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
                             <span className="hud-label">Condition: </span>
                             <span style={{ fontFamily: 'monospace', color: 'var(--status-running)' }}>{task.if}</span>
                           </div>
@@ -447,7 +447,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                           </>
                         )}
                         {task.on_success && task.on_success.length > 0 && (
-                          <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                          <div style={{ fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
                             <span className="hud-label">On Success: </span>
                             {task.on_success.map((h, hi) => (
                               <span key={hi} style={{ fontFamily: 'monospace', color: 'var(--status-success)' }}>
@@ -457,7 +457,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
                           </div>
                         )}
                         {task.on_fail && task.on_fail.length > 0 && (
-                          <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                          <div style={{ fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
                             <span className="hud-label">On Fail: </span>
                             {task.on_fail.map((h, hi) => (
                               <span key={hi} style={{ fontFamily: 'monospace', color: 'var(--status-failed)' }}>
@@ -480,10 +480,10 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0.5rem 0', borderTop: '1px solid var(--border-default)',
-        fontSize: '0.75rem', color: 'var(--text-tertiary)', flexShrink: 0,
+        fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', flexShrink: 0,
       }}>
         <span>{bp.steps.length} sections · {totalTasks} tasks · {bp.inputs?.length ?? 0} inputs</span>
-        <button className="btn btn-ghost" onClick={() => setShowYamlModal(true)} style={{ fontSize: '0.72rem' }}>
+        <button className="btn btn-ghost" onClick={() => setShowYamlModal(true)} style={{ fontSize: 'var(--text-sm)' }}>
           View YAML
         </button>
       </div>
@@ -497,11 +497,11 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
             style={{ maxWidth: '900px', width: '90vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
+              <span style={{ fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
                 Blueprint YAML
               </span>
               <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
+                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-sm)' }}>
                   <Copy size={12} /> Copy
                 </button>
                 <button className="btn btn-ghost" onClick={() => setShowYamlModal(false)} style={{ padding: '0.25rem' }}>
@@ -513,7 +513,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
               flex: 1, overflow: 'auto', padding: '0.75rem',
               background: 'var(--bg-base)', borderRadius: '4px',
               border: '1px solid var(--border-default)',
-              fontSize: '0.78rem', lineHeight: '1.6', whiteSpace: 'pre-wrap',
+              fontSize: 'var(--text-sm)', lineHeight: '1.6', whiteSpace: 'pre-wrap',
               wordBreak: 'break-all',
             }}>
               {rawYaml}
@@ -538,7 +538,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
           <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
             <div style={{ padding: '1.25rem' }}>
               <div style={{ marginBottom: '0.75rem', fontWeight: 600 }}>Run blueprint?</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
+              <div style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
                 Execute <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>
                   {blueprint?.blueprint?.name || path.split('/').pop()}
                 </span> with no inputs?
@@ -559,11 +559,11 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
       {deleteConfirm && (
         <div className="hud-modal-overlay" onClick={() => setDeleteConfirm(false)}>
           <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Delete Blueprint</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+            <h3 style={{ fontSize: 'var(--text-base)', marginBottom: '0.5rem' }}>Delete Blueprint</h3>
+            <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
               Are you sure you want to delete this blueprint? This cannot be undone.
             </p>
-            <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
+            <p style={{ fontFamily: 'monospace', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
               {path}
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>

@@ -86,7 +86,7 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
             className="hud-input"
             value={data.label}
             onChange={e => onUpdate(nodeId, { label: e.target.value })}
-            style={{ width: '100%', boxSizing: 'border-box', fontSize: '0.8rem', padding: '0.3rem 0.5rem' }}
+            style={{ width: '100%', boxSizing: 'border-box', fontSize: 'var(--text-md)', padding: '0.3rem 0.5rem' }}
           />
         </div>
 
@@ -98,7 +98,7 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
               className="hud-input"
               value={data.blueprintPath}
               onChange={e => onUpdate(nodeId, { blueprintPath: e.target.value })}
-              style={{ flex: 1, fontSize: '0.75rem', padding: '0.3rem 0.5rem', fontFamily: 'monospace' }}
+              style={{ flex: 1, fontSize: 'var(--text-sm)', padding: '0.3rem 0.5rem', fontFamily: 'monospace' }}
               placeholder="/path/to/blueprint.yaml"
             />
             <button
@@ -120,7 +120,7 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
             value={data.condition ?? ''}
             onChange={e => onUpdate(nodeId, { condition: e.target.value || undefined })}
             style={{
-              width: '100%', boxSizing: 'border-box', fontSize: '0.75rem',
+              width: '100%', boxSizing: 'border-box', fontSize: 'var(--text-sm)',
               padding: '0.3rem 0.5rem', fontFamily: 'monospace',
               color: data.condition ? 'rgb(var(--warn))' : undefined,
             }}
@@ -137,7 +137,7 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
             onChange={e => onUpdate(nodeId, { isStart: e.target.checked })}
             style={{ accentColor: 'rgb(var(--ok))' }}
           />
-          <label htmlFor={`start-${nodeId}`} style={{ fontSize: '0.78rem', color: 'rgb(var(--text))', cursor: 'pointer' }}>
+          <label htmlFor={`start-${nodeId}`} style={{ fontSize: 'var(--text-sm)', color: 'rgb(var(--text))', cursor: 'pointer' }}>
             Start node (no input handle)
           </label>
         </div>
@@ -152,7 +152,7 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
             <button
               className="hud-button-ghost"
               onClick={addInput}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.65rem', padding: '0.1rem 0.3rem' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', fontSize: 'var(--text-xs)', padding: '0.1rem 0.3rem' }}
             >
               <Plus size={10} /> Add
             </button>
@@ -165,15 +165,15 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
                     className="hud-input"
                     value={key}
                     onChange={e => updateInput(key, e.target.value, val)}
-                    style={{ width: '38%', fontSize: '0.7rem', padding: '0.2rem 0.3rem', fontFamily: 'monospace' }}
+                    style={{ width: '38%', fontSize: 'var(--text-xs)', padding: '0.2rem 0.3rem', fontFamily: 'monospace' }}
                     placeholder="key"
                   />
-                  <span style={{ color: 'rgb(var(--muted))', fontSize: '0.65rem' }}>=</span>
+                  <span style={{ color: 'rgb(var(--muted))', fontSize: 'var(--text-xs)' }}>=</span>
                   <input
                     className="hud-input"
                     value={val}
                     onChange={e => updateInput(key, key, e.target.value)}
-                    style={{ flex: 1, fontSize: '0.7rem', padding: '0.2rem 0.3rem', fontFamily: 'monospace' }}
+                    style={{ flex: 1, fontSize: 'var(--text-xs)', padding: '0.2rem 0.3rem', fontFamily: 'monospace' }}
                     placeholder="value"
                   />
                   <button
@@ -196,7 +196,7 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
             <button
               className="hud-button-ghost"
               onClick={addOutput}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.65rem', padding: '0.1rem 0.3rem' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', fontSize: 'var(--text-xs)', padding: '0.1rem 0.3rem' }}
             >
               <Plus size={10} /> Add
             </button>
@@ -209,7 +209,7 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
                     className="hud-input"
                     value={out}
                     onChange={e => updateOutput(i, e.target.value)}
-                    style={{ flex: 1, fontSize: '0.7rem', padding: '0.2rem 0.3rem', fontFamily: 'monospace' }}
+                    style={{ flex: 1, fontSize: 'var(--text-xs)', padding: '0.2rem 0.3rem', fontFamily: 'monospace' }}
                     placeholder="output name"
                   />
                   <button
@@ -242,7 +242,7 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
           </button>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            <div style={{ fontSize: '0.75rem', color: 'rgb(var(--danger))' }}>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'rgb(var(--danger))' }}>
               Delete this stage and all connected edges?
             </div>
             <div style={{ display: 'flex', gap: '0.3rem' }}>

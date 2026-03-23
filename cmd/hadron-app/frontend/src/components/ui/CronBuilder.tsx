@@ -170,7 +170,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
           type="button"
           className="hud-button-ghost"
           onClick={() => setShowPresets(!showPresets)}
-          style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+          style={{ fontSize: 'var(--text-xs)', padding: '0.15rem 0.5rem' }}
         >
           Presets {showPresets ? '▴' : '▾'}
         </button>
@@ -182,7 +182,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                 type="button"
                 className={assembled === p.cron ? 'hud-button' : 'hud-button-ghost'}
                 onClick={() => handlePreset(p.cron)}
-                style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}
+                style={{ fontSize: 'var(--text-xs)', padding: '0.15rem 0.4rem' }}
               >
                 {p.label}
               </button>
@@ -207,14 +207,14 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                   width: '100%',
                   boxSizing: 'border-box',
                   fontFamily: 'monospace',
-                  fontSize: '0.9rem',
+                  fontSize: 'var(--text-base)',
                   textAlign: 'center',
                   padding: '0.4rem 0.25rem',
                   ...(fieldErr ? { borderColor: 'rgb(var(--danger))' } : {}),
                 }}
               />
               <div style={{
-                fontSize: '0.62rem',
+                fontSize: 'var(--text-xs)',
                 textAlign: 'center',
                 marginTop: '0.2rem',
                 letterSpacing: '0.04em',
@@ -225,7 +225,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                 {meta.label}
               </div>
               <div style={{
-                fontSize: '0.58rem',
+                fontSize: 'var(--text-xs)',
                 textAlign: 'center',
                 color: 'rgb(var(--muted))',
                 opacity: 0.7,
@@ -251,7 +251,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
       }}>
         <span style={{
           fontFamily: 'monospace',
-          fontSize: '0.78rem',
+          fontSize: 'var(--text-sm)',
           color: hasAnyError ? 'rgb(var(--danger))' : 'rgb(var(--accent))',
           fontWeight: 600,
           whiteSpace: 'nowrap',
@@ -259,7 +259,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
           {assembled}
         </span>
         <span style={{
-          fontSize: '0.68rem',
+          fontSize: 'var(--text-xs)',
           color: 'rgb(var(--muted))',
           textAlign: 'right',
           overflow: 'hidden',

@@ -133,7 +133,7 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
           </button>
           <span className="page-title">Error</span>
         </div>
-        <div style={{ color: 'var(--status-failed)', fontSize: '0.8rem', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+        <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-md)', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
           {error || 'Failed to load pipeline'}
         </div>
       </div>
@@ -190,7 +190,7 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
                   display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
                   padding: '0.5rem 0.75rem', background: 'none', border: 'none',
                   color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  fontSize: '0.8rem', textAlign: 'left',
+                  fontSize: 'var(--text-md)', textAlign: 'left',
                 }}
               >
                 <Copy size={13} /> View YAML
@@ -202,7 +202,7 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
                     display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
                     padding: '0.5rem 0.75rem', background: 'none', border: 'none',
                     color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                    fontSize: '0.8rem', textAlign: 'left',
+                    fontSize: 'var(--text-md)', textAlign: 'left',
                   }}
                 >
                   <Pencil size={13} /> Edit
@@ -214,7 +214,7 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
                   display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
                   padding: '0.5rem 0.75rem', background: 'none', border: 'none',
                   color: 'var(--status-failed)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  fontSize: '0.8rem', textAlign: 'left',
+                  fontSize: 'var(--text-md)', textAlign: 'left',
                 }}
               >
                 <Trash2 size={13} /> Delete
@@ -246,7 +246,7 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
             </div>
             <div className="bp-meta-field" style={{ flexDirection: 'column' }}>
               <span className="bp-meta-field-label">Path</span>
-              <span style={{ fontSize: '0.72rem', fontFamily: 'monospace', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>{path}</span>
+              <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>{path}</span>
             </div>
           </div>
 
@@ -254,14 +254,14 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
           <div className="bp-meta-section">
             <div className="bp-meta-section-title">Pipeline Inputs ({topInputKeys.length})</div>
             {topInputKeys.length === 0 ? (
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>No pipeline-level inputs</div>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>No pipeline-level inputs</div>
             ) : (
               topInputKeys.map((key, i) => (
                 <div key={i} style={{ padding: '0.3rem 0', borderBottom: i < topInputKeys.length - 1 ? '1px solid rgba(var(--border), 0.5)' : 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
-                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{key}</span>
+                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 'var(--text-md)' }}>{key}</span>
                     {pipeline.inputs[key] && (
-                      <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
                         = <span style={{ fontFamily: 'monospace' }}>{pipeline.inputs[key]}</span>
                       </span>
                     )}
@@ -282,10 +282,10 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
                 {/* Stage header */}
                 <div className="bp-section-header" onClick={() => toggleStage(si)}>
                   {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  <span style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: '0.82rem' }}>
+                  <span style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: 'var(--text-md)' }}>
                     {stage.name || `Stage ${si + 1}`}
                   </span>
-                  <span style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', marginLeft: '0.5rem' }}>
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginLeft: '0.5rem' }}>
                     #{si + 1}
                   </span>
                   {stage.condition && (
@@ -304,10 +304,10 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
                 {isExpanded && (
                   <div className="bp-task-expanded">
                     <div className="hud-label">Blueprint</div>
-                    <pre style={{ fontSize: '0.78rem' }}>{stage.blueprint_path}</pre>
+                    <pre style={{ fontSize: 'var(--text-sm)' }}>{stage.blueprint_path}</pre>
 
                     {stage.condition && (
-                      <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                      <div style={{ fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
                         <span className="hud-label">Condition: </span>
                         <span style={{ fontFamily: 'monospace', color: 'var(--status-running)' }}>{stage.condition}</span>
                       </div>
@@ -316,7 +316,7 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
                     {inputKeys.length > 0 && (
                       <>
                         <div className="hud-label" style={{ marginTop: '0.5rem' }}>Inputs</div>
-                        <pre style={{ fontSize: '0.78rem' }}>
+                        <pre style={{ fontSize: 'var(--text-sm)' }}>
                           {inputKeys.map(k => `${k}: ${stage.inputs[k]}`).join('\n')}
                         </pre>
                       </>
@@ -333,10 +333,10 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0.5rem 0', borderTop: '1px solid var(--border-default)',
-        fontSize: '0.75rem', color: 'var(--text-tertiary)', flexShrink: 0,
+        fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', flexShrink: 0,
       }}>
         <span>{pipeline.stages.length} stages · {topInputKeys.length} inputs · stop_on_fail: {pipeline.stop_on_fail ? 'yes' : 'no'}</span>
-        <button className="btn btn-ghost" onClick={() => setShowYamlModal(true)} style={{ fontSize: '0.72rem' }}>
+        <button className="btn btn-ghost" onClick={() => setShowYamlModal(true)} style={{ fontSize: 'var(--text-sm)' }}>
           View YAML
         </button>
       </div>
@@ -350,11 +350,11 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
             style={{ maxWidth: '900px', width: '90vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
+              <span style={{ fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
                 Pipeline YAML
               </span>
               <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
+                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-sm)' }}>
                   <Copy size={12} /> Copy
                 </button>
                 <button className="btn btn-ghost" onClick={() => setShowYamlModal(false)} style={{ padding: '0.25rem' }}>
@@ -366,7 +366,7 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
               flex: 1, overflow: 'auto', padding: '0.75rem',
               background: 'var(--bg-base)', borderRadius: '4px',
               border: '1px solid var(--border-default)',
-              fontSize: '0.78rem', lineHeight: '1.6', whiteSpace: 'pre-wrap',
+              fontSize: 'var(--text-sm)', lineHeight: '1.6', whiteSpace: 'pre-wrap',
               wordBreak: 'break-all',
             }}>
               {rawYaml}
@@ -379,11 +379,11 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
       {deleteConfirm && (
         <div className="hud-modal-overlay" onClick={() => setDeleteConfirm(false)}>
           <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Delete Pipeline</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+            <h3 style={{ fontSize: 'var(--text-base)', marginBottom: '0.5rem' }}>Delete Pipeline</h3>
+            <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
               Are you sure you want to delete this pipeline? This cannot be undone.
             </p>
-            <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
+            <p style={{ fontFamily: 'monospace', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
               {path}
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
