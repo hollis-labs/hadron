@@ -1,6 +1,18 @@
-import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, FlaskConical, Folder, MoreVertical } from 'lucide-react';
-import type { Workspace } from '../../api/types';
+import { useState, useEffect } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, FlaskConical, Folder, MoreVertical, Check } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { useDaemon } from '../../contexts/DaemonContext';
+import { useNavigation } from '../../contexts/NavigationContext';
 import type { NavPage } from './AppNav';
 
 interface Breadcrumb { label: string; page?: NavPage; }
@@ -19,16 +31,6 @@ function getBreadcrumbs(phase: NavPage): Breadcrumb[] {
 interface AppHeaderProps {
   page: string;
   phase: NavPage;
-  daemonStatus: string;
-  daemonAddr: string;
-  workspaces: Workspace[];
-  selectedWorkspaceId: string;
-  onSelectWorkspace: (id: string) => void;
-  onCreateWorkspace: () => void;
-  onNavigate: (page: NavPage) => void;
-  activeRunStartedAt?: string | null;
-  demoMode?: boolean;
-  onToggleDemo?: () => void;
 }
 
 function ElapsedTimer({ startedAt }: { startedAt: string }) {
@@ -47,185 +49,183 @@ function ElapsedTimer({ startedAt }: { startedAt: string }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: 'var(--text-sm)', color: 'var(--status-running)' }}>
       <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--status-running)', animation: 'badge-pulse 1.8s ease-in-out infinite' }} />
-      <span className="mono">{elapsed}</span>
+      <span className="font-mono">{elapsed}</span>
     </span>
   );
 }
 
-export function AppHeader({
-  page,
-  phase,
-  daemonStatus,
-  daemonAddr,
-  workspaces,
-  selectedWorkspaceId,
-  onSelectWorkspace,
-  onCreateWorkspace,
-  onNavigate,
-  activeRunStartedAt,
-  demoMode,
-  onToggleDemo,
-}: AppHeaderProps) {
+export function AppHeader({ page, phase }: AppHeaderProps) {
+  const daemon = useDaemon();
+  const nav = useNavigation();
   const breadcrumbs = getBreadcrumbs(phase);
   const hasBack = breadcrumbs.length > 0;
-  const [wsOpen, setWsOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const wsRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
+  const [wsFormId, setWsFormId] = useState('');
+  const [wsFormName, setWsFormName] = useState('');
+  const [wsCreating, setWsCreating] = useState(false);
 
-  useEffect(() => {
-    if (!wsOpen && !menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (wsOpen && wsRef.current && !wsRef.current.contains(e.target as Node)) setWsOpen(false);
-      if (menuOpen && menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [wsOpen, menuOpen]);
+  const handleCreateWorkspace = async () => {
+    const id = wsFormId.trim();
+    if (!id) return;
+    const name = wsFormName.trim() || id;
+    setWsCreating(true);
+    try {
+      await daemon.createWorkspace(id, name);
+      setShowWorkspaceModal(false);
+    } catch (err) {
+      // toast is handled in DaemonContext
+    } finally {
+      setWsCreating(false);
+    }
+  };
 
   return (
-    <header className="header">
-      {/* Back button for detail pages */}
-      {hasBack && (
-        <button
-          className="btn-ghost btn"
-          onClick={() => breadcrumbs[0].page && onNavigate(breadcrumbs[0].page)}
-          style={{ padding: '4px 6px' }}
-        >
-          <ChevronLeft size={16} />
-        </button>
-      )}
-
-      {/* Title / Breadcrumbs */}
-      {breadcrumbs.length > 0 ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span className="header-breadcrumb">
-            {breadcrumbs[0].page ? (
-              <span
-                style={{ cursor: 'pointer' }}
-                onClick={() => breadcrumbs[0].page && onNavigate(breadcrumbs[0].page)}
-              >{breadcrumbs[0].label}</span>
-            ) : breadcrumbs[0].label}
-          </span>
-          {breadcrumbs.length > 1 && (
-            <>
-              <ChevronRight size={11} style={{ color: 'var(--text-tertiary)' }} />
-              <span className="header-title">{breadcrumbs[1].label}</span>
-            </>
-          )}
-        </div>
-      ) : (
-        <span className="header-title">{page}</span>
-      )}
-
-      <div className="header-spacer" />
-
-      <div className="header-actions">
-        {/* Demo mode indicator */}
-        {demoMode && onToggleDemo && (
-          <button
-            className="btn btn-ghost"
-            onClick={onToggleDemo}
-            style={{ color: 'var(--status-running)', fontSize: 'var(--text-xs)', padding: '2px 8px', border: '1px solid rgba(245, 158, 11, 0.3)', background: 'rgba(245, 158, 11, 0.08)' }}
+    <>
+      <header className="header">
+        {hasBack && (
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => breadcrumbs[0].page && nav.navigate(breadcrumbs[0].page)}
           >
-            <FlaskConical size={12} /> DEMO
-          </button>
+            <ChevronLeft size={16} />
+          </Button>
         )}
 
-        {/* Active run timer */}
-        {activeRunStartedAt && <ElapsedTimer startedAt={activeRunStartedAt} />}
+        {breadcrumbs.length > 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span className="header-breadcrumb">
+              {breadcrumbs[0].page ? (
+                <span
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => breadcrumbs[0].page && nav.navigate(breadcrumbs[0].page)}
+                >{breadcrumbs[0].label}</span>
+              ) : breadcrumbs[0].label}
+            </span>
+            {breadcrumbs.length > 1 && (
+              <>
+                <ChevronRight size={11} style={{ color: 'var(--text-tertiary)' }} />
+                <span className="header-title">{breadcrumbs[1].label}</span>
+              </>
+            )}
+          </div>
+        ) : (
+          <span className="header-title">{page}</span>
+        )}
 
-        {/* Daemon status */}
-        <div className="daemon-status">
-          <span
-            className="daemon-dot"
-            style={{
-              background: daemonStatus === 'running' ? 'var(--accent)' : daemonStatus === 'error' ? 'var(--status-failed)' : 'var(--text-tertiary)',
-              boxShadow: daemonStatus === 'running' ? '0 0 6px rgba(59, 130, 246, 0.5)' : 'none',
-            }}
-          />
-          <span>{daemonAddr}</span>
-        </div>
+        <div className="header-spacer" />
 
-        {/* Workspace selector */}
-        <div ref={wsRef} style={{ position: 'relative' }}>
-          <button className="workspace-btn" onClick={() => setWsOpen(o => !o)}>
-            <Folder size={14} />
-            {selectedWorkspaceId}
-            <ChevronDown size={12} />
-          </button>
-
-          {wsOpen && (
-            <div style={{
-              position: 'absolute', top: 'calc(100% + 4px)', right: 0,
-              minWidth: 180, zIndex: 100, padding: '4px 0',
-              background: 'var(--bg-overlay)', border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)', boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-            }}>
-              {workspaces.map(ws => (
-                <button
-                  key={ws.id}
-                  className="btn btn-ghost"
-                  onClick={() => { onSelectWorkspace(ws.id); setWsOpen(false); }}
-                  style={{
-                    width: '100%', textAlign: 'left', borderRadius: 0,
-                    fontSize: 'var(--text-sm)', padding: '6px 12px', border: 'none',
-                  }}
-                >
-                  <span className="mono" style={{ flex: 1 }}>{ws.id}</span>
-                  {ws.id === selectedWorkspaceId && <span style={{ color: 'var(--accent)', fontSize: 'var(--text-xs)' }}>✓</span>}
-                </button>
-              ))}
-              <div style={{ borderTop: '1px solid var(--border-default)', margin: '4px 0' }} />
-              <button
-                className="btn btn-ghost"
-                onClick={() => { setWsOpen(false); onCreateWorkspace(); }}
-                style={{
-                  width: '100%', textAlign: 'left', borderRadius: 0,
-                  fontSize: 'var(--text-sm)', padding: '6px 12px', border: 'none',
-                  color: 'var(--accent)',
-                }}
-              >
-                <Plus size={12} /> New Workspace
-              </button>
-            </div>
+        <div className="header-actions">
+          {daemon.demoMode && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={daemon.toggleDemo}
+              style={{ color: 'var(--status-running)', padding: '2px 8px', border: '1px solid rgba(245, 158, 11, 0.3)', background: 'rgba(245, 158, 11, 0.08)' }}
+            >
+              <FlaskConical size={12} /> DEMO
+            </Button>
           )}
-        </div>
 
-        {/* App menu (demo toggle, version) */}
-        <div ref={menuRef} style={{ position: 'relative' }}>
-          <button className="btn btn-ghost" onClick={() => setMenuOpen(o => !o)} style={{ padding: '4px 6px' }}>
-            <MoreVertical size={15} />
-          </button>
-          {menuOpen && (
-            <div style={{
-              position: 'absolute', top: 'calc(100% + 4px)', right: 0,
-              minWidth: 170, zIndex: 100, padding: '4px 0',
-              background: 'var(--bg-overlay)', border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)', boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-            }}>
-              {onToggleDemo && (
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => { setMenuOpen(false); onToggleDemo(); }}
-                  style={{
-                    width: '100%', textAlign: 'left', borderRadius: 0,
-                    fontSize: 'var(--text-sm)', padding: '6px 12px', border: 'none',
-                    color: demoMode ? 'var(--status-running)' : undefined,
-                  }}
+          {daemon.activeRunStartedAt && <ElapsedTimer startedAt={daemon.activeRunStartedAt} />}
+
+          <div className="daemon-status">
+            <span
+              className="daemon-dot"
+              style={{
+                background: daemon.status === 'running' ? 'var(--accent)' : daemon.status === 'error' ? 'var(--status-failed)' : 'var(--text-tertiary)',
+                boxShadow: daemon.status === 'running' ? '0 0 6px rgba(59, 130, 246, 0.5)' : 'none',
+              }}
+            />
+            <span>{daemon.address}</span>
+          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<button className="workspace-btn" />}>
+              <Folder size={14} />
+              {daemon.workspaceId}
+              <ChevronDown size={12} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[180px]">
+              {daemon.workspaces.map(ws => (
+                <DropdownMenuItem
+                  key={ws.id}
+                  onClick={() => daemon.selectWorkspace(ws.id)}
+                  className="font-mono text-sm"
                 >
-                  <FlaskConical size={13} /> {demoMode ? 'Disable Demo' : 'Enable Demo'}
-                </button>
-              )}
-              <div style={{ borderTop: '1px solid var(--border-default)', margin: '4px 0' }} />
-              <div style={{ padding: '6px 12px', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
-                <div style={{ color: 'var(--accent)', fontWeight: 600, marginBottom: 2 }}>hadron v0.4.0</div>
+                  <span className="flex-1">{ws.id}</span>
+                  {ws.id === daemon.workspaceId && <Check size={14} className="text-primary" />}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => { setWsFormId(''); setWsFormName(''); setShowWorkspaceModal(true); }} className="text-primary">
+                <Plus size={12} /> New Workspace
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="xs" />}>
+              <MoreVertical size={15} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[170px]">
+              <DropdownMenuItem
+                onClick={daemon.toggleDemo}
+                className={daemon.demoMode ? 'text-amber-400' : ''}
+              >
+                <FlaskConical size={13} /> {daemon.demoMode ? 'Disable Demo' : 'Enable Demo'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <div className="px-3 py-1.5 text-xs text-muted-foreground leading-snug">
+                <div className="text-primary font-semibold mb-0.5">hadron v0.4.0</div>
                 <div>Hollis Labs</div>
               </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          </div>
+      </header>
+
+      <Dialog open={showWorkspaceModal} onOpenChange={(open) => { if (!open) setShowWorkspaceModal(false); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New Workspace</DialogTitle>
+          </DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div>
+              <Label>Workspace ID</Label>
+              <Input
+                placeholder="my-workspace"
+                value={wsFormId}
+                onChange={e => setWsFormId(e.target.value.replace(/[^a-zA-Z0-9-]/g, ''))}
+                style={{ width: '100%', boxSizing: 'border-box' }}
+                autoFocus
+              />
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: '0.2rem' }}>
+                Letters, numbers, and hyphens only
+              </div>
             </div>
-          )}
-        </div>
-        </div>
-    </header>
+            <div>
+              <Label>Display Name <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span></Label>
+              <Input
+                placeholder="My Workspace"
+                value={wsFormName}
+                onChange={e => setWsFormName(e.target.value)}
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowWorkspaceModal(false)}>Cancel</Button>
+            <Button
+              onClick={handleCreateWorkspace}
+              disabled={!wsFormId.trim() || wsCreating}
+              style={{ borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
+            >
+              {wsCreating ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

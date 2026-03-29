@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
-import { toast, Toaster } from 'sonner';
+import { useEffect, useCallback } from 'react';
+import { Toaster } from 'sonner';
+import { DaemonProvider, useDaemon } from './contexts/DaemonContext';
+import { NavigationProvider, useNavigation } from './contexts/NavigationContext';
 import { AppHeader } from './components/layout/AppHeader';
-import { AppNav, NavPage } from './components/layout/AppNav';
+import { AppNav, type NavPage } from './components/layout/AppNav';
 import { AppFooter } from './components/layout/AppFooter';
 import { DashboardPage } from './pages/DashboardPage';
 import { BlueprintsPage } from './pages/BlueprintsPage';
@@ -16,25 +18,6 @@ import { FlowBuilderPage } from './pages/FlowBuilderPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TelemetryPage } from './pages/TelemetryPage';
 import { HelpPage } from './pages/HelpPage';
-import { setBaseURL, listWorkspaces, createWorkspace, getPreference, setPreference, listRuns, readBlueprintFile } from './api/client';
-import { isDemoMode, setDemoMode } from './demo/demoMode';
-import type { Workspace } from './api/types';
-
-const PAGE_TITLES: Record<NavPage, string> = {
-  dashboard: 'Dashboard',
-  blueprints: 'Blueprint Browser',
-  blueprintDetail: 'Blueprint Detail',
-  blueprintWizard: 'Blueprint Wizard',
-  pipelines: 'Pipelines',
-  pipelineDetail: 'Pipeline Detail',
-  flowBuilder: 'Flow Builder',
-  runs: 'Run Log',
-  runDetail: 'Run Detail',
-  schedules: 'Schedules',
-  telemetry: 'Telemetry',
-  settings: 'Settings',
-  help: 'Help',
-};
 
 // Wails runtime events are exposed on window.runtime in v2
 declare global {
@@ -53,193 +36,50 @@ declare global {
   }
 }
 
-export default function App() {
-  const [phase, setPhase] = useState<NavPage>('dashboard');
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selectedBlueprintPath, setSelectedBlueprintPath] = useState<string | null>(null);
-  const [selectedPipelinePath, setSelectedPipelinePath] = useState<string | null>(null);
-  const [wizardEditPath, setWizardEditPath] = useState<string | null>(null);
-  const [daemonAddr, setDaemonAddr] = useState('127.0.0.1:8095');
-  const [daemonStatus, setDaemonStatus] = useState<string>('stopped');
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('default');
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [activeRunStartedAt, setActiveRunStartedAt] = useState<string | null>(null);
-  const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
-  const [wsFormId, setWsFormId] = useState('');
-  const [wsFormName, setWsFormName] = useState('');
-  const [wsCreating, setWsCreating] = useState(false);
-  const [demoEnabled, setDemoEnabled] = useState(isDemoMode());
+const PAGE_TITLES: Record<NavPage, string> = {
+  dashboard: 'Dashboard',
+  blueprints: 'Blueprint Browser',
+  blueprintDetail: 'Blueprint Detail',
+  blueprintWizard: 'Blueprint Wizard',
+  pipelines: 'Pipelines',
+  pipelineDetail: 'Pipeline Detail',
+  flowBuilder: 'Flow Builder',
+  runs: 'Run Log',
+  runDetail: 'Run Detail',
+  schedules: 'Schedules',
+  telemetry: 'Telemetry',
+  settings: 'Settings',
+  help: 'Help',
+};
 
-  const handleToggleDemo = () => {
-    const next = !demoEnabled;
-    setDemoEnabled(next);
-    setDemoMode(next);
-    if (next) {
-      // In demo mode, fake a running daemon
-      setDaemonStatus('running');
-    }
-  };
-
-  // On mount: grab daemon addr from Go binding and listen for status events
-  useEffect(() => {
-    const app = window.go?.main?.App;
-    if (app?.GetDaemonAddr) {
-      app.GetDaemonAddr().then(addr => {
-        if (addr) {
-          setDaemonAddr(addr);
-          setBaseURL(`http://${addr}`);
-        }
-      });
-      app.GetDaemonStatus?.().then(status => {
-        if (status) setDaemonStatus(status);
-      });
-    } else {
-      // Dev mode: assume daemon is up at default addr
-      setDaemonStatus('running');
-    }
-
-    // Subscribe to daemon:status events via Wails runtime
-    const unsubscribe = window.runtime?.EventsOn('daemon:status', (data: unknown) => {
-      const payload = data as { status: string; addr?: string };
-      setDaemonStatus(payload.status);
-      if (payload.addr) {
-        setDaemonAddr(payload.addr);
-        setBaseURL(`http://${payload.addr}`);
-      }
-    });
-
-    return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();
-    };
-  }, []);
-
-  // When daemon comes up: fetch workspaces and restore last workspace from prefs
-  useEffect(() => {
-    if (daemonStatus !== 'running') return;
-    listWorkspaces().then(res => setWorkspaces(res.items ?? [])).catch(() => {});
-    getPreference('lastWorkspaceId').then(id => { if (id) setSelectedWorkspaceId(id); }).catch(() => {});
-  }, [daemonStatus]);
-
-  // Poll for active (running) runs to show timer in header
-  useEffect(() => {
-    if (daemonStatus !== 'running') { setActiveRunStartedAt(null); return; }
-    let cancelled = false;
-    const poll = () => {
-      listRuns({ limit: 20 }).then(res => {
-        if (cancelled) return;
-        const running = (res.items ?? []).find(r => r.status === 'running');
-        setActiveRunStartedAt(running?.started_at ?? null);
-      }).catch(() => {});
-    };
-    poll();
-    const timer = setInterval(poll, 3000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [daemonStatus]);
-
-  const handleSelectWorkspace = (id: string) => {
-    setSelectedWorkspaceId(id);
-    setPreference('lastWorkspaceId', id);
-  };
-
-  const handleCreateWorkspace = () => {
-    setWsFormId('');
-    setWsFormName('');
-    setShowWorkspaceModal(true);
-  };
-
-  const handleSubmitWorkspace = async () => {
-    const id = wsFormId.trim();
-    if (!id) return;
-    const name = wsFormName.trim() || id;
-    setWsCreating(true);
-    try {
-      await createWorkspace(id, name);
-      const res = await listWorkspaces();
-      setWorkspaces(res.items ?? []);
-      handleSelectWorkspace(id);
-      toast.success('Workspace created');
-      setShowWorkspaceModal(false);
-    } catch (err) {
-      toast.error(`Failed to create workspace: ${err}`);
-    } finally {
-      setWsCreating(false);
-    }
-  };
-
-  const openRunDetail = (runId: string) => {
-    setSelectedRunId(runId);
-    setPhase('runDetail');
-  };
-
-  const openBlueprintDetail = async (path: string) => {
-    // Detect if file is a pipeline spec (has stages: key) vs a blueprint
-    try {
-      const content = await readBlueprintFile(path);
-      if (/^stages:/m.test(content)) {
-        setSelectedPipelinePath(path);
-        setPhase('pipelineDetail');
-        return;
-      }
-    } catch {
-      // Fall through to blueprint detail — it will show its own error
-    }
-    setSelectedBlueprintPath(path);
-    setPhase('blueprintDetail');
-  };
-
-  const openPipelineDetail = (path: string) => {
-    setSelectedPipelinePath(path);
-    setPhase('pipelineDetail');
-  };
-
-  const openFlowBuilder = (path: string) => {
-    setSelectedPipelinePath(path);
-    setPhase('flowBuilder');
-  };
-
-  const openWizard = (editPath: string | null = null) => {
-    setWizardEditPath(editPath);
-    setPhase('blueprintWizard');
-  };
-
-  const handleNav = (page: NavPage) => {
-    if (page !== 'runDetail') {
-      setPhase(page);
-    }
-  };
+function AppShell() {
+  const nav = useNavigation();
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Don't handle if a modal overlay is open or input is focused
-    if (document.querySelector('.hud-modal-overlay')) return;
+    if (document.querySelector('[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"]')) return;
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
     if (e.key === 'Escape') {
-      if (phase === 'runDetail') { setPhase('runs'); e.preventDefault(); }
-      else if (phase === 'blueprintDetail') { setPhase('blueprints'); e.preventDefault(); }
-      else if (phase === 'blueprintWizard') { setPhase('blueprints'); e.preventDefault(); }
-      else if (phase === 'pipelineDetail') { setPhase('pipelines'); e.preventDefault(); }
-      else if (phase === 'flowBuilder') { setPhase('pipelines'); e.preventDefault(); }
+      nav.goBack();
+      e.preventDefault();
     }
 
-    // R — refresh (dispatch custom event that pages can listen for)
     if (e.key === 'r' && !e.metaKey && !e.ctrlKey) {
-      window.dispatchEvent(new CustomEvent('hadron:refresh'));
+      nav.refresh();
     }
 
-    // N — new blueprint (only on blueprints page)
-    if (e.key === 'n' && !e.metaKey && !e.ctrlKey && phase === 'blueprints') {
-      openWizard();
+    if (e.key === 'n' && !e.metaKey && !e.ctrlKey && nav.page === 'blueprints') {
+      nav.openWizard();
       e.preventDefault();
     }
 
-    // ? — help
     if (e.key === '?' && !e.metaKey && !e.ctrlKey) {
-      setPhase('help');
+      nav.navigate('help');
       e.preventDefault();
     }
-  }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nav]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -248,169 +88,29 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <AppNav current={phase} onNavigate={handleNav} />
+      <AppNav current={nav.page} onNavigate={nav.navigate} />
 
       <div className="main">
-        <AppHeader
-          page={PAGE_TITLES[phase]}
-          phase={phase}
-          daemonStatus={daemonStatus}
-          daemonAddr={daemonAddr}
-          workspaces={workspaces}
-          selectedWorkspaceId={selectedWorkspaceId}
-          onSelectWorkspace={handleSelectWorkspace}
-          onCreateWorkspace={handleCreateWorkspace}
-          onNavigate={handleNav}
-          activeRunStartedAt={activeRunStartedAt}
-          demoMode={demoEnabled}
-          onToggleDemo={handleToggleDemo}
-        />
+        <AppHeader page={PAGE_TITLES[nav.page]} phase={nav.page} />
 
         <main className="content">
-          {phase === 'dashboard' && (
-            <DashboardPage
-              daemonStatus={daemonStatus}
-              daemonAddr={daemonAddr}
-              onOpenRun={openRunDetail}
-            />
-          )}
-          {phase === 'blueprints' && (
-            <BlueprintsPage
-              daemonStatus={daemonStatus}
-              workspaceId={selectedWorkspaceId}
-              onRunCreated={id => {
-                openRunDetail(id);
-              }}
-              onOpenBlueprint={openBlueprintDetail}
-              onNewBlueprint={() => openWizard()}
-              onBatchRunComplete={() => setPhase('runs')}
-            />
-          )}
-          {phase === 'blueprintDetail' && selectedBlueprintPath && (
-            <BlueprintDetailPage
-              path={selectedBlueprintPath}
-              onBack={() => setPhase('blueprints')}
-              onOpenRun={openRunDetail}
-              onEditBlueprint={(p) => openWizard(p)}
-              daemonStatus={daemonStatus}
-              workspaceId={selectedWorkspaceId}
-            />
-          )}
-          {phase === 'blueprintWizard' && (
-            <BlueprintWizardPage
-              editPath={wizardEditPath}
-              onBack={() => setPhase('blueprints')}
-            />
-          )}
-          {phase === 'pipelines' && (
-            <PipelinesPage
-              daemonStatus={daemonStatus}
-              workspaceId={selectedWorkspaceId}
-              onOpenRun={openRunDetail}
-              onOpenPipeline={openPipelineDetail}
-              onOpenFlowBuilder={openFlowBuilder}
-            />
-          )}
-          {phase === 'pipelineDetail' && selectedPipelinePath && (
-            <PipelineDetailPage
-              path={selectedPipelinePath}
-              onBack={() => setPhase('pipelines')}
-              onOpenRun={openRunDetail}
-              onEditPipeline={() => {
-                // Navigate back to pipelines with edit modal — for now just go back
-                setPhase('pipelines');
-              }}
-              onOpenFlowBuilder={openFlowBuilder}
-              daemonStatus={daemonStatus}
-              workspaceId={selectedWorkspaceId}
-            />
-          )}
-          {phase === 'flowBuilder' && (
-            <FlowBuilderPage
-              path={selectedPipelinePath}
-              onBack={() => setPhase('pipelines')}
-              daemonStatus={daemonStatus}
-              workspaceId={selectedWorkspaceId}
-            />
-          )}
-          {phase === 'runs' && (
-            <RunsPage
-              daemonStatus={daemonStatus}
-              onOpenRun={openRunDetail}
-            />
-          )}
-          {phase === 'schedules' && (
-            <SchedulerPage
-              daemonStatus={daemonStatus}
-            />
-          )}
-          {phase === 'telemetry' && (
-            <TelemetryPage
-              onOpenRun={openRunDetail}
-            />
-          )}
-          {phase === 'settings' && (
-            <SettingsPage />
-          )}
-          {phase === 'help' && (
-            <HelpPage />
-          )}
-          {phase === 'runDetail' && selectedRunId && (
-            <RunDetailPage
-              runId={selectedRunId}
-              onBack={() => setPhase('runs')}
-            />
-          )}
+          {nav.page === 'dashboard' && <DashboardPage />}
+          {nav.page === 'blueprints' && <BlueprintsPage />}
+          {nav.page === 'blueprintDetail' && nav.selectedBlueprintPath && <BlueprintDetailPage />}
+          {nav.page === 'blueprintWizard' && <BlueprintWizardPage />}
+          {nav.page === 'pipelines' && <PipelinesPage />}
+          {nav.page === 'pipelineDetail' && nav.selectedPipelinePath && <PipelineDetailPage />}
+          {nav.page === 'flowBuilder' && <FlowBuilderPage />}
+          {nav.page === 'runs' && <RunsPage />}
+          {nav.page === 'schedules' && <SchedulerPage />}
+          {nav.page === 'telemetry' && <TelemetryPage />}
+          {nav.page === 'settings' && <SettingsPage />}
+          {nav.page === 'help' && <HelpPage />}
+          {nav.page === 'runDetail' && nav.selectedRunId && <RunDetailPage />}
         </main>
 
-        <AppFooter phase={phase} />
+        <AppFooter phase={nav.page} />
       </div>
-
-      {/* Workspace creation modal */}
-      {showWorkspaceModal && (
-        <div className="hud-modal-overlay" onClick={() => setShowWorkspaceModal(false)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <div style={{ padding: '1.25rem' }}>
-              <div style={{ marginBottom: '1rem', fontWeight: 600, fontSize: 'var(--text-base)', letterSpacing: '0.05em' }}>New Workspace</div>
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label className="hud-label">Workspace ID</label>
-                <input
-                  className="hud-input"
-                  placeholder="my-workspace"
-                  value={wsFormId}
-                  onChange={e => setWsFormId(e.target.value.replace(/[^a-zA-Z0-9-]/g, ''))}
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                  autoFocus
-                />
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: '0.2rem' }}>
-                  Letters, numbers, and hyphens only
-                </div>
-              </div>
-              <div style={{ marginBottom: '1rem' }}>
-                <label className="hud-label">Display Name <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span></label>
-                <input
-                  className="hud-input"
-                  placeholder="My Workspace"
-                  value={wsFormName}
-                  onChange={e => setWsFormName(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button className="hud-button-ghost" onClick={() => setShowWorkspaceModal(false)}>Cancel</button>
-                <button
-                  className="hud-button"
-                  onClick={handleSubmitWorkspace}
-                  disabled={!wsFormId.trim() || wsCreating}
-                  style={{ borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
-                >
-                  {wsCreating ? 'Creating...' : 'Create'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <Toaster
         position="bottom-right"
@@ -426,5 +126,15 @@ export default function App() {
         theme="dark"
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <DaemonProvider>
+      <NavigationProvider>
+        <AppShell />
+      </NavigationProvider>
+    </DaemonProvider>
   );
 }

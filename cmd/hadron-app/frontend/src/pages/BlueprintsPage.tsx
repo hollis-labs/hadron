@@ -1,21 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { openDirectoryDialog, listFilesInDir, validateBlueprintFile, enqueueRun, parseBlueprintInputs, deleteBlueprintFile, getBlueprintMetadata, getSettings, createDirectory, selectDirectoryDialog, moveBlueprintFile, copyBlueprintFile, archiveBlueprintFile, getBlueprintDir, setBlueprintDir } from '../api/client';
 import { ValidateResult, FileEntry, BlueprintInput, BlueprintMetaSummary } from '../api/types';
+import { Input } from '@/components/ui/input';
 import { FolderOpen, FolderPlus, Play, CheckCircle, ChevronLeft, Folder, FileCode, Plus, Trash2, RefreshCw, MoveRight, Copy, Archive } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
 import { RunInputsModal } from '../components/ui/RunInputsModal';
+import { useDaemon } from '../contexts/DaemonContext';
+import { useNavigation } from '../contexts/NavigationContext';
+import { cn } from '@/lib/utils';
 
-interface BlueprintsPageProps {
-  daemonStatus: string;
-  workspaceId: string;
-  onRunCreated: (runId: string) => void;
-  onOpenBlueprint?: (path: string) => void;
-  onNewBlueprint?: () => void;
-  onBatchRunComplete?: () => void;
-}
-
-export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpenBlueprint, onNewBlueprint, onBatchRunComplete }: BlueprintsPageProps) {
+export function BlueprintsPage() {
+  const daemon = useDaemon();
+  const nav = useNavigation();
   const [rootDir, setRootDir] = useState<string>('');
   const [currentDir, setCurrentDir] = useState<string>('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -142,9 +141,9 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
   const doEnqueue = async (entry: FileEntry, inputs: Record<string, unknown>, dryRun = false) => {
     setRunningPaths(prev => new Set(prev).add(entry.path));
     try {
-      const run = await enqueueRun({ blueprint_path: entry.path, workspace_id: workspaceId, inputs, dry_run: dryRun || undefined });
+      const run = await enqueueRun({ blueprint_path: entry.path, workspace_id: daemon.workspaceId, inputs, dry_run: dryRun || undefined });
       toast.success(dryRun ? 'Dry run enqueued' : 'Run enqueued');
-      onRunCreated(run.id);
+      nav.openRun(run.id);
     } catch (err) {
       toast.error(`Failed to start run: ${err}`);
     } finally {
@@ -157,7 +156,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
   };
 
   const handleRun = async (entry: FileEntry) => {
-    if (daemonStatus !== 'running') return;
+    if (daemon.status !== 'running') return;
     const inputs = await parseBlueprintInputs(entry.path);
     if (inputs && inputs.length > 0) {
       setInputModalInputs(inputs);
@@ -205,14 +204,14 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
     let ok = 0;
     for (const path of paths) {
       try {
-        await enqueueRun({ blueprint_path: path, workspace_id: workspaceId });
+        await enqueueRun({ blueprint_path: path, workspace_id: daemon.workspaceId });
         ok++;
       } catch { /* skip failures */ }
     }
     toast.success(`Enqueued ${ok} of ${paths.length} runs`);
     setSelected(new Set());
-    if (ok > 0 && onBatchRunComplete) {
-      onBatchRunComplete();
+    if (ok > 0) {
+      nav.navigate('runs');
     }
   };
 
@@ -305,7 +304,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
         e.preventDefault();
         const entry = filteredEntries[focusIndex];
         if (entry.isDir) setCurrentDir(entry.path);
-        else if (onOpenBlueprint) onOpenBlueprint(entry.path);
+        else nav.openBlueprint(entry.path);
       } else if (e.key === ' ' && focusIndex >= 0 && focusIndex < count) {
         e.preventDefault();
         const entry = filteredEntries[focusIndex];
@@ -314,7 +313,7 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [focusIndex, filteredEntries, onOpenBlueprint]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focusIndex, filteredEntries, nav]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setFocusIndex(-1); }, [currentDir, search]);
   useEffect(() => { focusRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [focusIndex]);
@@ -322,79 +321,75 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
   const canGoBack = currentDir && currentDir !== rootDir;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%' }}>
+    <div className="flex flex-col gap-3 h-full">
       {/* Toolbar */}
-      <div className="page-header" style={{ gap: '0.5rem' }}>
-        <span className="page-title">Blueprints</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xl font-semibold text-foreground tracking-tight">Blueprints</span>
         {currentDir && (
-          <button
-            className="btn btn-ghost"
+          <Button
+            variant="ghost"
             onClick={() => loadDir(currentDir)}
             title="Refresh (R)"
-            style={{ display: 'flex', alignItems: 'center', padding: '0.25rem' }}
+            className="p-1"
           >
             <RefreshCw size={14} />
-          </button>
+          </Button>
         )}
         {canGoBack && (
-          <button className="btn btn-ghost" onClick={handleBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <Button variant="ghost" onClick={handleBack}>
             <ChevronLeft size={13} /> Up
-          </button>
+          </Button>
         )}
-        {onNewBlueprint && (
-          <button className="btn btn-primary" onClick={onNewBlueprint} style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}>
-            <Plus size={14} /> New Blueprint
-          </button>
-        )}
+        <Button onClick={() => nav.openWizard()} className="ml-auto border-blue-500/50 text-blue-400">
+          <Plus size={14} /> New Blueprint
+        </Button>
         {currentDir && (
-          <button className="btn btn-ghost" onClick={handleNewFolder} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <Button variant="ghost" onClick={handleNewFolder}>
             <FolderPlus size={14} /> New Folder
-          </button>
+          </Button>
         )}
-        <button className="btn btn-primary" onClick={handleOpenFolder} style={{ marginLeft: (!onNewBlueprint && !currentDir) ? 'auto' : undefined, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+        <Button onClick={handleOpenFolder}>
           <FolderOpen size={14} /> Open Folder
-        </button>
+        </Button>
       </div>
 
       {/* Current path */}
       {currentDir && (
-        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+        <div className="text-sm text-muted-foreground font-mono break-all">
           {currentDir}
         </div>
       )}
 
       {/* Search + Sort */}
       {currentDir && (
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <input
-            className="hud-input"
+        <div className="flex gap-2 items-center">
+          <Input
             type="text"
             placeholder="Filter blueprints..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ flex: 1 }}
+            className="flex-1"
           />
           {search && (
-            <button className="btn btn-ghost" onClick={() => setSearch('')} style={{ padding: '0.3rem 0.5rem', fontSize: 'var(--text-xs)' }}>
+            <Button variant="ghost" size="xs" onClick={() => setSearch('')}>
               Clear
-            </button>
+            </Button>
           )}
           <select
-            className="hud-input"
+            className="h-8 w-auto rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
-            style={{ width: 'auto' }}
           >
             <option value="name-asc">Name A-Z</option>
             <option value="name-desc">Name Z-A</option>
           </select>
           {entries.some(e => !e.isDir) && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+            <label className="flex items-center gap-1 cursor-pointer text-xs text-muted-foreground">
               <input
                 type="checkbox"
                 checked={selected.size > 0 && selected.size === entries.filter(e => !e.isDir).length}
                 onChange={selectAllFiles}
-                style={{ accentColor: 'var(--status-success)' }}
+                className="accent-blue-400"
               />
               All
             </label>
@@ -404,56 +399,53 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
 
       {/* Error */}
       {error && (
-        <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-md)', padding: '0.5rem 0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+        <div className="text-red-400 text-sm px-3 py-2 bg-red-500/10 rounded border border-red-500/30">
           {error}
         </div>
       )}
 
       {/* Batch actions bar */}
       {selected.size > 0 && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '0.5rem',
-          padding: '0.4rem 0.75rem', background: 'rgba(59, 130, 246, 0.08)',
-          border: '1px solid rgba(var(--ok) / 0.2)', borderRadius: '4px',
-        }}>
-          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--status-success)' }}>
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/[0.08] border border-blue-500/20 rounded">
+          <span className="text-sm text-blue-400">
             {selected.size} selected
           </span>
-          <button className="btn btn-ghost" onClick={handleBatchValidate} style={{ fontSize: 'var(--text-xs)' }}>
+          <Button variant="ghost" size="xs" onClick={handleBatchValidate}>
             Validate All
-          </button>
-          <button
-            className="btn btn-ghost"
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={handleBatchRun}
-            disabled={daemonStatus !== 'running'}
-            style={{ fontSize: 'var(--text-xs)' }}
+            disabled={daemon.status !== 'running'}
           >
             Run All
-          </button>
-          <button className="btn btn-ghost" onClick={handleBatchMove} style={{ fontSize: 'var(--text-xs)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          </Button>
+          <Button variant="ghost" size="xs" onClick={handleBatchMove}>
             <MoveRight size={11} /> Move
-          </button>
-          <button className="btn btn-ghost" onClick={handleBatchCopy} style={{ fontSize: 'var(--text-xs)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          </Button>
+          <Button variant="ghost" size="xs" onClick={handleBatchCopy}>
             <Copy size={11} /> Copy
-          </button>
-          <button className="btn btn-ghost" onClick={handleBatchArchive} style={{ fontSize: 'var(--text-xs)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          </Button>
+          <Button variant="ghost" size="xs" onClick={handleBatchArchive}>
             <Archive size={11} /> Archive
-          </button>
-          <button
-            className="btn btn-ghost"
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
             onClick={() => setBatchDeleteConfirm(true)}
-            style={{ fontSize: 'var(--text-xs)', color: 'var(--status-failed)' }}
+            className="text-red-400"
           >
             Delete Selected
-          </button>
-          <button className="btn btn-ghost" onClick={() => setSelected(new Set())} style={{ fontSize: 'var(--text-xs)', marginLeft: 'auto' }}>
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => setSelected(new Set())} className="ml-auto">
             Clear
-          </button>
+          </Button>
         </div>
       )}
 
       {/* File list */}
-      <div className="file-list" style={{ flex: 1, overflowY: 'auto' }}>
+      <div className="flex flex-col gap-px flex-1 overflow-y-auto">
         {!currentDir ? (
           <EmptyState message="No folder selected" sub="Click 'Open Blueprint' to select a .yaml file and browse its folder" />
         ) : filteredEntries.length === 0 ? (
@@ -466,13 +458,13 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
             return (
               <div
                 key={entry.path}
-                className="file-row"
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded hover:bg-muted/30 transition-colors',
+                  entry.isDir ? 'cursor-pointer' : 'cursor-default',
+                  i === focusIndex && 'bg-muted/50 outline outline-1 outline-blue-400/30',
+                )}
                 ref={i === focusIndex ? focusRef : undefined}
                 onClick={() => entry.isDir ? handleDrillDown(entry) : undefined}
-                style={{
-                  cursor: entry.isDir ? 'pointer' : 'default',
-                  ...(i === focusIndex ? { background: 'var(--bg-hover)', outline: '1px solid rgba(var(--accent), 0.3)' } : {}),
-                }}
               >
                 {/* Checkbox (files only) */}
                 {!entry.isDir && (
@@ -481,43 +473,45 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
                     checked={selected.has(entry.path)}
                     onChange={() => toggleSelect(entry.path)}
                     onClick={e => e.stopPropagation()}
-                    style={{ accentColor: 'var(--status-success)', flexShrink: 0, cursor: 'pointer' }}
+                    className="accent-blue-400 shrink-0 cursor-pointer"
                   />
                 )}
 
                 {/* Icon */}
-                <span style={{ color: entry.isDir ? 'var(--status-running)' : 'var(--status-success)', flexShrink: 0 }}>
+                <span className={cn('shrink-0', entry.isDir ? 'text-amber-400' : 'text-blue-400')}>
                   {entry.isDir ? <Folder size={15} /> : <FileCode size={15} />}
                 </span>
 
                 {/* Name + metadata */}
                 <div
-                  className="file-row-name"
-                  style={{ color: entry.isDir ? 'var(--text-primary)' : undefined, cursor: !entry.isDir ? 'pointer' : undefined }}
-                  onClick={() => { if (!entry.isDir && onOpenBlueprint) onOpenBlueprint(entry.path); }}
+                  className={cn(
+                    'flex-1 min-w-0 flex flex-col',
+                    entry.isDir ? 'text-foreground' : 'cursor-pointer',
+                  )}
+                  onClick={() => { if (!entry.isDir) nav.openBlueprint(entry.path); }}
                 >
                   <span>
                     {entry.name}
-                    {entry.isDir && <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)', marginLeft: '0.3rem' }}>/</span>}
+                    {entry.isDir && <span className="text-muted-foreground text-sm ml-1">/</span>}
                   </span>
                   {!entry.isDir && metaCache[entry.path] && (() => {
                     const meta = metaCache[entry.path];
                     return (
-                      <div className="file-row-meta">
+                      <div className="flex items-center gap-2 mt-0.5">
                         {meta.description && (
-                          <span className="file-row-meta-desc">
+                          <span className="text-xs text-muted-foreground truncate">
                             {meta.description.length > 80 ? meta.description.slice(0, 80) + '…' : meta.description}
                           </span>
                         )}
                         {meta.tags && meta.tags.length > 0 && (
-                          <span className="file-row-meta-tags">
+                          <span className="flex items-center gap-1">
                             {meta.tags.slice(0, 4).map(t => (
-                              <span key={t} className="file-row-meta-tag">{t}</span>
+                              <span key={t} className="px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">{t}</span>
                             ))}
-                            {meta.tags.length > 4 && <span className="file-row-meta-tag">+{meta.tags.length - 4}</span>}
+                            {meta.tags.length > 4 && <span className="px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">+{meta.tags.length - 4}</span>}
                           </span>
                         )}
-                        <span className="file-row-meta-counts">
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
                           {meta.input_count > 0 && <span>{meta.input_count} input{meta.input_count !== 1 ? 's' : ''}</span>}
                           {meta.step_count > 0 && <span>{meta.step_count} step{meta.step_count !== 1 ? 's' : ''}</span>}
                           {meta.has_imports && <span>imports</span>}
@@ -529,41 +523,35 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
 
                 {/* Validate result badge */}
                 {!entry.isDir && validateResult && (
-                  <span style={{
-                    fontSize: 'var(--text-xs)',
-                    color: validateResult.valid ? 'var(--status-success)' : 'var(--status-failed)',
-                    letterSpacing: '0.06em',
-                    flexShrink: 0,
-                  }}>
+                  <span className={cn('text-xs tracking-wide shrink-0', validateResult.valid ? 'text-blue-400' : 'text-red-400')}>
                     {validateResult.valid ? '✓ valid' : `✗ ${validateResult.error ?? 'invalid'}`}
                   </span>
                 )}
 
                 {/* Actions */}
                 {!entry.isDir && (
-                  <div className="file-row-actions" onClick={e => e.stopPropagation()}>
-                    <button
-                      className="btn btn-ghost"
+                  <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                    <Button
+                      variant="ghost"
+                      size="xs"
                       onClick={() => handleValidate(entry)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-xs)' }}
                     >
                       <CheckCircle size={12} /> Validate
-                    </button>
-                    <button
-                      className="btn btn-primary"
+                    </Button>
+                    <Button
+                      size="xs"
                       onClick={() => handleRun(entry)}
-                      disabled={daemonStatus !== 'running' || isRunning}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-xs)' }}
+                      disabled={daemon.status !== 'running' || isRunning}
                     >
                       <Play size={12} /> {isRunning ? 'Running…' : 'Run'}
-                    </button>
-                    <button
-                      className="btn btn-ghost"
+                    </Button>
+                    <Button
+                      variant="ghost"
                       onClick={() => setDeleteConfirm(entry.path)}
-                      style={{ padding: '0.3rem', display: 'flex', alignItems: 'center' }}
+                      className="p-1"
                     >
-                      <Trash2 size={12} style={{ color: 'var(--status-failed)' }} />
-                    </button>
+                      <Trash2 size={12} className="text-red-400" />
+                    </Button>
                   </div>
                 )}
               </div>
@@ -587,74 +575,58 @@ export function BlueprintsPage({ daemonStatus, workspaceId, onRunCreated, onOpen
       )}
 
       {/* Batch delete confirmation */}
-      {batchDeleteConfirm && (
-        <div className="hud-modal-overlay" onClick={() => setBatchDeleteConfirm(false)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: 'var(--text-base)', marginBottom: '0.5rem' }}>Delete {selected.size} Blueprints</h3>
-            <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+      <AlertDialog open={batchDeleteConfirm} onOpenChange={(open) => { if (!open) setBatchDeleteConfirm(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selected.size} Blueprints</AlertDialogTitle>
+            <AlertDialogDescription>
               Are you sure you want to delete {selected.size} selected blueprint{selected.size !== 1 ? 's' : ''}? This cannot be undone.
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="btn btn-ghost" onClick={() => setBatchDeleteConfirm(false)}>Cancel</button>
-              <button
-                className="btn btn-primary"
-                style={{ borderColor: 'var(--status-failed)', color: 'var(--status-failed)' }}
-                onClick={handleBatchDelete}
-              >
-                Delete {selected.size}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleBatchDelete}>Delete {selected.size}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Run confirmation (requireConfirmation setting) */}
-      {confirmEntry && (
-        <div className="hud-modal-overlay" onClick={() => setConfirmEntry(null)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <div style={{ padding: '1.25rem' }}>
-              <div style={{ marginBottom: '0.75rem', fontWeight: 600 }}>Run blueprint?</div>
-              <div style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
-                Execute <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>
-                  {confirmEntry.name}
-                </span> with no inputs?
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button className="btn btn-ghost" onClick={() => setConfirmEntry(null)}>Cancel</button>
-                <button className="btn btn-primary" style={{ borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
-                  onClick={() => { const e = confirmEntry; setConfirmEntry(null); doEnqueue(e, {}); }}>
-                  Run
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <AlertDialog open={!!confirmEntry} onOpenChange={(open) => { if (!open) setConfirmEntry(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Run blueprint?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Execute <span className="font-mono text-blue-400">
+                {confirmEntry?.name}
+              </span> with no inputs?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { const e = confirmEntry; setConfirmEntry(null); if (e) doEnqueue(e, {}); }}>Run</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirmation modal */}
-      {deleteConfirm && (
-        <div className="hud-modal-overlay" onClick={() => setDeleteConfirm(null)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: 'var(--text-base)', marginBottom: '0.5rem' }}>Delete Blueprint</h3>
-            <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+      <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Blueprint</AlertDialogTitle>
+            <AlertDialogDescription>
               Are you sure you want to delete this blueprint? This cannot be undone.
-            </p>
-            <p style={{ fontFamily: 'monospace', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
-              {deleteConfirm}
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="btn btn-ghost" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-              <button
-                className="btn btn-primary"
-                style={{ borderColor: 'var(--status-failed)', color: 'var(--status-failed)' }}
-                onClick={() => handleDelete(deleteConfirm)}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              <br />
+              <span className="font-mono text-sm break-all">
+                {deleteConfirm}
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => { if (deleteConfirm) handleDelete(deleteConfirm); }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

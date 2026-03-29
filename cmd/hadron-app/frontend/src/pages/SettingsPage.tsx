@@ -3,6 +3,8 @@ import { toast } from 'sonner';
 import { getSettings, saveSettings, selectDirectoryDialog, getBlueprintDir, setBlueprintDir } from '../api/client';
 import { Spinner } from '../components/ui/Spinner';
 import { FolderOpen, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { HadronSettings } from '../api/types';
 
 export function SettingsPage() {
@@ -54,8 +56,8 @@ export function SettingsPage() {
   if (loading) {
     return (
       <div>
-        <div className="page-header">
-          <div className="page-title">Settings</div>
+        <div className="flex items-center justify-between mb-6">
+          <div className="text-xl font-semibold text-foreground tracking-tight">Settings</div>
           <Spinner size={14} />
         </div>
       </div>
@@ -65,10 +67,10 @@ export function SettingsPage() {
   if (error || !settings) {
     return (
       <div>
-        <div className="page-header">
-          <div className="page-title">Settings</div>
+        <div className="flex items-center justify-between mb-6">
+          <div className="text-xl font-semibold text-foreground tracking-tight">Settings</div>
         </div>
-        <div className="section" style={{ padding: 'var(--space-4) var(--space-5)', color: 'var(--status-failed)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+        <div className="rounded-lg border border-red-500/30 bg-card overflow-hidden px-5 py-4 text-destructive">
           {error || 'Failed to load settings'}
         </div>
       </div>
@@ -77,68 +79,67 @@ export function SettingsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div className="page-title">Settings</div>
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+      <div className="flex items-center justify-between mb-6">
+        <div className="text-xl font-semibold text-foreground tracking-tight">Settings</div>
+        <Button onClick={handleSave} disabled={saving}>
           {saving ? 'Saving...' : 'Save'}
-        </button>
+        </Button>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', maxWidth: 640 }}>
+      <div className="flex flex-col gap-4 max-w-[640px]">
         {/* General */}
-        <div className="section">
-          <div className="section-header">
-            <span className="section-title">General</span>
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <span className="text-base font-semibold text-foreground">General</span>
           </div>
-          <div style={{ padding: 'var(--space-4) var(--space-5)' }}>
-            <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--text-primary)', marginBottom: 'var(--space-2)' }}>
+          <div className="px-5 py-4">
+            <label className="block text-sm font-medium text-foreground mb-2">
               Default Blueprint Directory
             </label>
-            <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-              <input
-                className="hud-input"
+            <div className="flex gap-2 items-center">
+              <Input
                 type="text"
                 value={defaultBpDir}
                 onChange={e => setDefaultBpDir(e.target.value)}
                 placeholder="None — uses last opened folder"
-                style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}
+                className="flex-1 font-mono text-sm"
               />
-              <button className="btn btn-ghost" onClick={handleBrowseDefaultDir}>
+              <Button variant="ghost" onClick={handleBrowseDefaultDir}>
                 <FolderOpen size={13} /> Browse
-              </button>
+              </Button>
               {defaultBpDir && (
-                <button className="btn btn-ghost" onClick={() => setDefaultBpDir('')} style={{ padding: '4px 6px' }}>
+                <Button variant="ghost" size="xs" onClick={() => setDefaultBpDir('')}>
                   <X size={13} />
-                </button>
+                </Button>
               )}
             </div>
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)' }}>
+            <div className="text-xs text-muted-foreground mt-1">
               Blueprints page will open this folder automatically on launch.
             </div>
           </div>
         </div>
 
         {/* Execution */}
-        <div className="section">
-          <div className="section-header">
-            <span className="section-title">Execution</span>
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <span className="text-base font-semibold text-foreground">Execution</span>
           </div>
-          <div style={{ padding: 'var(--space-4) var(--space-5)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+          <div className="px-5 py-4 grid grid-cols-2 gap-4">
             <div>
-              <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Workers</label>
-              <input className="hud-input" type="number" min="1" max="16"
+              <label className="block text-sm font-medium mb-1">Workers</label>
+              <Input type="number" min="1" max="16"
                 value={settings.execution.workers}
                 onChange={e => updateExecution('workers', parseInt(e.target.value) || 1)} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Max Concurrent Jobs</label>
-              <input className="hud-input" type="number" min="1" max="32"
+              <label className="block text-sm font-medium mb-1">Max Concurrent Jobs</label>
+              <Input type="number" min="1" max="32"
                 value={settings.execution.maxConcurrentJobs}
                 onChange={e => updateExecution('maxConcurrentJobs', parseInt(e.target.value) || 1)} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Default Timeout (seconds)</label>
-              <input className="hud-input" type="number" min="0"
+              <label className="block text-sm font-medium mb-1">Default Timeout (seconds)</label>
+              <Input type="number" min="0"
                 value={settings.execution.defaultTimeout}
                 onChange={e => updateExecution('defaultTimeout', parseInt(e.target.value) || 0)} />
             </div>
@@ -146,50 +147,50 @@ export function SettingsPage() {
         </div>
 
         {/* Safety */}
-        <div className="section">
-          <div className="section-header">
-            <span className="section-title">Safety</span>
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <span className="text-base font-semibold text-foreground">Safety</span>
           </div>
-          <div style={{ padding: 'var(--space-4) var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div className="px-5 py-4 flex flex-col gap-3">
             {[
               { key: 'requireConfirmation', label: 'Require confirmation before runs' },
               { key: 'dryRunByDefault', label: 'Dry run by default' },
               { key: 'blockSudo', label: 'Block sudo commands' },
               { key: 'sandboxMode', label: 'Sandbox mode', sub: '(restrict execution to allowed dirs/commands)' },
             ].map(({ key, label, sub }) => (
-              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
+              <label key={key} className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={(settings.safety as Record<string, boolean>)[key]}
                   onChange={e => updateSafety(key, e.target.checked)}
-                  style={{ accentColor: 'var(--accent)' }} />
-                <span style={{ fontSize: 'var(--text-md)' }}>{label}</span>
-                {sub && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>{sub}</span>}
+                  className="accent-primary" />
+                <span className="text-sm">{label}</span>
+                {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
               </label>
             ))}
           </div>
         </div>
 
         {/* Telemetry */}
-        <div className="section">
-          <div className="section-header">
-            <span className="section-title">Telemetry</span>
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <span className="text-base font-semibold text-foreground">Telemetry</span>
           </div>
-          <div style={{ padding: 'var(--space-4) var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
+          <div className="px-5 py-4 flex flex-col gap-3">
+            <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={settings.telemetry.enabled}
                 onChange={e => updateTelemetry('enabled', e.target.checked)}
-                style={{ accentColor: 'var(--accent)' }} />
-              <span style={{ fontSize: 'var(--text-md)' }}>Enable telemetry logging</span>
+                className="accent-primary" />
+              <span className="text-sm">Enable telemetry logging</span>
             </label>
-            <div style={{ maxWidth: 200 }}>
-              <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Retain logs (days)</label>
-              <input className="hud-input" type="number" min="1" max="365"
+            <div className="max-w-[200px]">
+              <label className="block text-sm font-medium mb-1">Retain logs (days)</label>
+              <Input type="number" min="1" max="365"
                 value={settings.telemetry.retainDays}
                 onChange={e => updateTelemetry('retainDays', parseInt(e.target.value) || 7)} />
             </div>
           </div>
         </div>
 
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+        <div className="text-xs text-muted-foreground">
           Settings are stored in ~/.hadron/settings.json. Changes require saving and may need a daemon restart to take effect.
         </div>
       </div>

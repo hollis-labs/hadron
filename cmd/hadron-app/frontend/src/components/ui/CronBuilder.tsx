@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface CronBuilderProps {
   value: string;
@@ -166,26 +168,26 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
     <div>
       {/* Preset selector */}
       <div style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        <button
+        <Button
           type="button"
-          className="hud-button-ghost"
+          variant="ghost"
+          size="xs"
           onClick={() => setShowPresets(!showPresets)}
-          style={{ fontSize: 'var(--text-xs)', padding: '0.15rem 0.5rem' }}
         >
           Presets {showPresets ? '▴' : '▾'}
-        </button>
+        </Button>
         {showPresets && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
             {PRESETS.map(p => (
-              <button
+              <Button
                 key={p.cron}
                 type="button"
-                className={assembled === p.cron ? 'hud-button' : 'hud-button-ghost'}
+                variant={assembled === p.cron ? 'outline' : 'ghost'}
+                size="xs"
                 onClick={() => handlePreset(p.cron)}
-                style={{ fontSize: 'var(--text-xs)', padding: '0.15rem 0.4rem' }}
               >
                 {p.label}
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -197,9 +199,8 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
           const fieldErr = errors[meta.key];
           return (
             <div key={meta.key} style={{ flex: 1, minWidth: 0 }}>
-              <input
+              <Input
                 type="text"
-                className="hud-input"
                 value={fields[meta.key]}
                 onChange={e => handleFieldChange(meta.key, e.target.value)}
                 placeholder={meta.placeholder}

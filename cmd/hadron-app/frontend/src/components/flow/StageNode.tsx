@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Zap } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 export type StageStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped';
 
@@ -62,9 +63,9 @@ function StageNodeComponent({ data, selected }: NodeProps & { data: StageNodeDat
           <span className="stage-node-name">{nodeData.label}</span>
         </div>
         {nodeData.condition && (
-          <span className="bp-badge bp-badge-warn" style={{ fontSize: '8px', padding: '0 4px', lineHeight: '14px' }}>
+          <Badge variant="running" className="h-3.5 px-1 text-[8px]">
             if
-          </span>
+          </Badge>
         )}
       </div>
 

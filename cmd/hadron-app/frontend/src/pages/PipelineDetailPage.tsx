@@ -1,20 +1,17 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { ChevronLeft, Play, Copy, X, MoreHorizontal, Trash2, Pencil, Layers, ChevronDown, ChevronRight, Workflow } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ChevronLeft, Play, Copy, MoreHorizontal, Trash2, Pencil, Layers, ChevronDown, ChevronRight, Workflow } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { readBlueprintFile, enqueuePipeline, deleteBlueprintFile } from '../api/client';
 import { Spinner } from '../components/ui/Spinner';
 import { basename } from '../utils/path';
 import { parsePipelineYaml } from '../utils/yaml';
-
-interface PipelineDetailPageProps {
-  path: string;
-  onBack: () => void;
-  onOpenRun: (runId: string) => void;
-  onEditPipeline?: (path: string) => void;
-  onOpenFlowBuilder?: (path: string) => void;
-  daemonStatus: string;
-  workspaceId: string;
-}
+import { useDaemon } from '../contexts/DaemonContext';
+import { useNavigation } from '../contexts/NavigationContext';
+import { cn } from '@/lib/utils';
 
 interface PipelineStageDetail {
   name: string;
@@ -46,7 +43,12 @@ function parsePipelineToDetail(content: string): PipelineDetail | null {
   };
 }
 
-export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, onOpenFlowBuilder, daemonStatus, workspaceId }: PipelineDetailPageProps) {
+export function PipelineDetailPage() {
+  const daemon = useDaemon();
+  const nav = useNavigation();
+  const path = nav.selectedPipelinePath!;
+  const daemonStatus = daemon.status;
+  const workspaceId = daemon.workspaceId;
   const [pipeline, setPipeline] = useState<PipelineDetail | null>(null);
   const [rawYaml, setRawYaml] = useState('');
   const [loading, setLoading] = useState(true);
@@ -92,7 +94,7 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
     try {
       await deleteBlueprintFile(path);
       toast.success('Pipeline deleted');
-      onBack();
+      nav.goBack();
     } catch (err) {
       toast.error(`Delete failed: ${err}`);
     }
@@ -112,12 +114,12 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
-        <div className="page-header">
-          <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+      <div className="flex flex-col h-full gap-3">
+        <div className="flex items-center justify-between mb-6">
+          <Button variant="ghost" onClick={nav.goBack}>
             <ChevronLeft size={13} /> Back
-          </button>
-          <span className="page-title">Loading...</span>
+          </Button>
+          <span className="text-xl font-semibold text-foreground tracking-tight">Loading...</span>
           <Spinner size={14} />
         </div>
       </div>
@@ -126,14 +128,14 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
 
   if (error || !pipeline) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
-        <div className="page-header">
-          <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+      <div className="flex flex-col h-full gap-3">
+        <div className="flex items-center justify-between mb-6">
+          <Button variant="ghost" onClick={nav.goBack}>
             <ChevronLeft size={13} /> Back
-          </button>
-          <span className="page-title">Error</span>
+          </Button>
+          <span className="text-xl font-semibold text-foreground tracking-tight">Error</span>
         </div>
-        <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-md)', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+        <div className="text-red-400 text-sm p-3 bg-red-500/10 rounded border border-red-500/30">
           {error || 'Failed to load pipeline'}
         </div>
       </div>
@@ -144,78 +146,52 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
   const topInputKeys = Object.keys(pipeline.inputs);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
+    <div className="flex flex-col h-full gap-3">
       {/* Header */}
-      <div className="page-header" style={{ gap: '0.5rem' }}>
-        <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+      <div className="flex items-center justify-between mb-6 gap-2">
+        <Button variant="ghost" onClick={nav.goBack}>
           <ChevronLeft size={13} /> Back
-        </button>
-        <Layers size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-        <span className="page-title" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        </Button>
+        <Layers size={15} className="text-primary shrink-0" />
+        <span className="text-xl font-semibold text-foreground tracking-tight flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
           {title}
         </span>
-        {onOpenFlowBuilder && (
-          <button
-            className="btn btn-primary"
-            onClick={() => onOpenFlowBuilder(path)}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-          >
-            <Workflow size={12} /> Flow
-          </button>
-        )}
-        <button
-          className="btn btn-primary"
+        <Button
+          onClick={() => nav.openFlowBuilder(path)}
+        >
+          <Workflow size={12} /> Flow
+        </Button>
+        <Button
           onClick={handleRun}
           disabled={daemonStatus !== 'running' || running}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
+          className="border-blue-500/50 text-blue-400"
         >
           <Play size={12} /> {running ? 'Running...' : 'Run'}
-        </button>
-        <div style={{ position: 'relative' }}>
-          <button className="btn btn-ghost" onClick={() => setShowActionMenu(!showActionMenu)} style={{ padding: '0.3rem 0.5rem' }}>
+        </Button>
+        <div className="relative">
+          <Button variant="ghost" size="xs" onClick={() => setShowActionMenu(!showActionMenu)}>
             <MoreHorizontal size={15} />
-          </button>
+          </Button>
           {showActionMenu && (
             <div
-              style={{
-                position: 'absolute', right: 0, top: '100%', marginTop: '0.25rem',
-                background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
-                borderRadius: '4px', minWidth: '160px', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-              }}
+              className="absolute right-0 top-full mt-1 bg-card border border-border rounded min-w-[160px] z-50 shadow-lg"
               onClick={() => setShowActionMenu(false)}
             >
               <button
                 onClick={() => setShowYamlModal(true)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
-                  padding: '0.5rem 0.75rem', background: 'none', border: 'none',
-                  color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-md)', textAlign: 'left',
-                }}
+                className="flex items-center gap-2 w-full px-3 py-2 bg-transparent border-none text-foreground cursor-pointer font-mono text-sm text-left hover:bg-muted"
               >
                 <Copy size={13} /> View YAML
               </button>
-              {onEditPipeline && (
-                <button
-                  onClick={() => onEditPipeline(path)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
-                    padding: '0.5rem 0.75rem', background: 'none', border: 'none',
-                    color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                    fontSize: 'var(--text-md)', textAlign: 'left',
-                  }}
-                >
-                  <Pencil size={13} /> Edit
-                </button>
-              )}
+              <button
+                onClick={() => nav.navigate('pipelines')}
+                className="flex items-center gap-2 w-full px-3 py-2 bg-transparent border-none text-foreground cursor-pointer font-mono text-sm text-left hover:bg-muted"
+              >
+                <Pencil size={13} /> Edit
+              </button>
               <button
                 onClick={() => setDeleteConfirm(true)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
-                  padding: '0.5rem 0.75rem', background: 'none', border: 'none',
-                  color: 'var(--status-failed)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-md)', textAlign: 'left',
-                }}
+                className="flex items-center gap-2 w-full px-3 py-2 bg-transparent border-none text-red-400 cursor-pointer font-mono text-sm text-left hover:bg-muted"
               >
                 <Trash2 size={13} /> Delete
               </button>
@@ -225,44 +201,44 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
       </div>
 
       {/* Main content — split layout like BlueprintDetailPage */}
-      <div className="bp-detail-split">
+      <div className="flex gap-6 flex-1 overflow-hidden">
         {/* Left — Metadata */}
-        <div className="bp-detail-meta">
-          <div className="bp-meta-section">
-            <div className="bp-meta-section-title">Pipeline</div>
-            <div className="bp-meta-field">
-              <span className="bp-meta-field-label">Name</span>
-              <span style={{ fontFamily: 'monospace' }}>{pipeline.name || '—'}</span>
+        <div className="w-80 min-w-[280px] overflow-y-auto pr-2">
+          <div className="mb-4">
+            <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1.5 border-b border-border pb-1">Pipeline</div>
+            <div className="flex gap-2 text-sm py-0.5">
+              <span className="text-muted-foreground min-w-[80px] shrink-0">Name</span>
+              <span className="font-mono">{pipeline.name || '—'}</span>
             </div>
-            <div className="bp-meta-field">
-              <span className="bp-meta-field-label">Stages</span>
+            <div className="flex gap-2 text-sm py-0.5">
+              <span className="text-muted-foreground min-w-[80px] shrink-0">Stages</span>
               <span>{pipeline.stages.length}</span>
             </div>
-            <div className="bp-meta-field">
-              <span className="bp-meta-field-label">Stop on Fail</span>
-              <span className={`bp-badge ${pipeline.stop_on_fail ? 'bp-badge-warn' : 'bp-badge-info'}`}>
+            <div className="flex gap-2 text-sm py-0.5">
+              <span className="text-muted-foreground min-w-[80px] shrink-0">Stop on Fail</span>
+              <Badge variant={pipeline.stop_on_fail ? "running" : "secondary"}>
                 {pipeline.stop_on_fail ? 'yes' : 'no'}
-              </span>
+              </Badge>
             </div>
-            <div className="bp-meta-field" style={{ flexDirection: 'column' }}>
-              <span className="bp-meta-field-label">Path</span>
-              <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>{path}</span>
+            <div className="flex flex-col gap-2 text-sm py-0.5">
+              <span className="text-muted-foreground min-w-[80px] shrink-0">Path</span>
+              <span className="text-sm font-mono text-muted-foreground break-all">{path}</span>
             </div>
           </div>
 
           {/* Pipeline-level inputs */}
-          <div className="bp-meta-section">
-            <div className="bp-meta-section-title">Pipeline Inputs ({topInputKeys.length})</div>
+          <div className="mb-4">
+            <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1.5 border-b border-border pb-1">Pipeline Inputs ({topInputKeys.length})</div>
             {topInputKeys.length === 0 ? (
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>No pipeline-level inputs</div>
+              <div className="text-sm text-muted-foreground">No pipeline-level inputs</div>
             ) : (
               topInputKeys.map((key, i) => (
-                <div key={i} style={{ padding: '0.3rem 0', borderBottom: i < topInputKeys.length - 1 ? '1px solid rgba(var(--border), 0.5)' : 'none' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
-                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 'var(--text-md)' }}>{key}</span>
+                <div key={i} className={cn("py-1", i < topInputKeys.length - 1 && "border-b border-border/50")}>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-primary font-mono text-sm">{key}</span>
                     {pipeline.inputs[key] && (
-                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
-                        = <span style={{ fontFamily: 'monospace' }}>{pipeline.inputs[key]}</span>
+                      <span className="text-xs text-muted-foreground">
+                        = <span className="font-mono">{pipeline.inputs[key]}</span>
                       </span>
                     )}
                   </div>
@@ -273,50 +249,53 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
         </div>
 
         {/* Right — Stage Timeline */}
-        <div className="bp-detail-steps">
+        <div className="flex-1 overflow-y-auto">
           {pipeline.stages.map((stage, si) => {
             const isExpanded = expandedStages.has(si);
             const inputKeys = Object.keys(stage.inputs);
             return (
-              <div key={si} style={{ marginBottom: '0.5rem' }}>
+              <div key={si} className="mb-2">
                 {/* Stage header */}
-                <div className="bp-section-header" onClick={() => toggleStage(si)}>
+                <div
+                  className="flex items-center gap-2 py-2 cursor-pointer select-none text-sm hover:text-blue-400"
+                  onClick={() => toggleStage(si)}
+                >
                   {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  <span style={{ fontFamily: 'monospace', color: 'var(--accent)', fontSize: 'var(--text-md)' }}>
+                  <span className="font-mono text-primary text-sm">
                     {stage.name || `Stage ${si + 1}`}
                   </span>
-                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginLeft: '0.5rem' }}>
+                  <span className="text-xs text-muted-foreground ml-2">
                     #{si + 1}
                   </span>
                   {stage.condition && (
-                    <span className="bp-badge bp-badge-warn" style={{ marginLeft: '0.3rem' }}>
+                    <Badge variant="running" className="ml-1">
                       conditional
-                    </span>
+                    </Badge>
                   )}
                   {inputKeys.length > 0 && (
-                    <span className="bp-badge bp-badge-info" style={{ marginLeft: '0.3rem' }}>
+                    <Badge variant="secondary" className="ml-1">
                       {inputKeys.length} input{inputKeys.length !== 1 ? 's' : ''}
-                    </span>
+                    </Badge>
                   )}
                 </div>
 
                 {/* Stage detail */}
                 {isExpanded && (
-                  <div className="bp-task-expanded">
-                    <div className="hud-label">Blueprint</div>
-                    <pre style={{ fontSize: 'var(--text-sm)' }}>{stage.blueprint_path}</pre>
+                  <div className="p-3 my-1 ml-4 bg-card rounded border border-border">
+                    <span className="text-sm font-medium text-muted-foreground">Blueprint</span>
+                    <pre className="my-2 p-2 bg-background rounded text-xs overflow-x-auto whitespace-pre-wrap break-all">{stage.blueprint_path}</pre>
 
                     {stage.condition && (
-                      <div style={{ fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
-                        <span className="hud-label">Condition: </span>
-                        <span style={{ fontFamily: 'monospace', color: 'var(--status-running)' }}>{stage.condition}</span>
+                      <div className="text-sm mt-1">
+                        <span className="text-sm font-medium text-muted-foreground">Condition: </span>
+                        <span className="font-mono text-amber-400">{stage.condition}</span>
                       </div>
                     )}
 
                     {inputKeys.length > 0 && (
                       <>
-                        <div className="hud-label" style={{ marginTop: '0.5rem' }}>Inputs</div>
-                        <pre style={{ fontSize: 'var(--text-sm)' }}>
+                        <span className="text-sm font-medium text-muted-foreground block mt-2">Inputs</span>
+                        <pre className="my-2 p-2 bg-background rounded text-xs overflow-x-auto whitespace-pre-wrap break-all">
                           {inputKeys.map(k => `${k}: ${stage.inputs[k]}`).join('\n')}
                         </pre>
                       </>
@@ -330,75 +309,48 @@ export function PipelineDetailPage({ path, onBack, onOpenRun, onEditPipeline, on
       </div>
 
       {/* Footer */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0.5rem 0', borderTop: '1px solid var(--border-default)',
-        fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', flexShrink: 0,
-      }}>
+      <div className="flex items-center justify-between py-2 border-t border-border text-sm text-muted-foreground shrink-0">
         <span>{pipeline.stages.length} stages · {topInputKeys.length} inputs · stop_on_fail: {pipeline.stop_on_fail ? 'yes' : 'no'}</span>
-        <button className="btn btn-ghost" onClick={() => setShowYamlModal(true)} style={{ fontSize: 'var(--text-sm)' }}>
+        <Button variant="ghost" size="sm" onClick={() => setShowYamlModal(true)}>
           View YAML
-        </button>
+        </Button>
       </div>
 
       {/* YAML Modal */}
-      {showYamlModal && (
-        <div className="hud-modal-overlay" onClick={() => setShowYamlModal(false)}>
-          <div
-            className="hud-modal"
-            onClick={e => e.stopPropagation()}
-            style={{ maxWidth: '900px', width: '90vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <span style={{ fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
-                Pipeline YAML
-              </span>
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-sm)' }}>
-                  <Copy size={12} /> Copy
-                </button>
-                <button className="btn btn-ghost" onClick={() => setShowYamlModal(false)} style={{ padding: '0.25rem' }}>
-                  <X size={15} />
-                </button>
-              </div>
-            </div>
-            <pre style={{
-              flex: 1, overflow: 'auto', padding: '0.75rem',
-              background: 'var(--bg-base)', borderRadius: '4px',
-              border: '1px solid var(--border-default)',
-              fontSize: 'var(--text-sm)', lineHeight: '1.6', whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-            }}>
-              {rawYaml}
-            </pre>
-          </div>
-        </div>
-      )}
+      <Dialog open={showYamlModal} onOpenChange={setShowYamlModal}>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>Pipeline YAML</span>
+              <Button variant="ghost" size="sm" onClick={handleCopyYaml}>
+                <Copy size={12} /> Copy
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          <pre className="flex-1 overflow-auto p-3 bg-background rounded border border-border text-sm leading-relaxed whitespace-pre-wrap break-all">
+            {rawYaml}
+          </pre>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation */}
-      {deleteConfirm && (
-        <div className="hud-modal-overlay" onClick={() => setDeleteConfirm(false)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: 'var(--text-base)', marginBottom: '0.5rem' }}>Delete Pipeline</h3>
-            <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+      <AlertDialog open={deleteConfirm} onOpenChange={setDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Pipeline</AlertDialogTitle>
+            <AlertDialogDescription>
               Are you sure you want to delete this pipeline? This cannot be undone.
-            </p>
-            <p style={{ fontFamily: 'monospace', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
-              {path}
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="btn btn-ghost" onClick={() => setDeleteConfirm(false)}>Cancel</button>
-              <button
-                className="btn btn-primary"
-                style={{ borderColor: 'var(--status-failed)', color: 'var(--status-failed)' }}
-                onClick={handleDelete}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              <span className="block font-mono text-sm text-muted-foreground break-all mt-2">
+                {path}
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Button } from '@/components/ui/button';
 
 interface PageHeaderProps {
   title: string;
@@ -12,9 +13,9 @@ export function PageHeader({ title, subtitle, onBack, actions }: PageHeaderProps
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 'var(--space-5)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
         {onBack && (
-          <button className="btn btn-ghost" onClick={onBack} style={{ padding: '4px 6px' }}>
+          <Button variant="ghost" size="xs" onClick={onBack}>
             ←
-          </button>
+          </Button>
         )}
         <div>
           <div style={{ fontSize: 'var(--text-xl)', fontWeight: 600 }}>{title}</div>

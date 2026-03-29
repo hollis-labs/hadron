@@ -1,19 +1,19 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { CalendarClock, Plus, Trash2, ToggleLeft, ToggleRight, FolderOpen, Pencil, RefreshCw } from 'lucide-react';
+import { useDaemon } from '../contexts/DaemonContext';
 import { usePoll } from '../hooks/usePoll';
 import { listSchedules, createSchedule, patchSchedule, deleteSchedule, selectBlueprintFile } from '../api/client';
 import { EmptyState } from '../components/ui/EmptyState';
 import { CronBuilder } from '../components/ui/CronBuilder';
-import { Modal } from '../components/ui/Modal';
-import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { formatNextRun } from '../utils/format';
 import { shortPath } from '../utils/path';
+import { cn } from '@/lib/utils';
 import type { Schedule, CreateScheduleRequest } from '../api/types';
-
-interface SchedulerPageProps {
-  daemonStatus: string;
-}
 
 type ScheduleMode = 'cron' | 'once';
 
@@ -35,9 +35,10 @@ const EMPTY_FORM: NewScheduleForm = {
   enabled: true,
 };
 
-export function SchedulerPage({ daemonStatus }: SchedulerPageProps) {
+export function SchedulerPage() {
+  const daemon = useDaemon();
   const fetcher = useCallback(() => listSchedules(), []);
-  const { data, loading, refresh } = usePoll(fetcher, 5000, daemonStatus === 'running');
+  const { data, loading, refresh } = usePoll(fetcher, 5000, daemon.status === 'running');
 
   const [showModal, setShowModal] = useState(false);
   const [schedMode, setSchedMode] = useState<ScheduleMode>('cron');
@@ -178,67 +179,70 @@ export function SchedulerPage({ daemonStatus }: SchedulerPageProps) {
 
   return (
     <div>
-      <div className="page-header">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <div className="page-title">Schedules</div>
-          {loading && <div className="page-subtitle">Refreshing…</div>}
+          <div className="text-xl font-semibold text-foreground tracking-tight">Schedules</div>
+          {loading && <div className="text-sm text-muted-foreground">Refreshing…</div>}
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-          <button className="btn btn-ghost" onClick={refresh} title="Refresh (R)">
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={refresh} title="Refresh (R)">
             <RefreshCw size={14} />
-          </button>
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+          </Button>
+          <Button onClick={() => setShowModal(true)}>
             <Plus size={14} /> New Schedule
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="section">
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
         {schedules.length === 0 ? (
           <EmptyState message="No schedules" sub="Create a schedule to run blueprints on a cron expression" />
         ) : (
-          <table className="table">
+          <table className="w-full border-collapse">
             <thead>
               <tr>
-                <th className="col-shrink"></th>
-                <th className="col-primary">Schedule</th>
-                <th className="col-shrink">Cron</th>
-                <th className="col-shrink col-right">Next Run</th>
-                <th className="col-shrink"></th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap"></th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 w-full">Schedule</th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Cron</th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap text-right">Next Run</th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap"></th>
               </tr>
             </thead>
             <tbody>
               {schedules.map(schedule => (
-                <tr key={schedule.id} style={{ cursor: 'default' }}>
-                  <td className="col-shrink">
-                    <button
-                      className="btn btn-ghost"
+                <tr key={schedule.id} className="cursor-default transition-colors hover:bg-muted/50">
+                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap">
+                    <Button
+                      variant="ghost"
+                      size="xs"
                       onClick={() => handleToggle(schedule)}
-                      style={{ padding: '2px 8px', fontSize: 'var(--text-xs)', color: schedule.enabled ? 'var(--accent)' : 'var(--text-tertiary)' }}
+                      className={cn(schedule.enabled ? 'text-primary' : 'text-muted-foreground')}
                       title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
                     >
                       {schedule.enabled ? <><ToggleRight size={15} /> ON</> : <><ToggleLeft size={15} /> OFF</>}
-                    </button>
+                    </Button>
                   </td>
-                  <td className="col-primary">
-                    <div style={{ fontWeight: 500 }}>
-                      {schedule.name || <span style={{ color: 'var(--text-tertiary)' }}>{schedule.id.slice(-8)}</span>}
+                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border w-full">
+                    <div className="font-medium">
+                      {schedule.name || <span className="text-muted-foreground">{schedule.id.slice(-8)}</span>}
                     </div>
-                    <div className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                    <div className="font-mono text-xs text-muted-foreground mt-px">
                       {shortPath(schedule.blueprint_path)}
                     </div>
                   </td>
-                  <td className="mono col-shrink">
-                    {schedule.cron_expr || <span style={{ color: 'var(--accent)', fontStyle: 'italic' }}>one-time</span>}
+                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono whitespace-nowrap">
+                    {schedule.cron_expr || <span className="text-primary italic">one-time</span>}
                   </td>
-                  <td className="col-shrink col-right" style={{ color: 'var(--text-tertiary)' }}>{formatNextRun(schedule.next_run_at)}</td>
-                  <td className="col-shrink" style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn btn-ghost" onClick={() => handleEdit(schedule)} style={{ padding: '2px 6px' }} title="Edit">
-                      <Pencil size={13} />
-                    </button>
-                    <button className="btn btn-ghost" onClick={() => handleDelete(schedule)} style={{ padding: '2px 6px', color: 'var(--status-failed)' }} title="Delete">
-                      <Trash2 size={13} />
-                    </button>
+                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap text-right">{formatNextRun(schedule.next_run_at)}</td>
+                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap">
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="xs" onClick={() => handleEdit(schedule)} title="Edit">
+                        <Pencil size={13} />
+                      </Button>
+                      <Button variant="ghost" size="xs" onClick={() => handleDelete(schedule)} className="text-red-400" title="Delete">
+                        <Trash2 size={13} />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -248,133 +252,141 @@ export function SchedulerPage({ daemonStatus }: SchedulerPageProps) {
       </div>
 
       {/* New Schedule modal */}
-      {showModal && (
-        <Modal onClose={handleModalClose} maxWidth="520px">
-          <div style={{ padding: 'var(--space-5)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
-              <CalendarClock size={16} style={{ color: 'var(--accent)' }} />
-              <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>New Schedule</span>
+      <Dialog open={showModal} onOpenChange={(open) => { if (!open) handleModalClose(); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              <div className="flex items-center gap-2">
+                <CalendarClock size={16} className="text-primary" />
+                <span>New Schedule</span>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Name <span className="text-muted-foreground">(optional)</span></label>
+              <Input placeholder="e.g. daily-cleanup" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full" />
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Name <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span></label>
-                <input className="hud-input" placeholder="e.g. daily-cleanup" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box' }} />
+            <div>
+              <label className="block text-sm font-medium mb-1">Blueprint Path</label>
+              <div className="flex gap-2">
+                <Input placeholder="/path/to/blueprint.yaml" value={form.blueprint_path} onChange={e => setForm(f => ({ ...f, blueprint_path: e.target.value }))} className="flex-1" />
+                <Button variant="ghost" onClick={handleBrowse}><FolderOpen size={13} /> Browse</Button>
               </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Blueprint Path</label>
-                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                  <input className="hud-input" placeholder="/path/to/blueprint.yaml" value={form.blueprint_path} onChange={e => setForm(f => ({ ...f, blueprint_path: e.target.value }))} style={{ flex: 1 }} />
-                  <button className="btn btn-ghost" onClick={handleBrowse}><FolderOpen size={13} /> Browse</button>
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Type</label>
-                <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
-                  <button className={`btn ${schedMode === 'cron' ? '' : 'btn-ghost'}`} onClick={() => setSchedMode('cron')} type="button" style={{ fontSize: 'var(--text-xs)' }}>Recurring (Cron)</button>
-                  <button className={`btn ${schedMode === 'once' ? '' : 'btn-ghost'}`} onClick={() => setSchedMode('once')} type="button" style={{ fontSize: 'var(--text-xs)' }}>One-Time</button>
-                </div>
-              </div>
-
-              {schedMode === 'cron' && (
-                <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Cron Expression</label>
-                  <CronBuilder value={form.cron_expr || '* * * * *'} onChange={cron => setForm(f => ({ ...f, cron_expr: cron }))} />
-                </div>
-              )}
-
-              {schedMode === 'once' && (
-                <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Run At</label>
-                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                    <input className="hud-input" type="date" value={form.run_at_date} onChange={e => setForm(f => ({ ...f, run_at_date: e.target.value }))} style={{ flex: 1 }} />
-                    <input className="hud-input" type="time" value={form.run_at_time} onChange={e => setForm(f => ({ ...f, run_at_time: e.target.value }))} style={{ flex: 1 }} />
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)' }}>Runs once then disables itself.</div>
-                </div>
-              )}
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} style={{ accentColor: 'var(--accent)' }} />
-                <span style={{ fontSize: 'var(--text-md)' }}>Enabled</span>
-              </label>
-
-              {formError && (
-                <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-sm)', padding: 'var(--space-2) var(--space-3)', background: 'var(--status-failed-bg)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-                  {formError}
-                </div>
-              )}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
-              <button className="btn btn-ghost" onClick={handleModalClose}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>{creating ? 'Creating…' : 'Create'}</button>
+            <div>
+              <label className="block text-sm font-medium mb-1">Type</label>
+              <div className="flex gap-1">
+                <Button variant={schedMode === 'cron' ? "outline" : "ghost"} onClick={() => setSchedMode('cron')} type="button" size="xs">Recurring (Cron)</Button>
+                <Button variant={schedMode === 'once' ? "outline" : "ghost"} onClick={() => setSchedMode('once')} type="button" size="xs">One-Time</Button>
+              </div>
             </div>
+
+            {schedMode === 'cron' && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Cron Expression</label>
+                <CronBuilder value={form.cron_expr || '* * * * *'} onChange={cron => setForm(f => ({ ...f, cron_expr: cron }))} />
+              </div>
+            )}
+
+            {schedMode === 'once' && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Run At</label>
+                <div className="flex gap-2">
+                  <Input type="date" value={form.run_at_date} onChange={e => setForm(f => ({ ...f, run_at_date: e.target.value }))} className="flex-1" />
+                  <Input type="time" value={form.run_at_time} onChange={e => setForm(f => ({ ...f, run_at_time: e.target.value }))} className="flex-1" />
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">Runs once then disables itself.</div>
+              </div>
+            )}
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} className="accent-primary" />
+              <span className="text-sm">Enabled</span>
+            </label>
+
+            {formError && (
+              <div className="text-red-400 text-sm px-3 py-2 bg-red-500/10 rounded border border-red-500/30">
+                {formError}
+              </div>
+            )}
           </div>
-        </Modal>
-      )}
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={handleModalClose}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={creating}>{creating ? 'Creating…' : 'Create'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Schedule modal */}
-      {editSchedule && (
-        <Modal onClose={() => setEditSchedule(null)} maxWidth="520px">
-          <div style={{ padding: 'var(--space-5)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
-              <Pencil size={16} style={{ color: 'var(--accent)' }} />
-              <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>Edit Schedule</span>
+      <Dialog open={!!editSchedule} onOpenChange={(open) => { if (!open) setEditSchedule(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              <div className="flex items-center gap-2">
+                <Pencil size={16} className="text-primary" />
+                <span>Edit Schedule</span>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Name <span className="text-muted-foreground">(optional)</span></label>
+              <Input placeholder="e.g. daily-cleanup" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className="w-full" />
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Name <span style={{ color: 'var(--text-tertiary)' }}>(optional)</span></label>
-                <input className="hud-input" placeholder="e.g. daily-cleanup" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box' }} />
+            <div>
+              <label className="block text-sm font-medium mb-1">Blueprint Path</label>
+              <div className="flex gap-2">
+                <Input placeholder="/path/to/blueprint.yaml" value={editForm.blueprint_path} onChange={e => setEditForm(f => ({ ...f, blueprint_path: e.target.value }))} className="flex-1" />
+                <Button variant="ghost" onClick={handleEditBrowse}><FolderOpen size={13} /> Browse</Button>
               </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Blueprint Path</label>
-                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                  <input className="hud-input" placeholder="/path/to/blueprint.yaml" value={editForm.blueprint_path} onChange={e => setEditForm(f => ({ ...f, blueprint_path: e.target.value }))} style={{ flex: 1 }} />
-                  <button className="btn btn-ghost" onClick={handleEditBrowse}><FolderOpen size={13} /> Browse</button>
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, marginBottom: 'var(--space-1)' }}>Cron Expression</label>
-                <CronBuilder value={editForm.cron_expr || '* * * * *'} onChange={cron => setEditForm(f => ({ ...f, cron_expr: cron }))} />
-              </div>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={editForm.enabled} onChange={e => setEditForm(f => ({ ...f, enabled: e.target.checked }))} style={{ accentColor: 'var(--accent)' }} />
-                <span style={{ fontSize: 'var(--text-md)' }}>Enabled</span>
-              </label>
-
-              {editError && (
-                <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-sm)', padding: 'var(--space-2) var(--space-3)', background: 'var(--status-failed-bg)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-                  {editError}
-                </div>
-              )}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
-              <button className="btn btn-ghost" onClick={() => setEditSchedule(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleEditSave} disabled={editSaving}>{editSaving ? 'Saving…' : 'Save'}</button>
+            <div>
+              <label className="block text-sm font-medium mb-1">Cron Expression</label>
+              <CronBuilder value={editForm.cron_expr || '* * * * *'} onChange={cron => setEditForm(f => ({ ...f, cron_expr: cron }))} />
             </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={editForm.enabled} onChange={e => setEditForm(f => ({ ...f, enabled: e.target.checked }))} className="accent-primary" />
+              <span className="text-sm">Enabled</span>
+            </label>
+
+            {editError && (
+              <div className="text-red-400 text-sm px-3 py-2 bg-red-500/10 rounded border border-red-500/30">
+                {editError}
+              </div>
+            )}
           </div>
-        </Modal>
-      )}
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditSchedule(null)}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={editSaving}>{editSaving ? 'Saving…' : 'Save'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation */}
-      {deleteTarget && (
-        <ConfirmDialog
-          title="Delete Schedule"
-          message={`Delete schedule "${deleteTarget.name || deleteTarget.id.slice(-8)}"? This cannot be undone.`}
-          confirmLabel="Delete"
-          danger
-          onConfirm={confirmDelete}
-          onCancel={() => setDeleteTarget(null)}
-        />
-      )}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget ? `Delete schedule "${deleteTarget.name || deleteTarget.id.slice(-8)}"? This cannot be undone.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

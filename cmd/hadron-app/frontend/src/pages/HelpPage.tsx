@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { FolderPlus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 import { createBlueprintFile, getPreference, selectDirectoryDialog } from '../api/client';
 
 type HelpTab = 'general' | 'blueprints' | 'pipelines' | 'examples';
@@ -336,42 +339,42 @@ export function HelpPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <span className="page-title">Help</span>
+      <div className="flex items-center justify-between mb-6">
+        <span className="text-xl font-semibold text-foreground tracking-tight">Help</span>
       </div>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1rem' }}>
+      <div className="flex gap-1 mb-4">
         {TABS.map(t => (
-          <button
+          <Button
             key={t.key}
-            className={tab === t.key ? 'hud-button' : 'hud-button-ghost'}
+            variant={tab === t.key ? 'outline' : 'ghost'}
+            size="sm"
             onClick={() => setTab(t.key)}
-            style={{ fontSize: 'var(--text-sm)', padding: '0.3rem 0.75rem' }}
           >
             {t.label}
-          </button>
+          </Button>
         ))}
       </div>
 
       {/* ══════════════ Tab: General ══════════════ */}
       {tab === 'general' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '960px' }}>
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>About</div>
-            <div style={{ fontSize: 'var(--text-md)', marginBottom: '0.3rem' }}>
-              <strong style={{ color: 'var(--status-success)' }}>HADRON</strong>
-              <span style={{ color: 'var(--text-tertiary)', marginLeft: '0.5rem' }}>by Hollis Labs</span>
+        <div className="flex flex-col gap-5 max-w-4xl">
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">About</div>
+            <div className="text-sm mb-1">
+              <strong className="text-blue-400">HADRON</strong>
+              <span className="text-muted-foreground ml-2">by Hollis Labs</span>
             </div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.5' }}>
+            <div className="text-sm text-muted-foreground leading-normal">
               A local-first, agent-first blueprint automation runner. Create, inspect, and run YAML blueprints
               that orchestrate multi-step workflows with inputs, conditions, retries, and more.
             </div>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Quick Start</div>
-            <ol style={{ fontSize: 'var(--text-md)', lineHeight: '1.7', paddingLeft: '1.2rem', color: 'var(--text-primary)' }}>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Quick Start</div>
+            <ol className="text-sm leading-relaxed pl-5 text-foreground">
               <li>Go to <strong>Blueprints</strong> and click <strong>Open Folder</strong> to select a directory containing .yaml blueprints</li>
               <li>Click a blueprint name to view its details, inputs, and step timeline</li>
               <li>Click <strong>Run</strong> to execute a blueprint (fill in inputs if required)</li>
@@ -382,9 +385,9 @@ export function HelpPage() {
             </ol>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Keyboard Shortcuts</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Keyboard Shortcuts</div>
+            <table className="w-full border-collapse">
               <tbody>
                 {[
                   ['Esc', 'Close modal / go back from detail pages'],
@@ -396,36 +399,32 @@ export function HelpPage() {
                   ['Space', 'Toggle selection (Blueprints page)'],
                 ].map(([key, desc]) => (
                   <tr key={key}>
-                    <td style={{ padding: '0.3rem 0', width: '120px' }}>
-                      <kbd style={{
-                        background: 'var(--bg-raised)', border: '1px solid var(--border-default)',
-                        borderRadius: '3px', padding: '2px 8px', fontSize: 'var(--text-sm)',
-                        fontFamily: 'var(--font-mono)',
-                      }}>{key}</kbd>
+                    <td className="py-1 w-[120px]">
+                      <kbd className="bg-muted border border-border rounded px-2 py-0.5 text-sm font-mono">{key}</kbd>
                     </td>
-                    <td style={{ padding: '0.3rem 0', fontSize: 'var(--text-md)', color: 'var(--text-tertiary)' }}>{desc}</td>
+                    <td className="py-1 text-sm text-muted-foreground">{desc}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Pages Overview</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
-              <div><strong style={{ color: 'var(--accent)' }}>Dashboard</strong> — Run stats, activity timeline, blueprint success rates</div>
-              <div><strong style={{ color: 'var(--accent)' }}>Blueprints</strong> — Browse, create, edit, run, and manage blueprint YAML files</div>
-              <div><strong style={{ color: 'var(--accent)' }}>Pipelines</strong> — Chain blueprints into multi-stage workflows</div>
-              <div><strong style={{ color: 'var(--accent)' }}>Run Log</strong> — History of all blueprint runs with status, duration, and details</div>
-              <div><strong style={{ color: 'var(--accent)' }}>Schedules</strong> — Cron-based recurring runs and one-time scheduled executions</div>
-              <div><strong style={{ color: 'var(--accent)' }}>Telemetry</strong> — JSONL activity logs per run for debugging and auditing</div>
-              <div><strong style={{ color: 'var(--accent)' }}>Settings</strong> — Execution limits, safety controls, telemetry retention</div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Pages Overview</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              <div><strong className="text-blue-400">Dashboard</strong> — Run stats, activity timeline, blueprint success rates</div>
+              <div><strong className="text-blue-400">Blueprints</strong> — Browse, create, edit, run, and manage blueprint YAML files</div>
+              <div><strong className="text-blue-400">Pipelines</strong> — Chain blueprints into multi-stage workflows</div>
+              <div><strong className="text-blue-400">Run Log</strong> — History of all blueprint runs with status, duration, and details</div>
+              <div><strong className="text-blue-400">Schedules</strong> — Cron-based recurring runs and one-time scheduled executions</div>
+              <div><strong className="text-blue-400">Telemetry</strong> — JSONL activity logs per run for debugging and auditing</div>
+              <div><strong className="text-blue-400">Settings</strong> — Execution limits, safety controls, telemetry retention</div>
             </div>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Resources</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Resources</div>
+            <div className="flex flex-col gap-1.5">
               {[
                 ['Data directory', '~/.hadron/'],
                 ['Settings', '~/.hadron/settings.json'],
@@ -434,8 +433,8 @@ export function HelpPage() {
                 ['Archive', '~/.hadron/archive/'],
                 ['Preferences', '~/.hadron/preferences.json'],
               ].map(([label, path]) => (
-                <div key={label} style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)' }}>
-                  {label}: <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>{path}</span>
+                <div key={label} className="text-sm text-muted-foreground">
+                  {label}: <span className="font-mono text-blue-400">{path}</span>
                 </div>
               ))}
             </div>
@@ -445,40 +444,40 @@ export function HelpPage() {
 
       {/* ══════════════ Tab: Blueprints ══════════════ */}
       {tab === 'blueprints' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '960px' }}>
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>What are Blueprints?</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+        <div className="flex flex-col gap-5 max-w-4xl">
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">What are Blueprints?</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
               Blueprints are YAML files that define multi-step automation workflows. Each blueprint can declare
               inputs, environment variables, conditional steps, retries, and hooks. Hadron executes them locally
               using Go&apos;s text/template engine for dynamic values.
             </div>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Blueprint Schema (v0.4)</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
-              <div><strong style={{ color: 'var(--accent)' }}>version:</strong> Schema version (currently "0.4")</div>
-              <div><strong style={{ color: 'var(--accent)' }}>blueprint:</strong> name, slug, title, description, author, license, tags, homepage</div>
-              <div><strong style={{ color: 'var(--accent)' }}>project:</strong> type, name, dir, path, php_version, node, vars</div>
-              <div><strong style={{ color: 'var(--accent)' }}>env:</strong> key-value environment variables</div>
-              <div><strong style={{ color: 'var(--accent)' }}>inputs:</strong> name, label, type (string|number|boolean|array), required, default, enum, pattern</div>
-              <div><strong style={{ color: 'var(--accent)' }}>packages:</strong> npm, composer, pip, brew, go</div>
-              <div><strong style={{ color: 'var(--accent)' }}>steps:</strong> sections with tasks (name, cmd, call, if, retry, timeout, dir, env)</div>
-              <div><strong style={{ color: 'var(--accent)' }}>hooks:</strong> before_run, after_run, on_error</div>
-              <div><strong style={{ color: 'var(--accent)' }}>imports:</strong> path, alias, with</div>
-              <div><strong style={{ color: 'var(--accent)' }}>stubs:</strong> enabled, search_paths, strict_match</div>
-              <div><strong style={{ color: 'var(--accent)' }}>git:</strong> init, create_github_repo, visibility, remote, branch</div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Blueprint Schema (v0.4)</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              <div><strong className="text-blue-400">version:</strong> Schema version (currently "0.4")</div>
+              <div><strong className="text-blue-400">blueprint:</strong> name, slug, title, description, author, license, tags, homepage</div>
+              <div><strong className="text-blue-400">project:</strong> type, name, dir, path, php_version, node, vars</div>
+              <div><strong className="text-blue-400">env:</strong> key-value environment variables</div>
+              <div><strong className="text-blue-400">inputs:</strong> name, label, type (string|number|boolean|array), required, default, enum, pattern</div>
+              <div><strong className="text-blue-400">packages:</strong> npm, composer, pip, brew, go</div>
+              <div><strong className="text-blue-400">steps:</strong> sections with tasks (name, cmd, call, if, retry, timeout, dir, env)</div>
+              <div><strong className="text-blue-400">hooks:</strong> before_run, after_run, on_error</div>
+              <div><strong className="text-blue-400">imports:</strong> path, alias, with</div>
+              <div><strong className="text-blue-400">stubs:</strong> enabled, search_paths, strict_match</div>
+              <div><strong className="text-blue-400">git:</strong> init, create_github_repo, visibility, remote, branch</div>
             </div>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Template Variables</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
-              <div style={{ marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Template Variables</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              <div className="mb-2 text-foreground">
                 Blueprints use Go text/template syntax. Available variables:
               </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table className="w-full border-collapse">
                 <tbody>
                   {[
                     ['{{ .inputs.name }}', 'User-provided input value by name'],
@@ -491,11 +490,8 @@ export function HelpPage() {
                     ['{{ .workspace.id }}', 'Current workspace identifier'],
                   ].map(([variable, desc]) => (
                     <tr key={variable}>
-                      <td style={{
-                        padding: '0.25rem 0', fontFamily: 'monospace', fontSize: 'var(--text-sm)',
-                        color: 'var(--accent)', whiteSpace: 'nowrap', width: '220px',
-                      }}>{variable}</td>
-                      <td style={{ padding: '0.25rem 0', fontSize: 'var(--text-sm)' }}>{desc}</td>
+                      <td className="py-1 font-mono text-sm text-blue-400 whitespace-nowrap w-[220px]">{variable}</td>
+                      <td className="py-1 text-sm">{desc}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -503,10 +499,10 @@ export function HelpPage() {
             </div>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Template Functions</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.3rem 1.5rem' }}>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Template Functions</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1">
                 {[
                   ['upper', 'Convert to uppercase'],
                   ['lower', 'Convert to lowercase'],
@@ -523,28 +519,28 @@ export function HelpPage() {
                   ['ternary', 'Conditional value'],
                   ['json', 'Marshal to JSON'],
                 ].map(([fn, desc]) => (
-                  <div key={fn} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline' }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: 'var(--text-sm)', color: 'var(--accent)' }}>{fn}</span>
-                    <span style={{ fontSize: 'var(--text-sm)' }}>{desc}</span>
+                  <div key={fn} className="flex gap-2 items-baseline">
+                    <span className="font-mono text-sm text-blue-400">{fn}</span>
+                    <span className="text-sm">{desc}</span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Task Options</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
-              <div><strong style={{ color: 'var(--accent)' }}>cmd</strong> — Shell command to execute</div>
-              <div><strong style={{ color: 'var(--accent)' }}>call</strong> — Call another blueprint by path</div>
-              <div><strong style={{ color: 'var(--accent)' }}>if</strong> — Conditional expression (template syntax)</div>
-              <div><strong style={{ color: 'var(--accent)' }}>dir</strong> — Working directory for the command</div>
-              <div><strong style={{ color: 'var(--accent)' }}>env</strong> — Per-task environment variables</div>
-              <div><strong style={{ color: 'var(--accent)' }}>retry</strong> — Number of retry attempts on failure</div>
-              <div><strong style={{ color: 'var(--accent)' }}>retry_delay_seconds</strong> — Delay between retries</div>
-              <div><strong style={{ color: 'var(--accent)' }}>timeout_seconds</strong> — Maximum execution time</div>
-              <div><strong style={{ color: 'var(--accent)' }}>continue_on_error</strong> — Don&apos;t halt on failure</div>
-              <div><strong style={{ color: 'var(--accent)' }}>on_success / on_fail</strong> — Hooks triggered by outcome</div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Task Options</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              <div><strong className="text-blue-400">cmd</strong> — Shell command to execute</div>
+              <div><strong className="text-blue-400">call</strong> — Call another blueprint by path</div>
+              <div><strong className="text-blue-400">if</strong> — Conditional expression (template syntax)</div>
+              <div><strong className="text-blue-400">dir</strong> — Working directory for the command</div>
+              <div><strong className="text-blue-400">env</strong> — Per-task environment variables</div>
+              <div><strong className="text-blue-400">retry</strong> — Number of retry attempts on failure</div>
+              <div><strong className="text-blue-400">retry_delay_seconds</strong> — Delay between retries</div>
+              <div><strong className="text-blue-400">timeout_seconds</strong> — Maximum execution time</div>
+              <div><strong className="text-blue-400">continue_on_error</strong> — Don&apos;t halt on failure</div>
+              <div><strong className="text-blue-400">on_success / on_fail</strong> — Hooks triggered by outcome</div>
             </div>
           </div>
         </div>
@@ -552,39 +548,34 @@ export function HelpPage() {
 
       {/* ══════════════ Tab: Pipelines ══════════════ */}
       {tab === 'pipelines' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '960px' }}>
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>What are Pipelines?</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+        <div className="flex flex-col gap-5 max-w-4xl">
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">What are Pipelines?</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
               Pipelines chain multiple blueprints together into a sequential workflow. Each stage runs a blueprint,
               and (by default) the pipeline stops on the first failure. Use pipelines to orchestrate multi-step
               deployments, build chains, or any workflow that requires ordered execution.
             </div>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Pipeline Schema</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
-              <div><strong style={{ color: 'var(--accent)' }}>meta.name</strong> — Pipeline display name</div>
-              <div><strong style={{ color: 'var(--accent)' }}>stop_on_fail</strong> — Stop pipeline if a stage fails (default: true)</div>
-              <div><strong style={{ color: 'var(--accent)' }}>stages[]</strong> — Ordered list of stages to execute:</div>
-              <div style={{ paddingLeft: '1rem' }}>
-                <div><strong style={{ color: 'var(--accent)' }}>name</strong> — Stage identifier (required)</div>
-                <div><strong style={{ color: 'var(--accent)' }}>blueprint_path</strong> — Path to blueprint YAML (required)</div>
-                <div><strong style={{ color: 'var(--accent)' }}>inputs</strong> — Key-value inputs passed to the blueprint</div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Pipeline Schema</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              <div><strong className="text-blue-400">meta.name</strong> — Pipeline display name</div>
+              <div><strong className="text-blue-400">stop_on_fail</strong> — Stop pipeline if a stage fails (default: true)</div>
+              <div><strong className="text-blue-400">stages[]</strong> — Ordered list of stages to execute:</div>
+              <div className="pl-4">
+                <div><strong className="text-blue-400">name</strong> — Stage identifier (required)</div>
+                <div><strong className="text-blue-400">blueprint_path</strong> — Path to blueprint YAML (required)</div>
+                <div><strong className="text-blue-400">inputs</strong> — Key-value inputs passed to the blueprint</div>
               </div>
-              <div><strong style={{ color: 'var(--accent)' }}>inputs</strong> — Global inputs inherited by all stages</div>
+              <div><strong className="text-blue-400">inputs</strong> — Global inputs inherited by all stages</div>
             </div>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Example Pipeline</div>
-            <pre style={{
-              fontSize: 'var(--text-sm)', lineHeight: '1.5', color: 'var(--text-primary)',
-              background: 'var(--bg-raised)', padding: '0.75rem', borderRadius: '4px',
-              border: '1px solid var(--border-default)', overflow: 'auto',
-              fontFamily: 'monospace', whiteSpace: 'pre', margin: 0,
-            }}>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Example Pipeline</div>
+            <pre className="text-sm leading-normal text-foreground bg-muted p-3 rounded border border-border overflow-auto font-mono whitespace-pre m-0">
 {`meta:
   name: full-stack-deploy
 stop_on_fail: true
@@ -600,9 +591,9 @@ stages:
             </pre>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>How to Use</div>
-            <ol style={{ fontSize: 'var(--text-md)', lineHeight: '1.7', paddingLeft: '1.2rem', color: 'var(--text-primary)' }}>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">How to Use</div>
+            <ol className="text-sm leading-relaxed pl-5 text-foreground">
               <li>Navigate to the <strong>Pipelines</strong> page from the sidebar</li>
               <li>Click <strong>Open Folder</strong> to select a directory containing pipeline YAML files</li>
               <li>Click <strong>New Pipeline</strong> to create a pipeline with the visual editor</li>
@@ -613,14 +604,14 @@ stages:
             </ol>
           </div>
 
-          <div className="section" style={{ padding: '1rem' }}>
-            <div className="bp-meta-section-title" style={{ marginBottom: '0.5rem' }}>Execution Behavior</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
-              <div>Stages execute <strong style={{ color: 'var(--text-primary)' }}>sequentially</strong> — each stage waits for the previous one to complete.</div>
-              <div style={{ marginTop: '0.3rem' }}>With <strong style={{ color: 'var(--accent)' }}>stop_on_fail: true</strong> (default), the pipeline halts when any stage fails.</div>
-              <div style={{ marginTop: '0.3rem' }}>With <strong style={{ color: 'var(--accent)' }}>stop_on_fail: false</strong>, all stages run regardless of failures.</div>
-              <div style={{ marginTop: '0.3rem' }}>Each stage creates a separate <strong style={{ color: 'var(--text-primary)' }}>blueprint run</strong> visible in the Run Log.</div>
-              <div style={{ marginTop: '0.3rem' }}>Default stage timeout: <strong style={{ color: 'var(--text-primary)' }}>60 seconds</strong>. Blueprint-level timeouts override this.</div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Execution Behavior</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              <div>Stages execute <strong className="text-foreground">sequentially</strong> — each stage waits for the previous one to complete.</div>
+              <div className="mt-1">With <strong className="text-blue-400">stop_on_fail: true</strong> (default), the pipeline halts when any stage fails.</div>
+              <div className="mt-1">With <strong className="text-blue-400">stop_on_fail: false</strong>, all stages run regardless of failures.</div>
+              <div className="mt-1">Each stage creates a separate <strong className="text-foreground">blueprint run</strong> visible in the Run Log.</div>
+              <div className="mt-1">Default stage timeout: <strong className="text-foreground">60 seconds</strong>. Blueprint-level timeouts override this.</div>
             </div>
           </div>
         </div>
@@ -628,72 +619,69 @@ stages:
 
       {/* ══════════════ Tab: Examples ══════════════ */}
       {tab === 'examples' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '960px' }}>
-          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: '1.5' }}>
-            Sample blueprints and pipelines for common use cases. <strong style={{ color: 'var(--text-primary)' }}>View</strong> to
-            see the full YAML, <strong style={{ color: 'var(--text-primary)' }}>Copy</strong> to clipboard,
-            or <strong style={{ color: 'var(--text-primary)' }}>Add</strong> to save directly to your blueprints folder.
+        <div className="flex flex-col gap-4 max-w-4xl">
+          <div className="text-sm text-muted-foreground leading-normal">
+            Sample blueprints and pipelines for common use cases. <strong className="text-foreground">View</strong> to
+            see the full YAML, <strong className="text-foreground">Copy</strong> to clipboard,
+            or <strong className="text-foreground">Add</strong> to save directly to your blueprints folder.
           </div>
 
           {/* Filter */}
-          <div style={{ display: 'flex', gap: '0.25rem' }}>
+          <div className="flex gap-1">
             {(['all', 'blueprint', 'pipeline'] as const).map(f => (
-              <button
+              <Button
                 key={f}
-                className={exampleFilter === f ? 'hud-button' : 'hud-button-ghost'}
+                variant={exampleFilter === f ? 'outline' : 'ghost'}
+                size="sm"
                 onClick={() => setExampleFilter(f)}
-                style={{ fontSize: 'var(--text-sm)', padding: '0.2rem 0.6rem' }}
               >
                 {f === 'all' ? 'All' : f === 'blueprint' ? 'Blueprints' : 'Pipelines'}
-              </button>
+              </Button>
             ))}
           </div>
 
           {filteredSamples.map(sample => (
-            <div key={sample.filename} className="section" style={{ padding: '0.75rem 1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                <span style={{
-                  fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.08em',
-                  textTransform: 'uppercase', padding: '0.1rem 0.35rem', borderRadius: '3px',
-                  background: sample.kind === 'pipeline' ? 'rgba(var(--accent) / 0.15)' : 'rgba(var(--ok) / 0.15)',
-                  color: sample.kind === 'pipeline' ? 'var(--accent)' : 'var(--status-success)',
-                }}>
+            <div key={sample.filename} className="rounded-lg border border-border bg-card px-4 py-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className={cn(
+                  'text-xs font-bold uppercase tracking-wide px-1.5 py-0.5 rounded',
+                  sample.kind === 'pipeline' ? 'bg-blue-400/15 text-blue-400' : 'bg-blue-400/15 text-blue-400'
+                )}>
                   {sample.kind}
                 </span>
-                <div style={{ fontWeight: 600, fontSize: 'var(--text-md)', color: 'var(--text-primary)', flex: 1 }}>
+                <div className="font-semibold text-sm text-foreground flex-1">
                   {sample.title}
                 </div>
-                <div style={{ display: 'flex', gap: '0.25rem' }}>
-                  <button
-                    className="btn btn-ghost"
+                <div className="flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={() => setViewingSample(sample)}
-                    style={{ fontSize: 'var(--text-xs)', padding: '0.2rem 0.5rem' }}
                   >
                     View
-                  </button>
-                  <button
-                    className="btn btn-ghost"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={() => {
                       navigator.clipboard.writeText(sample.yaml);
                       toast.success('Copied to clipboard');
                     }}
-                    style={{ fontSize: 'var(--text-xs)', padding: '0.2rem 0.5rem' }}
                   >
                     Copy
-                  </button>
-                  <button
-                    className="btn btn-primary"
+                  </Button>
+                  <Button
+                    size="xs"
                     onClick={() => addFileToBlueprints(sample)}
-                    style={{ fontSize: 'var(--text-xs)', padding: '0.2rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
                   >
                     <FolderPlus size={11} /> Add
-                  </button>
+                  </Button>
                 </div>
               </div>
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
+              <div className="text-sm text-muted-foreground">
                 {sample.description}
               </div>
-              <div style={{ fontSize: 'var(--text-xs)', fontFamily: 'monospace', color: 'var(--accent)', marginTop: '0.2rem' }}>
+              <div className="text-xs font-mono text-blue-400 mt-0.5">
                 {sample.filename}
               </div>
             </div>
@@ -702,58 +690,54 @@ stages:
       )}
 
       {/* Sample viewer modal */}
-      {viewingSample && (
-        <div className="hud-modal-overlay" onClick={() => setViewingSample(null)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '650px', width: '100%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{
-                    fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.08em',
-                    textTransform: 'uppercase', padding: '0.1rem 0.35rem', borderRadius: '3px',
-                    background: viewingSample.kind === 'pipeline' ? 'rgba(var(--accent) / 0.15)' : 'rgba(var(--ok) / 0.15)',
-                    color: viewingSample.kind === 'pipeline' ? 'var(--accent)' : 'var(--status-success)',
-                  }}>
-                    {viewingSample.kind}
-                  </span>
-                  <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>{viewingSample.title}</span>
+      <Dialog open={!!viewingSample} onOpenChange={(open) => { if (!open) setViewingSample(null); }}>
+        <DialogContent className="sm:max-w-[650px] w-full">
+          {viewingSample && (
+            <>
+              <DialogHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        'text-xs font-bold uppercase tracking-wide px-1.5 py-0.5 rounded',
+                        viewingSample.kind === 'pipeline' ? 'bg-blue-400/15 text-blue-400' : 'bg-blue-400/15 text-blue-400'
+                      )}>
+                        {viewingSample.kind}
+                      </span>
+                      <DialogTitle className="font-semibold text-base">{viewingSample.title}</DialogTitle>
+                    </div>
+                    <div className="text-sm font-mono text-blue-400">{viewingSample.filename}</div>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        navigator.clipboard.writeText(viewingSample.yaml);
+                        toast.success('Copied to clipboard');
+                      }}
+                    >
+                      Copy
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => addFileToBlueprints(viewingSample)}
+                    >
+                      <FolderPlus size={11} /> Add to Blueprints
+                    </Button>
+                  </div>
                 </div>
-                <div style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--accent)' }}>{viewingSample.filename}</div>
-              </div>
-              <div style={{ display: 'flex', gap: '0.3rem' }}>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    navigator.clipboard.writeText(viewingSample.yaml);
-                    toast.success('Copied to clipboard');
-                  }}
-                  style={{ fontSize: 'var(--text-sm)', padding: '0.25rem 0.6rem' }}
-                >
-                  Copy
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => addFileToBlueprints(viewingSample)}
-                  style={{ fontSize: 'var(--text-sm)', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                >
-                  <FolderPlus size={11} /> Add to Blueprints
-                </button>
-              </div>
-            </div>
-            <pre style={{
-              fontSize: 'var(--text-sm)', lineHeight: '1.5', color: 'var(--text-primary)',
-              background: 'var(--bg-raised)', padding: '0.75rem', borderRadius: '4px',
-              border: '1px solid var(--border-default)', overflow: 'auto',
-              fontFamily: 'monospace', whiteSpace: 'pre', margin: 0, maxHeight: '60vh',
-            }}>
-              {viewingSample.yaml}
-            </pre>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
-              <button className="btn btn-ghost" onClick={() => setViewingSample(null)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+              </DialogHeader>
+              <pre className="text-sm leading-normal text-foreground bg-muted p-3 rounded border border-border overflow-auto font-mono whitespace-pre m-0 max-h-[60vh]">
+                {viewingSample.yaml}
+              </pre>
+              <DialogFooter>
+                <DialogClose render={<Button variant="ghost" />}>Close</DialogClose>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

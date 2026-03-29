@@ -13,6 +13,7 @@ agents:
     name: Hadron Frontend Developer
     description: React/Wails frontend development for the Hadron desktop app
     roles: [frontend, react]
+    skills: [shadcn-ui]
     plugins: [vercel]
     context: agents/frontend.md
 

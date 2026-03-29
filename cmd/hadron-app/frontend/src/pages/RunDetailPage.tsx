@@ -1,19 +1,17 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
+import { useNavigation } from '../contexts/NavigationContext';
 import { usePoll } from '../hooks/usePoll';
 import { useRunEvents } from '../hooks/useRunEvents';
 import { getRun, cancelRun } from '../api/client';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Spinner } from '../components/ui/Spinner';
 import { ChevronDown, ChevronRight, Copy, Square, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { formatDuration } from '../utils/format';
 import { shortPath } from '../utils/path';
 import type { RunEvent } from '../api/types';
-
-interface RunDetailPageProps {
-  runId: string;
-  onBack: () => void;
-}
 
 const TERMINAL = new Set(['success', 'failed', 'canceled', 'cancelled']);
 
@@ -89,16 +87,24 @@ const TASK_ICON: Record<string, { char: string; cls: string }> = {
   skipped: { char: '—', cls: 'queued' },
 };
 
-function eventTypeColor(eventType: string): string {
-  if (eventType.includes('error') || eventType.includes('fail')) return 'var(--status-failed)';
-  if (eventType.includes('start') || eventType.includes('complete') || eventType.includes('success')) return 'var(--status-success)';
-  if (eventType.includes('log')) return 'var(--text-tertiary)';
-  return 'var(--accent)';
+function eventTypeColorClass(eventType: string): string {
+  if (eventType.includes('error') || eventType.includes('fail')) return 'text-red-400';
+  if (eventType.includes('start') || eventType.includes('complete') || eventType.includes('success')) return 'text-blue-400';
+  if (eventType.includes('log')) return 'text-muted-foreground';
+  return 'text-accent';
+}
+
+function eventMessageColorClass(eventType: string): string {
+  if (eventType === 'stderr' || eventType.includes('error')) return 'text-red-400';
+  if (eventType.includes('success') || eventType.includes('complete')) return 'text-blue-400';
+  return 'text-muted-foreground';
 }
 
 // ── Main component ───────────────────────────────────────────────────
 
-export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
+export function RunDetailPage() {
+  const nav = useNavigation();
+  const runId = nav.selectedRunId!;
   const fetcher = useCallback(() => getRun(runId), [runId]);
   const { data: run, error: runError } = usePoll(fetcher, 2000, true);
   const isTerminal = run ? TERMINAL.has(run.status) : false;
@@ -152,34 +158,34 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
   const progress = realGroups.length > 0 ? (completedCount / realGroups.length) * 100 : 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 'var(--space-4)' }}>
+    <div className="flex flex-col h-full gap-4">
       {/* Run header */}
       {run && (
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-4)' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-              <h1 className="mono" style={{ fontSize: 'var(--text-xl)', fontWeight: 600, letterSpacing: '-0.01em' }}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3">
+              <h1 className="font-mono text-xl font-semibold tracking-tight">
                 {shortPath(run.blueprint_path)}
               </h1>
               <StatusBadge status={run.status} />
               {!isTerminal && <Spinner size={14} />}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
-              <span>Duration: <strong style={{ color: 'var(--text-secondary)' }}>{formatDuration(run.started_at, run.ended_at)}</strong></span>
-              <span className="mono" style={{ fontSize: 'var(--text-xs)', background: 'var(--bg-raised)', padding: '2px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+              <span>Duration: <strong className="text-foreground">{formatDuration(run.started_at, run.ended_at)}</strong></span>
+              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded border border-border">
                 {runId.slice(-8)}
               </span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+          <div className="flex gap-2 shrink-0">
             {!isTerminal && (
-              <button className="btn btn-danger" onClick={handleCancel}>
+              <Button variant="destructive" onClick={handleCancel}>
                 <Square size={12} /> Cancel
-              </button>
+              </Button>
             )}
-            <button className="btn" onClick={() => { /* rerun placeholder */ }}>
+            <Button variant="outline" onClick={() => { /* rerun placeholder */ }}>
               <RefreshCw size={12} /> Rerun
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -187,75 +193,77 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
       {/* Progress bar */}
       {realGroups.length > 0 && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', fontWeight: 500 }}>Task Progress</span>
-            <span className="mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>{completedCount} / {realGroups.length} tasks</span>
+          <div className="flex justify-between mb-1">
+            <span className="text-sm text-foreground font-medium">Task Progress</span>
+            <span className="font-mono text-sm text-muted-foreground">{completedCount} / {realGroups.length} tasks</span>
           </div>
-          <div style={{ height: 4, background: 'var(--bg-overlay)', borderRadius: 2, overflow: 'hidden' }}>
-            <div style={{
-              height: '100%', borderRadius: 2, width: `${progress}%`,
-              background: isTerminal && run?.status === 'failed' ? 'var(--status-failed)' : isTerminal ? 'var(--status-success)' : 'var(--status-running)',
-              transition: 'width 0.5s ease',
-            }} />
+          <div className="w-full h-1 rounded-full bg-muted overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                isTerminal && run?.status === 'failed' ? 'bg-red-400' : isTerminal ? 'bg-blue-400' : 'bg-amber-400'
+              )}
+              style={{ width: `${progress}%` }}
+            />
           </div>
         </div>
       )}
 
       {/* Error banner */}
       {run?.error_message && (
-        <div className="section" style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--status-failed)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+        <div className="rounded-lg border border-red-500/30 bg-card overflow-hidden px-4 py-3 text-red-400">
           {run.error_message}
         </div>
       )}
       {runError && (
-        <div className="section" style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--status-failed)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+        <div className="rounded-lg border border-red-500/30 bg-card overflow-hidden px-4 py-3 text-red-400">
           Error fetching run: {runError.message}
         </div>
       )}
 
       {/* View toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>Tasks</span>
-        <div style={{ display: 'flex', background: 'var(--bg-raised)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: 2, gap: 2 }}>
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-foreground">Tasks</span>
+        <div className="flex bg-muted border border-border rounded-md p-0.5 gap-0.5">
           <button
             onClick={() => setViewMode('grouped')}
-            style={{
-              padding: '4px 12px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)',
-              fontWeight: 500, fontFamily: 'var(--font-ui)', border: 'none', cursor: 'pointer',
-              background: viewMode === 'grouped' ? 'var(--bg-active)' : 'transparent',
-              color: viewMode === 'grouped' ? 'var(--text-primary)' : 'var(--text-tertiary)',
-            }}
+            className={cn(
+              "px-3 py-1 rounded text-sm font-medium border-none cursor-pointer transition-colors",
+              viewMode === 'grouped'
+                ? "bg-background text-foreground"
+                : "bg-transparent text-muted-foreground hover:text-foreground"
+            )}
           >Grouped</button>
           <button
             onClick={() => setViewMode('raw')}
-            style={{
-              padding: '4px 12px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)',
-              fontWeight: 500, fontFamily: 'var(--font-ui)', border: 'none', cursor: 'pointer',
-              background: viewMode === 'raw' ? 'var(--bg-active)' : 'transparent',
-              color: viewMode === 'raw' ? 'var(--text-primary)' : 'var(--text-tertiary)',
-            }}
+            className={cn(
+              "px-3 py-1 rounded text-sm font-medium border-none cursor-pointer transition-colors",
+              viewMode === 'raw'
+                ? "bg-background text-foreground"
+                : "bg-transparent text-muted-foreground hover:text-foreground"
+            )}
           >Raw</button>
         </div>
       </div>
 
       {/* Task list */}
-      <div ref={logRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+      <div ref={logRef} className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2">
         {events.length === 0 ? (
-          <div style={{ color: 'var(--text-tertiary)', padding: 'var(--space-8)', textAlign: 'center' }}>
-            {!run ? 'Loading…' : isTerminal ? 'No events recorded.' : 'Waiting for events…'}
+          <div className="text-muted-foreground p-8 text-center">
+            {!run ? 'Loading...' : isTerminal ? 'No events recorded.' : 'Waiting for events...'}
           </div>
         ) : viewMode === 'raw' ? (
-          <div className="section" style={{ padding: 'var(--space-4)' }}>
+          <div className="rounded-lg border border-border bg-card overflow-hidden p-4">
             {events.map(ev => (
-              <div key={ev.id} style={{ display: 'flex', gap: 'var(--space-3)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', lineHeight: 1.6, padding: '1px 0' }}>
-                <span style={{ color: eventTypeColor(ev.event_type), flexShrink: 0, fontSize: 'var(--text-xs)', minWidth: 90 }}>
+              <div key={ev.id} className="flex gap-3 font-mono text-sm leading-relaxed py-px">
+                <span className={cn("shrink-0 text-xs min-w-[90px]", eventTypeColorClass(ev.event_type))}>
                   [{ev.event_type}]
                 </span>
-                <span style={{
-                  color: ev.event_type === 'stderr' || ev.event_type.includes('error') ? 'var(--status-failed)' : 'var(--text-secondary)',
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                }}>
-                  {ev.step_name && <span style={{ color: 'var(--accent)' }}>{ev.step_name} </span>}
+                <span className={cn(
+                  "whitespace-pre-wrap break-all",
+                  ev.event_type === 'stderr' || ev.event_type.includes('error') ? 'text-red-400' : 'text-muted-foreground'
+                )}>
+                  {ev.step_name && <span className="text-accent">{ev.step_name} </span>}
                   {ev.message ?? ''}
                 </span>
               </div>
@@ -270,52 +278,63 @@ export function RunDetailPage({ runId, onBack }: RunDetailPageProps) {
             const isRunning = group.status === 'running';
 
             return (
-              <div key={group.stepName} className="section" style={isRunning ? { borderColor: 'rgba(245, 158, 11, 0.2)' } : undefined}>
+              <div
+                key={group.stepName}
+                className="rounded-lg border border-border bg-card overflow-hidden"
+                style={isRunning ? { borderColor: 'rgba(245, 158, 11, 0.2)' } : undefined}
+              >
                 <div
                   onClick={() => toggleGroup(group.stepName)}
-                  style={{
-                    display: 'flex', alignItems: 'center', padding: 'var(--space-3) var(--space-4)',
-                    gap: 'var(--space-3)', cursor: 'pointer', transition: 'background 0.1s ease',
-                  }}
+                  className="flex items-center px-4 py-3 gap-3 cursor-pointer transition-colors hover:bg-muted/50"
                 >
-                  <div className={`badge badge-${icon.cls}`} style={{ width: 20, height: 20, borderRadius: '50%', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>
+                  <span className={cn("flex size-5 items-center justify-center rounded-full text-xs font-bold", {
+                    "bg-blue-500/20 text-blue-400": icon.cls === "success",
+                    "bg-amber-500/20 text-amber-400": icon.cls === "running",
+                    "bg-red-500/20 text-red-400": icon.cls === "failed",
+                    "bg-zinc-500/20 text-zinc-400": icon.cls === "queued",
+                    "bg-purple-500/20 text-purple-400": icon.cls === "canceled",
+                  })}>
                     {isRunning ? <Spinner size={12} /> : icon.char}
-                  </div>
-                  <span style={{ flex: 1, fontSize: 'var(--text-md)', fontWeight: 500 }}>{displayName}</span>
-                  <span className="mono" style={{ fontSize: 'var(--text-sm)', color: isRunning ? 'var(--status-running)' : 'var(--text-tertiary)' }}>
+                  </span>
+                  <span className="flex-1 text-sm font-medium text-foreground">{displayName}</span>
+                  <span className={cn(
+                    "font-mono text-sm",
+                    isRunning ? "text-amber-400" : "text-muted-foreground"
+                  )}>
                     {isRunning ? '(running)' : duration}
                   </span>
-                  <button
-                    className="btn btn-ghost"
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={(e) => {
                       e.stopPropagation();
                       const text = group.events.map(ev => ev.message ?? '').filter(Boolean).join('\n');
                       navigator.clipboard.writeText(text);
                       toast.success('Output copied');
                     }}
-                    style={{ padding: '2px 6px' }}
                     title="Copy output"
                   >
                     <Copy size={13} />
-                  </button>
-                  <span style={{ color: 'var(--text-tertiary)', transition: 'transform 0.2s ease', transform: isExpanded ? 'rotate(180deg)' : 'none' }}>
+                  </Button>
+                  <span className={cn(
+                    "text-muted-foreground transition-transform duration-200",
+                    isExpanded && "rotate-180"
+                  )}>
                     <ChevronDown size={14} />
                   </span>
                 </div>
 
                 {isExpanded && (
-                  <div style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-base)', padding: 'var(--space-4)', maxHeight: 300, overflowY: 'auto' }}>
+                  <div className="border-t border-border bg-background p-4 max-h-[300px] overflow-y-auto">
                     {group.events.map(ev => (
-                      <div key={ev.id} style={{ display: 'flex', gap: 'var(--space-3)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', lineHeight: 1.6, padding: '1px 0' }}>
-                        <span style={{ color: 'var(--text-tertiary)', flexShrink: 0, fontSize: 'var(--text-xs)', minWidth: 72, userSelect: 'none' }}>
+                      <div key={ev.id} className="flex gap-3 font-mono text-sm leading-relaxed py-px">
+                        <span className="text-muted-foreground shrink-0 text-xs min-w-[72px] select-none">
                           {ev.created_at ? new Date(ev.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}
                         </span>
-                        <span style={{
-                          whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                          color: ev.event_type === 'stderr' || ev.event_type.includes('error') ? 'var(--status-failed)'
-                            : ev.event_type.includes('success') || ev.event_type.includes('complete') ? 'var(--status-success)'
-                            : 'var(--text-secondary)',
-                        }}>
+                        <span className={cn(
+                          "whitespace-pre-wrap break-all",
+                          eventMessageColorClass(ev.event_type)
+                        )}>
                           {ev.message ?? ''}
                         </span>
                       </div>

@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, Component, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { listTelemetryRuns, readTelemetryLog, deleteTelemetryLog } from '../api/client';
 import { EmptyState } from '../components/ui/EmptyState';
-import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import type { TelemetryRunSummary, TelemetryLogEntry } from '../api/types';
 
 // Error boundary to prevent page from crashing the whole app
@@ -13,16 +16,16 @@ class TelemetryErrorBoundary extends Component<{ children: ReactNode; onRetry: (
   render() {
     if (this.state.error) {
       return (
-        <div style={{ padding: 'var(--space-8)', textAlign: 'center' }}>
-          <div style={{ color: 'var(--status-failed)', marginBottom: 'var(--space-2)', fontWeight: 600 }}>
+        <div className="p-8 text-center">
+          <div className="text-red-400 mb-2 font-semibold">
             Activity Log encountered an error
           </div>
-          <div className="mono" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-4)' }}>
+          <div className="font-mono text-sm text-muted-foreground mb-4">
             {this.state.error.message}
           </div>
-          <button className="btn btn-primary" onClick={() => { this.setState({ error: null }); this.props.onRetry(); }}>
+          <Button onClick={() => { this.setState({ error: null }); this.props.onRetry(); }}>
             Retry
-          </button>
+          </Button>
         </div>
       );
     }
@@ -30,15 +33,20 @@ class TelemetryErrorBoundary extends Component<{ children: ReactNode; onRetry: (
   }
 }
 
-interface TelemetryPageProps {
-  onOpenRun: (runId: string) => void;
-}
+import { useNavigation } from '../contexts/NavigationContext';
 
 const LEVEL_COLORS: Record<string, string> = {
-  info: 'var(--accent)',
-  warn: 'var(--status-running)',
-  error: 'var(--status-failed)',
-  debug: 'var(--text-tertiary)',
+  info: 'text-primary',
+  warn: 'text-amber-400',
+  error: 'text-red-400',
+  debug: 'text-muted-foreground',
+};
+
+const LEVEL_BORDER_COLORS: Record<string, string> = {
+  info: 'border-primary text-primary',
+  warn: 'border-amber-400 text-amber-400',
+  error: 'border-red-400 text-red-400',
+  debug: 'border-muted-foreground text-muted-foreground',
 };
 
 const LEVEL_FILTERS = ['all', 'info', 'warn', 'error', 'debug'] as const;
@@ -46,16 +54,17 @@ type LevelFilter = typeof LEVEL_FILTERS[number];
 
 import { formatFileSize, formatDate, formatTimestamp } from '../utils/format';
 
-export function TelemetryPage(props: TelemetryPageProps) {
+export function TelemetryPage() {
   const [retryKey, setRetryKey] = useState(0);
   return (
     <TelemetryErrorBoundary onRetry={() => setRetryKey(k => k + 1)} key={retryKey}>
-      <TelemetryPageInner {...props} />
+      <TelemetryPageInner />
     </TelemetryErrorBoundary>
   );
 }
 
-function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
+function TelemetryPageInner() {
+  const nav = useNavigation();
   const [runs, setRuns] = useState<TelemetryRunSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -153,51 +162,50 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
   if (selectedRunId) {
     return (
       <div>
-        <div className="page-header">
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <div className="page-title">Run {selectedRunId.slice(-8)}</div>
+            <div className="text-xl font-semibold text-foreground tracking-tight">Run {selectedRunId.slice(-8)}</div>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <button className="btn btn-ghost" onClick={handleBack}>Back</button>
-            <button className="btn" onClick={() => onOpenRun(selectedRunId)}>View Run</button>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={handleBack}>Back</Button>
+            <Button variant="outline" onClick={() => nav.openRun(selectedRunId)}>View Run</Button>
           </div>
         </div>
 
         {/* Level filters */}
-        <div style={{ display: 'flex', gap: 'var(--space-3)', marginBottom: 'var(--space-4)', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+        <div className="flex gap-3 mb-4 flex-wrap items-center">
+          <div className="flex gap-1">
             {LEVEL_FILTERS.map(lf => {
               const count = lf === 'all' ? entries.length : (levelCounts[lf] || 0);
               const isActive = levelFilter === lf;
-              const color = isActive && lf !== 'all' ? LEVEL_COLORS[lf] : undefined;
               return (
-                <button
+                <Button
                   key={lf}
-                  className={`btn ${isActive ? '' : 'btn-ghost'}`}
+                  variant={isActive ? "outline" : "ghost"}
+                  size="xs"
                   onClick={() => setLevelFilter(lf)}
-                  style={{ padding: '4px 12px', fontSize: 'var(--text-xs)', ...(color ? { borderColor: color, color } : {}) }}
+                  className={cn(isActive && lf !== 'all' && LEVEL_BORDER_COLORS[lf])}
                 >
                   {lf === 'all' ? 'All' : lf.charAt(0).toUpperCase() + lf.slice(1)}
-                  {count > 0 && <span style={{ opacity: 0.6 }}>({count})</span>}
-                </button>
+                  {count > 0 && <span className="opacity-60">({count})</span>}
+                </Button>
               );
             })}
           </div>
-          <input
-            className="hud-input"
+          <Input
             type="text"
             placeholder="Search events, messages, steps..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ flex: 1, minWidth: 180 }}
+            className="flex-1 min-w-[180px]"
           />
           {search && (
-            <button className="btn btn-ghost" onClick={() => setSearch('')} style={{ fontSize: 'var(--text-xs)' }}>Clear</button>
+            <Button variant="ghost" size="xs" onClick={() => setSearch('')}>Clear</Button>
           )}
         </div>
 
         {/* Log entries table */}
-        <div className="section">
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
           {entriesLoading ? (
             <EmptyState message="Loading log entries..." />
           ) : filteredEntries.length === 0 ? (
@@ -206,7 +214,7 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
               sub={entries.length > 0 ? `${entries.length} entries total` : undefined}
             />
           ) : (
-            <table className="table">
+            <table className="w-full border-collapse">
               <thead>
                 <tr>
                   <th className="col-shrink">Time</th>
@@ -219,17 +227,20 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
               </thead>
               <tbody>
                 {filteredEntries.map((entry, i) => (
-                  <tr key={i} style={{ cursor: 'default' }}>
-                    <td className="mono" style={{ color: 'var(--text-tertiary)' }}>{formatTimestamp(entry.ts)}</td>
+                  <tr key={i} className="cursor-default">
+                    <td className="font-mono text-muted-foreground">{formatTimestamp(entry.ts)}</td>
                     <td>
-                      <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: LEVEL_COLORS[entry.level] ?? 'var(--text-primary)' }}>
+                      <span className={cn(
+                        'text-xs font-semibold uppercase tracking-wider',
+                        LEVEL_COLORS[entry.level] ?? 'text-foreground'
+                      )}>
                         {entry.level}
                       </span>
                     </td>
-                    <td className="mono" style={{ color: 'var(--accent)' }}>{entry.event}</td>
-                    <td style={{ color: 'var(--text-tertiary)' }}>{entry.section || '—'}</td>
-                    <td style={{ color: 'var(--text-tertiary)' }}>{entry.step || '—'}</td>
-                    <td style={{ wordBreak: 'break-word' }}>{entry.msg || '—'}</td>
+                    <td className="font-mono text-primary">{entry.event}</td>
+                    <td className="text-muted-foreground">{entry.section || '—'}</td>
+                    <td className="text-muted-foreground">{entry.step || '—'}</td>
+                    <td className="break-words">{entry.msg || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -238,7 +249,7 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
         </div>
 
         {entries.length > 0 && (
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)' }}>
+          <div className="text-xs text-muted-foreground mt-2">
             Showing {filteredEntries.length} of {entries.length} entries
           </div>
         )}
@@ -249,24 +260,24 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
   // ── List view (telemetry run files) ──
   return (
     <div>
-      <div className="page-header">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <div className="page-title">Telemetry</div>
-          {loading && <div className="page-subtitle">Loading…</div>}
+          <div className="text-xl font-semibold text-foreground tracking-tight">Telemetry</div>
+          {loading && <div className="text-sm text-muted-foreground mt-0.5">Loading…</div>}
         </div>
-        <button className="btn btn-ghost" onClick={fetchRuns} title="Refresh (R)">
+        <Button variant="ghost" onClick={fetchRuns} title="Refresh (R)">
           <RefreshCw size={14} />
-        </button>
+        </Button>
       </div>
 
-      <div className="section">
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
         {runs.length === 0 ? (
           <EmptyState
             message="No telemetry logs"
             sub="Run a blueprint to generate telemetry data"
           />
         ) : (
-          <table className="table">
+          <table className="w-full border-collapse">
             <thead>
               <tr>
                 <th className="col-primary">Run ID</th>
@@ -279,18 +290,19 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
             <tbody>
               {runs.map(run => (
                 <tr key={run.run_id} onClick={() => handleSelectRun(run.run_id)}>
-                  <td className="mono col-primary">{run.run_id.slice(-12)}</td>
-                  <td className="col-shrink col-right"><span style={{ color: 'var(--accent)' }}>{run.event_count}</span></td>
-                  <td className="col-shrink col-right" style={{ color: 'var(--text-tertiary)' }}>{formatFileSize(run.file_size)}</td>
-                  <td style={{ color: 'var(--text-tertiary)' }}>{formatDate(run.modified_at)}</td>
+                  <td className="font-mono col-primary">{run.run_id.slice(-12)}</td>
+                  <td className="col-shrink col-right"><span className="text-primary">{run.event_count}</span></td>
+                  <td className="col-shrink col-right text-muted-foreground">{formatFileSize(run.file_size)}</td>
+                  <td className="text-muted-foreground">{formatDate(run.modified_at)}</td>
                   <td>
-                    <button
-                      className="btn btn-ghost"
+                    <Button
+                      variant="ghost"
+                      size="xs"
                       onClick={(e) => { e.stopPropagation(); setDeleteConfirm(run.run_id); }}
-                      style={{ padding: '2px 8px', fontSize: 'var(--text-xs)', color: 'var(--status-failed)' }}
+                      className="text-red-400"
                     >
                       Del
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -300,21 +312,25 @@ function TelemetryPageInner({ onOpenRun }: TelemetryPageProps) {
       </div>
 
       {runs.length > 0 && (
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)' }}>
+        <div className="text-xs text-muted-foreground mt-2">
           {runs.length} log file{runs.length !== 1 ? 's' : ''} · {formatFileSize(runs.reduce((s, r) => s + r.file_size, 0))} total
         </div>
       )}
 
-      {deleteConfirm && (
-        <ConfirmDialog
-          title="Delete telemetry log?"
-          message={`This will permanently delete the log file for run ${deleteConfirm.slice(-12)}.`}
-          confirmLabel="Delete"
-          danger
-          onConfirm={() => handleDelete(deleteConfirm)}
-          onCancel={() => setDeleteConfirm(null)}
-        />
-      )}
+      <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete telemetry log?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteConfirm ? `This will permanently delete the log file for run ${deleteConfirm.slice(-12)}.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => { if (deleteConfirm) handleDelete(deleteConfirm); }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

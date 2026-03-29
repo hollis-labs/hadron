@@ -1,5 +1,7 @@
 import { useState, useEffect, type DragEvent } from 'react';
 import { Plus, Search, FileCode } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { getBlueprintDir, listFilesInDir } from '../../api/client';
 import type { FileEntry } from '../../api/types';
 
@@ -67,16 +69,14 @@ export function NodePalette({ onAddBlankNode }: NodePaletteProps) {
 
       {/* Add blank stage */}
       <div style={{ padding: '0.5rem' }}>
-        <button
-          className="hud-button"
+        <Button
+          variant="outline"
+          size="sm"
           onClick={onAddBlankNode}
-          style={{
-            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            gap: '0.3rem', fontSize: 'var(--text-sm)',
-          }}
+          style={{ width: '100%', justifyContent: 'center' }}
         >
           <Plus size={12} /> Add Stage
-        </button>
+        </Button>
       </div>
 
       {/* Search */}
@@ -89,8 +89,7 @@ export function NodePalette({ onAddBlankNode }: NodePaletteProps) {
               color: 'rgb(var(--muted))', pointerEvents: 'none',
             }}
           />
-          <input
-            className="hud-input"
+          <Input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search blueprints..."

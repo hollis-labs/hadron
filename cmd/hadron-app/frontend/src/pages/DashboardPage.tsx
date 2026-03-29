@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { useDaemon } from '../contexts/DaemonContext';
+import { useNavigation } from '../contexts/NavigationContext';
 import { usePoll } from '../hooks/usePoll';
 import { listRuns } from '../api/client';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -7,12 +11,6 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { formatRunDuration, formatMs, formatTime, computeAvgDuration } from '../utils/format';
 import { shortPath } from '../utils/path';
 import type { Run } from '../api/types';
-
-interface DashboardPageProps {
-  daemonStatus: string;
-  daemonAddr: string;
-  onOpenRun: (runId: string) => void;
-}
 
 interface BlueprintStats {
   path: string;
@@ -50,9 +48,11 @@ function computePerBlueprint(runs: Run[]): BlueprintStats[] {
   return stats.sort((a, b) => b.total - a.total).slice(0, 10);
 }
 
-export function DashboardPage({ daemonStatus, daemonAddr, onOpenRun }: DashboardPageProps) {
+export function DashboardPage() {
+  const daemon = useDaemon();
+  const nav = useNavigation();
   const fetcher = useCallback(() => listRuns({ limit: 100 }), []);
-  const { data, refresh } = usePoll(fetcher, 3000, daemonStatus === 'running');
+  const { data, refresh } = usePoll(fetcher, 3000, daemon.status === 'running');
 
   // Listen for global refresh shortcut (R key)
   useEffect(() => {
@@ -101,85 +101,88 @@ export function DashboardPage({ daemonStatus, daemonAddr, onOpenRun }: Dashboard
 
   return (
     <div>
-      <div className="page-header">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <div className="page-title">Overview</div>
-          <div className="page-subtitle">Last 24 hours</div>
+          <div className="text-xl font-semibold text-foreground tracking-tight">Overview</div>
+          <div className="text-sm text-muted-foreground">Last 24 hours</div>
         </div>
-        <button className="btn" onClick={refresh} title="Refresh (R)">
+        <Button variant="outline" onClick={refresh} title="Refresh (R)">
           <RefreshCw size={14} /> Refresh
-        </button>
+        </Button>
       </div>
 
       {/* Stat cards */}
-      <div className="stat-grid">
-        <div className="stat-card">
-          <span className="stat-label">Total Runs</span>
-          <span className="stat-value">{total.toLocaleString()}</span>
+      <div className="grid grid-cols-6 gap-3 mb-6">
+        <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Runs</span>
+          <span className="text-2xl font-bold font-mono text-foreground tracking-tight leading-tight">{total.toLocaleString()}</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Running</span>
-          <span className={`stat-value${running > 0 ? ' running' : ''}`}>{running}</span>
+        <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Running</span>
+          <span className={cn('text-2xl font-bold font-mono text-foreground tracking-tight leading-tight', running > 0 && 'text-amber-400')}>{running}</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Succeeded</span>
-          <span className={`stat-value${succeeded > 0 ? ' success' : ''}`}>{succeeded.toLocaleString()}</span>
+        <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Succeeded</span>
+          <span className={cn('text-2xl font-bold font-mono text-foreground tracking-tight leading-tight', succeeded > 0 && 'text-blue-400')}>{succeeded.toLocaleString()}</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Failed</span>
-          <span className={`stat-value${failed > 0 ? ' failed' : ''}`}>{failed}</span>
+        <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Failed</span>
+          <span className={cn('text-2xl font-bold font-mono text-foreground tracking-tight leading-tight', failed > 0 && 'text-red-400')}>{failed}</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Success Rate</span>
-          <span className={`stat-value${total > 0 ? (successRate >= 80 ? ' success' : ' failed') : ''}`}>
-            {total > 0 ? `${successRate}%` : '—'}
+        <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Success Rate</span>
+          <span className={cn(
+            'text-2xl font-bold font-mono text-foreground tracking-tight leading-tight',
+            total > 0 && (successRate >= 80 ? 'text-blue-400' : 'text-red-400'),
+          )}>
+            {total > 0 ? `${successRate}%` : '\u2014'}
           </span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Avg Duration</span>
-          <span className="stat-value" style={{ fontSize: 'var(--text-xl)' }}>
-            {avgDuration > 0 ? formatMs(avgDuration) : '—'}
+        <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Avg Duration</span>
+          <span className="text-xl font-bold font-mono text-foreground tracking-tight leading-tight">
+            {avgDuration > 0 ? formatMs(avgDuration) : '\u2014'}
           </span>
         </div>
       </div>
 
       {/* Daemon warning */}
-      {daemonStatus !== 'running' && (
-        <div className="section" style={{ padding: 'var(--space-4) var(--space-5)', marginBottom: 'var(--space-4)', color: 'var(--status-running)' }}>
-          {daemonStatus === 'error' ? 'Daemon error — check that hadrond is installed.' : 'Daemon starting…'}
+      {daemon.status !== 'running' && (
+        <div className="rounded-lg border border-border bg-card overflow-hidden px-5 py-4 mb-4 text-amber-400">
+          {daemon.status === 'error' ? 'Daemon error \u2014 check that hadrond is installed.' : 'Daemon starting\u2026'}
         </div>
       )}
 
       {/* Two-column: Recent Runs + Activity */}
-      <div className="section-grid">
+      <div className="grid grid-cols-2 gap-4 mb-6">
         {/* Recent Runs */}
-        <div className="section">
-          <div className="section-header">
-            <span className="section-title">Recent Runs</span>
-            <span className="section-action">View all</span>
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <span className="text-base font-semibold text-foreground">Recent Runs</span>
+            <span className="text-sm text-muted-foreground cursor-pointer flex items-center gap-1 hover:text-primary transition-colors">View all</span>
           </div>
           {recent.length === 0 ? (
             <EmptyState
               message="No runs yet"
-              sub={daemonStatus === 'running' ? `daemon running at ${daemonAddr}` : undefined}
+              sub={daemon.status === 'running' ? `daemon running at ${daemon.address}` : undefined}
             />
           ) : (
-            <table className="table">
+            <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  <th className="col-primary">Blueprint</th>
-                  <th className="col-shrink">Status</th>
-                  <th className="col-shrink col-right">Started</th>
-                  <th className="col-shrink col-right">Duration</th>
+                  <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 w-full">Blueprint</th>
+                  <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Status</th>
+                  <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Started</th>
+                  <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Duration</th>
                 </tr>
               </thead>
               <tbody>
                 {recent.map(run => (
-                  <tr key={run.id} onClick={() => onOpenRun(run.id)}>
-                    <td className="mono col-primary">{shortPath(run.blueprint_path)}</td>
-                    <td className="col-shrink"><StatusBadge status={run.status} /></td>
-                    <td className="col-shrink col-right" style={{ color: 'var(--text-tertiary)' }}>{run.started_at ? formatTime(run.started_at) : '—'}</td>
-                    <td className="mono col-shrink col-right">{formatRunDuration(run)}</td>
+                  <tr key={run.id} className="cursor-pointer transition-colors hover:bg-muted/50" onClick={() => nav.openRun(run.id)}>
+                    <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono w-full">{shortPath(run.blueprint_path)}</td>
+                    <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap"><StatusBadge status={run.status} /></td>
+                    <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap text-right">{run.started_at ? formatTime(run.started_at) : '\u2014'}</td>
+                    <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono whitespace-nowrap text-right">{formatRunDuration(run)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -188,10 +191,10 @@ export function DashboardPage({ daemonStatus, daemonAddr, onOpenRun }: Dashboard
         </div>
 
         {/* Activity Timeline */}
-        <div className="section">
-          <div className="section-header">
-            <span className="section-title">Activity</span>
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>24h</span>
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <span className="text-base font-semibold text-foreground">Activity</span>
+            <span className="text-sm text-muted-foreground">24h</span>
           </div>
           {runs.length > 0 && (() => {
             const maxCount = Math.max(...timeline.map(b => b.success + b.failed + b.other), 1);
@@ -207,7 +210,7 @@ export function DashboardPage({ daemonStatus, daemonAddr, onOpenRun }: Dashboard
                         key={i}
                         className={`timeline-bar ${cls}`}
                         style={{ height: `${pct}%` }}
-                        title={`${bucket.label}:00 — ${bTotal} run${bTotal !== 1 ? 's' : ''}`}
+                        title={`${bucket.label}:00 \u2014 ${bTotal} run${bTotal !== 1 ? 's' : ''}`}
                       />
                     );
                   })}
@@ -224,31 +227,31 @@ export function DashboardPage({ daemonStatus, daemonAddr, onOpenRun }: Dashboard
           {/* Per-blueprint stats below the chart */}
           {perBlueprint.length > 0 && (
             <>
-              <div className="section-header" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-                <span className="section-title">Top Blueprints</span>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border border-t">
+                <span className="text-base font-semibold text-foreground">Top Blueprints</span>
               </div>
-              <table className="table">
+              <table className="w-full border-collapse">
                 <thead>
                   <tr>
-                    <th className="col-primary">Blueprint</th>
-                    <th className="col-shrink col-right">Runs</th>
-                    <th className="col-shrink col-right">Success</th>
-                    <th className="col-shrink col-right">Avg</th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 w-full">Blueprint</th>
+                    <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Runs</th>
+                    <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Success</th>
+                    <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Avg</th>
                   </tr>
                 </thead>
                 <tbody>
                   {perBlueprint.map(bp => (
-                    <tr key={bp.path} style={{ cursor: 'default' }}>
-                      <td className="mono col-primary">{bp.name}</td>
-                      <td className="mono col-shrink col-right">{bp.total}</td>
-                      <td className="col-shrink col-right">
-                        <span style={{
-                          color: bp.successRate >= 80 ? 'var(--status-success)' : bp.successRate >= 50 ? 'var(--status-running)' : 'var(--status-failed)',
-                        }}>
+                    <tr key={bp.path} className="cursor-default">
+                      <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono w-full">{bp.name}</td>
+                      <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono whitespace-nowrap text-right">{bp.total}</td>
+                      <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap text-right">
+                        <span className={cn(
+                          bp.successRate >= 80 ? 'text-blue-400' : bp.successRate >= 50 ? 'text-amber-400' : 'text-red-400',
+                        )}>
                           {bp.successRate}%
                         </span>
                       </td>
-                      <td className="mono col-shrink col-right">{bp.avgMs > 0 ? formatMs(bp.avgMs) : '—'}</td>
+                      <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono whitespace-nowrap text-right">{bp.avgMs > 0 ? formatMs(bp.avgMs) : '\u2014'}</td>
                     </tr>
                   ))}
                 </tbody>

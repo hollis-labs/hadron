@@ -1,26 +1,27 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { ChevronLeft, Play, ChevronDown, ChevronRight, Copy, X, MoreHorizontal, Trash2, Pencil } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { ChevronLeft, Play, ChevronDown, ChevronRight, Copy, MoreHorizontal, Trash2, Pencil } from 'lucide-react';
 import { parseBlueprintFull, readBlueprintFile, enqueueRun, parseBlueprintInputs, deleteBlueprintFile, getSettings } from '../api/client';
 import { Spinner } from '../components/ui/Spinner';
 import { RunInputsModal } from '../components/ui/RunInputsModal';
-import type { ParsedBlueprint, BlueprintInput, FileEntry } from '../api/types';
-
-interface BlueprintDetailPageProps {
-  path: string;
-  onBack: () => void;
-  onOpenRun: (runId: string) => void;
-  onEditBlueprint?: (path: string) => void;
-  daemonStatus: string;
-  workspaceId: string;
-}
+import type { ParsedBlueprint, BlueprintInput } from '../api/types';
+import { useDaemon } from '../contexts/DaemonContext';
+import { useNavigation } from '../contexts/NavigationContext';
+import { cn } from '@/lib/utils';
 
 function basename(p: string): string {
   const parts = p.split(/[/\\]/);
   return parts[parts.length - 1] || p;
 }
 
-export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, daemonStatus, workspaceId }: BlueprintDetailPageProps) {
+export function BlueprintDetailPage() {
+  const daemon = useDaemon();
+  const nav = useNavigation();
+  const path = nav.selectedBlueprintPath!;
   const [blueprint, setBlueprint] = useState<ParsedBlueprint | null>(null);
   const [rawYaml, setRawYaml] = useState('');
   const [loading, setLoading] = useState(true);
@@ -64,9 +65,9 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
             return;
           }
         } catch { /* proceed without confirmation */ }
-        const run = await enqueueRun({ blueprint_path: path, workspace_id: workspaceId });
+        const run = await enqueueRun({ blueprint_path: path, workspace_id: daemon.workspaceId });
         toast.success('Run enqueued');
-        onOpenRun(run.id);
+        nav.openRun(run.id);
       }
     } catch (err: unknown) {
       toast.error(`Failed to start run: ${err}`);
@@ -76,9 +77,9 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
   const handleConfirmRun = async () => {
     setShowConfirmModal(false);
     try {
-      const run = await enqueueRun({ blueprint_path: path, workspace_id: workspaceId });
+      const run = await enqueueRun({ blueprint_path: path, workspace_id: daemon.workspaceId });
       toast.success('Run enqueued');
-      onOpenRun(run.id);
+      nav.openRun(run.id);
     } catch (err: unknown) {
       toast.error(`Failed to start run: ${err}`);
     }
@@ -87,9 +88,9 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
   const handleRunConfirm = async (values: Record<string, unknown>, dryRun: boolean) => {
     setShowRunModal(false);
     try {
-      const run = await enqueueRun({ blueprint_path: path, workspace_id: workspaceId, inputs: values, dry_run: dryRun || undefined });
+      const run = await enqueueRun({ blueprint_path: path, workspace_id: daemon.workspaceId, inputs: values, dry_run: dryRun || undefined });
       toast.success(dryRun ? 'Dry run enqueued' : 'Run enqueued');
-      onOpenRun(run.id);
+      nav.openRun(run.id);
     } catch (err: unknown) {
       toast.error(`Failed to start run: ${err}`);
     }
@@ -99,7 +100,7 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
     try {
       await deleteBlueprintFile(path);
       toast.success('Blueprint deleted');
-      onBack();
+      nav.goBack();
     } catch (err: unknown) {
       toast.error(`Delete failed: ${err}`);
     }
@@ -129,12 +130,12 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
-        <div className="page-header">
-          <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+      <div className="flex flex-col h-full gap-3">
+        <div className="flex items-center justify-between mb-6">
+          <Button variant="ghost" onClick={nav.goBack}>
             <ChevronLeft size={13} /> Back
-          </button>
-          <span className="page-title">Loading...</span>
+          </Button>
+          <span className="text-xl font-semibold text-foreground tracking-tight">Loading...</span>
           <Spinner size={14} />
         </div>
       </div>
@@ -143,14 +144,14 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
 
   if (error || !blueprint) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
-        <div className="page-header">
-          <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+      <div className="flex flex-col h-full gap-3">
+        <div className="flex items-center justify-between mb-6">
+          <Button variant="ghost" onClick={nav.goBack}>
             <ChevronLeft size={13} /> Back
-          </button>
-          <span className="page-title">Error</span>
+          </Button>
+          <span className="text-xl font-semibold text-foreground tracking-tight">Error</span>
         </div>
-        <div style={{ color: 'var(--status-failed)', fontSize: 'var(--text-md)', padding: '0.75rem', background: 'var(--status-failed-bg)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+        <div className="text-red-400 text-sm p-3 bg-red-500/10 rounded border border-red-500/30">
           {error || 'Failed to load blueprint'}
         </div>
       </div>
@@ -162,68 +163,46 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
   const totalTasks = bp.steps.reduce((sum, s) => sum + s.tasks.length, 0);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0.75rem' }}>
+    <div className="flex flex-col h-full gap-3">
       {/* Header */}
-      <div className="page-header" style={{ gap: '0.5rem' }}>
-        <button className="btn btn-ghost" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+      <div className="flex items-center justify-between mb-6 gap-2">
+        <Button variant="ghost" onClick={nav.goBack}>
           <ChevronLeft size={13} /> Back
-        </button>
-        <span className="page-title" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        </Button>
+        <span className="text-xl font-semibold text-foreground tracking-tight flex-1 truncate">
           {title}
         </span>
-        <button
-          className="btn btn-primary"
+        <Button
           onClick={handleRun}
-          disabled={daemonStatus !== 'running'}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
+          disabled={daemon.status !== 'running'}
+          className="border-blue-500/50 text-blue-400"
         >
           <Play size={12} /> Run
-        </button>
-        <div style={{ position: 'relative' }}>
-          <button className="btn btn-ghost" onClick={() => setShowActionMenu(!showActionMenu)} style={{ padding: '0.3rem 0.5rem' }}>
+        </Button>
+        <div className="relative">
+          <Button variant="ghost" onClick={() => setShowActionMenu(!showActionMenu)} size="xs">
             <MoreHorizontal size={15} />
-          </button>
+          </Button>
           {showActionMenu && (
             <div
-              style={{
-                position: 'absolute', right: 0, top: '100%', marginTop: '0.25rem',
-                background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
-                borderRadius: '4px', minWidth: '160px', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-              }}
+              className="absolute right-0 top-full mt-1 bg-card border border-border rounded shadow-lg min-w-[160px] z-50"
               onClick={() => setShowActionMenu(false)}
             >
               <button
                 onClick={() => setShowYamlModal(true)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
-                  padding: '0.5rem 0.75rem', background: 'none', border: 'none',
-                  color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-md)', textAlign: 'left',
-                }}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm font-mono text-foreground hover:bg-muted/50 transition-colors bg-transparent border-none cursor-pointer text-left"
               >
                 <Copy size={13} /> View YAML
               </button>
-              {onEditBlueprint && (
-                <button
-                  onClick={() => onEditBlueprint(path)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
-                    padding: '0.5rem 0.75rem', background: 'none', border: 'none',
-                    color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                    fontSize: 'var(--text-md)', textAlign: 'left',
-                  }}
-                >
-                  <Pencil size={13} /> Edit
-                </button>
-              )}
+              <button
+                onClick={() => nav.openWizard(path)}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm font-mono text-foreground hover:bg-muted/50 transition-colors bg-transparent border-none cursor-pointer text-left"
+              >
+                <Pencil size={13} /> Edit
+              </button>
               <button
                 onClick={() => setDeleteConfirm(true)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
-                  padding: '0.5rem 0.75rem', background: 'none', border: 'none',
-                  color: 'var(--status-failed)', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--text-md)', textAlign: 'left',
-                }}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm font-mono text-red-400 hover:bg-muted/50 transition-colors bg-transparent border-none cursor-pointer text-left"
               >
                 <Trash2 size={13} /> Delete
               </button>
@@ -233,66 +212,66 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
       </div>
 
       {/* Main content */}
-      <div className="bp-detail-split">
+      <div className="flex flex-1 gap-4 overflow-hidden">
         {/* Left — Metadata */}
-        <div className="bp-detail-meta">
+        <div className="w-72 shrink-0 overflow-y-auto flex flex-col gap-3">
           {/* Blueprint identity */}
-          <div className="bp-meta-section">
-            <div className="bp-meta-section-title">Metadata</div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Metadata</div>
             {bp.blueprint.name && (
-              <div className="bp-meta-field"><span className="bp-meta-field-label">Name</span><span>{bp.blueprint.name}</span></div>
+              <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">Name</span><span>{bp.blueprint.name}</span></div>
             )}
             {bp.blueprint.slug && (
-              <div className="bp-meta-field"><span className="bp-meta-field-label">Slug</span><span style={{ fontFamily: 'monospace' }}>{bp.blueprint.slug}</span></div>
+              <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">Slug</span><span className="font-mono">{bp.blueprint.slug}</span></div>
             )}
             {bp.version && (
-              <div className="bp-meta-field"><span className="bp-meta-field-label">Version</span><span className="bp-badge bp-badge-info">v{bp.version}</span></div>
+              <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">Version</span><Badge variant="secondary">v{bp.version}</Badge></div>
             )}
             {bp.blueprint.description && (
-              <div className="bp-meta-field" style={{ flexDirection: 'column' }}>
-                <span className="bp-meta-field-label">Description</span>
-                <span style={{ color: 'var(--text-primary)', fontSize: 'var(--text-sm)', lineHeight: '1.4' }}>{bp.blueprint.description}</span>
+              <div className="flex flex-col py-1 text-sm">
+                <span className="text-muted-foreground">Description</span>
+                <span className="text-foreground text-sm leading-relaxed">{bp.blueprint.description}</span>
               </div>
             )}
             {bp.blueprint.author && (
-              <div className="bp-meta-field"><span className="bp-meta-field-label">Author</span><span>{bp.blueprint.author}</span></div>
+              <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">Author</span><span>{bp.blueprint.author}</span></div>
             )}
             {bp.blueprint.license && (
-              <div className="bp-meta-field"><span className="bp-meta-field-label">License</span><span>{bp.blueprint.license}</span></div>
+              <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">License</span><span>{bp.blueprint.license}</span></div>
             )}
             {bp.blueprint.homepage && (
-              <div className="bp-meta-field"><span className="bp-meta-field-label">Homepage</span><span style={{ wordBreak: 'break-all', fontSize: 'var(--text-sm)' }}>{bp.blueprint.homepage}</span></div>
+              <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">Homepage</span><span className="break-all text-sm">{bp.blueprint.homepage}</span></div>
             )}
             {bp.blueprint.tags && bp.blueprint.tags.length > 0 && (
-              <div style={{ marginTop: '0.35rem' }}>
+              <div className="mt-1.5">
                 {bp.blueprint.tags.map((tag, i) => (
-                  <span key={i} className="bp-tag">{tag}</span>
+                  <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground mr-1 mb-1">{tag}</span>
                 ))}
               </div>
             )}
           </div>
 
           {/* Inputs */}
-          <div className="bp-meta-section">
-            <div className="bp-meta-section-title">Inputs ({bp.inputs?.length ?? 0})</div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Inputs ({bp.inputs?.length ?? 0})</div>
             {(!bp.inputs || bp.inputs.length === 0) ? (
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>No inputs defined</div>
+              <div className="text-sm text-muted-foreground">No inputs defined</div>
             ) : (
               bp.inputs.map((inp, i) => (
-                <div key={i} style={{ padding: '0.35rem 0', borderBottom: i < bp.inputs.length - 1 ? '1px solid rgba(var(--border), 0.5)' : 'none' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
-                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 'var(--text-md)' }}>{inp.name}</span>
-                    <span className="bp-badge bp-badge-info">{inp.type}</span>
-                    {inp.required && <span style={{ color: 'var(--status-failed)', fontSize: 'var(--text-xs)' }}>*</span>}
+                <div key={i} className={cn('py-1.5', i < bp.inputs.length - 1 && 'border-b border-border/50')}>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-blue-400 font-mono text-sm">{inp.name}</span>
+                    <Badge variant="secondary">{inp.type}</Badge>
+                    {inp.required && <span className="text-red-400 text-xs">*</span>}
                   </div>
                   {inp.description && (
-                    <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>{inp.description}</div>
+                    <div className="text-sm text-muted-foreground mt-0.5">{inp.description}</div>
                   )}
                   {inp.default != null && inp.default !== '' && (
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: '0.1rem' }}>Default: <span style={{ fontFamily: 'monospace' }}>{String(inp.default)}</span></div>
+                    <div className="text-xs text-muted-foreground mt-0.5">Default: <span className="font-mono">{String(inp.default)}</span></div>
                   )}
                   {inp.enum && inp.enum.length > 0 && (
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: '0.1rem' }}>Enum: {inp.enum.join(', ')}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">Enum: {inp.enum.join(', ')}</div>
                   )}
                 </div>
               ))
@@ -301,30 +280,26 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
 
           {/* Imports */}
           {bp.imports && bp.imports.length > 0 && (
-            <div className="bp-meta-section">
-              <div className="bp-meta-section-title">Imports ({bp.imports.length})</div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Imports ({bp.imports.length})</div>
               {bp.imports.map((imp, i) => (
-                <div key={i} style={{
-                  padding: '0.45rem 0.6rem', marginBottom: '0.35rem',
-                  background: 'var(--bg-raised)', borderRadius: '4px',
-                  border: '1px solid var(--border-default)',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-                    <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 'var(--text-md)', fontWeight: 700 }}>
+                <div key={i} className="py-2 px-2.5 mb-1.5 bg-muted rounded border border-border">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-blue-400 font-mono text-sm font-bold">
                       {imp.alias || '(unnamed)'}
                     </span>
-                    <span className="bp-badge bp-badge-info">import</span>
+                    <Badge variant="secondary">import</Badge>
                   </div>
-                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '0.15rem', wordBreak: 'break-all' }}>
+                  <div className="text-sm text-muted-foreground font-mono mt-0.5 break-all">
                     {imp.path}
                   </div>
                   {imp.with && Object.keys(imp.with).length > 0 && (
-                    <div style={{ marginTop: '0.3rem', paddingTop: '0.25rem', borderTop: '1px solid rgba(var(--border), 0.5)' }}>
-                      <span style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>with</span>
-                      <div style={{ marginTop: '0.15rem' }}>
+                    <div className="mt-1 pt-1 border-t border-border/50">
+                      <span className="text-xs uppercase tracking-wider text-muted-foreground">with</span>
+                      <div className="mt-0.5">
                         {Object.entries(imp.with).map(([k, v]) => (
-                          <div key={k} style={{ fontSize: 'var(--text-sm)', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
-                            <span style={{ color: 'var(--text-tertiary)' }}>{k}:</span> {String(v)}
+                          <div key={k} className="text-sm font-mono text-foreground">
+                            <span className="text-muted-foreground">{k}:</span> {String(v)}
                           </div>
                         ))}
                       </div>
@@ -337,32 +312,32 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
 
           {/* Hooks */}
           {bp.hooks && (bp.hooks.before_run?.length > 0 || bp.hooks.after_run?.length > 0 || bp.hooks.on_error?.length > 0) && (
-            <div className="bp-meta-section">
-              <div className="bp-meta-section-title">Hooks</div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Hooks</div>
               {bp.hooks.before_run?.length > 0 && (
-                <div className="bp-meta-field"><span className="bp-meta-field-label">before_run</span><span>{bp.hooks.before_run.length}</span></div>
+                <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">before_run</span><span>{bp.hooks.before_run.length}</span></div>
               )}
               {bp.hooks.after_run?.length > 0 && (
-                <div className="bp-meta-field"><span className="bp-meta-field-label">after_run</span><span>{bp.hooks.after_run.length}</span></div>
+                <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">after_run</span><span>{bp.hooks.after_run.length}</span></div>
               )}
               {bp.hooks.on_error?.length > 0 && (
-                <div className="bp-meta-field"><span className="bp-meta-field-label">on_error</span><span>{bp.hooks.on_error.length}</span></div>
+                <div className="flex items-center justify-between py-1 text-sm"><span className="text-muted-foreground">on_error</span><span>{bp.hooks.on_error.length}</span></div>
               )}
             </div>
           )}
         </div>
 
         {/* Right — Step Timeline */}
-        <div className="bp-detail-steps">
+        <div className="flex-1 overflow-y-auto">
           {bp.steps.map((section, si) => (
-            <div key={si} style={{ marginBottom: '0.75rem' }}>
+            <div key={si} className="mb-3">
               {/* Section header */}
-              <div className="bp-section-header" onClick={() => toggleSection(si)}>
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 cursor-pointer select-none text-sm font-medium" onClick={() => toggleSection(si)}>
                 {expandedSections.has(si) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                <span style={{ color: 'var(--status-success)' }}>
+                <span className="text-blue-400">
                   {section.section || `Section ${si + 1}`}
                 </span>
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
+                <span className="text-xs text-muted-foreground ml-auto">
                   {section.tasks.length} task{section.tasks.length !== 1 ? 's' : ''}
                 </span>
               </div>
@@ -378,25 +353,25 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
 
                 return (
                   <div key={ti}>
-                    <div className="bp-task-row" onClick={() => toggleTask(taskKey)}>
-                      <div className={`bp-task-dot ${isDisabled ? 'disabled' : hasCondition ? 'conditional' : 'enabled'}`} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
-                          <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 'var(--text-md)' }}>
+                    <div className="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-muted/30 rounded" onClick={() => toggleTask(taskKey)}>
+                      <div className={cn('size-2 rounded-full mt-1.5 shrink-0', isDisabled ? 'bg-muted-foreground' : hasCondition ? 'bg-amber-400' : 'bg-blue-400')} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-1.5 flex-wrap">
+                          <span className="text-blue-400 font-mono text-sm">
                             {task.name || `task-${ti + 1}`}
                           </span>
-                          {isDisabled && <span className="bp-badge bp-badge-muted">disabled</span>}
-                          {hasCondition && <span className="bp-badge bp-badge-warn">conditional</span>}
-                          {isCall && <span className="bp-badge bp-badge-info">call</span>}
-                          {task.retry > 0 && <span className="bp-badge bp-badge-info">retry:{task.retry}</span>}
-                          {task.timeout_seconds > 0 && <span className="bp-badge bp-badge-info">{task.timeout_seconds}s</span>}
-                          {task.continue_on_error && <span className="bp-badge bp-badge-warn">continue</span>}
-                          {task.env && Object.keys(task.env).length > 0 && <span className="bp-badge bp-badge-info">env:{Object.keys(task.env).length}</span>}
-                          {task.on_success && task.on_success.length > 0 && <span className="bp-badge bp-badge-ok">on_success</span>}
-                          {task.on_fail && task.on_fail.length > 0 && <span className="bp-badge bp-badge-danger">on_fail</span>}
+                          {isDisabled && <Badge variant="queued">disabled</Badge>}
+                          {hasCondition && <Badge variant="running">conditional</Badge>}
+                          {isCall && <Badge variant="secondary">call</Badge>}
+                          {task.retry > 0 && <Badge variant="secondary">retry:{task.retry}</Badge>}
+                          {task.timeout_seconds > 0 && <Badge variant="secondary">{task.timeout_seconds}s</Badge>}
+                          {task.continue_on_error && <Badge variant="running">continue</Badge>}
+                          {task.env && Object.keys(task.env).length > 0 && <Badge variant="secondary">env:{Object.keys(task.env).length}</Badge>}
+                          {task.on_success && task.on_success.length > 0 && <Badge variant="success">on_success</Badge>}
+                          {task.on_fail && task.on_fail.length > 0 && <Badge variant="failed">on_fail</Badge>}
                         </div>
                         {cmdPreview && (
-                          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div className="text-sm text-muted-foreground font-mono mt-0.5 truncate">
                             {cmdPreview}
                           </div>
                         )}
@@ -405,62 +380,62 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
 
                     {/* Expanded task detail */}
                     {isExpanded && (
-                      <div className="bp-task-expanded">
+                      <div className="ml-6 px-3 py-2 mb-1 rounded bg-muted/30 border border-border">
                         {(task.cmd || task.run) && (
                           <>
-                            <div className="hud-label">Command</div>
+                            <div className="text-sm font-medium text-muted-foreground">Command</div>
                             <pre>{task.cmd || task.run}</pre>
                           </>
                         )}
                         {task.call && (
                           <>
-                            <div className="hud-label">Call</div>
+                            <div className="text-sm font-medium text-muted-foreground">Call</div>
                             <pre>{task.call}</pre>
                             {bp.imports && bp.imports.some(imp => imp.alias === task.call) && (
-                              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--status-success)', marginTop: '0.15rem' }}>
-                                Resolves to import: <span style={{ fontFamily: 'monospace' }}>{bp.imports.find(imp => imp.alias === task.call)?.path}</span>
+                              <div className="text-sm text-blue-400 mt-0.5">
+                                Resolves to import: <span className="font-mono">{bp.imports.find(imp => imp.alias === task.call)?.path}</span>
                               </div>
                             )}
                             {task.with && Object.keys(task.with).length > 0 && (
                               <>
-                                <div className="hud-label" style={{ marginTop: '0.5rem' }}>With</div>
+                                <div className="text-sm font-medium text-muted-foreground mt-2">With</div>
                                 <pre>{Object.entries(task.with).map(([k, v]) => `${k}: ${v}`).join('\n')}</pre>
                               </>
                             )}
                           </>
                         )}
                         {task.dir && (
-                          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginTop: '0.25rem' }}>
-                            <span className="hud-label">Dir: </span>{task.dir}
+                          <div className="text-sm text-muted-foreground mt-1">
+                            <span className="text-sm font-medium text-muted-foreground">Dir: </span>{task.dir}
                           </div>
                         )}
                         {task.if && (
-                          <div style={{ fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
-                            <span className="hud-label">Condition: </span>
-                            <span style={{ fontFamily: 'monospace', color: 'var(--status-running)' }}>{task.if}</span>
+                          <div className="text-sm mt-1">
+                            <span className="text-sm font-medium text-muted-foreground">Condition: </span>
+                            <span className="font-mono text-amber-400">{task.if}</span>
                           </div>
                         )}
                         {task.env && Object.keys(task.env).length > 0 && (
                           <>
-                            <div className="hud-label" style={{ marginTop: '0.5rem' }}>Environment</div>
+                            <div className="text-sm font-medium text-muted-foreground mt-2">Environment</div>
                             <pre>{Object.entries(task.env).map(([k, v]) => `${k}=${v}`).join('\n')}</pre>
                           </>
                         )}
                         {task.on_success && task.on_success.length > 0 && (
-                          <div style={{ fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
-                            <span className="hud-label">On Success: </span>
+                          <div className="text-sm mt-1">
+                            <span className="text-sm font-medium text-muted-foreground">On Success: </span>
                             {task.on_success.map((h, hi) => (
-                              <span key={hi} style={{ fontFamily: 'monospace', color: 'var(--status-success)' }}>
+                              <span key={hi} className="font-mono text-blue-400">
                                 {h.type}: {h.value}{hi < task.on_success.length - 1 ? ', ' : ''}
                               </span>
                             ))}
                           </div>
                         )}
                         {task.on_fail && task.on_fail.length > 0 && (
-                          <div style={{ fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
-                            <span className="hud-label">On Fail: </span>
+                          <div className="text-sm mt-1">
+                            <span className="text-sm font-medium text-muted-foreground">On Fail: </span>
                             {task.on_fail.map((h, hi) => (
-                              <span key={hi} style={{ fontFamily: 'monospace', color: 'var(--status-failed)' }}>
+                              <span key={hi} className="font-mono text-red-400">
                                 {h.type}: {h.value}{hi < task.on_fail.length - 1 ? ', ' : ''}
                               </span>
                             ))}
@@ -477,50 +452,27 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
       </div>
 
       {/* Footer */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0.5rem 0', borderTop: '1px solid var(--border-default)',
-        fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', flexShrink: 0,
-      }}>
+      <div className="flex items-center justify-between py-2 border-t border-border text-sm text-muted-foreground shrink-0">
         <span>{bp.steps.length} sections · {totalTasks} tasks · {bp.inputs?.length ?? 0} inputs</span>
-        <button className="btn btn-ghost" onClick={() => setShowYamlModal(true)} style={{ fontSize: 'var(--text-sm)' }}>
+        <Button variant="ghost" onClick={() => setShowYamlModal(true)} size="sm">
           View YAML
-        </button>
+        </Button>
       </div>
 
       {/* YAML Modal */}
-      {showYamlModal && (
-        <div className="hud-modal-overlay" onClick={() => setShowYamlModal(false)}>
-          <div
-            className="hud-modal"
-            onClick={e => e.stopPropagation()}
-            style={{ maxWidth: '900px', width: '90vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-              <span style={{ fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-tertiary)' }}>
-                Blueprint YAML
-              </span>
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button className="btn btn-ghost" onClick={handleCopyYaml} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: 'var(--text-sm)' }}>
-                  <Copy size={12} /> Copy
-                </button>
-                <button className="btn btn-ghost" onClick={() => setShowYamlModal(false)} style={{ padding: '0.25rem' }}>
-                  <X size={15} />
-                </button>
-              </div>
-            </div>
-            <pre style={{
-              flex: 1, overflow: 'auto', padding: '0.75rem',
-              background: 'var(--bg-base)', borderRadius: '4px',
-              border: '1px solid var(--border-default)',
-              fontSize: 'var(--text-sm)', lineHeight: '1.6', whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-            }}>
-              {rawYaml}
-            </pre>
-          </div>
-        </div>
-      )}
+      <Dialog open={showYamlModal} onOpenChange={(open) => { if (!open) setShowYamlModal(false); }}>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader className="flex flex-row items-center justify-between">
+            <DialogTitle>Blueprint YAML</DialogTitle>
+            <Button variant="ghost" onClick={handleCopyYaml} size="sm">
+              <Copy size={12} /> Copy
+            </Button>
+          </DialogHeader>
+          <pre className="flex-1 overflow-auto p-3 bg-background rounded border border-border text-sm leading-relaxed whitespace-pre-wrap break-all">
+            {rawYaml}
+          </pre>
+        </DialogContent>
+      </Dialog>
 
       {/* Run inputs modal */}
       {showRunModal && (
@@ -533,52 +485,42 @@ export function BlueprintDetailPage({ path, onBack, onOpenRun, onEditBlueprint, 
       )}
 
       {/* Run confirmation (requireConfirmation setting) */}
-      {showConfirmModal && (
-        <div className="hud-modal-overlay" onClick={() => setShowConfirmModal(false)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <div style={{ padding: '1.25rem' }}>
-              <div style={{ marginBottom: '0.75rem', fontWeight: 600 }}>Run blueprint?</div>
-              <div style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '1rem' }}>
-                Execute <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>
-                  {blueprint?.blueprint?.name || path.split('/').pop()}
-                </span> with no inputs?
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                <button className="btn btn-ghost" onClick={() => setShowConfirmModal(false)}>Cancel</button>
-                <button className="btn btn-primary" style={{ borderColor: 'rgba(59, 130, 246, 0.5)', color: 'var(--status-success)' }}
-                  onClick={handleConfirmRun}>
-                  Run
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <AlertDialog open={showConfirmModal} onOpenChange={(open) => { if (!open) setShowConfirmModal(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Run blueprint?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Execute <span className="font-mono text-blue-400">
+                {blueprint?.blueprint?.name || path.split('/').pop()}
+              </span> with no inputs?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmRun}>Run</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirmation */}
-      {deleteConfirm && (
-        <div className="hud-modal-overlay" onClick={() => setDeleteConfirm(false)}>
-          <div className="hud-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: 'var(--text-base)', marginBottom: '0.5rem' }}>Delete Blueprint</h3>
-            <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-tertiary)', marginBottom: '0.5rem' }}>
+      <AlertDialog open={deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Blueprint</AlertDialogTitle>
+            <AlertDialogDescription>
               Are you sure you want to delete this blueprint? This cannot be undone.
-            </p>
-            <p style={{ fontFamily: 'monospace', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', wordBreak: 'break-all' }}>
-              {path}
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-              <button className="btn btn-ghost" onClick={() => setDeleteConfirm(false)}>Cancel</button>
-              <button
-                className="btn btn-primary"
-                style={{ borderColor: 'var(--status-failed)', color: 'var(--status-failed)' }}
-                onClick={handleDelete}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              <br />
+              <span className="font-mono text-sm break-all">
+                {path}
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
