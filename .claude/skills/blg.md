@@ -1,0 +1,1 @@
+/Users/chrispian/Projects-apps/hadron/.agentrc/skills/blg.md

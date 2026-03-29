@@ -25,6 +25,9 @@ vendor/
 .vscode/
 *.swp
 
+# Local Env
+.mcp.json
+
 # Node / Frontend
 node_modules/
 cmd/hadron-app/frontend/dist/
