@@ -5,7 +5,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { openDirectoryDialog, listFilesInDir, validateBlueprintFile, enqueueRun, parseBlueprintInputs, deleteBlueprintFile, getBlueprintMetadata, getSettings, createDirectory, selectDirectoryDialog, moveBlueprintFile, copyBlueprintFile, archiveBlueprintFile, getBlueprintDir, setBlueprintDir } from '../api/client';
 import { ValidateResult, FileEntry, BlueprintInput, BlueprintMetaSummary } from '../api/types';
 import { Input } from '@/components/ui/input';
-import { FolderOpen, FolderPlus, Play, CheckCircle, ChevronLeft, Folder, FileCode, Plus, Trash2, RefreshCw, MoveRight, Copy, Archive } from 'lucide-react';
+import { FolderOpen, FolderPlus, Play, CheckCircle, ChevronLeft, Folder, FileCode, Plus, Trash2, RefreshCw, MoveRight, Copy, Archive, MoreHorizontal } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EmptyState } from '../components/ui/EmptyState';
 import { RunInputsModal } from '../components/ui/RunInputsModal';
 import { useDaemon } from '../contexts/DaemonContext';
@@ -289,6 +291,11 @@ export function BlueprintsPage() {
       if (a.isDir && !b.isDir) return -1;
       if (!a.isDir && b.isDir) return 1;
       if (sortBy === 'name-desc') return b.name.localeCompare(a.name);
+      if (sortBy === 'steps-asc' || sortBy === 'steps-desc') {
+        const aSteps = metaCache[a.path]?.step_count ?? 0;
+        const bSteps = metaCache[b.path]?.step_count ?? 0;
+        return sortBy === 'steps-asc' ? aSteps - bSteps : bSteps - aSteps;
+      }
       return a.name.localeCompare(b.name);
     });
 
@@ -321,7 +328,7 @@ export function BlueprintsPage() {
   const canGoBack = currentDir && currentDir !== rootDir;
 
   return (
-    <div className="flex flex-col gap-3 h-full">
+    <div className="flex flex-col gap-2 h-full">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xl font-semibold text-foreground tracking-tight">Blueprints</span>
@@ -340,15 +347,15 @@ export function BlueprintsPage() {
             <ChevronLeft size={13} /> Up
           </Button>
         )}
-        <Button onClick={() => nav.openWizard()} className="ml-auto border-blue-500/50 text-blue-400">
+        <Button onClick={() => nav.openWizard()} className="ml-auto bg-blue-500 text-white hover:bg-blue-600">
           <Plus size={14} /> New Blueprint
         </Button>
         {currentDir && (
-          <Button variant="ghost" onClick={handleNewFolder}>
+          <Button onClick={handleNewFolder} className="bg-yellow-500 text-yellow-950 hover:bg-yellow-600">
             <FolderPlus size={14} /> New Folder
           </Button>
         )}
-        <Button onClick={handleOpenFolder}>
+        <Button onClick={handleOpenFolder} className="bg-yellow-500 text-yellow-950 hover:bg-yellow-600">
           <FolderOpen size={14} /> Open Folder
         </Button>
       </div>
@@ -368,32 +375,43 @@ export function BlueprintsPage() {
             placeholder="Filter blueprints..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                if (search) { setSearch(''); e.stopPropagation(); }
+                else { (e.target as HTMLInputElement).blur(); }
+              }
+            }}
+            className="flex-1 h-10 border-border/60 text-sm placeholder:text-muted-foreground/50 focus-visible:border-blue-500 focus-visible:ring-0 dark:focus-visible:bg-blue-500/10 focus-visible:shadow-[inset_0_0_12px_rgba(59,130,246,0.08),0_0_8px_rgba(59,130,246,0.06)] focus-visible:text-blue-100 transition-all"
           />
           {search && (
             <Button variant="ghost" size="xs" onClick={() => setSearch('')}>
               Clear
             </Button>
           )}
-          <select
-            className="h-8 w-auto rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-          >
-            <option value="name-asc">Name A-Z</option>
-            <option value="name-desc">Name Z-A</option>
-          </select>
-          {entries.some(e => !e.isDir) && (
-            <label className="flex items-center gap-1 cursor-pointer text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={selected.size > 0 && selected.size === entries.filter(e => !e.isDir).length}
-                onChange={selectAllFiles}
-                className="accent-blue-400"
-              />
-              All
-            </label>
-          )}
+          <div className="flex gap-1">
+            {['name-asc', 'name-desc', 'steps-asc', 'steps-desc'].map(key => {
+              const labels: Record<string, string> = {
+                'name-asc': 'A\u2013Z',
+                'name-desc': 'Z\u2013A',
+                'steps-asc': 'Simple',
+                'steps-desc': 'Complex',
+              };
+              return (
+                <button
+                  key={key}
+                  onClick={() => setSortBy(key)}
+                  className={cn(
+                    'h-8 px-3 rounded-md text-xs font-medium transition-colors',
+                    'border border-border/60 bg-transparent',
+                    'hover:bg-muted/60 hover:text-foreground',
+                    sortBy === key ? 'text-blue-400 border-blue-500/40 bg-blue-500/[0.06]' : 'text-muted-foreground',
+                  )}
+                >
+                  {labels[key]}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -410,6 +428,9 @@ export function BlueprintsPage() {
           <span className="text-sm text-blue-400">
             {selected.size} selected
           </span>
+          <Button variant="ghost" size="xs" onClick={selectAllFiles}>
+            {selected.size === entries.filter(e => !e.isDir).length ? 'Deselect All' : 'Select All'}
+          </Button>
           <Button variant="ghost" size="xs" onClick={handleBatchValidate}>
             Validate All
           </Button>
@@ -459,66 +480,60 @@ export function BlueprintsPage() {
               <div
                 key={entry.path}
                 className={cn(
-                  'flex items-center gap-2 px-3 py-2 rounded hover:bg-muted/30 transition-colors',
-                  entry.isDir ? 'cursor-pointer' : 'cursor-default',
-                  i === focusIndex && 'bg-muted/50 outline outline-1 outline-blue-400/30',
+                  'flex items-start gap-2 py-1 rounded transition-colors',
+                  'hover:bg-blue-500/[0.06] hover:border hover:border-blue-500/30',
+                  'border border-transparent',
+                  entry.isDir ? 'cursor-pointer pl-3 pr-3' : 'cursor-default pl-3 pr-3',
+                  i === focusIndex && 'bg-blue-500/[0.06] border-blue-500/30',
                 )}
                 ref={i === focusIndex ? focusRef : undefined}
                 onClick={() => entry.isDir ? handleDrillDown(entry) : undefined}
               >
-                {/* Checkbox (files only) */}
-                {!entry.isDir && (
-                  <input
-                    type="checkbox"
-                    checked={selected.has(entry.path)}
-                    onChange={() => toggleSelect(entry.path)}
-                    onClick={e => e.stopPropagation()}
-                    className="accent-blue-400 shrink-0 cursor-pointer"
-                  />
+                {/* Checkbox — fixed-width column, negative margin to pull left */}
+                {!entry.isDir ? (
+                  <div className="-ml-2 w-5 shrink-0 flex items-start pt-px" onClick={e => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selected.has(entry.path)}
+                      onCheckedChange={() => toggleSelect(entry.path)}
+                    />
+                  </div>
+                ) : (
+                  <div className="-ml-2 w-5 shrink-0" />
                 )}
 
-                {/* Icon */}
-                <span className={cn('shrink-0', entry.isDir ? 'text-amber-400' : 'text-blue-400')}>
+                {/* Icon — same line as first text row */}
+                <span className={cn('shrink-0 mt-px', entry.isDir ? 'text-yellow-500' : 'text-blue-400')}>
                   {entry.isDir ? <Folder size={15} /> : <FileCode size={15} />}
                 </span>
 
-                {/* Name + metadata */}
+                {/* Name + metadata — takes ~85% leaving room for actions */}
                 <div
                   className={cn(
-                    'flex-1 min-w-0 flex flex-col',
+                    'min-w-0 flex-1 max-w-[85%] -mt-[3px]',
                     entry.isDir ? 'text-foreground' : 'cursor-pointer',
                   )}
                   onClick={() => { if (!entry.isDir) nav.openBlueprint(entry.path); }}
                 >
-                  <span>
-                    {entry.name}
-                    {entry.isDir && <span className="text-muted-foreground text-sm ml-1">/</span>}
-                  </span>
-                  {!entry.isDir && metaCache[entry.path] && (() => {
-                    const meta = metaCache[entry.path];
-                    return (
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {meta.description && (
-                          <span className="text-xs text-muted-foreground truncate">
-                            {meta.description.length > 80 ? meta.description.slice(0, 80) + '…' : meta.description}
-                          </span>
-                        )}
-                        {meta.tags && meta.tags.length > 0 && (
-                          <span className="flex items-center gap-1">
-                            {meta.tags.slice(0, 4).map(t => (
-                              <span key={t} className="px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">{t}</span>
-                            ))}
-                            {meta.tags.length > 4 && <span className="px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">+{meta.tags.length - 4}</span>}
-                          </span>
-                        )}
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          {meta.input_count > 0 && <span>{meta.input_count} input{meta.input_count !== 1 ? 's' : ''}</span>}
-                          {meta.step_count > 0 && <span>{meta.step_count} step{meta.step_count !== 1 ? 's' : ''}</span>}
-                          {meta.has_imports && <span>imports</span>}
-                        </span>
-                      </div>
-                    );
-                  })()}
+                  <div className="flex items-center gap-2">
+                    <span className="leading-tight">
+                      {entry.name}
+                      {entry.isDir && <span className="text-muted-foreground text-sm ml-1">/</span>}
+                    </span>
+                    {/* Tags inline with name */}
+                    {!entry.isDir && metaCache[entry.path]?.tags && metaCache[entry.path].tags.length > 0 && (
+                      <span className="flex items-center gap-1 shrink-0">
+                        {metaCache[entry.path].tags.slice(0, 4).map(t => (
+                          <span key={t} className="px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">{t}</span>
+                        ))}
+                        {metaCache[entry.path].tags.length > 4 && <span className="px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">+{metaCache[entry.path].tags.length - 4}</span>}
+                      </span>
+                    )}
+                  </div>
+                  {!entry.isDir && metaCache[entry.path]?.description && (
+                    <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                      {metaCache[entry.path].description}
+                    </div>
+                  )}
                 </div>
 
                 {/* Validate result badge */}
@@ -528,16 +543,9 @@ export function BlueprintsPage() {
                   </span>
                 )}
 
-                {/* Actions */}
+                {/* Actions — pushed right */}
                 {!entry.isDir && (
-                  <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => handleValidate(entry)}
-                    >
-                      <CheckCircle size={12} /> Validate
-                    </Button>
+                  <div className="flex items-center gap-1 shrink-0 ml-auto" onClick={e => e.stopPropagation()}>
                     <Button
                       size="xs"
                       onClick={() => handleRun(entry)}
@@ -545,13 +553,19 @@ export function BlueprintsPage() {
                     >
                       <Play size={12} /> {isRunning ? 'Running…' : 'Run'}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => setDeleteConfirm(entry.path)}
-                      className="p-1"
-                    >
-                      <Trash2 size={12} className="text-red-400" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 px-2 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors">
+                        <MoreHorizontal size={14} />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleValidate(entry)}>
+                          <CheckCircle size={12} /> Validate
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setDeleteConfirm(entry.path)} className="text-red-400 focus:text-red-400">
+                          <Trash2 size={12} /> Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 )}
               </div>
