@@ -1,4 +1,4 @@
-# Boot Prompt — Hadron Frontend Beta Stabilization
+# Boot Prompt — Hadron Frontend Polish & Remaining Migration
 
 > Last updated: 2026-03-29
 
@@ -8,89 +8,107 @@
 
 ## What We're Doing
 
-Migrating the Hadron frontend from legacy inline styles + custom CSS classes to **shadcn/ui components + Tailwind CSS utility classes**. Establishing a **"props down, events up"** component architecture. Preparing for beta release.
+Design polish pass across all pages. Establishing a consistent visual language based on the **BlueprintsPage** as the golden template. Migration from legacy CSS to Tailwind/shadcn is largely complete — remaining work is style alignment, god component decomposition, and CSS cleanup.
 
 ## Plan Document
 
 Read `.agentrc/agents/frontend-beta-plan.md` for the full 5-phase plan with file-level detail.
 
-## Current Phase
+## Current Status
 
-**Phase 1 — shadcn Primitives** (COMPLETE as of 2026-03-29)
+**Phase 1 — shadcn Primitives** (COMPLETE)
+**Phase 2 — Context & Architecture** (COMPLETE)
+**Phase 3 — Page-by-Page Migration** (COMPLETE — all 13 pages have 0 inline styles, 0 hud-* classes)
 
-All mechanical replacements done:
-- 18 shadcn components installed
-- ~130 `.btn`/`.hud-button` → `<Button>` with variants
-- 17 `hud-modal-overlay` → `<Dialog>` / `<AlertDialog>` (Modal.tsx + ConfirmDialog.tsx deleted)
-- ~20 `.badge`/`bp-badge` → `<Badge>` with custom status variants
-- ~116 `hud-input`/`hud-label` → `<Input>` / `<Label>`
-- 2 manual dropdowns → `<DropdownMenu>` in AppHeader
-- Removed badge/button/modal/input/label CSS from theme.css and index.css
-- Build passes, tsc clean
+**Design Polish Pass** (in progress as of 2026-03-29)
 
-**Phase 2 — Context & Architecture** (COMPLETE as of 2026-03-29)
+Pages aligned to BlueprintsPage golden template:
+- [x] DashboardPage — stat cards + flat rows, blue glass hover
+- [x] BlueprintsPage — **golden template**: glass search, sort chips, blue hover rows, dropdown menus
+- [x] PipelinesPage — flat rows, blue/yellow buttons, dropdown menus
+- [x] RunsPage — flat rows, chip filters, glass search
+- [x] SchedulerPage — flat rows, dropdown menus
+- [x] TelemetryPage — flat rows (list + detail views), chip level filters
 
-- Created `DaemonContext` (daemon status, address, workspace CRUD, active run timer, demo mode)
-- Created `NavigationContext` (page routing, selected IDs, openRun/openBlueprint/openPipeline/openWizard/goBack)
-- App.tsx slimmed from 430 → ~130 lines (just providers + keyboard handler + page router)
-- Workspace creation modal moved to AppHeader (owns its own state)
-- All 13 pages + AppHeader consume contexts instead of props
-- Build passes, tsc clean
+Pages remaining for polish:
+- [ ] FlowBuilderPage — needs its own session (visual editor, several issues to address)
+- [ ] BlueprintDetailPage
+- [ ] BlueprintWizardPage
+- [ ] PipelineDetailPage
+- [ ] RunDetailPage
+- [ ] SettingsPage
+- [ ] HelpPage
 
-**Phase 3 — Page-by-Page Migration** (in progress as of 2026-03-29)
+After polish, proceed to Phase 4 (god component decomposition) and Phase 5 (CSS file cleanup).
 
-7 of 13 pages fully migrated to Tailwind (0 inline styles):
-- [x] RunsPage (168 lines)
-- [x] SettingsPage (198 lines)
-- [x] DashboardPage (262 lines)
-- [x] RunDetailPage (299 lines)
-- [x] TelemetryPage (320 lines)
-- [x] SchedulerPage (380 lines)
-- [x] PipelineDetailPage (404 lines)
+## Design Language (established via BlueprintsPage)
 
-6 pages remaining (436 inline styles total):
-- [ ] BlueprintsPage (660 lines, 26 inline styles)
-- [ ] BlueprintDetailPage (584 lines, 56 inline styles)
-- [ ] HelpPage (759 lines, 126 inline styles)
-- [ ] PipelinesPage (869 lines, 66 inline styles)
-- [ ] BlueprintWizardPage (1168 lines, 122 inline styles)
-- [ ] FlowBuilderPage (913 lines, 38 inline styles)
+**Layout patterns:**
+- Page container: `flex flex-col gap-2 h-full`
+- Section labels: `text-xs tracking-wider uppercase text-muted-foreground`
+- No card-wrapped tables — use flat rows on transparent bg (grid shows through)
 
-**Tailwind migration patterns established** (use these for remaining pages):
-- `page-header` → `flex items-center justify-between mb-6`
-- `page-title` → `text-xl font-semibold text-foreground tracking-tight`
-- `section` → `rounded-lg border border-border bg-card overflow-hidden`
-- `section-header` → `flex items-center justify-between px-5 py-4 border-b border-border`
-- `table` th → `text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50`
-- `table` td → `px-5 py-3 text-sm text-muted-foreground border-t border-border`
-- `col-primary` → `w-full`, `col-shrink` → `whitespace-nowrap`, `col-right` → `text-right`
-- `mono` → `font-mono`
-- Status colors: success=`text-blue-400`, running=`text-amber-400`, failed=`text-red-400`
-- Use `cn()` for all conditional classes
+**Row pattern (flat, transparent, blue glass hover):**
+```
+'flex items-center gap-3 px-3 py-1.5 rounded transition-colors',
+'hover:bg-blue-500/[0.06] hover:border hover:border-blue-500/30',
+'border border-transparent',
+```
 
-After Phase 3, proceed to Phase 4 (god component decomposition) and Phase 5 (CSS file cleanup).
+**Search input (glass focus effect):**
+```
+'h-10 border-border/60 text-sm placeholder:text-muted-foreground/50
+ focus-visible:border-blue-500 focus-visible:ring-0
+ dark:focus-visible:bg-blue-500/10
+ focus-visible:shadow-[inset_0_0_12px_rgba(59,130,246,0.08),0_0_8px_rgba(59,130,246,0.06)]
+ focus-visible:text-blue-100 transition-all'
+```
+Escape clears text, second Escape blurs.
+
+**Filter/sort chips:**
+```
+'h-8 px-3 rounded-md text-xs font-medium transition-colors',
+'border border-border/60 bg-transparent',
+'hover:bg-muted/60 hover:text-foreground',
+// active: 'text-blue-400 border-blue-500/40 bg-blue-500/[0.06]'
+```
+
+**Buttons:**
+- Primary action: `bg-blue-500 text-white hover:bg-blue-600` (e.g. New Blueprint)
+- Folder actions: `bg-yellow-500 text-yellow-950 hover:bg-yellow-600`
+- Secondary actions: moved to `...` DropdownMenu with gray trigger button
+- Destructive in dropdown: `className="text-red-400 focus:text-red-400"`
+
+**Colors:**
+- Folders: `text-yellow-500`
+- Files/blueprints: `text-blue-400`
+- Status: success=`text-blue-400`, running=`text-amber-400`, failed=`text-red-400`
 
 ## Key Context
 
 - **Stack:** React 18.2 SPA in Wails v2, Vite 5, TypeScript 5.3, Tailwind CSS v4.2.2, shadcn/ui 4.1.1 (base-nova preset)
 - **Frontend path:** `cmd/hadron-app/frontend/`
-- **Design:** Dark theme, zinc backgrounds, blue success / amber running / red failed / gray queued / purple canceled. Geist font. See `feedback_ui_color_palette.md` in memory.
+- **Design:** Dark theme, zinc backgrounds (#09090b base, #0f0f12 surface, #18181b raised, #27272a borders). Blue success / amber running / red failed / gray queued / purple canceled. Yellow-500 for folders. Text: #fafafa primary, #a1a1aa secondary, #71717a tertiary.
+- **Dark mode:** `class="dark"` on `<html>`. Dark tokens in `.dark {}` block of index.css. Hadron overrides: `--primary` = blue-500, chart colors = status palette.
+- **CSS note:** Do NOT add unlayered `* { margin:0; padding:0 }` — it overrides all Tailwind utilities. Tailwind v4 preflight handles resets. The `body` rule uses legacy vars for bg/color.
 - **No router:** Navigation is state-driven (`NavPage` union type in App.tsx)
 - **Desktop app:** Runs in Wails webview, Go bindings on `window.go`
+- **Reference screenshots:** `~/Downloads/hadron-shots/` (13 screenshots from 2026-03-29)
 
 ## Rules
 
 - No new inline styles. Use Tailwind utility classes.
 - No new CSS classes. Use Tailwind + shadcn semantic tokens.
 - Use `cn()` for conditional classes, not template literals.
-- Semantic colors only (`bg-primary`, `text-muted-foreground`), never raw hex/rgb.
 - `gap-*` for spacing, `size-*` for equal dimensions.
 - shadcn first — check if a component exists before writing custom markup.
-- Each phase is independently shippable. The app must build and run after every change.
+- Use the design language patterns above (flat rows, glass search, chip filters, dropdown menus).
+- Each change must build and run. Not a Next.js app — ignore "use client" suggestions.
 
 ## Files to Read First
 
 1. `.agentrc/agents/frontend.md` — full frontend context and audit
 2. `.agentrc/agents/frontend-beta-plan.md` — detailed migration plan
 3. `cmd/hadron-app/frontend/components.json` — shadcn config
-4. `cmd/hadron-app/frontend/src/index.css` — Tailwind imports + @theme inline block
+4. `cmd/hadron-app/frontend/src/index.css` — Tailwind imports + @theme inline block + dark mode tokens
+5. `cmd/hadron-app/frontend/src/pages/BlueprintsPage.tsx` — golden template for design patterns

@@ -72,19 +72,20 @@ export function DashboardPage() {
   const recent = runs.slice(0, 10);
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="flex flex-col gap-4 h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
           <div className="text-xl font-semibold text-foreground tracking-tight">Overview</div>
           <div className="text-sm text-muted-foreground">Last 24 hours</div>
         </div>
-        <Button variant="outline" onClick={refresh} title="Refresh (R)">
-          <RefreshCw size={14} /> Refresh
+        <Button variant="ghost" onClick={refresh} title="Refresh (R)">
+          <RefreshCw size={14} />
         </Button>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-6 gap-3 mb-6">
+      <div className="grid grid-cols-6 gap-3">
         <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-4">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Runs</span>
           <span className="text-2xl font-bold font-mono text-foreground tracking-tight leading-tight">{total.toLocaleString()}</span>
@@ -120,88 +121,82 @@ export function DashboardPage() {
 
       {/* Daemon warning */}
       {daemon.status !== 'running' && (
-        <div className="rounded-lg border border-border bg-card overflow-hidden px-5 py-4 mb-4 text-amber-400">
+        <div className="rounded-lg border border-border bg-card overflow-hidden px-5 py-4 text-amber-400">
           {daemon.status === 'error' ? 'Daemon error \u2014 check that hadrond is installed.' : 'Daemon starting\u2026'}
         </div>
       )}
 
-      {/* Two-column: Recent Runs + Activity */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      {/* Two-column: Recent Runs + Top Blueprints */}
+      <div className="grid grid-cols-2 gap-6 flex-1 min-h-0">
         {/* Recent Runs */}
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <span className="text-base font-semibold text-foreground">Recent Runs</span>
-            <span className="text-sm text-muted-foreground cursor-pointer flex items-center gap-1 hover:text-primary transition-colors">View all</span>
+        <div className="flex flex-col gap-1 min-h-0">
+          <div className="flex items-center justify-between">
+            <span className="text-xs tracking-wider uppercase text-muted-foreground">Recent Runs</span>
+            <button onClick={() => nav.navigate('runs')} className="text-xs text-muted-foreground hover:text-primary transition-colors">View all</button>
           </div>
-          {recent.length === 0 ? (
-            <EmptyState
-              message="No runs yet"
-              sub={daemon.status === 'running' ? `daemon running at ${daemon.address}` : undefined}
-            />
-          ) : (
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 w-full">Blueprint</th>
-                  <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Status</th>
-                  <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Started</th>
-                  <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Duration</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recent.map(run => (
-                  <tr key={run.id} className="cursor-pointer transition-colors hover:bg-muted/50" onClick={() => nav.openRun(run.id)}>
-                    <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono w-full">{shortPath(run.blueprint_path)}</td>
-                    <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap"><StatusBadge status={run.status} /></td>
-                    <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap text-right">{run.started_at ? formatTime(run.started_at) : '\u2014'}</td>
-                    <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono whitespace-nowrap text-right">{formatRunDuration(run)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <div className="flex flex-col gap-px flex-1 overflow-y-auto">
+            {recent.length === 0 ? (
+              <EmptyState
+                message="No runs yet"
+                sub={daemon.status === 'running' ? `daemon running at ${daemon.address}` : undefined}
+              />
+            ) : (
+              recent.map(run => (
+                <div
+                  key={run.id}
+                  onClick={() => nav.openRun(run.id)}
+                  className={cn(
+                    'flex items-center gap-3 px-3 py-1.5 rounded cursor-pointer transition-colors',
+                    'hover:bg-blue-500/[0.06] hover:border hover:border-blue-500/30',
+                    'border border-transparent',
+                  )}
+                >
+                  <div className="flex-1 min-w-0 font-mono text-sm truncate">{shortPath(run.blueprint_path)}</div>
+                  <div className="shrink-0"><StatusBadge status={run.status} /></div>
+                  <div className="shrink-0 text-sm text-muted-foreground whitespace-nowrap w-28 text-right">
+                    {run.started_at ? formatTime(run.started_at) : '\u2014'}
+                  </div>
+                  <div className="shrink-0 text-sm font-mono text-muted-foreground whitespace-nowrap w-12 text-right">
+                    {formatRunDuration(run)}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
 
-        {/* Activity Timeline */}
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <span className="text-base font-semibold text-foreground">Activity</span>
-            <span className="text-sm text-muted-foreground">24h</span>
+        {/* Top Blueprints */}
+        <div className="flex flex-col gap-1 min-h-0">
+          <span className="text-xs tracking-wider uppercase text-muted-foreground">Top Blueprints</span>
+          <div className="flex flex-col gap-px flex-1 overflow-y-auto">
+            {perBlueprint.length === 0 ? (
+              <EmptyState message="No data" sub="Run some blueprints to see stats" />
+            ) : (
+              perBlueprint.map(bp => (
+                <div
+                  key={bp.path}
+                  className={cn(
+                    'flex items-center gap-3 px-3 py-1.5 rounded transition-colors',
+                    'hover:bg-blue-500/[0.06] hover:border hover:border-blue-500/30',
+                    'border border-transparent',
+                  )}
+                >
+                  <div className="flex-1 min-w-0 font-mono text-sm truncate">{bp.name}</div>
+                  <div className="shrink-0 text-sm font-mono text-muted-foreground w-10 text-right">{bp.total}</div>
+                  <div className="shrink-0 text-sm w-14 text-right">
+                    <span className={cn(
+                      bp.successRate >= 80 ? 'text-blue-400' : bp.successRate >= 50 ? 'text-amber-400' : 'text-red-400',
+                    )}>
+                      {bp.successRate}%
+                    </span>
+                  </div>
+                  <div className="shrink-0 text-sm font-mono text-muted-foreground w-16 text-right">
+                    {bp.avgMs > 0 ? formatMs(bp.avgMs) : '\u2014'}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-          {/* Per-blueprint stats */}
-          {perBlueprint.length > 0 && (
-            <>
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border border-t">
-                <span className="text-base font-semibold text-foreground">Top Blueprints</span>
-              </div>
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr>
-                    <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 w-full">Blueprint</th>
-                    <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Runs</th>
-                    <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Success</th>
-                    <th className="text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Avg</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {perBlueprint.map(bp => (
-                    <tr key={bp.path} className="cursor-default">
-                      <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono w-full">{bp.name}</td>
-                      <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono whitespace-nowrap text-right">{bp.total}</td>
-                      <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap text-right">
-                        <span className={cn(
-                          bp.successRate >= 80 ? 'text-blue-400' : bp.successRate >= 50 ? 'text-amber-400' : 'text-red-400',
-                        )}>
-                          {bp.successRate}%
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono whitespace-nowrap text-right">{bp.avgMs > 0 ? formatMs(bp.avgMs) : '\u2014'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
         </div>
       </div>
     </div>

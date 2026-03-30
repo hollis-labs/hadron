@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { CalendarClock, Plus, Trash2, ToggleLeft, ToggleRight, FolderOpen, Pencil, RefreshCw } from 'lucide-react';
+import { CalendarClock, Plus, Trash2, ToggleLeft, ToggleRight, FolderOpen, Pencil, RefreshCw, MoreHorizontal } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDaemon } from '../contexts/DaemonContext';
 import { usePoll } from '../hooks/usePoll';
 import { listSchedules, createSchedule, patchSchedule, deleteSchedule, selectBlueprintFile } from '../api/client';
@@ -178,8 +179,8 @@ export function SchedulerPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="flex flex-col gap-2 h-full">
+      <div className="flex items-center justify-between">
         <div>
           <div className="text-xl font-semibold text-foreground tracking-tight">Schedules</div>
           {loading && <div className="text-sm text-muted-foreground">Refreshing…</div>}
@@ -188,66 +189,72 @@ export function SchedulerPage() {
           <Button variant="ghost" onClick={refresh} title="Refresh (R)">
             <RefreshCw size={14} />
           </Button>
-          <Button onClick={() => setShowModal(true)}>
+          <Button onClick={() => setShowModal(true)} className="bg-blue-500 text-white hover:bg-blue-600">
             <Plus size={14} /> New Schedule
           </Button>
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="flex flex-col gap-px flex-1 overflow-y-auto">
         {schedules.length === 0 ? (
           <EmptyState message="No schedules" sub="Create a schedule to run blueprints on a cron expression" />
         ) : (
-          <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap"></th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 w-full">Schedule</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap">Cron</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap text-right">Next Run</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 whitespace-nowrap"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {schedules.map(schedule => (
-                <tr key={schedule.id} className="cursor-default transition-colors hover:bg-muted/50">
-                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap">
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => handleToggle(schedule)}
-                      className={cn(schedule.enabled ? 'text-primary' : 'text-muted-foreground')}
-                      title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
-                    >
-                      {schedule.enabled ? <><ToggleRight size={15} /> ON</> : <><ToggleLeft size={15} /> OFF</>}
-                    </Button>
-                  </td>
-                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border w-full">
-                    <div className="font-medium">
-                      {schedule.name || <span className="text-muted-foreground">{schedule.id.slice(-8)}</span>}
-                    </div>
-                    <div className="font-mono text-xs text-muted-foreground mt-px">
-                      {shortPath(schedule.blueprint_path)}
-                    </div>
-                  </td>
-                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border font-mono whitespace-nowrap">
-                    {schedule.cron_expr || <span className="text-primary italic">one-time</span>}
-                  </td>
-                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap text-right">{formatNextRun(schedule.next_run_at)}</td>
-                  <td className="px-5 py-3 text-sm text-muted-foreground border-t border-border whitespace-nowrap">
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="xs" onClick={() => handleEdit(schedule)} title="Edit">
-                        <Pencil size={13} />
-                      </Button>
-                      <Button variant="ghost" size="xs" onClick={() => handleDelete(schedule)} className="text-red-400" title="Delete">
-                        <Trash2 size={13} />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          schedules.map(schedule => (
+            <div
+              key={schedule.id}
+              className={cn(
+                'flex items-center gap-3 px-3 py-1.5 rounded transition-colors',
+                'hover:bg-blue-500/[0.06] hover:border hover:border-blue-500/30',
+                'border border-transparent',
+              )}
+            >
+              {/* Toggle */}
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => handleToggle(schedule)}
+                className={cn('shrink-0', schedule.enabled ? 'text-primary' : 'text-muted-foreground')}
+                title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
+              >
+                {schedule.enabled ? <><ToggleRight size={15} /> ON</> : <><ToggleLeft size={15} /> OFF</>}
+              </Button>
+
+              {/* Name + path */}
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm">
+                  {schedule.name || <span className="text-muted-foreground">{schedule.id.slice(-8)}</span>}
+                </div>
+                <div className="font-mono text-xs text-muted-foreground mt-px truncate">
+                  {shortPath(schedule.blueprint_path)}
+                </div>
+              </div>
+
+              {/* Cron */}
+              <div className="shrink-0 font-mono text-sm text-muted-foreground whitespace-nowrap">
+                {schedule.cron_expr || <span className="text-primary italic">one-time</span>}
+              </div>
+
+              {/* Next run */}
+              <div className="shrink-0 text-sm text-muted-foreground whitespace-nowrap w-40 text-right">
+                {formatNextRun(schedule.next_run_at)}
+              </div>
+
+              {/* Actions */}
+              <DropdownMenu>
+                <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 px-2 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors shrink-0">
+                  <MoreHorizontal size={14} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleEdit(schedule)}>
+                    <Pencil size={12} /> Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleDelete(schedule)} className="text-red-400 focus:text-red-400">
+                    <Trash2 size={12} /> Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ))
         )}
       </div>
 

@@ -15,10 +15,11 @@ import { shortPath } from '../utils/path';
 const STATUS_FILTERS = ['all', 'running', 'success', 'failed', 'canceled'] as const;
 type StatusFilter = typeof STATUS_FILTERS[number];
 
-const FILTER_STYLES: Record<string, string> = {
-  running: 'border-amber-500 text-amber-400',
-  success: 'border-blue-500 text-blue-400',
-  failed: 'border-red-500 text-red-400',
+const CHIP_COLORS: Record<string, string> = {
+  running: 'text-amber-400 border-amber-500/40 bg-amber-500/[0.06]',
+  success: 'text-blue-400 border-blue-500/40 bg-blue-500/[0.06]',
+  failed: 'text-red-400 border-red-500/40 bg-red-500/[0.06]',
+  canceled: 'text-muted-foreground border-border/60 bg-muted/30',
 };
 
 export function RunsPage() {
@@ -27,7 +28,7 @@ export function RunsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
   const [focusIndex, setFocusIndex] = useState(-1);
-  const focusRef = useRef<HTMLTableRowElement>(null);
+  const focusRef = useRef<HTMLDivElement>(null);
 
   const fetcher = useCallback(() => listRuns({ limit: 100 }), []);
   const { data, loading, refresh } = usePoll(fetcher, 3000, daemon.status === 'running');
@@ -66,9 +67,9 @@ export function RunsPage() {
   useEffect(() => { focusRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [focusIndex]);
 
   return (
-    <div>
+    <div className="flex flex-col gap-2 h-full">
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground tracking-tight">Runs</h1>
           {loading && <p className="text-sm text-muted-foreground">Refreshing…</p>}
@@ -78,89 +79,96 @@ export function RunsPage() {
         </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="flex gap-1">
-          {STATUS_FILTERS.map(sf => {
-            const isActive = statusFilter === sf;
-            return (
-              <Button
-                key={sf}
-                variant={isActive ? "outline" : "ghost"}
-                size="xs"
-                onClick={() => setStatusFilter(sf)}
-                className={cn(isActive && sf !== 'all' && FILTER_STYLES[sf])}
-              >
-                {sf === 'all' ? 'All' : sf.charAt(0).toUpperCase() + sf.slice(1)}
-              </Button>
-            );
-          })}
-        </div>
-
+      {/* Search + Filter chips */}
+      <div className="flex items-center gap-2">
         <Input
           type="text"
           placeholder="Search by blueprint or run ID..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-[180px]"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              if (search) { setSearch(''); e.stopPropagation(); }
+              else { (e.target as HTMLInputElement).blur(); }
+            }
+          }}
+          className="flex-1 h-10 border-border/60 text-sm placeholder:text-muted-foreground/50 focus-visible:border-blue-500 focus-visible:ring-0 dark:focus-visible:bg-blue-500/10 focus-visible:shadow-[inset_0_0_12px_rgba(59,130,246,0.08),0_0_8px_rgba(59,130,246,0.06)] focus-visible:text-blue-100 transition-all"
         />
         {search && (
           <Button variant="ghost" size="xs" onClick={() => setSearch('')}>
             Clear
           </Button>
         )}
+        <div className="flex gap-1">
+          {STATUS_FILTERS.map(sf => {
+            const isActive = statusFilter === sf;
+            return (
+              <button
+                key={sf}
+                onClick={() => setStatusFilter(sf)}
+                className={cn(
+                  'h-8 px-3 rounded-md text-xs font-medium transition-colors',
+                  'border border-border/60 bg-transparent',
+                  'hover:bg-muted/60 hover:text-foreground',
+                  isActive
+                    ? (sf !== 'all' && CHIP_COLORS[sf]) || 'text-blue-400 border-blue-500/40 bg-blue-500/[0.06]'
+                    : 'text-muted-foreground',
+                )}
+              >
+                {sf === 'all' ? 'All' : sf.charAt(0).toUpperCase() + sf.slice(1)}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Runs table */}
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
+      {/* Run list */}
+      <div className="flex flex-col gap-px flex-1 overflow-y-auto">
         {filteredRuns.length === 0 ? (
           <EmptyState
             message={runs.length === 0 ? 'No runs' : 'No matching runs'}
             sub={runs.length === 0 ? 'Run a blueprint to see history here' : 'No runs matching current filters'}
           />
         ) : (
-          <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                <th className="w-full text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50">Blueprint</th>
-                <th className="whitespace-nowrap text-left px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50">Status</th>
-                <th className="whitespace-nowrap text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50">Started</th>
-                <th className="whitespace-nowrap text-right px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50">Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRuns.map((run, i) => (
-                <tr
-                  key={run.id}
-                  onClick={() => nav.openRun(run.id)}
-                  ref={i === focusIndex ? focusRef : undefined}
-                  className={cn(
-                    "cursor-pointer transition-colors hover:bg-muted/50 border-t border-border",
-                    i === focusIndex && "bg-accent/10 outline outline-1 outline-ring"
-                  )}
-                >
-                  <td className="w-full px-5 py-3 text-sm text-muted-foreground">
-                    <div className="font-mono text-sm">{shortPath(run.blueprint_path)}</div>
-                    <div className="text-xs text-muted-foreground mt-px">{run.id.slice(-8)}</div>
-                  </td>
-                  <td className="whitespace-nowrap px-5 py-3">
-                    <StatusBadge status={run.status} />
-                  </td>
-                  <td className="whitespace-nowrap text-right px-5 py-3 text-sm text-muted-foreground">
-                    {run.started_at ? formatTime(run.started_at) : '—'}
-                  </td>
-                  <td className="whitespace-nowrap text-right px-5 py-3 text-sm font-mono">
-                    {formatRunDuration(run)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          filteredRuns.map((run, i) => (
+            <div
+              key={run.id}
+              ref={i === focusIndex ? focusRef : undefined}
+              onClick={() => nav.openRun(run.id)}
+              className={cn(
+                'flex items-center gap-3 px-3 py-1.5 rounded cursor-pointer transition-colors',
+                'hover:bg-blue-500/[0.06] hover:border hover:border-blue-500/30',
+                'border border-transparent',
+                i === focusIndex && 'bg-blue-500/[0.06] border-blue-500/30',
+              )}
+            >
+              {/* Blueprint + run ID */}
+              <div className="flex-1 min-w-0">
+                <div className="font-mono text-sm truncate">{shortPath(run.blueprint_path)}</div>
+                <div className="text-xs text-muted-foreground mt-px">{run.id.slice(-8)}</div>
+              </div>
+
+              {/* Status */}
+              <div className="shrink-0">
+                <StatusBadge status={run.status} />
+              </div>
+
+              {/* Started */}
+              <div className="shrink-0 text-sm text-muted-foreground whitespace-nowrap w-28 text-right">
+                {run.started_at ? formatTime(run.started_at) : '—'}
+              </div>
+
+              {/* Duration */}
+              <div className="shrink-0 text-sm font-mono text-muted-foreground whitespace-nowrap w-16 text-right">
+                {formatRunDuration(run)}
+              </div>
+            </div>
+          ))
         )}
       </div>
 
       {runs.length > 0 && (
-        <p className="text-xs text-muted-foreground mt-2">
+        <p className="text-xs text-muted-foreground">
           Showing {filteredRuns.length} of {runs.length} runs
         </p>
       )}
