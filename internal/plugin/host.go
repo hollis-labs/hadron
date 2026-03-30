@@ -106,6 +106,54 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 	return nil
 }
 
+// SetConfig persists a configuration value for the calling plugin.
+func (h *Host) SetConfig(key string, value string) error {
+	h.logger.Warn("SetConfig not yet implemented in Hadron", "key", key)
+	return nil
+}
+
+// RegisterConfigSchema registers config field definitions for the calling plugin.
+func (h *Host) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
+	h.logger.Warn("RegisterConfigSchema not yet implemented in Hadron")
+	return nil
+}
+
+// RegisterConnector registers a named connector (webhook, email sender, etc.).
+func (h *Host) RegisterConnector(name string, connector plugin.Connector) error {
+	h.logger.Warn("RegisterConnector not yet implemented in Hadron", "name", name)
+	return nil
+}
+
+// RegisterProvider registers a runtime LLM provider.
+func (h *Host) RegisterProvider(name string, provider interface{}) error {
+	h.logger.Warn("RegisterProvider not yet implemented in Hadron", "name", name)
+	return nil
+}
+
+// RegisterCLIAdapter registers a runtime CLI adapter for PTY/subprocess bridges.
+func (h *Host) RegisterCLIAdapter(name string, adapter interface{}) error {
+	h.logger.Warn("RegisterCLIAdapter not yet implemented in Hadron", "name", name)
+	return nil
+}
+
+// RegisterCommand registers a slash command.
+func (h *Host) RegisterCommand(cmd plugin.SlashCommandDef) error {
+	h.logger.Warn("RegisterCommand not yet implemented in Hadron", "command", cmd.Name)
+	return nil
+}
+
+// RegisterSlot registers a UI slot entry for a named mount point.
+func (h *Host) RegisterSlot(entry plugin.UISlotEntry) error {
+	h.logger.Warn("RegisterSlot not yet implemented in Hadron", "slot", entry.Slot)
+	return nil
+}
+
+// RegisterKeybinding registers a keyboard shortcut.
+func (h *Host) RegisterKeybinding(kb plugin.KeybindingDef) error {
+	h.logger.Warn("RegisterKeybinding not yet implemented in Hadron", "key", kb.Key)
+	return nil
+}
+
 // GetService provides access to core services.
 func (h *Host) GetService(name string) (interface{}, error) {
 	h.mu.RLock()

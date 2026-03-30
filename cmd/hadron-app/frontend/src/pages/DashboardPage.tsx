@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -70,34 +70,6 @@ export function DashboardPage() {
   const avgDuration = computeAvgDuration(runs);
   const perBlueprint = computePerBlueprint(runs);
   const recent = runs.slice(0, 10);
-
-  // Activity timeline: runs per hour for last 24h
-  const timeline = useMemo(() => {
-    const now = new Date();
-    const buckets: { hour: number; label: string; success: number; failed: number; other: number }[] = [];
-    for (let i = 23; i >= 0; i--) {
-      const t = new Date(now.getTime() - i * 3600000);
-      buckets.push({
-        hour: t.getHours(),
-        label: t.toLocaleTimeString([], { hour: '2-digit', hour12: false }),
-        success: 0,
-        failed: 0,
-        other: 0,
-      });
-    }
-    const cutoff = now.getTime() - 24 * 3600000;
-    for (const run of runs) {
-      if (!run.started_at) continue;
-      const ts = new Date(run.started_at).getTime();
-      if (ts < cutoff) continue;
-      const hoursAgo = Math.floor((now.getTime() - ts) / 3600000);
-      const idx = 23 - Math.min(hoursAgo, 23);
-      if (run.status === 'success') buckets[idx].success++;
-      else if (run.status === 'failed') buckets[idx].failed++;
-      else buckets[idx].other++;
-    }
-    return buckets;
-  }, [runs]);
 
   return (
     <div>
@@ -196,35 +168,7 @@ export function DashboardPage() {
             <span className="text-base font-semibold text-foreground">Activity</span>
             <span className="text-sm text-muted-foreground">24h</span>
           </div>
-          {runs.length > 0 && (() => {
-            const maxCount = Math.max(...timeline.map(b => b.success + b.failed + b.other), 1);
-            return (
-              <>
-                <div className="timeline-chart">
-                  {timeline.map((bucket, i) => {
-                    const bTotal = bucket.success + bucket.failed + bucket.other;
-                    const pct = bTotal > 0 ? Math.max((bTotal / maxCount) * 100, 5) : 0;
-                    const cls = bTotal === 0 ? '' : bucket.failed > 0 && bucket.success > 0 ? 'mixed' : bucket.failed > 0 ? 'failed' : 'success';
-                    return (
-                      <div
-                        key={i}
-                        className={`timeline-bar ${cls}`}
-                        style={{ height: `${pct}%` }}
-                        title={`${bucket.label}:00 \u2014 ${bTotal} run${bTotal !== 1 ? 's' : ''}`}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="timeline-labels">
-                  {timeline.map((bucket, i) => (
-                    <span key={i}>{i % 4 === 0 ? bucket.label : ''}</span>
-                  ))}
-                </div>
-              </>
-            );
-          })()}
-
-          {/* Per-blueprint stats below the chart */}
+          {/* Per-blueprint stats */}
           {perBlueprint.length > 0 && (
             <>
               <div className="flex items-center justify-between px-5 py-4 border-b border-border border-t">

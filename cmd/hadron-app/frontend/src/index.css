@@ -50,11 +50,9 @@
   --sidebar-ring:       oklch(0.708 0 0);
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+/* Note: Tailwind v4 preflight (via @import "tailwindcss") handles box-sizing,
+   margin/padding resets on elements, and base typography. Do NOT add an
+   unlayered * { margin:0; padding:0 } — it overrides all Tailwind utilities. */
 
 html {
   font-size: 16px;  /* Lock rem baseline — Wails webview may default lower */
@@ -574,38 +572,39 @@ body {
   --radius-4xl:       calc(var(--radius) * 2.6);
 }
 
+/* ── Dark mode: Hadron design tokens ───────────────────────────────── */
 .dark {
-  --background:       oklch(0.145 0 0);
-  --foreground:       oklch(0.985 0 0);
-  --card:       oklch(0.205 0 0);
-  --card-foreground:       oklch(0.985 0 0);
-  --popover:       oklch(0.205 0 0);
-  --popover-foreground:       oklch(0.985 0 0);
-  --primary:       oklch(0.922 0 0);
-  --primary-foreground:       oklch(0.205 0 0);
-  --secondary:       oklch(0.269 0 0);
-  --secondary-foreground:       oklch(0.985 0 0);
-  --muted:       oklch(0.269 0 0);
-  --muted-foreground:       oklch(0.708 0 0);
-  --accent:       oklch(0.269 0 0);
-  --accent-foreground:       oklch(0.985 0 0);
-  --destructive:       oklch(0.704 0.191 22.216);
-  --border:       oklch(1 0 0 / 10%);
-  --input:       oklch(1 0 0 / 15%);
-  --ring:       oklch(0.556 0 0);
-  --chart-1:       oklch(0.87 0 0);
-  --chart-2:       oklch(0.556 0 0);
-  --chart-3:       oklch(0.439 0 0);
-  --chart-4:       oklch(0.371 0 0);
-  --chart-5:       oklch(0.269 0 0);
-  --sidebar:       oklch(0.205 0 0);
-  --sidebar-foreground:       oklch(0.985 0 0);
-  --sidebar-primary:       oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground:       oklch(0.985 0 0);
-  --sidebar-accent:       oklch(0.269 0 0);
-  --sidebar-accent-foreground:       oklch(0.985 0 0);
-  --sidebar-border:       oklch(1 0 0 / 10%);
-  --sidebar-ring:       oklch(0.556 0 0);
+  --background:       #09090b;   /* bg-base */
+  --foreground:       #fafafa;   /* text-primary (headings, bold values) */
+  --card:             #0f0f12;   /* bg-surface */
+  --card-foreground:  #fafafa;
+  --popover:          #18181b;   /* bg-raised */
+  --popover-foreground: #fafafa;
+  --secondary:        #18181b;   /* bg-raised */
+  --secondary-foreground: #fafafa;
+  --muted:            #18181b;   /* bg-raised */
+  --muted-foreground: #a1a1aa;   /* text-secondary — primary body text */
+  --accent:           #18181b;
+  --accent-foreground: #fafafa;
+  --border:           #27272a;   /* border-default */
+  --input:            #27272a;
+  --ring:             #3b82f6;
+  --primary:          #3b82f6;   /* accent blue */
+  --primary-foreground: #ffffff;
+  --destructive:      #ef4444;
+  --chart-1:          #3b82f6;   /* blue — success */
+  --chart-2:          #f59e0b;   /* amber — running */
+  --chart-3:          #ef4444;   /* red — failed */
+  --chart-4:          #71717a;   /* zinc — queued */
+  --chart-5:          #a855f7;   /* purple — canceled */
+  --sidebar:          #0f0f12;   /* bg-surface */
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary:  #3b82f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent:   #18181b;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border:   #27272a;
+  --sidebar-ring:     #3b82f6;
 }
 
 @layer base {
