@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/plugin"
 )
 
 // Host implements the plugin.Host interface for Hadron.
@@ -133,24 +133,6 @@ func (h *Host) RegisterProvider(name string, provider interface{}) error {
 // RegisterCLIAdapter registers a runtime CLI adapter for PTY/subprocess bridges.
 func (h *Host) RegisterCLIAdapter(name string, adapter interface{}) error {
 	h.logger.Warn("RegisterCLIAdapter not yet implemented in Hadron", "name", name)
-	return nil
-}
-
-// RegisterCommand registers a slash command.
-func (h *Host) RegisterCommand(cmd plugin.SlashCommandDef) error {
-	h.logger.Warn("RegisterCommand not yet implemented in Hadron", "command", cmd.Name)
-	return nil
-}
-
-// RegisterSlot registers a UI slot entry for a named mount point.
-func (h *Host) RegisterSlot(entry plugin.UISlotEntry) error {
-	h.logger.Warn("RegisterSlot not yet implemented in Hadron", "slot", entry.Slot)
-	return nil
-}
-
-// RegisterKeybinding registers a keyboard shortcut.
-func (h *Host) RegisterKeybinding(kb plugin.KeybindingDef) error {
-	h.logger.Warn("RegisterKeybinding not yet implemented in Hadron", "key", kb.Key)
 	return nil
 }
 
