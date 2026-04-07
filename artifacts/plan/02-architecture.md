@@ -206,6 +206,6 @@ Default data dir: `~/.hadron/`
 |---|---|
 | Volon | Uses Hadron MCP tools for task scheduling and custom skill execution |
 | Nanite | Can trigger blueprint runs via MCP for automation |
-| Context Memory Service (Cortex) | Hadron run events can be published to context broker |
+| Context Memory Service (Vanta Conduit) | Hadron run events can be published to context broker |
 | Flow Builder (future) | Will use Hadron pipelines as the execution substrate |
 | Mentat | Will use Hadron as a primary automation tool via MCP |

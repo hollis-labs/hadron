@@ -25,9 +25,9 @@ steps:
           echo "    - T1059 : Command and Scripting Interpreter"
           echo "  Campaign match: 72% similarity to APT-41 toolkit (2026-Q1)"
 
-      - name: cortex-context
+      - name: conduit-context
         cmd: |
-          echo "[intel] Querying Cortex context memory..."
+          echo "[conduit] Querying Vanta Conduit context memory..."
           echo "  Prior incidents from 185.220.101.x: 0 (first contact)"
           echo "  jsmith flagged in prior audit: YES (password policy violation, 2026-01)"
         continue_on_error: true

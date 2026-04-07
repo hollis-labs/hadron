@@ -36,6 +36,6 @@ Stand up a buildable Go module for Hadron with the v0.4 blueprint spec fully imp
 ## Notes
 
 - Port `specparse` from `vnext-blueprint-runner/internal/specparse/` (already clean and tested)
-- Port `persistence` from `vnext-blueprint-runner/internal/persistence/` (rename module path `hollis-labs/cortex` → `hollis-labs/hadron`)
+- Port `persistence` from `vnext-blueprint-runner/internal/persistence/` (rename module path `hollis-labs/hadron` — already correct)
 - For `blueprint` package: start from vnext's typed input/hook model, enrich with wails-starter's sections, packages, git, stubs, tools, per-task hooks, PTY template functions
 - Do NOT port the GUI, API, or CLI yet

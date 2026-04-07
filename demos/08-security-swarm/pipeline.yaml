@@ -15,7 +15,7 @@
 #   6. REPORT — Generate incident report, notify stakeholders
 #
 # In production this would call real MCP tools:
-#   - Cortex for threat intelligence context
+#   - Vanta Conduit for threat intelligence context
 #   - Engine for task tracking
 #   - External MCP servers for SIEM/EDR integration
 #

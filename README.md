@@ -7,7 +7,7 @@ local daemon.  Blueprints are typed, parameterised, and composable.  The daemon
 exposes both a REST API and an MCP adapter so AI agents (Claude Code, Mentat)
 can trigger and inspect runs without leaving the conversation.
 
-Part of the **Hollis Labs** suite: Nanite · Volon · Cortex · Mentat · Hadron.
+Part of the **Hollis Labs** suite: Nanite · Volon · Vanta Conduit · Mentat · Hadron.
 
 ---
 

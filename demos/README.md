@@ -8,7 +8,7 @@ Demo blueprints for live walkthroughs. Organized by complexity.
 |---|------|-------|
 | 01 | `01-hello-world.yaml` | Minimal blueprint — "it works" |
 | 02 | `02-system-recon.yaml` | Parameterized inputs, conditionals, env vars |
-| 03 | `03-cross-system-mcp.yaml` | Pipeline calling Hadron + Cortex + Engine MCP tools |
+| 03 | `03-cross-system-mcp.yaml` | Pipeline calling Hadron + Vanta Conduit + Engine MCP tools |
 | 04 | `04-git-audit.yaml` | Multi-repo git health check (practical output) |
 | 05 | `05-hooks-lifecycle.yaml` | Before/after/error hooks + per-task hooks |
 

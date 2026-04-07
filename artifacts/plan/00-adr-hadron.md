@@ -14,7 +14,7 @@ author: architect
 The blueprint-runner project had two prior versions:
 
 - **nanite-wails-starter (v0.2):** Working Wails desktop app. Rich blueprint spec (sections, packages ecosystem, per-task hooks). Strong UX. Weak architecture (in-memory only, no real scheduler, no MCP).
-- **vnext-blueprint-runner (v0.3 / "Cortex"):** Agent started from scratch instead of enhancing v0.2. Good architecture (SQLite, cron scheduler, MCP adapter, pipelines, tests) but regressed the spec (flat steps, lost packages/git/stubs, no sections) and built task management instead of blueprint management.
+- **vnext-blueprint-runner (v0.3):** Agent started from scratch instead of enhancing v0.2. Good architecture (SQLite, cron scheduler, MCP adapter, pipelines, tests) but regressed the spec (flat steps, lost packages/git/stubs, no sections) and built task management instead of blueprint management.
 
 The goal is to combine the best of both into a new, clean project.
 
@@ -29,7 +29,7 @@ The goal is to combine the best of both into a new, clean project.
 
 Fits the naming ecosystem: Nanite (engineered nano-matter), Hadron (composite subatomic particle). CLI reads cleanly: `hadron run blueprint.yaml`.
 
-**Rejected names:** Cortex (reserved for Context Memory Service), Forge (good but less conceptually tight), Relay, Loom.
+**Rejected names:** Vanta Conduit (reserved for Context Memory Service), Forge (good but less conceptually tight), Relay, Loom.
 
 ### 2. Architecture: CLI/Daemon first, GUI second
 

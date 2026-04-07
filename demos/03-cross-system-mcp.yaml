@@ -16,14 +16,14 @@ version: "0.4"
 blueprint:
   name: demo-cross-system-mcp
   title: Cross-System MCP Interop
-  description: Orchestrates actions across Hadron, Cortex, and Fragments Engine via MCP.
+  description: Orchestrates actions across Hadron, Vanta Conduit, and Fragments Engine via MCP.
   author: Hollis Labs
-  tags: [demo, mcp, cross-system, cortex, engine]
+  tags: [demo, mcp, cross-system, conduit, engine]
 
 inputs:
   - name: search_query
     label: Context Search Query
-    description: Term to search across Cortex context memory.
+    description: Term to search across Vanta Conduit context memory.
     type: string
     default: "hadron blueprint"
 
@@ -37,20 +37,20 @@ steps:
         cmd: 'echo "[hadron] Recent runs:" && hadron runs list --limit 3 2>/dev/null || echo "(no recent runs or daemon offline)"'
         continue_on_error: true
 
-  - section: "Cortex Context Broker"
+  - section: "Vanta Conduit Context Broker"
     tasks:
-      - name: cortex-search
+      - name: conduit-search
         cmd: |
-          echo "[cortex] Searching context memory for '{{ .inputs.search_query }}'..."
-          # Cortex MCP tool: context_search
-          cortex search "{{ .inputs.search_query }}" --limit 5 2>/dev/null || echo "(cortex offline — would return matching context packets)"
+          echo "[conduit] Searching context memory for '{{ .inputs.search_query }}'..."
+          # Vanta Conduit MCP tool: context_search
+          conduit search "{{ .inputs.search_query }}" --limit 5 2>/dev/null || echo "(conduit offline — would return matching context packets)"
         continue_on_error: true
 
-      - name: cortex-write-demo
+      - name: conduit-write-demo
         cmd: |
-          echo "[cortex] Writing demo context packet..."
+          echo "[conduit] Writing demo context packet..."
           echo '{"type": "demo-event", "source": "hadron", "content": "Cross-system MCP demo ran at '"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}' | \
-            cortex write --namespace hadron --type demo-event 2>/dev/null || echo "(cortex offline — would persist event to context memory)"
+            conduit write --namespace hadron --type demo-event 2>/dev/null || echo "(conduit offline — would persist event to context memory)"
         continue_on_error: true
 
   - section: "Fragments Engine"
@@ -66,5 +66,5 @@ steps:
         cmd: |
           echo ""
           echo "=== Cross-System MCP Demo Complete ==="
-          echo "Demonstrated: Hadron → Cortex → Engine orchestration"
+          echo "Demonstrated: Hadron → Vanta Conduit → Engine orchestration"
           echo "Any MCP-connected service can be a blueprint target."
