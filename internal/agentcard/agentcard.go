@@ -133,7 +133,10 @@ func FromDirectory(dir string, baseURL string) (*AgentCard, error) {
 	var skills []Skill
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
 			return nil
 		}
 		ext := filepath.Ext(d.Name())
@@ -142,7 +145,8 @@ func FromDirectory(dir string, baseURL string) (*AgentCard, error) {
 		}
 		bp, parseErr := blueprint.ParseFile(path)
 		if parseErr != nil {
-			return nil // skip invalid files
+			// Invalid blueprints should not prevent serving a card for valid peers.
+			return nil //nolint:nilerr
 		}
 		skills = append(skills, SkillFromBlueprint(bp, path))
 		return nil
