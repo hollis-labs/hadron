@@ -129,7 +129,7 @@ func hasColumn(t *testing.T, store *Store, table, column string) bool {
 	if err != nil {
 		t.Fatalf("pragma table_info(%s): %v", table, err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 	for rows.Next() {
 		var cid int
 		var name, ctype string

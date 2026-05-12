@@ -131,7 +131,7 @@ func (m *Manager) startWatcherLocked(trigger persistence.TriggerRecord) {
 
 // runFileWatcher processes fsnotify events for a single trigger with debouncing.
 func (m *Manager) runFileWatcher(ctx context.Context, fw *fileWatcher, trigger persistence.TriggerRecord) {
-	defer fw.watcher.Close()
+	defer func() { _ = fw.watcher.Close() }()
 
 	// Parse event filter if present in extract_inputs.
 	var eventFilter map[string]bool

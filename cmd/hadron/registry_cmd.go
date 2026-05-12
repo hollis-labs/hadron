@@ -33,7 +33,7 @@ func openRegistry() (*registry.Registry, func(), error) {
 		return nil, nil, fmt.Errorf("open store: %w", err)
 	}
 	reg := registry.New(store)
-	cleanup := func() { store.Close() }
+	cleanup := func() { _ = store.Close() }
 	return reg, cleanup, nil
 }
 

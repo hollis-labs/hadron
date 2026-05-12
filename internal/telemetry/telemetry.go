@@ -54,7 +54,7 @@ func (l *Logger) Write(entry LogEntry) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	enc := json.NewEncoder(f)
 	_ = enc.Encode(entry)
 }

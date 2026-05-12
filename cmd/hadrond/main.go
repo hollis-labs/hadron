@@ -101,14 +101,14 @@ func runServe(args []string) error {
 	if otelErr != nil {
 		log.Printf("warning: OTel init failed: %v", otelErr)
 	} else {
-		defer otelShutdown(otelCtx)
+		defer func() { _ = otelShutdown(otelCtx) }()
 	}
 
 	store, err := persistence.Open(cfg.DBPath)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	sett, err := settings.Load(cfg.DataDir)
 	if err != nil {
@@ -217,7 +217,7 @@ func runMCP(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	sett, err := settings.Load(cfg.DataDir)
 	if err != nil {

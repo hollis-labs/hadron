@@ -20,6 +20,10 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+func closeBody(body io.Closer) {
+	_ = body.Close()
+}
+
 // FileEntry represents a file or directory in the browser.
 type FileEntry struct {
 	Name  string `json:"name"`
@@ -188,7 +192,7 @@ func (a *App) ValidateBlueprintFile(path string) ValidateResult {
 	if err != nil {
 		return ValidateResult{Valid: false, Error: "call api: " + err.Error()}
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 
 	body, _ := io.ReadAll(resp.Body)
 	var result struct {
@@ -716,11 +720,11 @@ func waitForHealth(addr string, timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url)
 		if err == nil && resp.StatusCode == http.StatusOK {
-			resp.Body.Close()
+			closeBody(resp.Body)
 			return nil
 		}
 		if resp != nil {
-			resp.Body.Close()
+			closeBody(resp.Body)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

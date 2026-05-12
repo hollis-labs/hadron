@@ -699,7 +699,7 @@ func (m *Manager) writeEventLog(e Event) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = fmt.Fprintf(f, "%s type=%s section=%s step=%s msg=%s\n",
 		e.CreatedAt.Format(time.RFC3339Nano), e.Type, e.Section, e.StepName, e.Message)
 }

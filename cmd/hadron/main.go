@@ -29,6 +29,10 @@ var (
 	httpClient = &http.Client{Timeout: 30 * time.Second}
 )
 
+func closeBody(body io.Closer) {
+	_ = body.Close()
+}
+
 func main() {
 	root := &cobra.Command{
 		Use:   "hadron",
@@ -212,7 +216,7 @@ func buildValidateCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("request failed: %w", err)
 			}
-			defer resp.Body.Close()
+			defer closeBody(resp.Body)
 
 			var result map[string]any
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -407,7 +411,7 @@ func buildScheduleCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
+			defer closeBody(resp.Body)
 			if resp.StatusCode == http.StatusNoContent {
 				fmt.Println("deleted")
 				return nil
@@ -429,7 +433,7 @@ func patchScheduleEnabled(id string, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 	if resp.StatusCode == http.StatusOK {
 		fmt.Printf("schedule %s: enabled=%v\n", id, enabled)
 		return nil
@@ -547,7 +551,7 @@ func postJSON(url string, body any, out any) error {
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 	if resp.StatusCode >= 400 {
 		return printAPIError(resp)
 	}
@@ -562,7 +566,7 @@ func httpGet(url string, out any) error {
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 	if resp.StatusCode >= 400 {
 		return printAPIError(resp)
 	}
@@ -839,7 +843,7 @@ func openRegistryForPack() (*registry.Registry, func(), error) {
 		return nil, nil, err
 	}
 	reg := registry.New(store)
-	cleanup := func() { store.Close() }
+	cleanup := func() { _ = store.Close() }
 	return reg, cleanup, nil
 }
 

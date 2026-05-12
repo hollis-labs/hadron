@@ -28,7 +28,7 @@ type Manifest struct {
 }
 
 // Pack bundles a blueprint with all its imports into a .hbp archive (tar.gz with manifest).
-func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportResolver) error {
+func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportResolver) (err error) {
 	absBP, err := filepath.Abs(blueprintPath)
 	if err != nil {
 		return fmt.Errorf("resolve blueprint path: %w", err)
@@ -89,13 +89,25 @@ func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportReso
 	if err != nil {
 		return fmt.Errorf("create output file: %w", err)
 	}
-	defer outFile.Close()
+	defer func() {
+		if closeErr := outFile.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close output file: %w", closeErr)
+		}
+	}()
 
 	gw := gzip.NewWriter(outFile)
-	defer gw.Close()
+	defer func() {
+		if closeErr := gw.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close gzip writer: %w", closeErr)
+		}
+	}()
 
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
+	defer func() {
+		if closeErr := tw.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close tar writer: %w", closeErr)
+		}
+	}()
 
 	// Write manifest.json.
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
@@ -134,7 +146,7 @@ func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportReso
 }
 
 // Unpack extracts a .hbp archive to a directory and returns the manifest.
-func Unpack(archivePath string, outputDir string) (*Manifest, error) {
+func Unpack(archivePath string, outputDir string) (manifest *Manifest, err error) {
 	if outputDir == "" {
 		outputDir = "."
 	}
@@ -143,17 +155,23 @@ func Unpack(archivePath string, outputDir string) (*Manifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close archive: %w", closeErr)
+		}
+	}()
 
 	gr, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, fmt.Errorf("open gzip reader: %w", err)
 	}
-	defer gr.Close()
+	defer func() {
+		if closeErr := gr.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close gzip reader: %w", closeErr)
+		}
+	}()
 
 	tr := tar.NewReader(gr)
-
-	var manifest *Manifest
 
 	for {
 		header, err := tr.Next()

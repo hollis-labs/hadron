@@ -18,6 +18,10 @@ type Store struct {
 	db *sql.DB
 }
 
+func closeRows(rows *sql.Rows) {
+	_ = rows.Close()
+}
+
 var ErrInvalidCursor = errors.New("invalid cursor")
 
 type RunRecord struct {
@@ -262,7 +266,7 @@ func (s *Store) ListRunsByWorkspaceFiltered(ctx context.Context, workspaceID str
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]RunRecord, 0, limit)
 	for rows.Next() {
@@ -376,7 +380,7 @@ func (s *Store) ListSchedules(ctx context.Context) ([]ScheduleRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list schedules: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]ScheduleRecord, 0)
 	for rows.Next() {
@@ -429,7 +433,7 @@ func (s *Store) ListSchedulesByWorkspace(ctx context.Context, workspaceID string
 	if err != nil {
 		return nil, fmt.Errorf("list schedules by workspace: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]ScheduleRecord, 0)
 	for rows.Next() {
@@ -591,7 +595,7 @@ func (s *Store) ListDueSchedules(ctx context.Context, now time.Time, limit int) 
 	if err != nil {
 		return nil, fmt.Errorf("list due schedules: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]ScheduleRecord, 0, limit)
 	for rows.Next() {
@@ -722,7 +726,7 @@ func (s *Store) ListRunEventsFiltered(ctx context.Context, runID string, limit i
 	if err != nil {
 		return nil, fmt.Errorf("list run events: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]RunEventRecord, 0, limit)
 	for rows.Next() {
@@ -815,7 +819,7 @@ func (s *Store) ListPipelineRuns(ctx context.Context, limit int) ([]PipelineRunR
 	if err != nil {
 		return nil, fmt.Errorf("list pipeline runs: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]PipelineRunRecord, 0, limit)
 	for rows.Next() {
@@ -863,7 +867,7 @@ func (s *Store) ListPipelineRunsByWorkspace(ctx context.Context, workspaceID str
 	if err != nil {
 		return nil, fmt.Errorf("list pipeline runs by workspace: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]PipelineRunRecord, 0, limit)
 	for rows.Next() {
@@ -981,7 +985,7 @@ func (s *Store) ListPipelineStageRuns(ctx context.Context, pipelineRunID string)
 	if err != nil {
 		return nil, fmt.Errorf("list pipeline stage runs: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]PipelineStageRunRecord, 0)
 	for rows.Next() {
@@ -1046,7 +1050,7 @@ func (s *Store) ListWorkspaces(ctx context.Context) ([]WorkspaceRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list workspaces: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := []WorkspaceRecord{}
 	for rows.Next() {
@@ -1197,7 +1201,7 @@ func (s *Store) queryTriggers(ctx context.Context, query string, args ...any) ([
 	if err != nil {
 		return nil, fmt.Errorf("query triggers: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	out := make([]TriggerRecord, 0)
 	for rows.Next() {
