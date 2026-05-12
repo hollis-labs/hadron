@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { usePoll } from '../hooks/usePoll';
-import { openDirectoryDialog, listFilesInDir, enqueuePipeline, listPipelines, getPipelineStages, readBlueprintFile } from '../api/client';
+import { openDirectoryDialog, listFilesInDir, enqueuePipeline, listPipelines, getPipelineStages, readBlueprintFile, deleteBlueprintFile } from '../api/client';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatDuration, formatTime } from '../utils/format';
 import { shortPath } from '../utils/path';
@@ -142,7 +142,6 @@ export function PipelinesPage() {
   const handleDeletePipeline = async () => {
     if (!deleteTarget) return;
     try {
-      const { deleteBlueprintFile } = await import('../api/client');
       await deleteBlueprintFile(deleteTarget.path);
       toast.success('Pipeline file deleted');
       setDeleteTarget(null);
