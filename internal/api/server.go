@@ -426,14 +426,14 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runID := s.nextRunID()
-	if err := s.deps.Runner.Enqueue(r.Context(), execution.Request{
+	if enqueueErr := s.deps.Runner.Enqueue(r.Context(), execution.Request{
 		RunID:         runID,
 		WorkspaceID:   wsID,
 		BlueprintPath: body.BlueprintPath,
 		Inputs:        normalized,
 		DryRun:        body.DryRun,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	}); enqueueErr != nil {
+		writeError(w, http.StatusInternalServerError, enqueueErr.Error())
 		return
 	}
 
@@ -693,8 +693,8 @@ func (s *Server) patchSchedule(w http.ResponseWriter, r *http.Request, id string
 	}
 	cronExpr := existing.CronExpr
 	if body.CronExpr != nil {
-		if err := scheduler.ValidateCron(*body.CronExpr); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid cron: "+err.Error())
+		if validateErr := scheduler.ValidateCron(*body.CronExpr); validateErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid cron: "+validateErr.Error())
 			return
 		}
 		cronExpr = *body.CronExpr
@@ -711,14 +711,14 @@ func (s *Server) patchSchedule(w http.ResponseWriter, r *http.Request, id string
 	// Recalculate next run if cron changed or explicitly set
 	var nextRun *time.Time
 	if body.CronExpr != nil && enabled {
-		t, err := scheduler.NextRun(cronExpr, time.Now())
-		if err == nil {
+		t, nextErr := scheduler.NextRun(cronExpr, time.Now())
+		if nextErr == nil {
 			nextRun = &t
 		}
 	}
 	if body.NextRunAt != nil {
-		t, err := time.Parse(time.RFC3339, *body.NextRunAt)
-		if err != nil {
+		t, parseErr := time.Parse(time.RFC3339, *body.NextRunAt)
+		if parseErr != nil {
 			writeError(w, http.StatusBadRequest, "next_run_at must be RFC3339")
 			return
 		}
@@ -727,15 +727,15 @@ func (s *Server) patchSchedule(w http.ResponseWriter, r *http.Request, id string
 	// If no next_run override and no cron change, preserve existing next_run
 	if nextRun == nil && body.CronExpr == nil {
 		if existing.NextRunAt.Valid {
-			t, err := time.Parse(time.RFC3339, existing.NextRunAt.String)
-			if err == nil {
+			t, parseErr := time.Parse(time.RFC3339, existing.NextRunAt.String)
+			if parseErr == nil {
 				nextRun = &t
 			}
 		}
 	}
 
-	if err := s.deps.Schedules.UpdateScheduleFields(r.Context(), id, name, cronExpr, bpPath, enabled, nextRun); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if updateErr := s.deps.Schedules.UpdateScheduleFields(r.Context(), id, name, cronExpr, bpPath, enabled, nextRun); updateErr != nil {
+		writeError(w, http.StatusInternalServerError, updateErr.Error())
 		return
 	}
 	updated, err := s.deps.Schedules.GetSchedule(r.Context(), id)

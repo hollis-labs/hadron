@@ -720,8 +720,8 @@ func buildFmtCmd() *cobra.Command {
 
 			// Parse and re-serialize to canonical YAML
 			var tree any
-			if err := yaml.Unmarshal([]byte(normalised), &tree); err != nil {
-				return fmt.Errorf("parse %s: %w", path, err)
+			if unmarshalErr := yaml.Unmarshal([]byte(normalised), &tree); unmarshalErr != nil {
+				return fmt.Errorf("parse %s: %w", path, unmarshalErr)
 			}
 			canonical, err := yaml.Marshal(tree)
 			if err != nil {

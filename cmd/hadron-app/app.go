@@ -676,7 +676,7 @@ func findHadrond() (string, error) {
 	execPath, err := os.Executable()
 	if err == nil {
 		candidate := filepath.Join(filepath.Dir(execPath), "hadrond")
-		if _, err := os.Stat(candidate); err == nil {
+		if _, statErr := os.Stat(candidate); statErr == nil {
 			return candidate, nil
 		}
 	}

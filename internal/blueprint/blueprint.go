@@ -785,8 +785,8 @@ func RenderForExecution(bp *Blueprint, ctx map[string]any) (*Blueprint, error) {
 		return nil, fmt.Errorf("marshal blueprint for render: %w", err)
 	}
 	var out Blueprint
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("unmarshal blueprint for render: %w", err)
+	if unmarshalErr := json.Unmarshal(raw, &out); unmarshalErr != nil {
+		return nil, fmt.Errorf("unmarshal blueprint for render: %w", unmarshalErr)
 	}
 
 	// Render project fields.

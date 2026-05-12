@@ -48,8 +48,8 @@ func yamlToJSONInterface(t *testing.T, path string) interface{} {
 		t.Fatalf("failed to read %s: %v", path, err)
 	}
 	var raw interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("failed to parse YAML %s: %v", path, err)
+	if unmarshalErr := yaml.Unmarshal(data, &raw); unmarshalErr != nil {
+		t.Fatalf("failed to parse YAML %s: %v", path, unmarshalErr)
 	}
 	// YAML produces map[string]interface{} but also map[interface{}]interface{};
 	// round-trip through JSON to normalise.

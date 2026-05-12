@@ -63,8 +63,8 @@ steps:
       - name: hello
         cmd: echo v2
 `
-	if err := os.WriteFile(bpPath, []byte(v2), 0o644); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(bpPath, []byte(v2), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 
 	result2, err := reg.Index(tmpDir)

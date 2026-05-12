@@ -102,8 +102,8 @@ func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportReso
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
-	if err := addBytesToTar(tw, "manifest.json", manifestJSON); err != nil {
-		return fmt.Errorf("add manifest to archive: %w", err)
+	if addErr := addBytesToTar(tw, "manifest.json", manifestJSON); addErr != nil {
+		return fmt.Errorf("add manifest to archive: %w", addErr)
 	}
 
 	// Write the main blueprint.
