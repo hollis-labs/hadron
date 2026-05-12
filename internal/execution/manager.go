@@ -467,9 +467,9 @@ func calcRetryDelay(step blueprint.Step, attempt int) time.Duration {
 
 	// Apply max delay cap.
 	if step.RetryMaxDelay > 0 {
-		cap := time.Duration(step.RetryMaxDelay) * time.Second
-		if delay > cap {
-			delay = cap
+		maxDelay := time.Duration(step.RetryMaxDelay) * time.Second
+		if delay > maxDelay {
+			delay = maxDelay
 		}
 	}
 	return delay

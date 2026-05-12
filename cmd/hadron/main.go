@@ -124,7 +124,7 @@ func buildRunCmd() *cobra.Command {
 			}
 			fmt.Printf("run %s queued\n", runID)
 
-			return streamRunEvents(runID, result)
+			return streamRunEvents(runID)
 		},
 	}
 
@@ -135,7 +135,7 @@ func buildRunCmd() *cobra.Command {
 	return cmd
 }
 
-func streamRunEvents(runID string, initialRun map[string]any) error {
+func streamRunEvents(runID string) error {
 	var lastCursor string
 	deadline := time.Now().Add(10 * time.Minute)
 
@@ -715,17 +715,17 @@ func buildFmtCmd() *cobra.Command {
 				return err
 			}
 
-			// Apply compat alias normalisation
+			// Apply compat alias normalization
 			normalised := applyCompatAliases(string(raw))
 
-			// Parse and re-serialise to canonical YAML
+			// Parse and re-serialize to canonical YAML
 			var tree any
 			if err := yaml.Unmarshal([]byte(normalised), &tree); err != nil {
 				return fmt.Errorf("parse %s: %w", path, err)
 			}
 			canonical, err := yaml.Marshal(tree)
 			if err != nil {
-				return fmt.Errorf("serialise: %w", err)
+				return fmt.Errorf("serialize: %w", err)
 			}
 
 			if check {

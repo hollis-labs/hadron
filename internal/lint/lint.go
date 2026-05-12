@@ -40,7 +40,7 @@ var lintFuncMap = template.FuncMap{
 	"upper":    func(s string) string { return s },
 	"lower":    func(s string) string { return s },
 	"trim":     func(s string) string { return s },
-	"replace":  func(old, new, s string) string { return s },
+	"replace":  func(old, replacement, s string) string { return s },
 	"split":    func(sep, s string) []string { return nil },
 	"join":     func(sep string, a []string) string { return "" },
 	"basename": func(s string) string { return s },
@@ -69,7 +69,7 @@ func LintBlueprint(bp *blueprint.Blueprint, path string, rawContent []byte) []Is
 	}
 	var issues []Issue
 
-	issues = append(issues, checkTemplateSyntax(bp, path, rawContent)...)
+	issues = append(issues, checkTemplateSyntax(path, rawContent)...)
 	issues = append(issues, checkDuplicateStepNames(bp, path)...)
 	issues = append(issues, checkUnusedInputs(bp, path, rawContent)...)
 	issues = append(issues, checkUnreferencedImports(bp, path)...)
@@ -95,7 +95,7 @@ func LintPipeline(spec *pipeline.Spec, path string, rawContent []byte) []Issue {
 // ── Blueprint rules ───────────────────────────────────────────────────────────
 
 // checkTemplateSyntax finds template expressions that fail to parse.
-func checkTemplateSyntax(bp *blueprint.Blueprint, path string, rawContent []byte) []Issue {
+func checkTemplateSyntax(path string, rawContent []byte) []Issue {
 	var issues []Issue
 	raw := string(rawContent)
 

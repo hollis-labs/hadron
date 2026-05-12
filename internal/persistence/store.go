@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	// Register the modernc SQLite driver for database/sql.
 	_ "modernc.org/sqlite"
 )
 

@@ -146,7 +146,7 @@ steps:
 	if bp.Packages.Composer == nil || len(bp.Packages.Composer.Require) == 0 {
 		t.Fatalf("expected composer.require populated")
 	}
-	if bp.Packages.Composer.RequireDev == nil || len(bp.Packages.Composer.RequireDev) == 0 {
+	if len(bp.Packages.Composer.RequireDev) == 0 {
 		t.Fatalf("expected composer.require_dev populated from composerDev compat")
 	}
 	if !bp.Git.Init {

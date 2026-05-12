@@ -978,8 +978,8 @@ var templateFuncMap = template.FuncMap{
 	"upper": strings.ToUpper,
 	"lower": strings.ToLower,
 	"trim":  strings.TrimSpace,
-	"replace": func(old, new, s string) string {
-		return strings.ReplaceAll(s, old, new)
+	"replace": func(old, replacement, s string) string {
+		return strings.ReplaceAll(s, old, replacement)
 	},
 	"split": strings.Split,
 	"join":  strings.Join,

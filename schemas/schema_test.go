@@ -66,7 +66,7 @@ func yamlToJSONInterface(t *testing.T, path string) interface{} {
 }
 
 // normalizeYAML recursively converts map[interface{}]interface{} (from gopkg.in/yaml.v3)
-// to map[string]interface{} so it can be marshalled to JSON.
+// to map[string]interface{} so it can be marshaled to JSON.
 func normalizeYAML(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:

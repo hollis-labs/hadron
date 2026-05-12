@@ -94,7 +94,7 @@ func runServe(args []string) error {
 		return fmt.Errorf("ensure dirs: %w", err)
 	}
 
-	// Initialise OpenTelemetry tracing.
+	// Initialize OpenTelemetry tracing.
 	otelCtx := context.Background()
 	otelShutdown, otelErr := feotel.Init(otelCtx, feotel.WithServiceName("hadron"))
 	if otelErr != nil {

@@ -427,36 +427,6 @@ func truncateToLastN(s string, n int) string {
 	return s[len(s)-n:]
 }
 
-// extractStageOutputs scans run events for ::set-output directives.
-// Blueprints emit outputs by printing: ::set-output key=value
-// Kept for backward compatibility.
-func (r *Runner) extractStageOutputs(ctx context.Context, runID string) map[string]string {
-	events, err := r.store.ListRunEvents(ctx, runID, 1000)
-	if err != nil {
-		return nil
-	}
-	outputs := map[string]string{}
-	for _, ev := range events {
-		if !ev.Message.Valid {
-			continue
-		}
-		msg := ev.Message.String
-		// Scan each line for ::set-output directives
-		for _, line := range strings.Split(msg, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "::set-output ") {
-				kv := strings.TrimPrefix(line, "::set-output ")
-				if idx := strings.Index(kv, "="); idx > 0 {
-					key := strings.TrimSpace(kv[:idx])
-					val := strings.TrimSpace(kv[idx+1:])
-					outputs[key] = val
-				}
-			}
-		}
-	}
-	return outputs
-}
-
 // resolveStageInputs substitutes {{ stages.<name>.<key> }} and {{ inputs.<key> }}
 // references in stage inputs.
 func resolveStageInputs(inputs map[string]any, stageOutputs map[string]map[string]string, pipelineInputs map[string]string) map[string]any {
