@@ -117,7 +117,7 @@ func (m *Manager) startWatcherLocked(trigger persistence.TriggerRecord) {
 		debounce = 5 * time.Second
 	}
 
-	ctx, cancel := context.WithCancel(m.watchCtx)
+	ctx, cancel := context.WithCancel(m.watchCtx) // #nosec G118 -- cancel is retained in fileWatcher and called during watcher shutdown.
 	fw := &fileWatcher{
 		watcher:  watcher,
 		cancel:   cancel,

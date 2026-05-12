@@ -447,7 +447,7 @@ func (t *Step) UnmarshalJSON(data []byte) error {
 // ─── Parse ────────────────────────────────────────────────────────────────────
 
 func ParseFile(path string) (*Blueprint, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- ParseFile intentionally reads the caller-selected blueprint path.
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
@@ -1004,7 +1004,7 @@ var templateFuncMap = template.FuncMap{
 		if info.Size() > maxTemplateFileSize {
 			return "", fmt.Errorf("file too large: %s (max 1MB, got %d bytes)", path, info.Size())
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- readFile templates are capped to 1MB and explicitly requested by the blueprint.
 		if err != nil {
 			return "", fmt.Errorf("cannot read file %s: %w", path, err)
 		}

@@ -904,7 +904,7 @@ func (a *Adapter) handleBlueprintLint(_ context.Context, req mcp.CallToolRequest
 		return toolError("validation_error", "blueprint_path is required"), nil
 	}
 
-	rawContent, err := os.ReadFile(bpPath)
+	rawContent, err := os.ReadFile(bpPath) // #nosec G304 -- MCP validate intentionally reads a caller-provided blueprint path.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return toolError("not_found", "file not found"), nil
@@ -1046,7 +1046,7 @@ func (a *Adapter) handleBlueprintGet(_ context.Context, req mcp.CallToolRequest)
 	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
 		return toolError("validation_error", "path is outside the blueprints directory"), nil
 	}
-	data, err := os.ReadFile(absPath)
+	data, err := os.ReadFile(absPath) // #nosec G304 -- path was validated to stay within the blueprint directory.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return toolError("not_found", "blueprint file not found"), nil

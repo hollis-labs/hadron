@@ -17,7 +17,7 @@ func setupTestRegistry(t *testing.T) (*Registry, func()) {
 		t.Fatalf("open store: %v", err)
 	}
 	reg := New(store)
-	cleanup := func() { store.Close() }
+	cleanup := func() { _ = store.Close() }
 	return reg, cleanup
 }
 

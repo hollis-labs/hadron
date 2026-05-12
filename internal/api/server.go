@@ -173,8 +173,9 @@ func NewServer(addr string, deps Dependencies) *Server {
 
 	s.handler = corsMiddleware(propagation.HTTPMiddleware(mux))
 	s.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: s.handler,
+		Addr:              addr,
+		Handler:           s.handler,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
 }

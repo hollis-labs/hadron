@@ -46,11 +46,11 @@ func (l *Logger) Write(entry LogEntry) {
 	if entry.Level == "" {
 		entry.Level = "info"
 	}
-	if err := os.MkdirAll(l.logsDir, 0o755); err != nil {
+	if err := os.MkdirAll(l.logsDir, 0o750); err != nil {
 		return
 	}
 	path := filepath.Join(l.logsDir, entry.RunID+".jsonl")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- path is constrained to logsDir plus run ID.
 	if err != nil {
 		return
 	}

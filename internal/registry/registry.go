@@ -56,7 +56,7 @@ func (r *Registry) Index(dir string) (result IndexResult, err error) {
 			return nil
 		}
 
-		raw, readErr := os.ReadFile(path)
+		raw, readErr := os.ReadFile(path) // #nosec G304 G122 -- registry indexing intentionally reads discovered blueprint files.
 		if readErr != nil {
 			// Indexing is best-effort; unreadable files should not block valid peers.
 			return nil //nolint:nilerr
@@ -199,7 +199,7 @@ func (r *Registry) CurrentHash(nameOrSlug string) (string, error) {
 // VerifyPin checks that a blueprint file's current content hash matches the expected pinned hash.
 // Returns the file path and nil error on match, or an error describing the mismatch.
 func (r *Registry) VerifyPin(blueprintPath, pinnedHash string) error {
-	raw, err := os.ReadFile(blueprintPath)
+	raw, err := os.ReadFile(blueprintPath) // #nosec G304 -- pin verification intentionally reads the selected blueprint file.
 	if err != nil {
 		return fmt.Errorf("read blueprint for pin verification: %w", err)
 	}
@@ -214,7 +214,7 @@ func (r *Registry) VerifyPin(blueprintPath, pinnedHash string) error {
 // the expected pinned hash. This is a standalone function that does not require
 // a Registry instance.
 func VerifyFileHash(blueprintPath, pinnedHash string) error {
-	raw, err := os.ReadFile(blueprintPath)
+	raw, err := os.ReadFile(blueprintPath) // #nosec G304 -- hash verification intentionally reads the selected blueprint file.
 	if err != nil {
 		return fmt.Errorf("read blueprint for pin verification: %w", err)
 	}

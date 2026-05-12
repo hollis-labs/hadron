@@ -46,7 +46,7 @@ func (c *Config) Ensure() error {
 			continue
 		}
 		seen[dir] = true
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("ensure dir %s: %w", dir, err)
 		}
 	}

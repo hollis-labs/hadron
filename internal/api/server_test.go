@@ -24,7 +24,7 @@ func openTestStore(t *testing.T) *persistence.Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
@@ -74,7 +74,7 @@ func doRequest(t *testing.T, ts *httptest.Server, method, path string, body any)
 
 func decodeJSON(t *testing.T, resp *http.Response, out any) {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

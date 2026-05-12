@@ -115,7 +115,7 @@ func Open(path string) (*Store, error) {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir db dir: %w", err)
 	}
 
@@ -258,6 +258,7 @@ func (s *Store) ListRunsByWorkspaceFiltered(ctx context.Context, workspaceID str
 		args = append(args, cursorCreated, cursorCreated, cursorRun.ID)
 	}
 	if len(clauses) > 0 {
+		// #nosec G202 -- clauses are selected from fixed strings above; user input stays in args.
 		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
 	query += " ORDER BY created_at DESC, id DESC LIMIT ?"

@@ -489,6 +489,7 @@ func (r *runExecution) execCmd(ctx context.Context, section string, step bluepri
 		defer cancel()
 	}
 
+	// #nosec G204 -- executing user-authored blueprint commands is Hadron's core function.
 	c := exec.CommandContext(stepCtx, "bash", "-lc", cmd)
 	if step.Dir != "" {
 		c.Dir = step.Dir
@@ -529,6 +530,7 @@ func (r *runExecution) runBlueprintHooks(ctx context.Context, hooks []blueprint.
 		if strings.TrimSpace(h.Cmd) == "" {
 			continue
 		}
+		// #nosec G204 -- blueprint lifecycle hooks are explicit user-authored commands.
 		c := exec.CommandContext(ctx, "sh", "-c", h.Cmd)
 		out, err := c.CombinedOutput()
 		if err != nil {
@@ -549,6 +551,7 @@ func (r *runExecution) executeActionHooks(ctx context.Context, basePath string, 
 		switch h.Type {
 		case "cmd":
 			r.emit(section, step.Name, "hook_cmd", fmt.Sprintf("[hook] %s", h.Value))
+			// #nosec G204 -- action hooks are explicit user-authored commands.
 			c := exec.CommandContext(ctx, "bash", "-lc", h.Value)
 			if out, err := c.CombinedOutput(); err == nil {
 				r.emit(section, step.Name, "hook_output", strings.TrimSpace(string(out)))
@@ -691,11 +694,11 @@ func (m *Manager) emit(runID, section, stepName, eventType, message string) {
 }
 
 func (m *Manager) writeEventLog(e Event) {
-	if err := os.MkdirAll(m.logDir, 0o755); err != nil {
+	if err := os.MkdirAll(m.logDir, 0o750); err != nil {
 		return
 	}
 	path := filepath.Join(m.logDir, e.RunID+".log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- path is constrained to logDir plus run ID.
 	if err != nil {
 		return
 	}

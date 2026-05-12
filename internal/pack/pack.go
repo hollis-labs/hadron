@@ -40,7 +40,7 @@ func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportReso
 	}
 
 	// Compute content hash of the main blueprint.
-	raw, err := os.ReadFile(absBP)
+	raw, err := os.ReadFile(absBP) // #nosec G304 -- pack intentionally reads the user-selected blueprint path.
 	if err != nil {
 		return fmt.Errorf("read blueprint: %w", err)
 	}
@@ -85,7 +85,7 @@ func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportReso
 		outputPath = name + ".hbp"
 	}
 
-	outFile, err := os.Create(outputPath)
+	outFile, err := os.OpenFile(outputPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304 -- output path is user-selected pack destination.
 	if err != nil {
 		return fmt.Errorf("create output file: %w", err)
 	}
@@ -151,7 +151,7 @@ func Unpack(archivePath string, outputDir string) (manifest *Manifest, err error
 		outputDir = "."
 	}
 
-	f, err := os.Open(archivePath)
+	f, err := os.Open(archivePath) // #nosec G304 -- archive path is user-selected unpack source.
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
 	}
@@ -192,12 +192,12 @@ func Unpack(archivePath string, outputDir string) (manifest *Manifest, err error
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := os.MkdirAll(target, 0o750); err != nil {
 				return nil, fmt.Errorf("create directory %s: %w", target, err)
 			}
 		case tar.TypeReg:
 			// Ensure parent directory exists.
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return nil, fmt.Errorf("create parent dir for %s: %w", target, err)
 			}
 
@@ -214,7 +214,11 @@ func Unpack(archivePath string, outputDir string) (manifest *Manifest, err error
 				manifest = &m
 			}
 
-			if err := os.WriteFile(target, data, os.FileMode(header.Mode)); err != nil {
+			mode := header.FileInfo().Mode().Perm()
+			if mode == 0 {
+				mode = 0o600
+			}
+			if err := os.WriteFile(target, data, mode); err != nil {
 				return nil, fmt.Errorf("write %s: %w", target, err)
 			}
 		}
@@ -242,7 +246,7 @@ func addBytesToTar(tw *tar.Writer, name string, data []byte) error {
 }
 
 func addFileToTar(tw *tar.Writer, filePath, archiveName string) error {
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304 -- pack intentionally includes resolved blueprint import files.
 	if err != nil {
 		return fmt.Errorf("read %s: %w", filePath, err)
 	}

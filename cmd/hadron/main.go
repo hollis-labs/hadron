@@ -625,7 +625,7 @@ func buildLintCmd() *cobra.Command {
 
 			var allIssues []lint.Issue
 			for _, f := range files {
-				rawContent, readErr := os.ReadFile(f)
+				rawContent, readErr := os.ReadFile(f) // #nosec G304 -- lint intentionally reads selected blueprint files.
 				if readErr != nil {
 					allIssues = append(allIssues, lint.Issue{
 						File:     f,
@@ -714,7 +714,7 @@ func buildFmtCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
 
-			raw, err := os.ReadFile(path)
+			raw, err := os.ReadFile(path) // #nosec G304 -- fmt intentionally reads the selected blueprint file.
 			if err != nil {
 				return err
 			}
@@ -741,7 +741,7 @@ func buildFmtCmd() *cobra.Command {
 			}
 
 			if writeBack {
-				return os.WriteFile(path, canonical, 0o644)
+				return os.WriteFile(path, canonical, 0o600)
 			}
 
 			_, err = os.Stdout.Write(canonical)

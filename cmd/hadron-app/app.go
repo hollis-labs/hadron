@@ -182,12 +182,13 @@ func (a *App) ValidateBlueprintFile(path string) ValidateResult {
 		return ValidateResult{Valid: false, Error: "daemon not running"}
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- desktop app validates the user-selected blueprint file.
 	if err != nil {
 		return ValidateResult{Valid: false, Error: "read file: " + err.Error()}
 	}
 
 	url := fmt.Sprintf("http://%s/v1/blueprints/validate", addr)
+	// #nosec G107 -- addr is the local daemon address configured by the desktop app.
 	resp, err := http.Post(url, "application/x-yaml", bytes.NewReader(data))
 	if err != nil {
 		return ValidateResult{Valid: false, Error: "call api: " + err.Error()}
@@ -214,19 +215,19 @@ func (a *App) prefsPath() string {
 func (a *App) GetPreference(key string) string {
 	data, _ := os.ReadFile(a.prefsPath())
 	var m map[string]string
-	json.Unmarshal(data, &m) //nolint:errcheck
+	_ = json.Unmarshal(data, &m)
 	return m[key]
 }
 
 // SetPreference sets a preference key/value pair and persists it (exposed to frontend).
 func (a *App) SetPreference(key, value string) {
 	p := a.prefsPath()
-	data, _ := os.ReadFile(p)
+	data, _ := os.ReadFile(p) // #nosec G304 -- preferences path is derived from the app data directory.
 	m := map[string]string{}
-	json.Unmarshal(data, &m) //nolint:errcheck
+	_ = json.Unmarshal(data, &m)
 	m[key] = value
 	out, _ := json.MarshalIndent(m, "", "  ")
-	os.WriteFile(p, out, 0644) //nolint:errcheck
+	_ = os.WriteFile(p, out, 0o600)
 }
 
 // BlueprintMetaSummary is a lightweight summary of a blueprint's metadata.
@@ -245,7 +246,7 @@ type BlueprintMetaSummary struct {
 
 // ReadBlueprintFile reads raw YAML content from disk (exposed to frontend).
 func (a *App) ReadBlueprintFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- desktop app reads the user-selected blueprint file.
 	if err != nil {
 		return "", fmt.Errorf("read blueprint: %w", err)
 	}
@@ -267,7 +268,7 @@ func (a *App) ParseBlueprintFull(path string) (string, error) {
 
 // SaveBlueprintFile writes YAML content to an existing file (exposed to frontend).
 func (a *App) SaveBlueprintFile(path string, content string) error {
-	return os.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 // CreateBlueprintFile creates a new blueprint file and returns its full path (exposed to frontend).
@@ -279,7 +280,7 @@ func (a *App) CreateBlueprintFile(dir string, filename string, content string) (
 	if _, err := os.Stat(fullPath); err == nil {
 		return "", fmt.Errorf("file already exists: %s", fullPath)
 	}
-	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
 		return "", fmt.Errorf("create blueprint: %w", err)
 	}
 	return fullPath, nil
@@ -310,11 +311,11 @@ func (a *App) CopyBlueprintFile(srcPath, destDir string) (string, error) {
 	if _, err := os.Stat(dest); err == nil {
 		return "", fmt.Errorf("file already exists at destination: %s", dest)
 	}
-	data, err := os.ReadFile(srcPath)
+	data, err := os.ReadFile(srcPath) // #nosec G304 -- desktop app copies the user-selected source file.
 	if err != nil {
 		return "", fmt.Errorf("read source: %w", err)
 	}
-	if err := os.WriteFile(dest, data, 0644); err != nil {
+	if err := os.WriteFile(dest, data, 0o600); err != nil { // #nosec G703 -- destination directory is selected by the desktop user.
 		return "", fmt.Errorf("write destination: %w", err)
 	}
 	return dest, nil
@@ -323,7 +324,7 @@ func (a *App) CopyBlueprintFile(srcPath, destDir string) (string, error) {
 // ArchiveBlueprintFile moves a blueprint file to ~/.hadron/archive/ (exposed to frontend).
 func (a *App) ArchiveBlueprintFile(srcPath string) error {
 	archiveDir := filepath.Join(a.dataDir, "archive")
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(archiveDir, 0o750); err != nil {
 		return fmt.Errorf("create archive dir: %w", err)
 	}
 	name := filepath.Base(srcPath)
@@ -346,7 +347,7 @@ func (a *App) CreateDirectory(parentDir, name string) (string, error) {
 	if _, err := os.Stat(full); err == nil {
 		return "", fmt.Errorf("directory already exists: %s", full)
 	}
-	if err := os.MkdirAll(full, 0755); err != nil {
+	if err := os.MkdirAll(full, 0o750); err != nil {
 		return "", fmt.Errorf("create directory: %w", err)
 	}
 	return full, nil
@@ -486,7 +487,7 @@ func (a *App) ListTelemetryRuns() (string, error) {
 		}
 		runID := strings.TrimSuffix(e.Name(), ".jsonl")
 		// Count lines (events) by reading file
-		data, err := os.ReadFile(filepath.Join(logsDir, e.Name()))
+		data, err := os.ReadFile(filepath.Join(logsDir, e.Name())) // #nosec G304 -- e.Name comes from enumerating logsDir.
 		eventCount := 0
 		if err == nil {
 			for _, line := range strings.Split(string(data), "\n") {
@@ -524,7 +525,7 @@ func (a *App) ListTelemetryRuns() (string, error) {
 func (a *App) ReadTelemetryLog(runID string) (string, error) {
 	logsDir := filepath.Join(a.dataDir, "logs", "runs")
 	path := filepath.Join(logsDir, runID+".jsonl")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is constrained to logsDir plus run ID.
 	if err != nil {
 		return "", fmt.Errorf("read log file: %w", err)
 	}
@@ -629,6 +630,7 @@ func (a *App) startDaemon() {
 	logsDir := filepath.Join(base, "logs", "runs")
 	dataDir := base
 
+	// #nosec G204 -- bin is resolved from the bundled executable location or PATH.
 	cmd := exec.Command(bin, "serve",
 		"-addr", addr,
 		"-db", dbPath,

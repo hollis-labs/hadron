@@ -360,7 +360,7 @@ func TestRenderForExecution_ReadFileSizeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp file: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	// Write 2MB
 	chunk := make([]byte, 1024)
 	for i := 0; i < 2*1024; i++ {

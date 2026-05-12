@@ -79,6 +79,7 @@ func (r *Runner) Start(ctx context.Context, pipelineRunID, pipelinePath, workspa
 		return err
 	}
 
+	// #nosec G118 -- pipeline execution is daemon-owned background work after the run is persisted.
 	go r.execute(pipelineRunID, pipelinePath, workspaceID)
 	return nil
 }
