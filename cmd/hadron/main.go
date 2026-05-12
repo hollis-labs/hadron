@@ -48,7 +48,6 @@ func main() {
 		buildDaemonCmd(),
 		buildLintCmd(),
 		buildFmtCmd(),
-		buildPluginCmd(),
 		buildTestGenCmd(),
 		buildAgentCardCmd(),
 		buildRegistryCmd(),

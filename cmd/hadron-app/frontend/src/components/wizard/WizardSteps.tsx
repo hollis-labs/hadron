@@ -32,7 +32,7 @@ interface ReviewStepProps extends StepProps {
 
 // ── 1. Metadata ───────────────────────────────────────────────────────
 
-export function WizardMetadataStep({ data, setData: _, newTag, setNewTag, updateBlueprint }: MetadataStepProps) {
+export function WizardMetadataStep({ data, newTag, setNewTag, updateBlueprint }: MetadataStepProps) {
   return (
     <div>
       <h3 className="text-sm text-blue-400 mb-4 uppercase tracking-wider">Metadata</h3>
@@ -76,7 +76,7 @@ export function WizardMetadataStep({ data, setData: _, newTag, setNewTag, update
           {data.blueprint.tags.map((tag, i) => (
             <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground mr-1 mb-1">
               {tag}
-              <button onClick={() => updateBlueprint('tags', data.blueprint.tags.filter((_, j) => j !== i))}
+              <button type="button" onClick={() => updateBlueprint('tags', data.blueprint.tags.filter((_, j) => j !== i))}
                 className="ml-1 cursor-pointer bg-transparent border-none text-inherit text-xs">&times;</button>
             </span>
           ))}
@@ -582,7 +582,7 @@ export function WizardAdvancedStep({ data, setData }: StepProps) {
                   <Button variant="ghost" size="icon-sm" onClick={() => removeHook(bucket, hi)}><Trash2 size={12} /></Button>
                 </div>
               ))}
-              <button className="flex items-center gap-1 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors cursor-pointer bg-transparent border-none" onClick={() => addHook(bucket)}><Plus size={12} /> Add</button>
+              <button type="button" className="flex items-center gap-1 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded transition-colors cursor-pointer bg-transparent border-none" onClick={() => addHook(bucket)}><Plus size={12} /> Add</button>
             </div>
           ))}
         </div>
@@ -593,7 +593,7 @@ export function WizardAdvancedStep({ data, setData }: StepProps) {
 
 // ── 8. Review ─────────────────────────────────────────────────────────
 
-export function WizardReviewStep({ data, saving: _ }: ReviewStepProps) {
+export function WizardReviewStep({ data }: ReviewStepProps) {
   const yaml = convertWizardToYaml(data);
   const warnings: string[] = [];
   if (!data.blueprint.name && !data.blueprint.slug) warnings.push('Name or slug is required');

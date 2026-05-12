@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { Toaster } from 'sonner';
-import { DaemonProvider, useDaemon } from './contexts/DaemonContext';
+import { DaemonProvider } from './contexts/DaemonContext';
 import { NavigationProvider, useNavigation } from './contexts/NavigationContext';
 import { AppHeader } from './components/layout/AppHeader';
 import { AppNav, type NavPage } from './components/layout/AppNav';

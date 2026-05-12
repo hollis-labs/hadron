@@ -5,24 +5,17 @@ go 1.26.1
 require (
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/hollis-labs/fragments-engine/plugin v0.0.0
-	github.com/hollis-labs/mcp-helpers v0.0.0
-	github.com/hollis-labs/otel v0.0.0
+	github.com/hollis-labs/go-mcp v0.0.2
+	github.com/hollis-labs/go-otel v0.0.2
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
-	github.com/wailsapp/wails/v2 v2.11.0
+	github.com/wailsapp/wails/v2 v2.10.2
 	go.opentelemetry.io/otel v1.41.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
-
-replace github.com/hollis-labs/mcp-helpers => ../fragments-engine/libs/mcp
-
-replace github.com/hollis-labs/otel => ../fragments-engine/libs/otel
-
-replace github.com/hollis-labs/fragments-engine/plugin => ../fragments-engine/libs/plugin
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/go-otel/propagation"
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
@@ -22,7 +23,6 @@ import (
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/trigger"
-	"github.com/hollis-labs/otel/propagation"
 )
 
 // ── Store interfaces ──────────────────────────────────────────────────────────

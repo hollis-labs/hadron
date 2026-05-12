@@ -125,7 +125,6 @@ export async function deleteSchedule(id: string): Promise<void> {
 
 // ── Wails Go bindings ─────────────────────────────────────────────────
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const go: any = (window as any).go?.main?.App;
 
 export async function getDaemonAddr(): Promise<string> {

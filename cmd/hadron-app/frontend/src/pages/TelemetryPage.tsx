@@ -80,19 +80,7 @@ function TelemetryPageInner() {
     }
   }, []);
 
-  useEffect(() => { fetchRuns(); }, [fetchRuns]);
-
-  // Listen for global refresh shortcut
-  useEffect(() => {
-    const handler = () => {
-      fetchRuns();
-      if (selectedRunId) loadEntries(selectedRunId);
-    };
-    window.addEventListener('hadron:refresh', handler);
-    return () => window.removeEventListener('hadron:refresh', handler);
-  }, [fetchRuns, selectedRunId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadEntries = async (runId: string) => {
+  const loadEntries = useCallback(async (runId: string) => {
     setEntriesLoading(true);
     try {
       const data = await readTelemetryLog(runId);
@@ -103,7 +91,19 @@ function TelemetryPageInner() {
     } finally {
       setEntriesLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => { fetchRuns(); }, [fetchRuns]);
+
+  // Listen for global refresh shortcut
+  useEffect(() => {
+    const handler = () => {
+      fetchRuns();
+      if (selectedRunId) loadEntries(selectedRunId);
+    };
+    window.addEventListener('hadron:refresh', handler);
+    return () => window.removeEventListener('hadron:refresh', handler);
+  }, [fetchRuns, loadEntries, selectedRunId]);
 
   const handleSelectRun = (runId: string) => {
     setSelectedRunId(runId);

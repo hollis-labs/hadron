@@ -7,7 +7,7 @@ export function indent(s: string, n: number): string {
 
 export function yamlValue(v: string): string {
   if (!v) return '""';
-  if (/[:{}\[\],&#*?|<>=!%@`]/.test(v) || v.includes('\n') || v.startsWith("'") || v.startsWith('"')) {
+  if (/[:{}[\],&#*?|<>=!%@`]/.test(v) || v.includes('\n') || v.startsWith("'") || v.startsWith('"')) {
     return JSON.stringify(v);
   }
   return v;

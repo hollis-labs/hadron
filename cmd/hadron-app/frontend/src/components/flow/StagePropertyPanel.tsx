@@ -39,7 +39,8 @@ export function StagePropertyPanel({ nodeId, data, onUpdate, onDelete, onClose }
   };
 
   const removeInput = (key: string) => {
-    const { [key]: _, ...rest } = inputs;
+    const rest = { ...inputs };
+    delete rest[key];
     onUpdate(nodeId, { inputs: rest });
   };
 
