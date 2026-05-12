@@ -185,4 +185,11 @@ The most important architecture follow-ups are:
 1. Split `internal/api/server.go` into route registration, handlers, and request/response helpers.
 2. Split `internal/persistence/store.go` into migrations plus query families.
 3. Split `internal/execution/manager.go` into queue/worker coordination vs subprocess execution details.
-4. Add ADRs for daemon ownership, blueprint execution semantics, and desktop-app layering.
+4. Keep the ADR set current as major execution, pipeline, and desktop boundaries evolve.
+
+## 9. Architecture Decision Records
+
+Durable architecture decisions are recorded in
+[`docs/architecture/adr`](adr/README.md). The initial ADR set covers daemon
+ownership, client boundaries, blueprint execution dispatch, pipeline
+orchestration, and Wails app layering.
