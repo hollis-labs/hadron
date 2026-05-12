@@ -9,7 +9,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "lint:eslint": "eslint .",
-    "test": "node --import tsx --test src/utils/string.test.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "preview": "vite preview"
   },
   "dependencies": {
