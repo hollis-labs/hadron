@@ -1,26 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import { getSettings, saveSettings, selectDirectoryDialog, getBlueprintDir, setBlueprintDir } from '../api/client';
 import { Spinner } from '../components/ui/Spinner';
 import { FolderOpen, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { HadronSettings } from '../api/types';
+import { useAsyncResource } from '@/hooks/useAsyncResource';
 
 export function SettingsPage() {
-  const [settings, setSettings] = useState<HadronSettings | null>(null);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [defaultBpDir, setDefaultBpDir] = useState('');
 
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      getSettings().then(s => { setSettings(s); setError(null); }).catch(err => setError(String(err))),
-      getBlueprintDir().then(v => { if (v) setDefaultBpDir(v); }).catch(() => {}),
-    ]).finally(() => setLoading(false));
+  const loadSettings = useCallback(async () => {
+    const [settingsResult, blueprintDir] = await Promise.all([
+      getSettings(),
+      getBlueprintDir().catch(() => ''),
+    ]);
+    if (blueprintDir) setDefaultBpDir(blueprintDir);
+    return settingsResult;
   }, []);
+
+  const { data: settings, setData: setSettings, loading, error } = useAsyncResource(loadSettings);
 
   const handleSave = async () => {
     if (!settings) return;
@@ -42,15 +42,15 @@ export function SettingsPage() {
   };
 
   const updateExecution = (field: string, value: unknown) => {
-    setSettings(prev => prev ? { ...prev, execution: { ...prev.execution, [field]: value } } : prev);
+    setSettings(settings ? { ...settings, execution: { ...settings.execution, [field]: value } } : null);
   };
 
   const updateSafety = (field: string, value: unknown) => {
-    setSettings(prev => prev ? { ...prev, safety: { ...prev.safety, [field]: value } } : prev);
+    setSettings(settings ? { ...settings, safety: { ...settings.safety, [field]: value } } : null);
   };
 
   const updateTelemetry = (field: string, value: unknown) => {
-    setSettings(prev => prev ? { ...prev, telemetry: { ...prev.telemetry, [field]: value } } : prev);
+    setSettings(settings ? { ...settings, telemetry: { ...settings.telemetry, [field]: value } } : null);
   };
 
   if (loading) {
@@ -71,7 +71,7 @@ export function SettingsPage() {
           <div className="text-xl font-semibold text-foreground tracking-tight">Settings</div>
         </div>
         <div className="rounded-lg border border-red-500/30 bg-card overflow-hidden px-5 py-4 text-destructive">
-          {error || 'Failed to load settings'}
+          {error?.message || 'Failed to load settings'}
         </div>
       </div>
     );
