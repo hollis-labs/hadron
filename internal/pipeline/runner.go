@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -262,13 +263,13 @@ func (r *Runner) executeStage(ctx context.Context, p executeStageParams) (*Stage
 		Inputs:        resolvedInputs,
 	}); err != nil {
 		_ = r.store.UpdatePipelineStageRunStatus(ctx, p.pipelineRunID, p.stageIdx, "failed")
-		return &StageResult{Status: "failed"}, fmt.Errorf("enqueue stage %d run: %v", p.stageIdx, err)
+		return &StageResult{Status: "failed"}, fmt.Errorf("enqueue stage %d run: %w", p.stageIdx, err)
 	}
 
 	runRec, waitErr := r.waitForRunTerminal(ctx, runID, 60*time.Second)
 	if waitErr != nil {
 		_ = r.store.UpdatePipelineStageRunStatus(ctx, p.pipelineRunID, p.stageIdx, "failed")
-		return &StageResult{Status: "failed"}, fmt.Errorf("stage %d wait failed: %v", p.stageIdx, waitErr)
+		return &StageResult{Status: "failed"}, fmt.Errorf("stage %d wait failed: %w", p.stageIdx, waitErr)
 	}
 
 	// Capture outputs from run events.
@@ -619,7 +620,7 @@ func (r *Runner) waitForRunTerminal(ctx context.Context, runID string, timeout t
 	for time.Now().Before(deadline) {
 		rec, err := r.store.GetRun(ctx, runID)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}

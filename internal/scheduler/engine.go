@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -168,7 +169,7 @@ func (e *Engine) tick(ctx context.Context, now time.Time) error {
 		})
 		if err != nil {
 			_ = e.store.SetScheduleNextRun(ctx, sch.ID, expectedNext)
-			if strings.Contains(strings.ToLower(err.Error()), "unique") || err == sql.ErrNoRows {
+			if strings.Contains(strings.ToLower(err.Error()), "unique") || errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
 			e.bumpWorkerErrors()
