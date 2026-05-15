@@ -1,0 +1,53 @@
+project:
+  id: hadron
+  display_name: Hadron
+  status: active
+  purpose: |
+    Local-first, agent-first blueprint automation runner. Executes typed,
+    parameterized YAML blueprints (ordered shell task sequences) via a persistent
+    local daemon, exposing a REST API and MCP adapter so AI agents can trigger
+    and inspect runs. Part of the Hollis Labs suite; serves as the portfolio's
+    execution substrate with an append-only audit trail and deterministic,
+    namespace-scoped runs.
+catalog:
+  torque_project_id: null            # no Torque PRJ-* id found in catalog
+  cerberus_project_id: hadron        # ~/.cerberus/config.yaml projects: - id: hadron
+  tether_catalog_project: hadron     # ~/.tether/catalog/projects/hadron.yaml
+locations:
+  repo: ~/dev/hollis-labs/apps/hadron
+  agent_os_tracking: ~/dev/agent-os/workspaces/execution/hadron
+  state_dir: ~/.hadron
+  catalog: null                      # no project-owned catalog dir
+  artifacts: ~/.cerberus/apps/hadron
+build:
+  authority: cerberus
+  resource: hadron-daemon-service
+  command: make build
+deployment:
+  type: launchd
+  service_name: hadron-daemon-service
+  binary: ~/.cerberus/apps/hadron/hadron-daemon-service/bin/hadron-daemon-service
+docs:
+  readme: README.md
+  architecture: docs/architecture/ARCHITECTURE.md
+  adrs: docs/architecture/adr/
+  roadmap: null                      # no docs/roadmap.md; sprint plans in docs/
+roadmap:
+  current_phase: 'Phase 2 (Wails GUI) closeout + beta-readiness hardening'
+  pointer: null
+usage_examples:
+  - intent: Run a blueprint locally
+    command: hadron run examples/hello-hadron.yaml
+    note: Requires hadrond daemon running (hadrond serve).
+  - intent: Validate a blueprint before running it
+    command: hadron validate <blueprint.yaml>
+    note: Pure check; no daemon side effects.
+  - intent: Drive Hadron from an AI agent
+    command: hadrond mcp -token <secret> -token-scopes run.write,schedule.write,pipeline.write
+    note: MCP setup docs may have drifted; cross-check internal/mcpadapter/.
+  - intent: Build the daemon and CLI binaries
+    command: make build
+    note: Produces bin/hadrond and bin/hadron.
+scopes:
+  - hadron.backend.main
+related_projects: [ion, nanite, volon, torque, tesseract, stack-explorer]
