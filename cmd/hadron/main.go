@@ -29,6 +29,10 @@ var (
 	httpClient = &http.Client{Timeout: 30 * time.Second}
 )
 
+func closeBody(body io.Closer) {
+	_ = body.Close()
+}
+
 func main() {
 	root := &cobra.Command{
 		Use:   "hadron",
@@ -48,7 +52,6 @@ func main() {
 		buildDaemonCmd(),
 		buildLintCmd(),
 		buildFmtCmd(),
-		buildPluginCmd(),
 		buildTestGenCmd(),
 		buildAgentCardCmd(),
 		buildRegistryCmd(),
@@ -125,7 +128,7 @@ func buildRunCmd() *cobra.Command {
 			}
 			fmt.Printf("run %s queued\n", runID)
 
-			return streamRunEvents(runID, result)
+			return streamRunEvents(runID)
 		},
 	}
 
@@ -136,7 +139,7 @@ func buildRunCmd() *cobra.Command {
 	return cmd
 }
 
-func streamRunEvents(runID string, initialRun map[string]any) error {
+func streamRunEvents(runID string) error {
 	var lastCursor string
 	deadline := time.Now().Add(10 * time.Minute)
 
@@ -213,7 +216,7 @@ func buildValidateCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("request failed: %w", err)
 			}
-			defer resp.Body.Close()
+			defer closeBody(resp.Body)
 
 			var result map[string]any
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -408,7 +411,7 @@ func buildScheduleCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
+			defer closeBody(resp.Body)
 			if resp.StatusCode == http.StatusNoContent {
 				fmt.Println("deleted")
 				return nil
@@ -430,7 +433,7 @@ func patchScheduleEnabled(id string, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 	if resp.StatusCode == http.StatusOK {
 		fmt.Printf("schedule %s: enabled=%v\n", id, enabled)
 		return nil
@@ -548,7 +551,7 @@ func postJSON(url string, body any, out any) error {
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 	if resp.StatusCode >= 400 {
 		return printAPIError(resp)
 	}
@@ -563,7 +566,7 @@ func httpGet(url string, out any) error {
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 	if resp.StatusCode >= 400 {
 		return printAPIError(resp)
 	}
@@ -622,7 +625,7 @@ func buildLintCmd() *cobra.Command {
 
 			var allIssues []lint.Issue
 			for _, f := range files {
-				rawContent, readErr := os.ReadFile(f)
+				rawContent, readErr := os.ReadFile(f) // #nosec G304 -- lint intentionally reads selected blueprint files.
 				if readErr != nil {
 					allIssues = append(allIssues, lint.Issue{
 						File:     f,
@@ -711,22 +714,22 @@ func buildFmtCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
 
-			raw, err := os.ReadFile(path)
+			raw, err := os.ReadFile(path) // #nosec G304 -- fmt intentionally reads the selected blueprint file.
 			if err != nil {
 				return err
 			}
 
-			// Apply compat alias normalisation
+			// Apply compat alias normalization
 			normalised := applyCompatAliases(string(raw))
 
-			// Parse and re-serialise to canonical YAML
+			// Parse and re-serialize to canonical YAML
 			var tree any
-			if err := yaml.Unmarshal([]byte(normalised), &tree); err != nil {
-				return fmt.Errorf("parse %s: %w", path, err)
+			if unmarshalErr := yaml.Unmarshal([]byte(normalised), &tree); unmarshalErr != nil {
+				return fmt.Errorf("parse %s: %w", path, unmarshalErr)
 			}
 			canonical, err := yaml.Marshal(tree)
 			if err != nil {
-				return fmt.Errorf("serialise: %w", err)
+				return fmt.Errorf("serialize: %w", err)
 			}
 
 			if check {
@@ -738,7 +741,7 @@ func buildFmtCmd() *cobra.Command {
 			}
 
 			if writeBack {
-				return os.WriteFile(path, canonical, 0o644)
+				return os.WriteFile(path, canonical, 0o600)
 			}
 
 			_, err = os.Stdout.Write(canonical)
@@ -840,7 +843,7 @@ func openRegistryForPack() (*registry.Registry, func(), error) {
 		return nil, nil, err
 	}
 	reg := registry.New(store)
-	cleanup := func() { store.Close() }
+	cleanup := func() { _ = store.Close() }
 	return reg, cleanup, nil
 }
 

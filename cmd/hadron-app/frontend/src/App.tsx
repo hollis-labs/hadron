@@ -1,23 +1,11 @@
-import { useEffect, useCallback } from 'react';
+import { lazy, Suspense, useEffect, useCallback } from 'react';
 import { Toaster } from 'sonner';
-import { DaemonProvider, useDaemon } from './contexts/DaemonContext';
+import { DaemonProvider } from './contexts/DaemonContext';
 import { NavigationProvider, useNavigation } from './contexts/NavigationContext';
 import { AppHeader } from './components/layout/AppHeader';
 import { AppNav, type NavPage } from './components/layout/AppNav';
 import { AppFooter } from './components/layout/AppFooter';
-import { DashboardPage } from './pages/DashboardPage';
-import { BlueprintsPage } from './pages/BlueprintsPage';
-import { BlueprintDetailPage } from './pages/BlueprintDetailPage';
-import { BlueprintWizardPage } from './pages/BlueprintWizardPage';
-import { RunsPage } from './pages/RunsPage';
-import { RunDetailPage } from './pages/RunDetailPage';
-import { SchedulerPage } from './pages/SchedulerPage';
-import { PipelinesPage } from './pages/PipelinesPage';
-import { PipelineDetailPage } from './pages/PipelineDetailPage';
-import { FlowBuilderPage } from './pages/FlowBuilderPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { TelemetryPage } from './pages/TelemetryPage';
-import { HelpPage } from './pages/HelpPage';
+import { Spinner } from './components/ui/Spinner';
 
 // Wails runtime events are exposed on window.runtime in v2
 declare global {
@@ -51,6 +39,28 @@ const PAGE_TITLES: Record<NavPage, string> = {
   settings: 'Settings',
   help: 'Help',
 };
+
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const BlueprintsPage = lazy(() => import('./pages/BlueprintsPage').then(m => ({ default: m.BlueprintsPage })));
+const BlueprintDetailPage = lazy(() => import('./pages/BlueprintDetailPage').then(m => ({ default: m.BlueprintDetailPage })));
+const BlueprintWizardPage = lazy(() => import('./pages/BlueprintWizardPage').then(m => ({ default: m.BlueprintWizardPage })));
+const PipelinesPage = lazy(() => import('./pages/PipelinesPage').then(m => ({ default: m.PipelinesPage })));
+const PipelineDetailPage = lazy(() => import('./pages/PipelineDetailPage').then(m => ({ default: m.PipelineDetailPage })));
+const FlowBuilderPage = lazy(() => import('./pages/FlowBuilderPage').then(m => ({ default: m.FlowBuilderPage })));
+const RunsPage = lazy(() => import('./pages/RunsPage').then(m => ({ default: m.RunsPage })));
+const RunDetailPage = lazy(() => import('./pages/RunDetailPage').then(m => ({ default: m.RunDetailPage })));
+const SchedulerPage = lazy(() => import('./pages/SchedulerPage').then(m => ({ default: m.SchedulerPage })));
+const TelemetryPage = lazy(() => import('./pages/TelemetryPage').then(m => ({ default: m.TelemetryPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const HelpPage = lazy(() => import('./pages/HelpPage').then(m => ({ default: m.HelpPage })));
+
+function PageFallback() {
+  return (
+    <div className="flex h-full items-center justify-center text-muted-foreground">
+      <Spinner size={16} />
+    </div>
+  );
+}
 
 function AppShell() {
   const nav = useNavigation();
@@ -94,19 +104,21 @@ function AppShell() {
         <AppHeader page={PAGE_TITLES[nav.page]} phase={nav.page} />
 
         <main className="content">
-          {nav.page === 'dashboard' && <DashboardPage />}
-          {nav.page === 'blueprints' && <BlueprintsPage />}
-          {nav.page === 'blueprintDetail' && nav.selectedBlueprintPath && <BlueprintDetailPage />}
-          {nav.page === 'blueprintWizard' && <BlueprintWizardPage />}
-          {nav.page === 'pipelines' && <PipelinesPage />}
-          {nav.page === 'pipelineDetail' && nav.selectedPipelinePath && <PipelineDetailPage />}
-          {nav.page === 'flowBuilder' && <FlowBuilderPage />}
-          {nav.page === 'runs' && <RunsPage />}
-          {nav.page === 'schedules' && <SchedulerPage />}
-          {nav.page === 'telemetry' && <TelemetryPage />}
-          {nav.page === 'settings' && <SettingsPage />}
-          {nav.page === 'help' && <HelpPage />}
-          {nav.page === 'runDetail' && nav.selectedRunId && <RunDetailPage />}
+          <Suspense fallback={<PageFallback />}>
+            {nav.page === 'dashboard' && <DashboardPage />}
+            {nav.page === 'blueprints' && <BlueprintsPage />}
+            {nav.page === 'blueprintDetail' && nav.selectedBlueprintPath && <BlueprintDetailPage />}
+            {nav.page === 'blueprintWizard' && <BlueprintWizardPage />}
+            {nav.page === 'pipelines' && <PipelinesPage />}
+            {nav.page === 'pipelineDetail' && nav.selectedPipelinePath && <PipelineDetailPage />}
+            {nav.page === 'flowBuilder' && <FlowBuilderPage />}
+            {nav.page === 'runs' && <RunsPage />}
+            {nav.page === 'schedules' && <SchedulerPage />}
+            {nav.page === 'telemetry' && <TelemetryPage />}
+            {nav.page === 'settings' && <SettingsPage />}
+            {nav.page === 'help' && <HelpPage />}
+            {nav.page === 'runDetail' && nav.selectedRunId && <RunDetailPage />}
+          </Suspense>
         </main>
 
         <AppFooter phase={nav.page} />

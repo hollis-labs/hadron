@@ -17,7 +17,7 @@ func setupTestRegistry(t *testing.T) (*Registry, func()) {
 		t.Fatalf("open store: %v", err)
 	}
 	reg := New(store)
-	cleanup := func() { store.Close() }
+	cleanup := func() { _ = store.Close() }
 	return reg, cleanup
 }
 
@@ -135,8 +135,8 @@ steps:
       - name: hello
         cmd: echo hello modified
 `
-	if err := os.WriteFile(bpPath, []byte(modified), 0o644); err != nil {
-		t.Fatalf("write modified blueprint: %v", err)
+	if writeErr := os.WriteFile(bpPath, []byte(modified), 0o600); writeErr != nil {
+		t.Fatalf("write modified blueprint: %v", writeErr)
 	}
 
 	result2, err := reg.Index(tmpDir)

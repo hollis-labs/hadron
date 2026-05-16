@@ -117,7 +117,7 @@ func (m *Manager) startWatcherLocked(trigger persistence.TriggerRecord) {
 		debounce = 5 * time.Second
 	}
 
-	ctx, cancel := context.WithCancel(m.watchCtx)
+	ctx, cancel := context.WithCancel(m.watchCtx) // #nosec G118 -- cancel is retained in fileWatcher and called during watcher shutdown.
 	fw := &fileWatcher{
 		watcher:  watcher,
 		cancel:   cancel,
@@ -131,7 +131,7 @@ func (m *Manager) startWatcherLocked(trigger persistence.TriggerRecord) {
 
 // runFileWatcher processes fsnotify events for a single trigger with debouncing.
 func (m *Manager) runFileWatcher(ctx context.Context, fw *fileWatcher, trigger persistence.TriggerRecord) {
-	defer fw.watcher.Close()
+	defer func() { _ = fw.watcher.Close() }()
 
 	// Parse event filter if present in extract_inputs.
 	var eventFilter map[string]bool

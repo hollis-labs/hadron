@@ -87,7 +87,8 @@ export function PipelineEditorModal({ mode, initialForm, editorPath, currentDir,
       ...f,
       stages: f.stages.map((s, i) => {
         if (i !== stageIndex) return s;
-        const { [key]: _, ...rest } = s.inputs;
+        const rest = { ...s.inputs };
+        delete rest[key];
         return { ...s, inputs: rest };
       }),
     }));
@@ -114,7 +115,8 @@ export function PipelineEditorModal({ mode, initialForm, editorPath, currentDir,
 
   const removePipelineInput = (key: string) => {
     setForm(f => {
-      const { [key]: _, ...rest } = f.inputs;
+      const rest = { ...f.inputs };
+      delete rest[key];
       return { ...f, inputs: rest };
     });
   };

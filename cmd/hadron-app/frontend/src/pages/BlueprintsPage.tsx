@@ -320,7 +320,7 @@ export function BlueprintsPage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [focusIndex, filteredEntries, nav]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focusIndex, filteredEntries, nav]);
 
   useEffect(() => { setFocusIndex(-1); }, [currentDir, search]);
   useEffect(() => { focusRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [focusIndex]);

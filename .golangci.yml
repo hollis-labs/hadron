@@ -151,6 +151,12 @@ linters:
         linters:
           - unparam
 
+      # Test files create fixtures with broad permissions and fake secrets.
+      # Keep gosec focused on production paths.
+      - path: _test\.go
+        linters:
+          - gosec
+
       # Generated files belt-and-suspenders (in case generated: lax misses).
       - path: _gen\.go
         linters:
@@ -161,6 +167,7 @@ linters:
           - all
 
     paths:
+      - cmd/hadron-app/frontend/node_modules$
       - third_party$
       - builtin$
       - examples$

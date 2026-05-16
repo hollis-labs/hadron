@@ -9,10 +9,10 @@ import (
 )
 
 type Settings struct {
-	BlueprintDir string             `json:"blueprint_dir"`
-	Execution    ExecutionSettings  `json:"execution"`
-	Safety       SafetySettings     `json:"safety"`
-	Telemetry    TelemetrySettings  `json:"telemetry"`
+	BlueprintDir string            `json:"blueprint_dir"`
+	Execution    ExecutionSettings `json:"execution"`
+	Safety       SafetySettings    `json:"safety"`
+	Telemetry    TelemetrySettings `json:"telemetry"`
 }
 
 type TelemetrySettings struct {
@@ -74,7 +74,7 @@ func DefaultSettings() *Settings {
 func Load(dataDir string) (*Settings, error) {
 	settingsPath := filepath.Join(dataDir, "settings.json")
 
-	data, err := os.ReadFile(settingsPath)
+	data, err := os.ReadFile(settingsPath) // #nosec G304 -- settingsPath is derived from Hadron's configured data directory.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return DefaultSettings(), nil
@@ -103,7 +103,7 @@ func (s *Settings) Save(dataDir string) error {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
-	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
+	if err := os.WriteFile(settingsPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write settings: %w", err)
 	}
 

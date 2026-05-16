@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
@@ -19,7 +20,6 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/scheduler"
-	"github.com/hollis-labs/mcp-helpers/budget"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -208,7 +208,11 @@ func (a *Adapter) registerBlueprintTools(s *server.MCPServer) {
 
 	var blueprintFiles []string
 	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			// Registration is best-effort; skip inaccessible entries.
+			return nil //nolint:nilerr
+		}
+		if d.IsDir() {
 			return nil
 		}
 		ext := filepath.Ext(d.Name())
@@ -526,8 +530,8 @@ func (a *Adapter) handleRunEnqueue(ctx context.Context, req mcp.CallToolRequest)
 	inputsRaw := strings.TrimSpace(req.GetString("inputs_json", ""))
 	inputs := map[string]any{}
 	if inputsRaw != "" {
-		if err := json.Unmarshal([]byte(inputsRaw), &inputs); err != nil {
-			return toolError("validation_error", "inputs_json must be a JSON object"), nil
+		if unmarshalErr := json.Unmarshal([]byte(inputsRaw), &inputs); unmarshalErr != nil {
+			return toolError("validation_error", "inputs_json must be a JSON object"), nil //nolint:nilerr
 		}
 	}
 	normalized, err := blueprint.NormalizeInputs(bp, inputs)
@@ -830,7 +834,7 @@ func (a *Adapter) handlePipelineGraph(ctx context.Context, req mcp.CallToolReque
 	// Parse pipeline spec for DAG structure.
 	spec, parseErr := pipeline.ParseFile(runRec.PipelinePath)
 	if parseErr != nil {
-		return toolError("internal_error", "cannot parse pipeline spec: "+parseErr.Error()), nil
+		return toolError("internal_error", "cannot parse pipeline spec: "+parseErr.Error()), nil //nolint:nilerr
 	}
 
 	nodes := make([]map[string]any, 0, len(spec.Stages))
@@ -900,7 +904,7 @@ func (a *Adapter) handleBlueprintLint(_ context.Context, req mcp.CallToolRequest
 		return toolError("validation_error", "blueprint_path is required"), nil
 	}
 
-	rawContent, err := os.ReadFile(bpPath)
+	rawContent, err := os.ReadFile(bpPath) // #nosec G304 -- MCP validate intentionally reads a caller-provided blueprint path.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return toolError("not_found", "file not found"), nil
@@ -951,7 +955,7 @@ func (a *Adapter) handleBlueprintValidate(_ context.Context, req mcp.CallToolReq
 	}
 	_, err := blueprint.ParseBytes([]byte(content))
 	if err != nil {
-		return toolJSON(map[string]any{"valid": false, "error": err.Error()}), nil
+		return toolJSON(map[string]any{"valid": false, "error": err.Error()}), nil //nolint:nilerr
 	}
 	return toolJSON(map[string]any{"valid": true}), nil
 }
@@ -963,18 +967,16 @@ func (a *Adapter) handleBlueprintsList(_ context.Context, req mcp.CallToolReques
 
 	var items []map[string]any
 	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			// Listing is best-effort; skip inaccessible entries.
+			return nil //nolint:nilerr
+		}
+		if d.IsDir() {
 			return nil
 		}
 		ext := filepath.Ext(d.Name())
 		if ext != ".yaml" && ext != ".yml" {
 			return nil
-		}
-
-		// Relative path from blueprint dir for cleaner display
-		relPath, _ := filepath.Rel(dir, path)
-		if relPath == "" {
-			relPath = d.Name()
 		}
 
 		entry := map[string]any{
@@ -1035,16 +1037,16 @@ func (a *Adapter) handleBlueprintGet(_ context.Context, req mcp.CallToolRequest)
 	// Resolve to absolute and ensure the path is within the blueprints directory.
 	absPath, err := filepath.Abs(bpPath)
 	if err != nil {
-		return toolError("validation_error", "invalid path"), nil
+		return toolError("validation_error", "invalid path"), nil //nolint:nilerr
 	}
 	absDir, err := filepath.Abs(a.blueprintDir)
 	if err != nil {
-		return toolError("internal_error", "cannot resolve blueprint directory"), nil
+		return toolError("internal_error", "cannot resolve blueprint directory"), nil //nolint:nilerr
 	}
 	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
 		return toolError("validation_error", "path is outside the blueprints directory"), nil
 	}
-	data, err := os.ReadFile(absPath)
+	data, err := os.ReadFile(absPath) // #nosec G304 -- path was validated to stay within the blueprint directory.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return toolError("not_found", "blueprint file not found"), nil
@@ -1227,7 +1229,7 @@ func (a *Adapter) handleTriggerWatch(ctx context.Context, req mcp.CallToolReques
 	// Parse config
 	var cfg map[string]any
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
-		return toolError("validation_error", "config must be valid JSON: "+err.Error()), nil
+		return toolError("validation_error", "config must be valid JSON: "+err.Error()), nil //nolint:nilerr
 	}
 
 	triggerID := fmt.Sprintf("mcp-trig-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&runSeq, 1))

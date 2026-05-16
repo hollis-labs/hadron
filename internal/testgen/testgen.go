@@ -243,9 +243,10 @@ func invalidCases(inp blueprint.Input, validBase map[string]any) []InvalidCase {
 		// Wrong type: string instead of array.
 		add("not-an-array", "wrong type (string instead of array)")
 		// Array with wrong items_type.
-		if inp.ItemsType == "string" {
+		switch inp.ItemsType {
+		case "string":
 			add([]any{12345}, "array with wrong items_type (number instead of string)")
-		} else if inp.ItemsType == "number" {
+		case "number":
 			add([]any{"wrong"}, "array with wrong items_type (string instead of number)")
 		}
 	}

@@ -447,7 +447,7 @@ func (t *Step) UnmarshalJSON(data []byte) error {
 // ─── Parse ────────────────────────────────────────────────────────────────────
 
 func ParseFile(path string) (*Blueprint, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- ParseFile intentionally reads the caller-selected blueprint path.
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
@@ -785,8 +785,8 @@ func RenderForExecution(bp *Blueprint, ctx map[string]any) (*Blueprint, error) {
 		return nil, fmt.Errorf("marshal blueprint for render: %w", err)
 	}
 	var out Blueprint
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("unmarshal blueprint for render: %w", err)
+	if unmarshalErr := json.Unmarshal(raw, &out); unmarshalErr != nil {
+		return nil, fmt.Errorf("unmarshal blueprint for render: %w", unmarshalErr)
 	}
 
 	// Render project fields.
@@ -978,8 +978,8 @@ var templateFuncMap = template.FuncMap{
 	"upper": strings.ToUpper,
 	"lower": strings.ToLower,
 	"trim":  strings.TrimSpace,
-	"replace": func(old, new, s string) string {
-		return strings.ReplaceAll(s, old, new)
+	"replace": func(old, replacement, s string) string {
+		return strings.ReplaceAll(s, old, replacement)
 	},
 	"split": strings.Split,
 	"join":  strings.Join,
@@ -1004,7 +1004,7 @@ var templateFuncMap = template.FuncMap{
 		if info.Size() > maxTemplateFileSize {
 			return "", fmt.Errorf("file too large: %s (max 1MB, got %d bytes)", path, info.Size())
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- readFile templates are capped to 1MB and explicitly requested by the blueprint.
 		if err != nil {
 			return "", fmt.Errorf("cannot read file %s: %w", path, err)
 		}

@@ -172,11 +172,11 @@ steps:
       - name: copy-database
         cmd: |
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          cp "{{ .inputs.db_path }}" "{{ .inputs.backup_dir }}/backup_\${TIMESTAMP}.db"
+          cp "{{ .inputs.db_path }}" "{{ .inputs.backup_dir }}/backup_${'${'}TIMESTAMP}.db"
       - name: compress-backup
         cmd: |
           LATEST=$(ls -t "{{ .inputs.backup_dir }}"/backup_*.db | head -1)
-          gzip "\$LATEST"
+          gzip "$LATEST"
         if: "{{ .inputs.compress }}"
       - name: report
         cmd: |

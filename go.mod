@@ -1,28 +1,21 @@
 module github.com/hollis-labs/hadron
 
-go 1.26.1
+go 1.26.3
 
 require (
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/hollis-labs/fragments-engine/plugin v0.0.0
-	github.com/hollis-labs/mcp-helpers v0.0.0
-	github.com/hollis-labs/otel v0.0.0
+	github.com/hollis-labs/go-mcp v0.0.2
+	github.com/hollis-labs/go-otel v0.0.2
+	github.com/hollis-labs/go-scheduler v0.1.0
 	github.com/mark3labs/mcp-go v0.44.1
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
-	github.com/wailsapp/wails/v2 v2.11.0
+	github.com/wailsapp/wails/v2 v2.10.2
 	go.opentelemetry.io/otel v1.41.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
-
-replace github.com/hollis-labs/mcp-helpers => ../fragments-engine/libs/mcp
-
-replace github.com/hollis-labs/otel => ../fragments-engine/libs/otel
-
-replace github.com/hollis-labs/fragments-engine/plugin => ../fragments-engine/libs/plugin
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -55,6 +48,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/samber/lo v1.49.1 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
@@ -72,11 +66,11 @@ require (
 	go.opentelemetry.io/otel/sdk v1.41.0 // indirect
 	go.opentelemetry.io/otel/trace v1.41.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
-	golang.org/x/net v0.50.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260209200024-4cfbd4190f57 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect
 	google.golang.org/grpc v1.79.1 // indirect

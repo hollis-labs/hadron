@@ -9,6 +9,7 @@ import { listTelemetryRuns, readTelemetryLog, deleteTelemetryLog } from '../api/
 import { EmptyState } from '../components/ui/EmptyState';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import type { TelemetryRunSummary, TelemetryLogEntry } from '../api/types';
+import { useAsyncResource } from '@/hooks/useAsyncResource';
 
 // Error boundary to prevent page from crashing the whole app
 class TelemetryErrorBoundary extends Component<{ children: ReactNode; onRetry: () => void }, { error: Error | null }> {
@@ -59,57 +60,58 @@ export function TelemetryPage() {
 
 function TelemetryPageInner() {
   const nav = useNavigation();
-  const [runs, setRuns] = useState<TelemetryRunSummary[]>([]);
-  const [loading, setLoading] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [entries, setEntries] = useState<TelemetryLogEntry[]>([]);
-  const [entriesLoading, setEntriesLoading] = useState(false);
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
   const [search, setSearch] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const fetchRuns = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await listTelemetryRuns();
-      setRuns(data);
-    } catch (err) {
-      toast.error(`Failed to load telemetry runs: ${err}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchRuns = useCallback(() => listTelemetryRuns(), []);
+  const {
+    data: loadedRuns,
+    loading,
+    refresh: refreshRuns,
+  } = useAsyncResource<TelemetryRunSummary[]>(fetchRuns);
+  const runs = loadedRuns ?? [];
 
-  useEffect(() => { fetchRuns(); }, [fetchRuns]);
+  const fetchEntries = useCallback(async () => {
+    if (!selectedRunId) return [];
+    return readTelemetryLog(selectedRunId);
+  }, [selectedRunId]);
+  const {
+    data: loadedEntries,
+    loading: entriesLoading,
+    refresh: refreshEntries,
+    setData: setEntries,
+  } = useAsyncResource<TelemetryLogEntry[]>(fetchEntries, { enabled: selectedRunId !== null });
+  const entries = loadedEntries ?? [];
+
+  const reloadRuns = useCallback(async () => {
+    const result = await refreshRuns();
+    if (!result) toast.error('Failed to load telemetry runs');
+    return result;
+  }, [refreshRuns]);
+
+  const reloadEntries = useCallback(async () => {
+    if (!selectedRunId) return null;
+    const result = await refreshEntries();
+    if (!result) toast.error('Failed to load log');
+    return result;
+  }, [refreshEntries, selectedRunId]);
 
   // Listen for global refresh shortcut
   useEffect(() => {
     const handler = () => {
-      fetchRuns();
-      if (selectedRunId) loadEntries(selectedRunId);
+      void reloadRuns();
+      if (selectedRunId) void reloadEntries();
     };
     window.addEventListener('hadron:refresh', handler);
     return () => window.removeEventListener('hadron:refresh', handler);
-  }, [fetchRuns, selectedRunId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadEntries = async (runId: string) => {
-    setEntriesLoading(true);
-    try {
-      const data = await readTelemetryLog(runId);
-      setEntries(data);
-    } catch (err) {
-      toast.error(`Failed to load log: ${err}`);
-      setEntries([]);
-    } finally {
-      setEntriesLoading(false);
-    }
-  };
+  }, [reloadRuns, reloadEntries, selectedRunId]);
 
   const handleSelectRun = (runId: string) => {
     setSelectedRunId(runId);
     setLevelFilter('all');
     setSearch('');
-    loadEntries(runId);
   };
 
   const handleBack = () => {
@@ -123,7 +125,7 @@ function TelemetryPageInner() {
       toast.success('Log deleted');
       setDeleteConfirm(null);
       if (selectedRunId === runId) handleBack();
-      fetchRuns();
+      void reloadRuns();
     } catch (err) {
       toast.error(`Delete failed: ${err}`);
     }

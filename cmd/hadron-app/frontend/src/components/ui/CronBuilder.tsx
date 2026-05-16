@@ -51,7 +51,7 @@ function validateField(value: string, rangeStr: string): string | null {
   if (stepPattern.test(value) || rangePattern.test(value) || listPattern.test(value) || numberPattern.test(value)) {
     // Check all numbers are within range
     const [lo, hi] = rangeStr.split('-').map(Number);
-    const nums = value.replace(/[*\/]/g, ',').split(',').filter(s => /^\d+$/.test(s)).map(Number);
+    const nums = value.replace(/[*/]/g, ',').split(',').filter(s => /^\d+$/.test(s)).map(Number);
     for (const n of nums) {
       if (n < lo || n > hi) return `Out of range (${rangeStr})`;
     }
@@ -135,7 +135,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
 
   const handleFieldChange = useCallback((key: keyof CronFields, val: string) => {
     // Only allow valid cron characters
-    const cleaned = val.replace(/[^0-9*,\-\/]/g, '');
+    const cleaned = val.replace(/[^0-9*,-/]/g, '');
     const updated = { ...fields, [key]: cleaned };
     setFields(updated);
 

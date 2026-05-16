@@ -1,4 +1,7 @@
-.PHONY: build install test lint run-daemon e2e app app-dev
+.PHONY: build install test test-ui lint lint-go lint-ui typecheck run-daemon e2e app app-dev
+
+GO_PACKAGES := ./cmd/hadron ./cmd/hadron-app ./cmd/hadrond ./internal/... ./schemas/...
+GO_LINT_CACHE_DIR := /tmp/hadron-go-build
 
 build:
 	go build -o bin/hadrond ./cmd/hadrond
@@ -9,10 +12,27 @@ install:
 	go install ./cmd/hadron
 
 test:
-	go test ./...
+	go test $(GO_PACKAGES)
 
-lint:
-	go vet ./...
+test-ui:
+	cd cmd/hadron-app/frontend && npm run test -- --run
+
+lint: lint-go lint-ui
+
+lint-go:
+	mkdir -p $(GO_LINT_CACHE_DIR)
+	GOCACHE=$(GO_LINT_CACHE_DIR) go vet $(GO_PACKAGES)
+	GOCACHE=$(GO_LINT_CACHE_DIR) golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
+	GOCACHE=$(GO_LINT_CACHE_DIR) staticcheck $(GO_PACKAGES)
+	GOCACHE=$(GO_LINT_CACHE_DIR) errcheck $(GO_PACKAGES)
+	GOCACHE=$(GO_LINT_CACHE_DIR) govulncheck $(GO_PACKAGES)
+
+lint-ui:
+	cd cmd/hadron-app/frontend && npm run lint
+	cd cmd/hadron-app/frontend && npm run lint:eslint
+
+typecheck:
+	cd cmd/hadron-app/frontend && npm run typecheck
 
 run-daemon:
 	go run ./cmd/hadrond

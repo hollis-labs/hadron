@@ -83,7 +83,7 @@ func writeToFiles(fs *testgen.FixtureSet, bpPath, outputDir, format string) erro
 	name := strings.TrimSuffix(base, ext)
 
 	dir := filepath.Join(outputDir, name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
@@ -145,7 +145,7 @@ func writeFixtureFile(path string, data any, prefix string, marshal marshalFunc)
 	}
 
 	content := prefix + string(b)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

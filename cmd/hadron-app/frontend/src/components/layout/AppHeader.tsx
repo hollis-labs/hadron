@@ -72,7 +72,7 @@ export function AppHeader({ page, phase }: AppHeaderProps) {
     try {
       await daemon.createWorkspace(id, name);
       setShowWorkspaceModal(false);
-    } catch (err) {
+    } catch {
       // toast is handled in DaemonContext
     } finally {
       setWsCreating(false);

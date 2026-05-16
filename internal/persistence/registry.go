@@ -116,7 +116,7 @@ func (s *Store) SearchRegistry(ctx context.Context, query string) ([]RegistryEnt
 	if err != nil {
 		return nil, fmt.Errorf("search registry: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []RegistryEntry
 	for rows.Next() {
@@ -153,7 +153,7 @@ func (s *Store) ListRegistryEntries(ctx context.Context) ([]RegistryEntry, error
 	if err != nil {
 		return nil, fmt.Errorf("list registry entries: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []RegistryEntry
 	for rows.Next() {
@@ -213,7 +213,7 @@ func (s *Store) ListBlueprintVersions(ctx context.Context, name string) ([]Bluep
 	if err != nil {
 		return nil, fmt.Errorf("list blueprint versions: %w", err)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var out []BlueprintVersion
 	for rows.Next() {

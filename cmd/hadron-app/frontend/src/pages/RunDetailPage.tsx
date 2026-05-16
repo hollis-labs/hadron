@@ -6,7 +6,7 @@ import { useRunEvents } from '../hooks/useRunEvents';
 import { getRun, cancelRun } from '../api/client';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Spinner } from '../components/ui/Spinner';
-import { ChevronDown, ChevronRight, Copy, Square, RefreshCw } from 'lucide-react';
+import { ChevronDown, Copy, Square, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatDuration } from '../utils/format';

@@ -126,7 +126,7 @@ func buildTriggerCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
+			defer closeBody(resp.Body)
 			if resp.StatusCode == http.StatusNoContent {
 				fmt.Println("deleted")
 				return nil
@@ -169,7 +169,7 @@ func buildTriggerCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("request failed: %w", err)
 			}
-			defer resp.Body.Close()
+			defer closeBody(resp.Body)
 			if resp.StatusCode >= 400 {
 				return printAPIError(resp)
 			}

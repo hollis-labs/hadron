@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/go-otel/propagation"
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
@@ -22,95 +22,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/trigger"
-	"github.com/hollis-labs/otel/propagation"
 )
-
-// ── Store interfaces ──────────────────────────────────────────────────────────
-
-type RunStore interface {
-	CreateRun(ctx context.Context, rec persistence.RunRecord) error
-	GetRun(ctx context.Context, id string) (persistence.RunRecord, error)
-	ListRunsByWorkspaceFiltered(ctx context.Context, workspaceID string, limit int, cursorID string, createdAfter, createdBefore *time.Time) ([]persistence.RunRecord, error)
-	ListRunEvents(ctx context.Context, runID string, limit int) ([]persistence.RunEventRecord, error)
-	ListRunEventsFiltered(ctx context.Context, runID string, limit int, cursorID int64, createdAfter, createdBefore *time.Time) ([]persistence.RunEventRecord, error)
-}
-
-type ScheduleStore interface {
-	GetSchedule(ctx context.Context, id string) (persistence.ScheduleRecord, error)
-	ListSchedulesByWorkspace(ctx context.Context, workspaceID string) ([]persistence.ScheduleRecord, error)
-	CreateSchedule(ctx context.Context, rec persistence.ScheduleRecord) error
-	UpdateScheduleEnabledAndNext(ctx context.Context, id string, enabled bool, nextRun *time.Time) error
-	UpdateScheduleFields(ctx context.Context, id string, name, cronExpr, blueprintPath string, enabled bool, nextRun *time.Time) error
-	DeleteSchedule(ctx context.Context, id string) error
-}
-
-type PipelineStore interface {
-	GetPipelineRun(ctx context.Context, id string) (persistence.PipelineRunRecord, error)
-	ListPipelineRunsByWorkspace(ctx context.Context, workspaceID string, limit int) ([]persistence.PipelineRunRecord, error)
-	ListPipelineStageRuns(ctx context.Context, pipelineRunID string) ([]persistence.PipelineStageRunRecord, error)
-}
-
-type WorkspaceStore interface {
-	CreateWorkspace(ctx context.Context, id, name string) error
-	GetWorkspace(ctx context.Context, id string) (persistence.WorkspaceRecord, error)
-	ListWorkspaces(ctx context.Context) ([]persistence.WorkspaceRecord, error)
-}
-
-type TriggerStore interface {
-	CreateTrigger(ctx context.Context, rec persistence.TriggerRecord) error
-	GetTrigger(ctx context.Context, id string) (persistence.TriggerRecord, error)
-	ListTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
-	DeleteTrigger(ctx context.Context, id string) error
-	GetTriggerByPath(ctx context.Context, path string) (persistence.TriggerRecord, error)
-	UpdateTriggerFired(ctx context.Context, id string) error
-	ListWebhookTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
-	ListFileWatchTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
-	DeleteExpiredTriggers(ctx context.Context, now time.Time) (int64, error)
-}
-
-// ── Other interfaces ──────────────────────────────────────────────────────────
-
-type Runner interface {
-	Enqueue(ctx context.Context, req execution.Request) error
-	Cancel(runID string) bool
-}
-
-type Scheduler interface {
-	Start()
-	Stop()
-	Status() scheduler.Status
-	TickNow(ctx context.Context) error
-}
-
-type PipelineRunner interface {
-	Start(ctx context.Context, pipelineRunID, pipelinePath, workspaceID string) error
-}
-
-// ── Dependencies and Server ───────────────────────────────────────────────────
-
-type Dependencies struct {
-	Runs         RunStore
-	Schedules    ScheduleStore
-	Pipelines    PipelineStore
-	Workspaces   WorkspaceStore
-	Triggers     TriggerStore
-	Runner       Runner
-	Scheduler    Scheduler
-	Pipeline     PipelineRunner
-	BlueprintDir string // root directory for blueprint YAML files
-}
-
-type Server struct {
-	httpServer     *http.Server
-	handler        http.Handler
-	deps           Dependencies
-	runSeq         atomic.Uint64
-	scheduleSeq    atomic.Uint64
-	pipelineSeq    atomic.Uint64
-	triggerSeq     atomic.Uint64
-	triggerManager *trigger.Manager
-	a2aHandler     *a2a.Handler
-}
 
 // Handler returns the underlying HTTP handler (useful for testing with httptest).
 func (s *Server) Handler() http.Handler {
@@ -173,8 +85,9 @@ func NewServer(addr string, deps Dependencies) *Server {
 
 	s.handler = corsMiddleware(propagation.HTTPMiddleware(mux))
 	s.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: s.handler,
+		Addr:              addr,
+		Handler:           s.handler,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
 }
@@ -426,14 +339,14 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runID := s.nextRunID()
-	if err := s.deps.Runner.Enqueue(r.Context(), execution.Request{
+	if enqueueErr := s.deps.Runner.Enqueue(r.Context(), execution.Request{
 		RunID:         runID,
 		WorkspaceID:   wsID,
 		BlueprintPath: body.BlueprintPath,
 		Inputs:        normalized,
 		DryRun:        body.DryRun,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	}); enqueueErr != nil {
+		writeError(w, http.StatusInternalServerError, enqueueErr.Error())
 		return
 	}
 
@@ -693,8 +606,8 @@ func (s *Server) patchSchedule(w http.ResponseWriter, r *http.Request, id string
 	}
 	cronExpr := existing.CronExpr
 	if body.CronExpr != nil {
-		if err := scheduler.ValidateCron(*body.CronExpr); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid cron: "+err.Error())
+		if validateErr := scheduler.ValidateCron(*body.CronExpr); validateErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid cron: "+validateErr.Error())
 			return
 		}
 		cronExpr = *body.CronExpr
@@ -711,14 +624,14 @@ func (s *Server) patchSchedule(w http.ResponseWriter, r *http.Request, id string
 	// Recalculate next run if cron changed or explicitly set
 	var nextRun *time.Time
 	if body.CronExpr != nil && enabled {
-		t, err := scheduler.NextRun(cronExpr, time.Now())
-		if err == nil {
+		t, nextErr := scheduler.NextRun(cronExpr, time.Now())
+		if nextErr == nil {
 			nextRun = &t
 		}
 	}
 	if body.NextRunAt != nil {
-		t, err := time.Parse(time.RFC3339, *body.NextRunAt)
-		if err != nil {
+		t, parseErr := time.Parse(time.RFC3339, *body.NextRunAt)
+		if parseErr != nil {
 			writeError(w, http.StatusBadRequest, "next_run_at must be RFC3339")
 			return
 		}
@@ -727,15 +640,15 @@ func (s *Server) patchSchedule(w http.ResponseWriter, r *http.Request, id string
 	// If no next_run override and no cron change, preserve existing next_run
 	if nextRun == nil && body.CronExpr == nil {
 		if existing.NextRunAt.Valid {
-			t, err := time.Parse(time.RFC3339, existing.NextRunAt.String)
-			if err == nil {
+			t, parseErr := time.Parse(time.RFC3339, existing.NextRunAt.String)
+			if parseErr == nil {
 				nextRun = &t
 			}
 		}
 	}
 
-	if err := s.deps.Schedules.UpdateScheduleFields(r.Context(), id, name, cronExpr, bpPath, enabled, nextRun); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if updateErr := s.deps.Schedules.UpdateScheduleFields(r.Context(), id, name, cronExpr, bpPath, enabled, nextRun); updateErr != nil {
+		writeError(w, http.StatusInternalServerError, updateErr.Error())
 		return
 	}
 	updated, err := s.deps.Schedules.GetSchedule(r.Context(), id)
@@ -1308,151 +1221,4 @@ func (s *Server) handleA2ATaskByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// ── Response helpers ──────────────────────────────────────────────────────────
-
-func toWorkspaceResponse(ws persistence.WorkspaceRecord) map[string]any {
-	return map[string]any{
-		"id":         ws.ID,
-		"name":       ws.Name,
-		"created_at": ws.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at": ws.UpdatedAt.UTC().Format(time.RFC3339),
-	}
-}
-
-func toRunResponse(r persistence.RunRecord) map[string]any {
-	return map[string]any{
-		"id":             r.ID,
-		"workspace_id":   r.WorkspaceID,
-		"blueprint_path": r.BlueprintPath,
-		"status":         r.Status,
-		"input_json":     r.InputJSON,
-		"error_message":  nullableString(r.ErrorMessage),
-		"created_at":     r.CreatedAt.UTC().Format(time.RFC3339),
-		"started_at":     nullableString(r.StartedAt),
-		"ended_at":       nullableString(r.EndedAt),
-	}
-}
-
-func toRunEventResponse(ev persistence.RunEventRecord) map[string]any {
-	return map[string]any{
-		"id":         ev.ID,
-		"run_id":     ev.RunID,
-		"step_name":  nullableString(ev.StepName),
-		"event_type": ev.EventType,
-		"message":    nullableString(ev.Message),
-		"created_at": ev.CreatedAt.UTC().Format(time.RFC3339Nano),
-	}
-}
-
-func toScheduleResponse(sc persistence.ScheduleRecord) map[string]any {
-	return map[string]any{
-		"id":             sc.ID,
-		"workspace_id":   sc.WorkspaceID,
-		"name":           sc.Name,
-		"blueprint_path": sc.BlueprintPath,
-		"cron_expr":      sc.CronExpr,
-		"enabled":        sc.Enabled,
-		"created_at":     sc.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at":     sc.UpdatedAt.UTC().Format(time.RFC3339),
-		"last_run_at":    nullableString(sc.LastRunAt),
-		"next_run_at":    nullableString(sc.NextRunAt),
-	}
-}
-
-func toPipelineResponse(p persistence.PipelineRunRecord) map[string]any {
-	return map[string]any{
-		"id":            p.ID,
-		"workspace_id":  p.WorkspaceID,
-		"pipeline_path": p.PipelinePath,
-		"status":        p.Status,
-		"error_message": nullableString(p.ErrorMessage),
-		"created_at":    p.CreatedAt.UTC().Format(time.RFC3339),
-		"started_at":    nullableString(p.StartedAt),
-		"ended_at":      nullableString(p.EndedAt),
-	}
-}
-
-func toPipelineStageResponse(st persistence.PipelineStageRunRecord) map[string]any {
-	return map[string]any{
-		"id":              st.ID,
-		"workspace_id":    st.WorkspaceID,
-		"pipeline_run_id": st.PipelineRunID,
-		"stage_index":     st.StageIndex,
-		"stage_name":      st.StageName,
-		"run_id":          st.RunID,
-		"status":          st.Status,
-		"created_at":      st.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at":      st.UpdatedAt.UTC().Format(time.RFC3339),
-	}
-}
-
-// parsePipelineSpecStages attempts to parse a pipeline spec file and returns
-// a map of stage name → Stage for DAG metadata enrichment. Returns an empty
-// map on any parse error so callers can degrade gracefully.
-func parsePipelineSpecStages(pipelinePath string) map[string]pipeline.Stage {
-	if pipelinePath == "" {
-		return nil
-	}
-	spec, err := pipeline.ParseFile(pipelinePath)
-	if err != nil {
-		return nil
-	}
-	m := make(map[string]pipeline.Stage, len(spec.Stages))
-	for _, st := range spec.Stages {
-		m[st.Name] = st
-	}
-	return m
-}
-
-// ── ID generators ─────────────────────────────────────────────────────────────
-
-func (s *Server) nextRunID() string {
-	n := s.runSeq.Add(1)
-	return fmt.Sprintf("run-%s-%04d", time.Now().UTC().Format("20060102-150405"), n)
-}
-
-func (s *Server) nextScheduleID() string {
-	n := s.scheduleSeq.Add(1)
-	return fmt.Sprintf("sched-%s-%04d", time.Now().UTC().Format("20060102-150405"), n)
-}
-
-func (s *Server) nextPipelineID() string {
-	n := s.pipelineSeq.Add(1)
-	return fmt.Sprintf("pl-%s-%04d", time.Now().UTC().Format("20060102-150405"), n)
-}
-
-// ── Low-level helpers ─────────────────────────────────────────────────────────
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-func isNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "no rows") ||
-		fmt.Sprintf("%v", err) == "sql: no rows in result set"
-}
-
-func isInvalidCursor(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "invalid cursor")
-}
-
-func nullableString(s sql.NullString) any {
-	if s.Valid {
-		return s.String
-	}
-	return nil
 }

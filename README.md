@@ -58,10 +58,12 @@ See [docs/mcp-setup.md](docs/mcp-setup.md).
 | Doc | Description |
 |---|---|
 | [docs/getting-started.md](docs/getting-started.md) | Installation and first run |
+| [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) | Current system architecture |
 | [docs/spec-v04.md](docs/spec-v04.md) | Full blueprint spec reference |
 | [docs/cli-reference.md](docs/cli-reference.md) | All CLI commands and flags |
 | [docs/mcp-setup.md](docs/mcp-setup.md) | Claude Code MCP integration |
 | [docs/safety.md](docs/safety.md) | Safety settings and trust levels |
+| [docs/audits/README.md](docs/audits/README.md) | Audit conventions for deep review passes |
 
 ---
 

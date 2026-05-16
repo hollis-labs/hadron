@@ -39,7 +39,7 @@ type Stage struct {
 }
 
 func ParseFile(path string) (*Spec, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- ParseFile intentionally reads the caller-selected pipeline path.
 	if err != nil {
 		return nil, fmt.Errorf("read pipeline: %w", err)
 	}

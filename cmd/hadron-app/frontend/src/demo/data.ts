@@ -1,5 +1,5 @@
 // Demo data for GUI testing without a running daemon
-import type { Run, RunEvent, Schedule, Pipeline, PipelineStage, ListResponse, Health, Workspace, TelemetryRunSummary, TelemetryLogEntry } from '../api/types';
+import type { Run, RunEvent, Schedule, Pipeline, PipelineStage, Health, Workspace, TelemetryRunSummary, TelemetryLogEntry } from '../api/types';
 
 // ── Helpers ──
 

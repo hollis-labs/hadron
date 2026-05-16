@@ -28,7 +28,7 @@ type Manifest struct {
 }
 
 // Pack bundles a blueprint with all its imports into a .hbp archive (tar.gz with manifest).
-func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportResolver) error {
+func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportResolver) (err error) {
 	absBP, err := filepath.Abs(blueprintPath)
 	if err != nil {
 		return fmt.Errorf("resolve blueprint path: %w", err)
@@ -40,7 +40,7 @@ func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportReso
 	}
 
 	// Compute content hash of the main blueprint.
-	raw, err := os.ReadFile(absBP)
+	raw, err := os.ReadFile(absBP) // #nosec G304 -- pack intentionally reads the user-selected blueprint path.
 	if err != nil {
 		return fmt.Errorf("read blueprint: %w", err)
 	}
@@ -85,25 +85,37 @@ func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportReso
 		outputPath = name + ".hbp"
 	}
 
-	outFile, err := os.Create(outputPath)
+	outFile, err := os.OpenFile(outputPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304 -- output path is user-selected pack destination.
 	if err != nil {
 		return fmt.Errorf("create output file: %w", err)
 	}
-	defer outFile.Close()
+	defer func() {
+		if closeErr := outFile.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close output file: %w", closeErr)
+		}
+	}()
 
 	gw := gzip.NewWriter(outFile)
-	defer gw.Close()
+	defer func() {
+		if closeErr := gw.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close gzip writer: %w", closeErr)
+		}
+	}()
 
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
+	defer func() {
+		if closeErr := tw.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close tar writer: %w", closeErr)
+		}
+	}()
 
 	// Write manifest.json.
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
-	if err := addBytesToTar(tw, "manifest.json", manifestJSON); err != nil {
-		return fmt.Errorf("add manifest to archive: %w", err)
+	if addErr := addBytesToTar(tw, "manifest.json", manifestJSON); addErr != nil {
+		return fmt.Errorf("add manifest to archive: %w", addErr)
 	}
 
 	// Write the main blueprint.
@@ -134,26 +146,32 @@ func Pack(blueprintPath string, outputPath string, resolver blueprint.ImportReso
 }
 
 // Unpack extracts a .hbp archive to a directory and returns the manifest.
-func Unpack(archivePath string, outputDir string) (*Manifest, error) {
+func Unpack(archivePath string, outputDir string) (manifest *Manifest, err error) {
 	if outputDir == "" {
 		outputDir = "."
 	}
 
-	f, err := os.Open(archivePath)
+	f, err := os.Open(archivePath) // #nosec G304 -- archive path is user-selected unpack source.
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close archive: %w", closeErr)
+		}
+	}()
 
 	gr, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, fmt.Errorf("open gzip reader: %w", err)
 	}
-	defer gr.Close()
+	defer func() {
+		if closeErr := gr.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close gzip reader: %w", closeErr)
+		}
+	}()
 
 	tr := tar.NewReader(gr)
-
-	var manifest *Manifest
 
 	for {
 		header, err := tr.Next()
@@ -174,12 +192,12 @@ func Unpack(archivePath string, outputDir string) (*Manifest, error) {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := os.MkdirAll(target, 0o750); err != nil {
 				return nil, fmt.Errorf("create directory %s: %w", target, err)
 			}
 		case tar.TypeReg:
 			// Ensure parent directory exists.
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return nil, fmt.Errorf("create parent dir for %s: %w", target, err)
 			}
 
@@ -196,7 +214,11 @@ func Unpack(archivePath string, outputDir string) (*Manifest, error) {
 				manifest = &m
 			}
 
-			if err := os.WriteFile(target, data, os.FileMode(header.Mode)); err != nil {
+			mode := header.FileInfo().Mode().Perm()
+			if mode == 0 {
+				mode = 0o600
+			}
+			if err := os.WriteFile(target, data, mode); err != nil {
 				return nil, fmt.Errorf("write %s: %w", target, err)
 			}
 		}
@@ -224,7 +246,7 @@ func addBytesToTar(tw *tar.Writer, name string, data []byte) error {
 }
 
 func addFileToTar(tw *tar.Writer, filePath, archiveName string) error {
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304 -- pack intentionally includes resolved blueprint import files.
 	if err != nil {
 		return fmt.Errorf("read %s: %w", filePath, err)
 	}

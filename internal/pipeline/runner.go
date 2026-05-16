@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,6 +79,7 @@ func (r *Runner) Start(ctx context.Context, pipelineRunID, pipelinePath, workspa
 		return err
 	}
 
+	// #nosec G118 -- pipeline execution is daemon-owned background work after the run is persisted.
 	go r.execute(pipelineRunID, pipelinePath, workspaceID)
 	return nil
 }
@@ -262,13 +264,13 @@ func (r *Runner) executeStage(ctx context.Context, p executeStageParams) (*Stage
 		Inputs:        resolvedInputs,
 	}); err != nil {
 		_ = r.store.UpdatePipelineStageRunStatus(ctx, p.pipelineRunID, p.stageIdx, "failed")
-		return &StageResult{Status: "failed"}, fmt.Errorf("enqueue stage %d run: %v", p.stageIdx, err)
+		return &StageResult{Status: "failed"}, fmt.Errorf("enqueue stage %d run: %w", p.stageIdx, err)
 	}
 
 	runRec, waitErr := r.waitForRunTerminal(ctx, runID, 60*time.Second)
 	if waitErr != nil {
 		_ = r.store.UpdatePipelineStageRunStatus(ctx, p.pipelineRunID, p.stageIdx, "failed")
-		return &StageResult{Status: "failed"}, fmt.Errorf("stage %d wait failed: %v", p.stageIdx, waitErr)
+		return &StageResult{Status: "failed"}, fmt.Errorf("stage %d wait failed: %w", p.stageIdx, waitErr)
 	}
 
 	// Capture outputs from run events.
@@ -425,36 +427,6 @@ func truncateToLastN(s string, n int) string {
 		return s
 	}
 	return s[len(s)-n:]
-}
-
-// extractStageOutputs scans run events for ::set-output directives.
-// Blueprints emit outputs by printing: ::set-output key=value
-// Kept for backward compatibility.
-func (r *Runner) extractStageOutputs(ctx context.Context, runID string) map[string]string {
-	events, err := r.store.ListRunEvents(ctx, runID, 1000)
-	if err != nil {
-		return nil
-	}
-	outputs := map[string]string{}
-	for _, ev := range events {
-		if !ev.Message.Valid {
-			continue
-		}
-		msg := ev.Message.String
-		// Scan each line for ::set-output directives
-		for _, line := range strings.Split(msg, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "::set-output ") {
-				kv := strings.TrimPrefix(line, "::set-output ")
-				if idx := strings.Index(kv, "="); idx > 0 {
-					key := strings.TrimSpace(kv[:idx])
-					val := strings.TrimSpace(kv[idx+1:])
-					outputs[key] = val
-				}
-			}
-		}
-	}
-	return outputs
 }
 
 // resolveStageInputs substitutes {{ stages.<name>.<key> }} and {{ inputs.<key> }}
@@ -649,7 +621,7 @@ func (r *Runner) waitForRunTerminal(ctx context.Context, runID string, timeout t
 	for time.Now().Before(deadline) {
 		rec, err := r.store.GetRun(ctx, runID)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
