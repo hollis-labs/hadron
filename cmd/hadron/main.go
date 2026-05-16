@@ -741,7 +741,14 @@ func buildFmtCmd() *cobra.Command {
 			}
 
 			if writeBack {
-				return os.WriteFile(path, canonical, 0o600)
+				// Preserve the file's existing permissions — formatting must
+				// not silently strip group/world readability from a shared,
+				// source-controlled blueprint.
+				mode := os.FileMode(0o644)
+				if info, statErr := os.Stat(path); statErr == nil {
+					mode = info.Mode().Perm()
+				}
+				return os.WriteFile(path, canonical, mode)
 			}
 
 			_, err = os.Stdout.Write(canonical)

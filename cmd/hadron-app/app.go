@@ -269,7 +269,13 @@ func (a *App) ParseBlueprintFull(path string) (string, error) {
 
 // SaveBlueprintFile writes YAML content to an existing file (exposed to frontend).
 func (a *App) SaveBlueprintFile(path string, content string) error {
-	return os.WriteFile(path, []byte(content), 0o600)
+	// Preserve the existing file's permissions — saving must not silently
+	// strip group/world readability from a shared, source-controlled blueprint.
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	return os.WriteFile(path, []byte(content), mode)
 }
 
 // CreateBlueprintFile creates a new blueprint file and returns its full path (exposed to frontend).
@@ -281,7 +287,9 @@ func (a *App) CreateBlueprintFile(dir string, filename string, content string) (
 	if _, err := os.Stat(fullPath); err == nil {
 		return "", fmt.Errorf("file already exists: %s", fullPath)
 	}
-	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
+	// New blueprints get conventional 0644 permissions — a blueprint is
+	// project content, not private state, and is typically committed.
+	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("create blueprint: %w", err)
 	}
 	return fullPath, nil
