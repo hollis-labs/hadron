@@ -17,6 +17,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/settings"
+	"github.com/hollis-labs/hadron/internal/telemetry"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -523,9 +524,12 @@ func (a *App) ListTelemetryRuns() (string, error) {
 
 // ReadTelemetryLog reads and returns parsed JSONL entries for a run (exposed to frontend).
 func (a *App) ReadTelemetryLog(runID string) (string, error) {
+	if err := telemetry.ValidateRunID(runID); err != nil {
+		return "", err
+	}
 	logsDir := filepath.Join(a.dataDir, "logs", "runs")
 	path := filepath.Join(logsDir, runID+".jsonl")
-	data, err := os.ReadFile(path) // #nosec G304 -- path is constrained to logsDir plus run ID.
+	data, err := os.ReadFile(path) // #nosec G304 -- runID validated by telemetry.ValidateRunID; path stays within logsDir.
 	if err != nil {
 		return "", fmt.Errorf("read log file: %w", err)
 	}
@@ -549,9 +553,12 @@ func (a *App) ReadTelemetryLog(runID string) (string, error) {
 
 // DeleteTelemetryLog removes a single telemetry log file (exposed to frontend).
 func (a *App) DeleteTelemetryLog(runID string) error {
+	if err := telemetry.ValidateRunID(runID); err != nil {
+		return err
+	}
 	logsDir := filepath.Join(a.dataDir, "logs", "runs")
 	path := filepath.Join(logsDir, runID+".jsonl")
-	return os.Remove(path)
+	return os.Remove(path) // #nosec G304 -- runID validated by telemetry.ValidateRunID; path stays within logsDir.
 }
 
 // startDaemon locates hadrond, picks a port, starts it, and polls health.
