@@ -516,11 +516,16 @@ func (m *Manager) emit(runID, section, stepName, eventType, message string) {
 }
 
 func (m *Manager) writeEventLog(e Event) {
+	// e.RunID can carry caller-controlled text; reject anything that could
+	// escape m.logDir before using it as a filename.
+	if err := telemetry.ValidateRunID(e.RunID); err != nil {
+		return
+	}
 	if err := os.MkdirAll(m.logDir, 0o750); err != nil {
 		return
 	}
 	path := filepath.Join(m.logDir, e.RunID+".log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- path is constrained to logDir plus run ID.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- e.RunID validated by telemetry.ValidateRunID; path stays within logDir.
 	if err != nil {
 		return
 	}
