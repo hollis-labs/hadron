@@ -122,7 +122,7 @@ test('convertWizardToYaml serializes blueprint metadata, inputs, packages, and s
   assert.ok(yaml.includes('on_success:\n          - type: cmd\n            value: echo shipped'))
 })
 
-test('convertWizardToYaml omits incomplete imports and tasks', () => {
+test('convertWizardToYaml omits incomplete imports and sections with no valid tasks', () => {
   const yaml = convertWizardToYaml(baseWizard({
     imports: [{ path: '', alias: 'ignored', with: { key: 'value' } }],
     steps: [
@@ -150,7 +150,11 @@ test('convertWizardToYaml omits incomplete imports and tasks', () => {
   }))
 
   assert.doesNotMatch(yaml, /imports:/)
-  assert.ok(yaml.endsWith('steps:\n  - section: default\n    tasks:\n'))
+  // The lone section's only task is incomplete, so the section is omitted
+  // entirely — emitting `section:` with an empty `tasks:` would produce
+  // YAML the backend rejects ("section must have at least one step").
+  assert.doesNotMatch(yaml, /section:/)
+  assert.ok(yaml.endsWith('steps:\n'))
 })
 
 test('convertParsedToWizard normalizes optional parsed blueprint fields for forms', () => {
