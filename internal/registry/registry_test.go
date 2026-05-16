@@ -294,3 +294,52 @@ func TestShow_ByName(t *testing.T) {
 		t.Error("expected non-empty version_hash")
 	}
 }
+
+func TestIndex_BestEffortOnUnreadableSubdir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permission bits are not enforced")
+	}
+	reg, cleanup := setupTestRegistry(t)
+	defer cleanup()
+
+	tmpDir := t.TempDir()
+
+	// A valid blueprint at the root.
+	good := `version: "0.4"
+blueprint:
+  name: good-blueprint
+  slug: good-bp
+  title: Good Blueprint
+  description: A valid peer
+  author: Test
+  tags: [test]
+steps:
+  - section: Test
+    tasks:
+      - name: hello
+        cmd: echo hello
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "good.yaml"), []byte(good), 0o644); err != nil {
+		t.Fatalf("write blueprint: %v", err)
+	}
+
+	// An unreadable subdirectory: WalkDir reports a permission error for it.
+	// Indexing must skip it, not abort and lose the valid peer above.
+	locked := filepath.Join(tmpDir, "locked")
+	if err := os.Mkdir(locked, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	// Restore perms so t.TempDir cleanup can remove the tree.
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	result, err := reg.Index(tmpDir)
+	if err != nil {
+		t.Fatalf("index aborted on an unreadable subdir: %v", err)
+	}
+	if result.Indexed != 1 {
+		t.Fatalf("expected the valid blueprint indexed despite the bad subdir, got %d", result.Indexed)
+	}
+}
