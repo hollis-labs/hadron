@@ -193,57 +193,63 @@ export function convertWizardToYaml(data: WizardBlueprint): string {
   // steps
   lines.push('steps:');
   for (const sec of data.steps) {
-    lines.push(`  - section: ${yamlValue(sec.section || 'default')}`);
-    lines.push('    tasks:');
+    const taskLines: string[] = [];
     for (const task of sec.tasks) {
       if (!task.name && !task.cmd && !task.call) continue;
-      lines.push(`      - name: ${yamlValue(task.name)}`);
+      taskLines.push(`      - name: ${yamlValue(task.name)}`);
       if (task.cmd) {
         if (task.cmd.includes('\n')) {
-          lines.push('        cmd: |');
-          lines.push(indent(task.cmd, 5));
+          taskLines.push('        cmd: |');
+          taskLines.push(indent(task.cmd, 5));
         } else {
-          lines.push(`        cmd: ${yamlValue(task.cmd)}`);
+          taskLines.push(`        cmd: ${yamlValue(task.cmd)}`);
         }
       }
-      if (task.call) lines.push(`        call: ${yamlValue(task.call)}`);
-      if (task.dir) lines.push(`        dir: ${yamlValue(task.dir)}`);
-      if (task.if_expr) lines.push(`        if: ${yamlValue(task.if_expr)}`);
-      if (!task.enabled) lines.push('        enabled: false');
+      if (task.call) taskLines.push(`        call: ${yamlValue(task.call)}`);
+      if (task.dir) taskLines.push(`        dir: ${yamlValue(task.dir)}`);
+      if (task.if_expr) taskLines.push(`        if: ${yamlValue(task.if_expr)}`);
+      if (!task.enabled) taskLines.push('        enabled: false');
       const retry = parseInt(task.retry);
-      if (retry > 0) lines.push(`        retry: ${retry}`);
+      if (retry > 0) taskLines.push(`        retry: ${retry}`);
       const retryDelay = parseInt(task.retry_delay_seconds);
-      if (retryDelay > 0) lines.push(`        retry_delay_seconds: ${retryDelay}`);
+      if (retryDelay > 0) taskLines.push(`        retry_delay_seconds: ${retryDelay}`);
       const timeout = parseInt(task.timeout_seconds);
-      if (timeout > 0) lines.push(`        timeout_seconds: ${timeout}`);
-      if (task.continue_on_error) lines.push('        continue_on_error: true');
+      if (timeout > 0) taskLines.push(`        timeout_seconds: ${timeout}`);
+      if (task.continue_on_error) taskLines.push('        continue_on_error: true');
       if (Object.keys(task.env).length > 0) {
-        lines.push('        env:');
+        taskLines.push('        env:');
         for (const [k, v] of Object.entries(task.env)) {
-          if (k) lines.push(`          ${k}: ${yamlValue(v)}`);
+          if (k) taskLines.push(`          ${k}: ${yamlValue(v)}`);
         }
       }
       if (task.on_success?.length > 0) {
         const validHooks = task.on_success.filter(h => h.value);
         if (validHooks.length > 0) {
-          lines.push('        on_success:');
+          taskLines.push('        on_success:');
           for (const h of validHooks) {
-            lines.push(`          - type: ${h.type}`);
-            lines.push(`            value: ${yamlValue(h.value)}`);
+            taskLines.push(`          - type: ${h.type}`);
+            taskLines.push(`            value: ${yamlValue(h.value)}`);
           }
         }
       }
       if (task.on_fail?.length > 0) {
         const validHooks = task.on_fail.filter(h => h.value);
         if (validHooks.length > 0) {
-          lines.push('        on_fail:');
+          taskLines.push('        on_fail:');
           for (const h of validHooks) {
-            lines.push(`          - type: ${h.type}`);
-            lines.push(`            value: ${yamlValue(h.value)}`);
+            taskLines.push(`          - type: ${h.type}`);
+            taskLines.push(`            value: ${yamlValue(h.value)}`);
           }
         }
       }
     }
+    // A section must carry at least one valid task — the backend rejects a
+    // section with no steps. Omit a section whose tasks were all incomplete
+    // rather than emitting an unparseable empty `tasks:`.
+    if (taskLines.length === 0) continue;
+    lines.push(`  - section: ${yamlValue(sec.section || 'default')}`);
+    lines.push('    tasks:');
+    for (const taskLine of taskLines) lines.push(taskLine);
   }
 
   return lines.join('\n') + '\n';
