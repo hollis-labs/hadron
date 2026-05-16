@@ -182,16 +182,32 @@ func (s *Store) GetSchedule(ctx context.Context, id string) (ScheduleRecord, err
 	return rec, nil
 }
 
+// UpdateScheduleEnabledAndNext updates a schedule's enabled flag and,
+// optionally, its next-run time. When nextRun is nil the next_run_at column
+// is left untouched — a plain enable/disable toggle must not wipe a cron
+// schedule's next-run time, or a re-enabled schedule would never be picked
+// up by ListDueSchedules.
 func (s *Store) UpdateScheduleEnabledAndNext(ctx context.Context, id string, enabled bool, nextRun *time.Time) error {
-	var next sql.NullString
-	if nextRun != nil {
-		next = sql.NullString{String: nextRun.UTC().Format(time.RFC3339), Valid: true}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if nextRun == nil {
+		_, err := s.db.ExecContext(ctx, `
+			UPDATE schedules
+			SET enabled = ?, updated_at = ?
+			WHERE id = ?
+		`, boolToInt(enabled), now, id)
+		if err != nil {
+			return fmt.Errorf("update schedule enabled: %w", err)
+		}
+		return nil
 	}
+
+	next := sql.NullString{String: nextRun.UTC().Format(time.RFC3339), Valid: true}
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE schedules
 		SET enabled = ?, next_run_at = ?, updated_at = ?
 		WHERE id = ?
-	`, boolToInt(enabled), next, time.Now().UTC().Format(time.RFC3339), id)
+	`, boolToInt(enabled), next, now, id)
 	if err != nil {
 		return fmt.Errorf("update schedule enabled+next: %w", err)
 	}

@@ -369,3 +369,77 @@ func TestPipelineRunsAndStagesCRUD(t *testing.T) {
 		t.Fatalf("expected stage success, got %s", stages[0].Status)
 	}
 }
+
+func TestUpdateScheduleEnabledAndNext_PreservesNextRunWhenNil(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hadron.db")
+	store, openErr := Open(dbPath)
+	if openErr != nil {
+		t.Fatalf("open store: %v", openErr)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	nextRun := now.Add(time.Hour).Format(time.RFC3339)
+
+	sched := ScheduleRecord{
+		ID:            "sch-next",
+		Name:          "Hourly",
+		BlueprintPath: "./bp.yaml",
+		CronExpr:      "0 * * * *",
+		Enabled:       true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		NextRunAt:     sql.NullString{String: nextRun, Valid: true},
+	}
+	if err := store.CreateSchedule(ctx, sched); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+
+	// A plain disable then re-enable (nextRun nil) must leave next_run_at
+	// intact, or the re-enabled schedule would never be dispatched.
+	if err := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, false, nil); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	// The nil-nextRun branch must persist enabled=false while keeping
+	// next_run_at — verify it now, before the schedule is re-enabled, so a
+	// regression that dropped the disable update cannot hide behind the
+	// schedule's initial enabled state.
+	disabled, err := store.GetSchedule(ctx, sched.ID)
+	if err != nil {
+		t.Fatalf("get schedule after disable: %v", err)
+	}
+	if disabled.Enabled {
+		t.Fatalf("expected schedule to be disabled after the disable call")
+	}
+	if !disabled.NextRunAt.Valid || disabled.NextRunAt.String != nextRun {
+		t.Fatalf("expected next_run_at preserved through disable as %q, got %+v", nextRun, disabled.NextRunAt)
+	}
+
+	if err := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, true, nil); err != nil {
+		t.Fatalf("re-enable: %v", err)
+	}
+	got, err := store.GetSchedule(ctx, sched.ID)
+	if err != nil {
+		t.Fatalf("get schedule: %v", err)
+	}
+	if !got.Enabled {
+		t.Fatalf("expected schedule to be re-enabled")
+	}
+	if !got.NextRunAt.Valid || got.NextRunAt.String != nextRun {
+		t.Fatalf("expected next_run_at preserved as %q, got %+v", nextRun, got.NextRunAt)
+	}
+
+	// A non-nil nextRun still updates the column.
+	newNext := now.Add(2 * time.Hour)
+	if err := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, true, &newNext); err != nil {
+		t.Fatalf("update with explicit next: %v", err)
+	}
+	got, err = store.GetSchedule(ctx, sched.ID)
+	if err != nil {
+		t.Fatalf("get schedule: %v", err)
+	}
+	if want := newNext.Format(time.RFC3339); !got.NextRunAt.Valid || got.NextRunAt.String != want {
+		t.Fatalf("expected next_run_at updated to %q, got %+v", want, got.NextRunAt)
+	}
+}
