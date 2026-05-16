@@ -69,6 +69,7 @@ function TelemetryPageInner() {
   const {
     data: loadedRuns,
     loading,
+    error: runsError,
     refresh: refreshRuns,
   } = useAsyncResource<TelemetryRunSummary[]>(fetchRuns);
   const runs = loadedRuns ?? [];
@@ -80,22 +81,27 @@ function TelemetryPageInner() {
   const {
     data: loadedEntries,
     loading: entriesLoading,
+    error: entriesError,
     refresh: refreshEntries,
     setData: setEntries,
   } = useAsyncResource<TelemetryLogEntry[]>(fetchEntries, { enabled: selectedRunId !== null });
   const entries = loadedEntries ?? [];
 
-  const reloadRuns = useCallback(async () => {
-    const result = await refreshRuns();
-    if (!result) toast.error('Failed to load telemetry runs');
-    return result;
-  }, [refreshRuns]);
+  // Surface load failures — including the initial fetch — instead of leaving
+  // the user with a silently empty list. The hook's `error` is a fresh object
+  // per failure, so each failed load (initial or refresh) toasts once.
+  useEffect(() => {
+    if (runsError) toast.error('Failed to load telemetry runs');
+  }, [runsError]);
+  useEffect(() => {
+    if (entriesError) toast.error('Failed to load log');
+  }, [entriesError]);
+
+  const reloadRuns = useCallback(() => refreshRuns(), [refreshRuns]);
 
   const reloadEntries = useCallback(async () => {
     if (!selectedRunId) return null;
-    const result = await refreshEntries();
-    if (!result) toast.error('Failed to load log');
-    return result;
+    return refreshEntries();
   }, [refreshEntries, selectedRunId]);
 
   // Listen for global refresh shortcut
@@ -264,7 +270,7 @@ function TelemetryPageInner() {
           <div className="text-xl font-semibold text-foreground tracking-tight">Telemetry</div>
           {loading && <div className="text-sm text-muted-foreground mt-0.5">Loading…</div>}
         </div>
-        <Button variant="ghost" onClick={fetchRuns} title="Refresh (R)">
+        <Button variant="ghost" onClick={() => void reloadRuns()} title="Refresh (R)">
           <RefreshCw size={14} />
         </Button>
       </div>
