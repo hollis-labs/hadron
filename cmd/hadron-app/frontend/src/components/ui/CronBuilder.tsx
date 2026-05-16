@@ -134,8 +134,9 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
   }, [value]);
 
   const handleFieldChange = useCallback((key: keyof CronFields, val: string) => {
-    // Only allow valid cron characters
-    const cleaned = val.replace(/[^0-9*,-/]/g, '');
+    // Only allow valid cron characters. The hyphen is kept last in the class
+    // so it is a literal "-" and not a ","–"/" range (which would admit ".").
+    const cleaned = val.replace(/[^0-9*,/-]/g, '');
     const updated = { ...fields, [key]: cleaned };
     setFields(updated);
 
