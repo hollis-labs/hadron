@@ -46,7 +46,13 @@ func (r *Registry) Index(dir string) (result IndexResult, err error) {
 
 	walkErr := filepath.WalkDir(absDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			// Indexing is best-effort: a single inaccessible entry must not
+			// abort the scan and block valid peers. Only an error on the
+			// root directory itself is fatal.
+			if path == absDir {
+				return walkErr
+			}
+			return nil //nolint:nilerr
 		}
 		if d.IsDir() {
 			return nil

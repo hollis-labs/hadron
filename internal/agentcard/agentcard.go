@@ -134,7 +134,13 @@ func FromDirectory(dir string, baseURL string) (*AgentCard, error) {
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return err
+			// Card generation is best-effort: a single inaccessible entry
+			// must not prevent serving a card for valid peers. Only an error
+			// on the root directory itself is fatal.
+			if path == dir {
+				return err
+			}
+			return nil //nolint:nilerr
 		}
 		if d.IsDir() {
 			return nil
