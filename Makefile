@@ -15,7 +15,7 @@ test:
 	go test $(GO_PACKAGES)
 
 test-ui:
-	cd cmd/hadron-app/frontend && npm run test -- --run
+	cd cmd/hadron-app/frontend && npm run test
 
 lint: lint-go lint-ui
 

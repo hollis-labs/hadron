@@ -51,7 +51,7 @@ v0.3's clean architecture (SQLite persistence, cron scheduling, MCP, pipelines).
 - **MCP adapter** (`internal/mcpadapter/`) — exposes every daemon capability as
   `mcp__hadron__*` tools for agent clients.
 - **Persistence** (`internal/persistence/`) — single-writer SQLite
-  (`mattn/go-sqlite3`); tables: workspaces, runs, run_events, schedules,
+  (`modernc.org/sqlite`); tables: workspaces, runs, run_events, schedules,
   pipeline_runs, pipeline_stage_runs, triggers; cursor-paginated.
 
 **Data flow:** user/agent → CLI / MCP / REST → `hadrond` → (execution + scheduler
@@ -64,7 +64,7 @@ Build and develop (from repo root):
 ```sh
 make build      # build bin/hadrond + bin/hadron
 make test       # go unit tests
-make test-ui    # frontend vitest
+make test-ui    # frontend tests (node --test)
 make lint       # go vet + golangci-lint + staticcheck + errcheck + govulncheck, plus UI lint
 make typecheck  # frontend tsc
 make e2e        # build + tagged end-to-end tests (./test/e2e/...)
