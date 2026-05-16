@@ -1,12 +1,15 @@
 package scheduler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	gosched "github.com/hollis-labs/go-scheduler"
+	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 )
 
@@ -79,4 +82,74 @@ func TestIsDuplicateRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fakeEnqueuer is a runEnqueuer that records requests and returns a fixed
+// error, standing in for *execution.Manager in adapter tests.
+type fakeEnqueuer struct {
+	reqs []execution.Request
+	err  error
+}
+
+func (f *fakeEnqueuer) Enqueue(_ context.Context, req execution.Request) error {
+	f.reqs = append(f.reqs, req)
+	return f.err
+}
+
+func TestRunnerAdapterEnqueue(t *testing.T) {
+	payload, err := json.Marshal(schedulePayload{WorkspaceID: "alpha", BlueprintPath: "./bp.yaml"})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	job := gosched.Job{
+		ScheduleID: "sch-1",
+		RunID:      "sched-sch-1-42",
+		JobType:    scheduleJobType,
+		Payload:    payload,
+	}
+
+	t.Run("decodes payload into execution.Request", func(t *testing.T) {
+		fake := &fakeEnqueuer{}
+		if err := (runnerAdapter{mgr: fake}).Enqueue(context.Background(), job); err != nil {
+			t.Fatalf("Enqueue: %v", err)
+		}
+		if len(fake.reqs) != 1 {
+			t.Fatalf("expected 1 enqueued request, got %d", len(fake.reqs))
+		}
+		got := fake.reqs[0]
+		if got.WorkspaceID != "alpha" || got.BlueprintPath != "./bp.yaml" || got.RunID != "sched-sch-1-42" {
+			t.Fatalf("request did not carry payload/run fields: %+v", got)
+		}
+	})
+
+	t.Run("wraps a duplicate run as ErrDuplicateJob", func(t *testing.T) {
+		fake := &fakeEnqueuer{err: errors.New("UNIQUE constraint failed: runs.id")}
+		err := (runnerAdapter{mgr: fake}).Enqueue(context.Background(), job)
+		if !errors.Is(err, gosched.ErrDuplicateJob) {
+			t.Fatalf("expected ErrDuplicateJob, got %v", err)
+		}
+	})
+
+	t.Run("passes through a non-duplicate error", func(t *testing.T) {
+		sentinel := errors.New("disk full")
+		fake := &fakeEnqueuer{err: sentinel}
+		err := (runnerAdapter{mgr: fake}).Enqueue(context.Background(), job)
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("expected the sentinel error to pass through, got %v", err)
+		}
+		if errors.Is(err, gosched.ErrDuplicateJob) {
+			t.Fatalf("a non-duplicate error must not wrap ErrDuplicateJob")
+		}
+	})
+
+	t.Run("rejects an undecodable payload", func(t *testing.T) {
+		fake := &fakeEnqueuer{}
+		bad := gosched.Job{RunID: "r", Payload: []byte("not json")}
+		if err := (runnerAdapter{mgr: fake}).Enqueue(context.Background(), bad); err == nil {
+			t.Fatalf("expected a decode error for a malformed payload")
+		}
+		if len(fake.reqs) != 0 {
+			t.Fatalf("must not enqueue when payload decode fails")
+		}
+	})
 }

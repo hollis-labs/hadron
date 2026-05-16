@@ -91,10 +91,18 @@ func parseNullTime(ns sql.NullString) time.Time {
 	return t
 }
 
+// runEnqueuer is the one capability runnerAdapter needs from the execution
+// manager: submitting a blueprint run. Narrowing *execution.Manager to this
+// interface keeps the adapter's decode-and-dispatch logic unit-testable
+// without standing up a live Manager.
+type runEnqueuer interface {
+	Enqueue(ctx context.Context, req execution.Request) error
+}
+
 // runnerAdapter implements go-scheduler's Runner over Hadron's execution
 // manager. It decodes the opaque job payload back into an execution.Request.
 type runnerAdapter struct {
-	mgr *execution.Manager
+	mgr runEnqueuer
 }
 
 // Enqueue dispatches a fired schedule's job through the execution manager.
