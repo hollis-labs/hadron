@@ -401,6 +401,21 @@ func TestUpdateScheduleEnabledAndNext_PreservesNextRunWhenNil(t *testing.T) {
 	if err := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, false, nil); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
+	// The nil-nextRun branch must persist enabled=false while keeping
+	// next_run_at — verify it now, before the schedule is re-enabled, so a
+	// regression that dropped the disable update cannot hide behind the
+	// schedule's initial enabled state.
+	disabled, err := store.GetSchedule(ctx, sched.ID)
+	if err != nil {
+		t.Fatalf("get schedule after disable: %v", err)
+	}
+	if disabled.Enabled {
+		t.Fatalf("expected schedule to be disabled after the disable call")
+	}
+	if !disabled.NextRunAt.Valid || disabled.NextRunAt.String != nextRun {
+		t.Fatalf("expected next_run_at preserved through disable as %q, got %+v", nextRun, disabled.NextRunAt)
+	}
+
 	if err := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, true, nil); err != nil {
 		t.Fatalf("re-enable: %v", err)
 	}
