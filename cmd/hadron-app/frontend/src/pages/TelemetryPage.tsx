@@ -270,7 +270,7 @@ function TelemetryPageInner() {
           <div className="text-xl font-semibold text-foreground tracking-tight">Telemetry</div>
           {loading && <div className="text-sm text-muted-foreground mt-0.5">Loading…</div>}
         </div>
-        <Button variant="ghost" onClick={fetchRuns} title="Refresh (R)">
+        <Button variant="ghost" onClick={() => void reloadRuns()} title="Refresh (R)">
           <RefreshCw size={14} />
         </Button>
       </div>
