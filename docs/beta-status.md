@@ -43,3 +43,7 @@ Expect ongoing changes in:
 - packaging
 - workflow ergonomics
 - some runtime surfaces that are newly landed
+
+## Captured For Later
+
+- a public blueprint marketplace/discovery surface for sharing reusable Hadron blueprints

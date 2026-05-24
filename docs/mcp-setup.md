@@ -1,9 +1,10 @@
 # Hadron MCP Setup
 
-Hadron exposes a Model Context Protocol (MCP) adapter so MCP clients can
-validate, run, and inspect blueprint runs without leaving the chat session.
+Hadron exposes a stdio MCP server from `hadrond mcp`. The adapter is meant to
+let agents discover blueprints, inspect their input schema, enqueue runs, and
+debug execution without leaving the conversation.
 
-## Starting hadrond in MCP Mode
+## Start The Server
 
 ```sh
 hadrond mcp \
@@ -12,25 +13,16 @@ hadrond mcp \
   -data ~/.hadron
 ```
 
-The adapter communicates over stdio (JSON-RPC), as required by the MCP spec.
-
-### With a Token (Mutating Tools)
-
-By default, read-only tools are always available. To enable mutating tools
-(enqueue runs, create schedules, etc.) provide a token and the desired scopes:
+Read-only tools are available without a token. Mutating tools require a token
+plus the corresponding scopes:
 
 ```sh
 hadrond mcp \
   -token "my-secret-token" \
-  -token-scopes "run.write,schedule.write,pipeline.write"
+  -token-scopes "run.write,run.cancel,schedule.write,pipeline.write,trigger.write,human_gate.write,message.write"
 ```
 
----
-
-## MCP Client Integration
-
-Add an entry to your MCP client configuration. For clients that use JSON config,
-the shape typically looks like:
+## MCP Client Config
 
 ```json
 {
@@ -43,97 +35,109 @@ the shape typically looks like:
         "-logs", "/Users/<you>/.hadron/logs",
         "-data", "/Users/<you>/.hadron",
         "-token", "your-token-here",
-        "-token-scopes", "run.write,schedule.write,pipeline.write"
+        "-token-scopes", "run.write,run.cancel,schedule.write,pipeline.write,trigger.write,human_gate.write,message.write"
       ]
     }
   }
 }
 ```
 
-Restart your MCP client to pick up the new server.
+Restart the MCP client after updating its config.
 
-Hadron does not ship a repo-local MCP client config file. Keep local client
-configuration in your own user or workspace config.
+## Recommended Agent Flow
 
----
+When the client is unfamiliar with Hadron:
 
-## Available MCP Tools
+1. Call `hadron_skills` with no arguments.
+2. Call `hadron_blueprint_broker` or `hadron_blueprint_discover`.
+3. Call `hadron_blueprint_schema` for the chosen blueprint.
+4. Call `hadron_run_enqueue`.
+5. Use `hadron_run_operations` for structured diagnostics and `hadron_run_events` for the raw audit trail.
 
-### Read-Only Tools (no token required)
+## Key Read-Only Tools
 
-| Tool | Description |
+| Tool | Purpose |
 |---|---|
-| `hadron_run_operations` | Summarize run operation diagnostics across MCP, HTTP, waits, and launches |
-| `hadron_run_mcp_calls` | Summarize MCP call diagnostics for a run |
-| `hadron_human_gate_get` | Inspect a waiting or decided human gate |
-| `hadron_validate_blueprint` | Validate a YAML blueprint; returns `{valid, error}` |
-| `hadron_list_runs` | List recent blueprint runs |
-| `hadron_get_run` | Get a run by ID, including status and error |
-| `hadron_list_run_events` | List events for a run (log lines, task results) |
-| `hadron_list_schedules` | List all schedules |
-| `hadron_list_workspaces` | List all workspaces |
+| `hadron_skills` | Progressive MCP orientation and workflow guidance |
+| `hadron_health` | Adapter health/status |
+| `hadron_workspaces_list` / `hadron_workspace_get` | Inspect workspaces |
+| `hadron_runs_list` / `hadron_run_get` | Inspect runs |
+| `hadron_run_events` | Read the append-only event history |
+| `hadron_run_operations` | Structured step diagnostics across MCP, HTTP, waits, and launches |
+| `hadron_run_mcp_calls` | MCP-call-only diagnostic summary |
+| `hadron_blueprints_list` | List blueprint files from the configured blueprint directory |
+| `hadron_blueprint_broker` | Rank blueprint recommendations for a task with reasons and next steps |
+| `hadron_blueprint_discover` | Rank likely-fit blueprints for a task |
+| `hadron_blueprint_search` | Deterministic keyword search across blueprints |
+| `hadron_blueprint_schema` | Read the agent-facing JSON input schema for one blueprint |
+| `hadron_blueprint_get` | Read the raw blueprint YAML |
+| `hadron_blueprint_validate` | Validate blueprint content |
+| `hadron_blueprint_lint` | Lint a blueprint or pipeline file |
+| `hadron_agent_card` | Generate an A2A-compatible agent card from one or all blueprints |
+| `hadron_schedules_list` | Inspect schedules |
+| `hadron_pipelines_list` / `hadron_pipeline_stages` / `hadron_pipeline_graph` | Inspect pipeline runs |
+| `hadron_triggers_list` / `hadron_trigger_list_mine` | Inspect triggers |
+| `hadron_human_gate_get` | Inspect a human decision gate |
+| `hadron_messages_inbox` / `hadron_messages_list` / `hadron_messages_thread` / `hadron_message_get` | Inspect local message workflows |
+| `hadron_registry_list` / `hadron_registry_search` / `hadron_registry_show` | Inspect the optional indexed blueprint registry |
 
-### Mutating Tools (require token + scope)
+## Prompts And Resources
 
-| Tool | Scope | Description |
-|---|---|---|
-| `hadron_enqueue_run` | `run.write` | Enqueue a blueprint run |
-| `hadron_cancel_run` | `run.write` | Cancel an in-progress run |
-| `hadron_human_gate_submit` | `human_gate.write` | Submit a decision for a waiting human gate |
-| `hadron_create_schedule` | `schedule.write` | Create a new schedule |
-| `hadron_update_schedule` | `schedule.write` | Enable/disable a schedule |
-| `hadron_delete_schedule` | `schedule.write` | Delete a schedule |
-| `hadron_enqueue_pipeline` | `pipeline.write` | Start a pipeline run |
+Hadron also exposes standard MCP prompts and resources for agent orientation:
 
----
+- prompts:
+  - `hadron_pick_blueprint`
+  - `hadron_debug_run`
+- static resources:
+  - `hadron://docs/mcp/start-here`
+  - `hadron://docs/mcp/blueprint-discovery`
+  - `hadron://docs/mcp/run-inspection`
+  - `hadron://docs/mcp/message-workflows`
+  - `hadron://docs/mcp/input-schema-guide`
+- resource template:
+  - `hadron://blueprints/{blueprint_ref}/input-schema`
 
-## Example: Asking A Client To Validate A Blueprint
+These are optional convenience surfaces for MCP clients that understand prompts/resources. The core workflow remains fully available through tools alone.
 
-Once the MCP server is configured, you can ask your client:
+## Mutating Tools And Scopes
 
-> "Validate the blueprint at `examples/hello-hadron.yaml` using Hadron."
-
-The client should call `hadron_validate_blueprint` and report back the result.
-
-> "Run `examples/parameterized.yaml` with `app_name=demo`."
-
-The client calls `hadron_enqueue_run` with the appropriate inputs and streams
-the result back.
-
----
-
-## Auth Token Setup
-
-Generate a random token and keep it in your environment or a secrets manager:
-
-```sh
-export HADRON_TOKEN=$(openssl rand -hex 32)
-```
-
-Pass it to `hadrond mcp -token "$HADRON_TOKEN"`.
-
-### Scopes
-
-| Scope | Effect |
+| Tool | Scope |
 |---|---|
-| `run.write` | Allow enqueueing and cancelling runs |
-| `human_gate.write` | Allow submitting decisions to waiting human gates |
-| `schedule.write` | Allow creating, updating, and deleting schedules |
-| `pipeline.write` | Allow starting pipeline runs |
+| `hadron_workspace_create` | `workspace.write` |
+| `hadron_run_enqueue` | `run.write` |
+| `hadron_run_cancel` | `run.cancel` |
+| `hadron_schedule_create` / `hadron_schedule_update` / `hadron_schedule_delete` | `schedule.write` |
+| `hadron_pipeline_enqueue` | `pipeline.write` |
+| `hadron_trigger_create` / `hadron_trigger_watch` / `hadron_trigger_delete` | `trigger.write` |
+| `hadron_human_gate_submit` | `human_gate.write` |
+| `hadron_message_send` / `hadron_message_consume` | `message.write` |
+| `hadron_registry_index` | none today, but treat as operator-oriented |
 
-Omit a scope to make that category read-only even with a valid token.
+## Example Prompts
+
+> "Use Hadron to find a blueprint that looks like a release workflow."
+
+Expected call path: `hadron_blueprint_broker` or `hadron_blueprint_discover`.
+
+> "Inspect the schema for `examples/parameterized.yaml` and then run it with reasonable demo inputs."
+
+Expected call path: `hadron_blueprint_schema` → `hadron_run_enqueue`.
+
+> "This run failed. Use Hadron to explain which step failed and why."
+
+Expected call path: `hadron_run_operations`, then `hadron_run_events` only if deeper raw detail is needed.
 
 ## External MCP Servers For Blueprints
 
 Blueprint `mcp_call` steps can target the local Hadron adapter with
 `server: hadron`, or a named external server from `~/.hadron/settings.json`.
-The current runtime supports:
+Supported transports today:
 
-- `stdio` for subprocess-backed MCP servers
-- `streamable_http` or `http` for MCP streamable HTTP endpoints
-- `sse` for legacy SSE-style MCP endpoints
+- `stdio`
+- `streamable_http` or `http`
+- `sse`
 
-Example:
+Example settings:
 
 ```json
 {
@@ -170,16 +174,6 @@ mcp_call:
 
 ## Agentic Workflow Notes
 
-For agents using Hadron as a workflow substrate today:
-
-- `mcp_call`, `http_call`, `human_gate`, local-runtime `agent_launch`, and
-  local-mailbox `message_wait` are production-usable in the stock daemon
-- local message workflows use `message_substrates[*].kind = "go_messaging"`
-  with `msg://` recipient URNs and correlation matching
-- the message helper tools are:
-  - `hadron_message_send`
-  - `hadron_messages_inbox`
-  - `hadron_message_get`
-  - `hadron_message_consume`
-- `hadron_run_operations` is the preferred inspection tool for structured step
-  diagnostics instead of scraping raw run events
+- `mcp_call`, `http_call`, `human_gate`, local-runtime `agent_launch`, and local-mailbox `message_wait` are production-usable in the stock daemon.
+- Local message workflows use `message_substrates[*].kind = "go_messaging"` with `msg://` URNs and correlation matching.
+- Prefer recipient- and thread-based message reads over id-only polling when the workflow already has a stable thread identifier.

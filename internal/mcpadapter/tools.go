@@ -31,6 +31,8 @@ var pipelineSeq uint64
 var messageSeq uint64
 
 func (a *Adapter) registerTools(s *server.MCPServer) {
+	a.registerSkillsTool(s)
+
 	s.AddTool(mcp.NewTool("hadron_health",
 		mcp.WithDescription("Read Hadron MCP adapter health/status."),
 	), a.handleHealth)
@@ -157,6 +159,8 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithString("blueprint_path", mcp.Required(), mcp.Description("Path to the blueprint file")),
 	), a.handleBlueprintGet)
 
+	a.registerBlueprintDiscoveryTools(s)
+
 	s.AddTool(mcp.NewTool("hadron_schedule_delete",
 		mcp.WithDescription("Delete a schedule by id (requires scope schedule.write)."),
 		mcp.WithString("schedule_id", mcp.Required(), mcp.Description("Schedule id")),
@@ -272,191 +276,6 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 
 	// Register blueprint registry tools
 	registerRegistryTools(s, a.registry)
-
-	// Auto-register blueprint files as individual MCP tools
-	a.registerBlueprintTools(s)
-}
-
-// registerBlueprintTools walks the blueprint directory and registers each valid
-// blueprint as its own MCP tool with typed inputs derived from the blueprint spec.
-func (a *Adapter) registerBlueprintTools(s *server.MCPServer) {
-	dir := a.blueprintDir
-	if dir == "" {
-		return
-	}
-
-	var blueprintFiles []string
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			// Registration is best-effort; skip inaccessible entries.
-			return nil //nolint:nilerr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		ext := filepath.Ext(d.Name())
-		if ext == ".yaml" || ext == ".yml" {
-			blueprintFiles = append(blueprintFiles, path)
-		}
-		return nil
-	})
-
-	registered := map[string]struct{}{}
-
-	for _, bpPath := range blueprintFiles {
-		bp, err := blueprint.ParseFile(bpPath)
-		if err != nil {
-			continue // skip invalid blueprints
-		}
-
-		// Derive tool name from blueprint slug or name
-		slug := bp.Spec.Slug
-		if slug == "" {
-			slug = bp.Spec.Name
-		}
-		if slug == "" {
-			// Fall back to filename without extension
-			slug = strings.TrimSuffix(filepath.Base(bpPath), filepath.Ext(bpPath))
-		}
-		// Sanitize: lowercase, replace non-alphanumeric with underscore
-		toolSlug := strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
-				return r
-			}
-			if r >= 'A' && r <= 'Z' {
-				return r + 32 // toLower
-			}
-			return '_'
-		}, slug)
-		// Collapse multiple underscores
-		for strings.Contains(toolSlug, "__") {
-			toolSlug = strings.ReplaceAll(toolSlug, "__", "_")
-		}
-		toolSlug = strings.Trim(toolSlug, "_")
-		if toolSlug == "" {
-			continue
-		}
-
-		toolName := "hadron_bp_" + toolSlug
-		if _, exists := registered[toolName]; exists {
-			continue // skip duplicates
-		}
-		registered[toolName] = struct{}{}
-
-		// Build description
-		desc := fmt.Sprintf("Run blueprint: %s", bp.Spec.Name)
-		if bp.Spec.Title != "" {
-			desc = fmt.Sprintf("Run blueprint: %s", bp.Spec.Title)
-		}
-		if bp.Spec.Description != "" {
-			desc += " — " + bp.Spec.Description
-		}
-		desc += " (requires scope run.write)"
-
-		// Build MCP tool options: workspace_id + typed inputs from blueprint
-		toolOpts := []mcp.ToolOption{
-			mcp.WithDescription(desc),
-			mcp.WithString("workspace_id", mcp.Description("Workspace id (default: default)")),
-		}
-
-		for _, inp := range bp.Inputs {
-			inputDesc := inp.Description
-			if inputDesc == "" && inp.Label != "" {
-				inputDesc = inp.Label
-			}
-			if inputDesc == "" {
-				inputDesc = inp.Name
-			}
-
-			switch inp.Type {
-			case "boolean":
-				opts := []mcp.PropertyOption{mcp.Description(inputDesc)}
-				if inp.Required {
-					opts = append(opts, mcp.Required())
-				}
-				toolOpts = append(toolOpts, mcp.WithBoolean(inp.Name, opts...))
-			case "number":
-				opts := []mcp.PropertyOption{mcp.Description(inputDesc)}
-				if inp.Required {
-					opts = append(opts, mcp.Required())
-				}
-				toolOpts = append(toolOpts, mcp.WithNumber(inp.Name, opts...))
-			default: // string, array, or unknown → treat as string
-				opts := []mcp.PropertyOption{mcp.Description(inputDesc)}
-				if inp.Required {
-					opts = append(opts, mcp.Required())
-				}
-				toolOpts = append(toolOpts, mcp.WithString(inp.Name, opts...))
-			}
-		}
-
-		// Capture bpPath for the closure
-		capturedPath := bpPath
-
-		handler := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			if deny := a.checkScope(ScopeRunWrite); deny != nil {
-				return deny, nil
-			}
-			if a.runner == nil {
-				return toolError("unavailable", "runner unavailable"), nil
-			}
-
-			workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
-			if _, err := a.store.GetWorkspace(ctx, workspaceID); err != nil {
-				if isNotFound(err) {
-					return toolError("not_found", "workspace not found"), nil
-				}
-				return toolError("internal_error", err.Error()), nil
-			}
-
-			// Re-parse to get current version of blueprint
-			bpCurrent, err := blueprint.ParseFile(capturedPath)
-			if err != nil {
-				return toolError("validation_error", err.Error()), nil
-			}
-
-			// Build inputs from request arguments
-			inputs := map[string]any{}
-			args := req.GetArguments()
-			for _, inp := range bpCurrent.Inputs {
-				if _, provided := args[inp.Name]; !provided {
-					continue
-				}
-				switch inp.Type {
-				case "boolean":
-					inputs[inp.Name] = req.GetBool(inp.Name, false)
-				case "number":
-					inputs[inp.Name] = req.GetFloat(inp.Name, 0)
-				default:
-					inputs[inp.Name] = req.GetString(inp.Name, "")
-				}
-			}
-
-			normalized, err := blueprint.NormalizeInputs(bpCurrent, inputs)
-			if err != nil {
-				return toolError("validation_error", err.Error()), nil
-			}
-
-			runID := fmt.Sprintf("mcp-run-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&runSeq, 1))
-			if err := a.runner.Enqueue(ctx, execution.Request{
-				RunID:         runID,
-				WorkspaceID:   workspaceID,
-				BlueprintPath: capturedPath,
-				Inputs:        normalized,
-			}); err != nil {
-				return toolError("internal_error", err.Error()), nil
-			}
-			return toolJSON(map[string]any{
-				"run_id":         runID,
-				"status":         "queued",
-				"workspace_id":   workspaceID,
-				"blueprint":      bpCurrent.Spec.Name,
-				"blueprint_path": capturedPath,
-			}), nil
-		}
-
-		s.AddTool(mcp.NewTool(toolName, toolOpts...), handler)
-	}
 }
 
 func (a *Adapter) handleHealth(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1233,17 +1052,15 @@ func (a *Adapter) handleBlueprintGet(_ context.Context, req mcp.CallToolRequest)
 	if bpPath == "" {
 		return toolError("validation_error", "blueprint_path is required"), nil
 	}
-	// Resolve to absolute and ensure the path is within the blueprints directory.
-	absPath, err := filepath.Abs(bpPath)
+	absPath, err := a.resolveBlueprintPath(bpPath)
 	if err != nil {
-		return toolError("validation_error", "invalid path"), nil //nolint:nilerr
-	}
-	absDir, err := filepath.Abs(a.blueprintDir)
-	if err != nil {
-		return toolError("internal_error", "cannot resolve blueprint directory"), nil //nolint:nilerr
-	}
-	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
-		return toolError("validation_error", "path is outside the blueprints directory"), nil
+		if os.IsNotExist(err) {
+			return toolError("not_found", "blueprint file not found"), nil
+		}
+		if strings.Contains(err.Error(), "outside") {
+			return toolError("validation_error", err.Error()), nil
+		}
+		return toolError("internal_error", err.Error()), nil
 	}
 	data, err := os.ReadFile(absPath) // #nosec G304 -- path was validated to stay within the blueprint directory.
 	if err != nil {

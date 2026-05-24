@@ -54,6 +54,33 @@ func newTestAdapter(t *testing.T) *mcpadapter.Adapter {
 	return mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "", nil)
 }
 
+func newBlueprintDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	content := strings.TrimSpace(`
+blueprint:
+  name: release-docs
+  slug: release-docs
+  title: Release Docs
+  description: Build release notes and publish docs for a beta release.
+  tags: [release, docs]
+inputs:
+  - name: version
+    type: string
+    required: true
+    description: Release version
+steps:
+  - section: main
+    tasks:
+      - name: publish
+        cmd: echo publish {{ .inputs.version }}
+`)
+	if err := os.WriteFile(filepath.Join(dir, "release-docs.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write blueprint: %v", err)
+	}
+	return dir
+}
+
 // callTool invokes a registered tool and returns the text result.
 func callTool(t *testing.T, adapter *mcpadapter.Adapter, toolName string, args map[string]any) map[string]any {
 	t.Helper()
@@ -120,6 +147,69 @@ steps:
 	}
 	if _, hasErr := out["error"]; hasErr {
 		t.Fatalf("expected no error field, got %v", out)
+	}
+}
+
+func TestMCP_HadronSkills_IndexAndBody(t *testing.T) {
+	adapter := newTestAdapter(t)
+
+	index := callTool(t, adapter, "hadron_skills", nil)
+	items, ok := index["items"].([]any)
+	if !ok || len(items) == 0 {
+		t.Fatalf("expected skill index items, got %#v", index)
+	}
+
+	result := adapter.CallTool(context.Background(), "hadron_skills", map[string]any{"name": "start-here"})
+	if result == nil || len(result.Content) == 0 {
+		t.Fatal("expected hadron_skills text response")
+	}
+	text, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatal("expected text content from hadron_skills")
+	}
+	if !strings.Contains(text.Text, "hadron_blueprint_discover") {
+		t.Fatalf("expected orientation body, got %q", text.Text)
+	}
+}
+
+func TestMCP_BlueprintDiscoverAndSchema(t *testing.T) {
+	store := newTestStore(t)
+	dir := newBlueprintDir(t)
+	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "", nil, mcpadapter.WithBlueprintDir(dir))
+
+	discover := callTool(t, adapter, "hadron_blueprint_discover", map[string]any{
+		"query": "release docs beta",
+	})
+	items, ok := discover["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one discover hit, got %#v", discover)
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected discover item object, got %#v", items[0])
+	}
+	if item["slug"] != "release-docs" {
+		t.Fatalf("unexpected discover hit: %#v", item)
+	}
+
+	schema := callTool(t, adapter, "hadron_blueprint_schema", map[string]any{
+		"blueprint_path": filepath.Join(dir, "release-docs.yaml"),
+	})
+	inputSchema, ok := schema["input_schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected input_schema object, got %#v", schema)
+	}
+	required, ok := inputSchema["required"].([]any)
+	if !ok || len(required) != 1 || required[0] != "version" {
+		t.Fatalf("unexpected required schema fields: %#v", inputSchema)
+	}
+}
+
+func TestMCP_BlueprintSearch_RequiresQuery(t *testing.T) {
+	adapter := newTestAdapter(t)
+	out := callTool(t, adapter, "hadron_blueprint_search", map[string]any{})
+	if out["code"] != "validation_error" {
+		t.Fatalf("expected validation_error, got %#v", out)
 	}
 }
 

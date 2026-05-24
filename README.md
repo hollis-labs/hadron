@@ -97,7 +97,9 @@ hadrond mcp -token <secret> -token-scopes run.write,schedule.write,pipeline.writ
 ```
 
 Configure your MCP client to launch `hadrond mcp` over stdio. See
-[docs/mcp-setup.md](docs/mcp-setup.md).
+[docs/mcp-setup.md](docs/mcp-setup.md). The MCP surface includes blueprint
+broker/discovery tools, prompt templates, and resource docs in addition to the
+core run/schedule/pipeline controls.
 
 ---
 

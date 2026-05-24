@@ -218,6 +218,7 @@ func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string
 // buildHandlerMap returns a map of tool name → handler function for direct invocation.
 func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){
+		"hadron_skills":             a.handleHadronSkills,
 		"hadron_health":             a.handleHealth,
 		"hadron_workspaces_list":    a.handleWorkspacesList,
 		"hadron_workspace_get":      a.handleWorkspaceGet,
@@ -240,6 +241,10 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_blueprint_lint":     a.handleBlueprintLint,
 		"hadron_blueprints_list":    a.handleBlueprintsList,
 		"hadron_blueprint_get":      a.handleBlueprintGet,
+		"hadron_blueprint_discover": a.handleBlueprintDiscover,
+		"hadron_blueprint_broker":   a.handleBlueprintBroker,
+		"hadron_blueprint_search":   a.handleBlueprintSearch,
+		"hadron_blueprint_schema":   a.handleBlueprintSchema,
 		"hadron_schedule_delete":    a.handleScheduleDelete,
 		"hadron_triggers_list":      a.handleTriggersList,
 		"hadron_trigger_create":     a.handleTriggerCreate,
@@ -256,12 +261,7 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 }
 
 func (a *Adapter) Run(ctx context.Context) error {
-	s := server.NewMCPServer(
-		"hadron",
-		"0.4.0",
-		server.WithToolCapabilities(true),
-	)
-	a.registerTools(s)
+	s := a.newServer()
 	ctxFunc := func(_ context.Context) context.Context { return ctx }
 	return server.ServeStdio(s, server.WithStdioContextFunc(ctxFunc))
 }
