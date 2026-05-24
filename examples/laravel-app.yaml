@@ -30,12 +30,14 @@ inputs:
 
   - name: php_version
     label: PHP Version
+    description: PHP version target for the generated Laravel project.
     type: string
     default: "8.3"
     enum: ["8.1", "8.2", "8.3"]
 
   - name: install_inertia
     label: Install Inertia.js?
+    description: Whether to install the Inertia Laravel adapter during setup.
     type: boolean
     default: false
 
@@ -82,6 +84,7 @@ steps:
     tasks:
       - name: create-laravel-project
         cmd: composer create-project laravel/laravel {{ .inputs.app_name }}
+        timeout_seconds: 300
         on_success:
           - type: cmd
             value: echo "Laravel created successfully"
@@ -93,24 +96,29 @@ steps:
     tasks:
       - name: install-composer-deps
         cmd: cd {{ .inputs.app_name }} && composer install --no-interaction
+        timeout_seconds: 180
         continue_on_error: false
 
       - name: generate-app-key
         cmd: cd {{ .inputs.app_name }} && php artisan key:generate
+        timeout_seconds: 60
 
       - name: install-inertia
         cmd: cd {{ .inputs.app_name }} && composer require inertiajs/inertia-laravel
         if: "{{ .inputs.install_inertia }}"
+        timeout_seconds: 120
 
   - section: Frontend
     tasks:
       - name: install-npm-deps
         cmd: cd {{ .inputs.app_name }} && npm install
+        timeout_seconds: 180
         retry: 2
         retry_delay_seconds: 5
 
       - name: build-assets
         cmd: cd {{ .inputs.app_name }} && npm run build
+        timeout_seconds: 180
         on_fail:
           - type: cmd
             value: echo "Asset build failed — continuing anyway"
@@ -120,7 +128,9 @@ steps:
     tasks:
       - name: git-init
         cmd: cd {{ .inputs.app_name }} && git init && git add . && git commit -m "Initial Laravel scaffold"
+        timeout_seconds: 60
         continue_on_error: true
 
       - name: show-summary
         cmd: echo "Project ready at ./{{ .inputs.app_name }}"
+        timeout_seconds: 10

@@ -15,3 +15,4 @@ steps:
     tasks:
       - name: run-linter
         cmd: echo "[lint] Running linter..."
+        timeout_seconds: 10

@@ -19,6 +19,8 @@ steps:
     tasks:
       - name: hello
         cmd: echo "Hello from Hadron!"
+        timeout_seconds: 10
 
       - name: show-date
         cmd: date "+%Y-%m-%d %H:%M:%S"
+        timeout_seconds: 10

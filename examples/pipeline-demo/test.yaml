@@ -15,9 +15,12 @@ steps:
     tasks:
       - name: run-unit-tests
         cmd: echo "[stage 2/test] Running unit tests (simulated)"
+        timeout_seconds: 10
 
       - name: run-integration-tests
         cmd: echo "[stage 2/test] Running integration tests (simulated)"
+        timeout_seconds: 10
 
       - name: show-results
         cmd: echo "[stage 2/test] All tests passed"
+        timeout_seconds: 10

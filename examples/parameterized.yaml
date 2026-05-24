@@ -64,20 +64,25 @@ steps:
           echo "Workers     : {{ .inputs.worker_count }}"
           echo "Debug Mode  : {{ .inputs.enable_debug }}"
           echo "Environment : {{ .inputs.environment }}"
+          echo "Tags        : {{ .inputs.tags }}"
+        timeout_seconds: 10
 
       - name: validate-prod-warning
         # Only warn when targeting production
         if: "test '{{ .inputs.environment }}' = 'production'"
         cmd: 'echo "WARNING: targeting production environment"'
+        timeout_seconds: 10
 
   - section: Execution
     tasks:
       - name: start-app
         cmd: echo "Starting {{ .inputs.app_name }} with {{ .inputs.worker_count }} workers in {{ .inputs.environment }} mode"
+        timeout_seconds: 10
 
       - name: enable-debug-output
         if: "test '{{ .inputs.enable_debug }}' = 'true'"
         cmd: echo "Debug logging enabled for {{ .inputs.app_name }}"
+        timeout_seconds: 10
         env:
           LOG_LEVEL: debug
           APP_ENV: "{{ .inputs.environment }}"

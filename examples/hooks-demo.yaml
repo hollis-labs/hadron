@@ -35,12 +35,14 @@ steps:
     tasks:
       - name: task-with-success-hook
         cmd: echo "task ran successfully"
+        timeout_seconds: 10
         on_success:
           - type: cmd
             value: echo "[on_success] task-with-success-hook completed"
 
       - name: task-with-both-hooks
         cmd: echo "this task also succeeded"
+        timeout_seconds: 10
         on_success:
           - type: cmd
             value: echo "[on_success] both-hooks task done"
@@ -52,6 +54,7 @@ steps:
     tasks:
       - name: intentional-failure
         cmd: "false"
+        timeout_seconds: 10
         continue_on_error: true
         on_fail:
           - type: cmd
@@ -61,3 +64,4 @@ steps:
 
       - name: after-failure
         cmd: echo "execution continues after continue_on_error task"
+        timeout_seconds: 10

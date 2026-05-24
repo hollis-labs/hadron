@@ -15,6 +15,8 @@ steps:
     tasks:
       - name: compile
         cmd: echo "[build] Compiling project..."
+        timeout_seconds: 10
 
       - name: emit-version
         cmd: echo "[build] Build complete — version artifact ready"
+        timeout_seconds: 10

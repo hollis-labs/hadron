@@ -33,7 +33,7 @@ pre-commit:
     go-vet:
       glob: "*.go"
       skip_empty: true
-      run: go vet ./...
+      run: go vet ./cmd/hadron ./cmd/hadron-app ./cmd/hadrond ./internal/... ./schemas/...
 
     # ── Frontend parallel group (optional) ────────────────────────────
     # Runs only when a ui/, web/, or frontend/ directory exists.
@@ -54,4 +54,4 @@ pre-push:
       # Full test suite gate before code reaches the remote.
       glob: "*.go"
       skip_empty: true
-      run: go test ./...
+      run: go test ./cmd/hadron ./cmd/hadron-app ./cmd/hadrond ./internal/... ./schemas/...

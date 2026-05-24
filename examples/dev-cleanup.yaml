@@ -24,33 +24,39 @@ steps:
     tasks:
       - name: clear-tmp-hadron
         cmd: rm -rf /tmp/hadron-*
+        timeout_seconds: 30
         continue_on_error: true
 
       - name: clear-ds-store
         cmd: find ~ -name ".DS_Store" -maxdepth 5 -delete
+        timeout_seconds: 30
         continue_on_error: true
 
       - name: clear-node-caches
         # Only runs if the node_modules/.cache directory exists
         if: "test -d ~/.npm/_cacache"
         cmd: npm cache clean --force
+        timeout_seconds: 30
         continue_on_error: true
 
   - section: Logs
     tasks:
       - name: rotate-hadrond-logs
         cmd: find ~/.hadron/logs/runs -name "*.jsonl" -mtime +30 -delete
+        timeout_seconds: 30
         continue_on_error: true
 
       - name: clear-xcode-logs
         if: "test -d ~/Library/Logs/CoreSimulator"
         cmd: rm -rf ~/Library/Logs/CoreSimulator/*
+        timeout_seconds: 30
         continue_on_error: true
 
   - section: Build Artifacts
     tasks:
       - name: check-brew-available
         cmd: which brew
+        timeout_seconds: 10
         on_fail:
           - type: cmd
             value: echo "brew not available — skipping brew cleanup"
@@ -59,6 +65,7 @@ steps:
       - name: brew-cleanup
         cmd: brew cleanup --prune=7
         if: "which brew"
+        timeout_seconds: 120
         continue_on_error: true
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -66,12 +73,15 @@ steps:
       - name: go-clean-cache
         cmd: go clean -testcache
         if: "which go"
+        timeout_seconds: 30
         continue_on_error: true
 
       - name: docker-prune
         cmd: docker system prune -f --filter "until=168h"
         if: "which docker && docker info > /dev/null 2>&1"
+        timeout_seconds: 120
         continue_on_error: true
 
       - name: cleanup-summary
         cmd: echo "Cleanup complete — $(date '+%Y-%m-%d %H:%M:%S')"
+        timeout_seconds: 10
