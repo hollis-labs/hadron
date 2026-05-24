@@ -19,13 +19,31 @@ pipelines, MCP-driven workflows, and the current first-class agentic steps.
 What "beta" means today:
 
 - APIs and workflow primitives are still being hardened
-- install and packaging are source-first today
+- packaging and install UX are still being improved
 - the desktop app is substantially complete but still stabilizing
 - some docs and ergonomics are still catching up with the live daemon
 
 ## Install
 
-### Option 1: Build from source
+### Option 1: Homebrew
+
+```sh
+brew install hollis-labs/tap/hadron
+```
+
+### Option 2: Download a release tarball
+
+```sh
+curl -L -o hadron.tar.gz \
+  https://github.com/hollis-labs/hadron/releases/download/v0.4.2-beta.1/hadron_v0.4.2-beta.1_darwin_arm64.tar.gz
+tar -xzf hadron.tar.gz
+cd hadron_v0.4.2-beta.1_darwin_arm64
+install -d "$HOME/.local/bin"
+install -m 0755 hadron hadrond "$HOME/.local/bin/"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### Option 3: Build from source
 
 ```sh
 git clone git@github.com:hollis-labs/hadron.git
@@ -34,40 +52,24 @@ make build
 export PATH="$PWD/bin:$PATH"
 ```
 
-### Option 2: Install binaries into a prefix
-
-```sh
-git clone git@github.com:hollis-labs/hadron.git
-cd hadron
-make install PREFIX="$HOME/.local"
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-### Option 3: Install with `go install`
+### Option 4: Install with `go install`
 
 ```sh
 go install github.com/hollis-labs/hadron/cmd/hadrond@latest
 go install github.com/hollis-labs/hadron/cmd/hadron@latest
 ```
 
-Tagged releases also publish macOS and Linux tarballs for `hadron` and
-`hadrond`. See [docs/install.md](docs/install.md) for prerequisites, paths,
-release artifacts, and setup details.
-
-Planned tap install:
-
-```sh
-brew install hollis-labs/tap/hadron
-```
-
-That path depends on the Hadron repo and release assets being publicly
-downloadable.
+See [docs/install.md](docs/install.md) for prerequisites, paths, release
+artifacts, and first-time setup details.
 
 ## Quick Start
 
 ```sh
 # Start the daemon
 hadrond serve
+
+# Check daemon status
+hadron daemon
 
 # Run your first blueprint
 hadron run examples/hello-hadron.yaml
@@ -84,8 +86,8 @@ hadron schedule create \
   --cron "* * * * *" \
   --name hello-every-minute
 
-# Check daemon status
-hadron daemon
+# Inspect a blueprint locally
+hadron blueprint show examples/parameterized.yaml
 ```
 
 ---
@@ -109,6 +111,7 @@ core run/schedule/pipeline controls.
 |---|---|
 | [docs/getting-started.md](docs/getting-started.md) | Installation and first run |
 | [docs/install.md](docs/install.md) | Source install, binary placement, and first daemon setup |
+| [docs/use-cases.md](docs/use-cases.md) | Sample user and agent workflows |
 | [docs/beta-status.md](docs/beta-status.md) | Current public beta posture and remaining hardening areas |
 | [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) | Current system architecture |
 | [docs/spec-v04.md](docs/spec-v04.md) | Full blueprint spec reference |

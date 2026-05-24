@@ -13,7 +13,7 @@ Hadron by Hollis Labs is in active public beta development.
 
 ## What Still Needs Hardening
 
-- release packaging beyond source-first installation
+- release and install ergonomics beyond the current beta paths
 - race-condition cleanup in file-watch trigger handling
 - continued docs and operator ergonomics cleanup
 - broader release-readiness testing across the desktop app and MCP workflows

@@ -2,6 +2,19 @@
 
 The `hadron` CLI communicates with a running `hadrond` daemon over HTTP.
 
+## Typical Flow
+
+Most users only need four commands to get started:
+
+```sh
+hadrond serve
+hadron daemon
+hadron validate examples/hello-hadron.yaml
+hadron run examples/hello-hadron.yaml
+```
+
+Use `hadron blueprint ...` for local file inspection without a running daemon.
+
 ## Global Flags
 
 | Flag | Default | Description |
@@ -32,6 +45,11 @@ hadron run examples/parameterized.yaml --input app_name=myapp --input worker_cou
 hadron run examples/laravel-app.yaml --workspace production --dry-run
 ```
 
+Use this when:
+
+- you want to execute a blueprint immediately
+- you want the CLI to stream the run events back to your terminal
+
 ---
 
 ## `hadron validate`
@@ -50,6 +68,12 @@ Exits 0 if valid, 1 if invalid.
 hadron validate examples/hello-hadron.yaml
 # valid
 ```
+
+Use this before:
+
+- committing a new or edited blueprint
+- scheduling a blueprint
+- asking an agent to run a blueprint you just changed
 
 ---
 
@@ -126,6 +150,12 @@ hadron blueprint show <path>
 
 Prints a parsed blueprint summary (name, version, inputs, sections).
 
+Use these when:
+
+- you want to inspect blueprint metadata locally
+- the daemon is not running yet
+- you are editing or reviewing blueprint files directly
+
 ---
 
 ## `hadron schedule`
@@ -166,6 +196,11 @@ hadron schedule create \
 
 ### `hadron schedule delete <id>`
 
+Use schedules when:
+
+- the workflow should recur on a cron cadence
+- you want the daemon to own timing and audit history
+
 ---
 
 ## `hadron pipeline`
@@ -177,6 +212,9 @@ hadron pipeline run <pipeline-path> [--workspace <id>]
 ```
 
 Starts a pipeline run and returns the pipeline run ID.
+
+Use this when a workflow is already split into several blueprints with stage
+boundaries.
 
 ---
 
@@ -196,6 +234,8 @@ Check daemon connectivity and version.
 hadron daemon
 # status: ok  version: 0.4.0
 ```
+
+This is the fastest “is Hadron up?” check.
 
 ---
 
@@ -249,6 +289,9 @@ hadrond mcp [flags]
 | `-data` | `~/.hadron` | Data directory |
 | `-token` | — | Bearer token for mutating tools |
 | `-token-scopes` | — | Comma-separated scopes (e.g. `run.write,pipeline.write`) |
+
+Use `hadrond mcp` when you want an MCP client or agent to discover and run
+Hadron workflows. See [mcp-setup.md](mcp-setup.md) for the actual tool model.
 
 ### `hadrond version`
 

@@ -1,83 +1,142 @@
 # Getting Started with Hadron
 
-Hadron is currently in public beta. Start with a source install, then bring up
-the daemon locally.
+Hadron is a local-first blueprint runner with three main entry points:
 
-## Installation
+- `hadrond` runs the daemon
+- `hadron` is the CLI client
+- `hadrond mcp` exposes Hadron to MCP-compatible agents
 
-Install instructions live in [install.md](install.md). The shortest path is:
+This page is the shortest path from install to a working local setup.
+
+## 1. Install
+
+Pick one install path from [install.md](install.md). For most users, the
+recommended paths are:
 
 ```sh
-git clone git@github.com:hollis-labs/hadron.git
-cd hadron
-make install PREFIX="$HOME/.local"
+brew install hollis-labs/tap/hadron
+```
+
+or:
+
+```sh
+curl -L -o hadron.tar.gz \
+  https://github.com/hollis-labs/hadron/releases/download/v0.4.2-beta.1/hadron_v0.4.2-beta.1_darwin_arm64.tar.gz
+tar -xzf hadron.tar.gz
+cd hadron_v0.4.2-beta.1_darwin_arm64
+install -d "$HOME/.local/bin"
+install -m 0755 hadron hadrond "$HOME/.local/bin/"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## First Run
+If you are developing Hadron itself, use a source install instead.
 
-**1. Start the daemon**
+## 2. Start The Daemon
+
+The CLI talks to a running local daemon.
 
 ```sh
 hadrond serve
-# {"level":"info","msg":"hadron daemon starting","addr":"127.0.0.1:8095","version":"0.4.0",...}
 ```
 
-**2. Run a blueprint**
+Expected result:
 
-```sh
-hadron run examples/hello-hadron.yaml
-# run abc123 queued
-# [started]
-# [log] Hello from Hadron!
-# [task_success] task succeeded
-# run completed successfully
+```text
+{"level":"info","msg":"hadron daemon starting","addr":"127.0.0.1:8095",...}
 ```
 
-**3. Validate a blueprint**
+By default Hadron stores state under `~/.hadron/`:
 
-```sh
-hadron validate examples/hello-hadron.yaml
-# valid
-```
+- database: `~/.hadron/state/hadron.db`
+- logs: `~/.hadron/logs/`
+- settings: `~/.hadron/settings.json`
 
-**4. Check daemon health**
+In a second shell, confirm the daemon is reachable:
 
 ```sh
 hadron daemon
-# status: ok  version: 0.4.0
 ```
 
-## First Schedule
+## 3. Run A Blueprint
 
-Schedule `hello-hadron` to run every minute:
+Start with the smallest example:
+
+```sh
+hadron run examples/hello-hadron.yaml
+```
+
+Typical output:
+
+```text
+run <id> queued
+[started]
+[log] Hello from Hadron!
+[task_success] task succeeded
+run completed successfully
+```
+
+Validate a blueprint without running it:
+
+```sh
+hadron validate examples/hello-hadron.yaml
+```
+
+Inspect a parameterized blueprint:
+
+```sh
+hadron blueprint show examples/parameterized.yaml
+hadron run examples/parameterized.yaml --input app_name=demo --input worker_count=4
+```
+
+## 4. Create A Schedule
+
+Schedule the hello-world blueprint to run every minute:
 
 ```sh
 hadron schedule create \
   --blueprint examples/hello-hadron.yaml \
   --cron "* * * * *" \
   --name hello-every-minute
+```
 
+List schedules:
+
+```sh
 hadron schedule list
-# <id>  examples/hello-hadron.yaml  * * * * *  enabled=true
 ```
 
-After a minute, list runs to see it fired:
+Disable or delete it later:
 
 ```sh
-hadron run examples/hello-hadron.yaml   # or wait for the scheduler
+hadron schedule disable <schedule-id>
+hadron schedule delete <schedule-id>
 ```
 
-Disable a schedule:
+## 5. Connect An Agent Over MCP
+
+Hadron can run as a stdio MCP server for agent clients:
 
 ```sh
-hadron schedule disable <id>
+hadrond mcp \
+  -token "my-secret-token" \
+  -token-scopes "run.write,run.cancel,schedule.write,pipeline.write,trigger.write,human_gate.write,message.write"
 ```
 
-## What's Next
+For the full MCP flow and tool model, see [mcp-setup.md](mcp-setup.md).
 
-- [Blueprint spec v0.4](spec-v04.md) — full YAML reference
-- [CLI reference](cli-reference.md) — all commands and flags
-- [MCP setup](mcp-setup.md) — use Hadron with any MCP client
-- [Safety settings](safety.md) — control what blueprints can do
-- [Beta status](beta-status.md) — current release posture
+## Common First Tasks
+
+- run a local cleanup or build blueprint
+- validate and lint a blueprint directory before committing
+- schedule recurring housekeeping jobs
+- let an MCP agent discover and run a blueprint with structured diagnostics
+
+For more concrete scenarios, see [use-cases.md](use-cases.md).
+
+## What Next
+
+- [install.md](install.md) for install and setup details
+- [cli-reference.md](cli-reference.md) for command-by-command usage
+- [mcp-setup.md](mcp-setup.md) for agent setup
+- [spec-v04.md](spec-v04.md) for the full blueprint spec
+- [safety.md](safety.md) for trust and execution controls
