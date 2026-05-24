@@ -41,7 +41,8 @@ CLAUDE.md
 
 # Node / Frontend
 node_modules/
-cmd/hadron-app/frontend/dist/
+cmd/hadron-app/frontend/dist/*
+!cmd/hadron-app/frontend/dist/.gitkeep
 
 # Wails build output
 cmd/hadron-app/build/bin/

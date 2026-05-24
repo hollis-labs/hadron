@@ -1,4 +1,4 @@
-.PHONY: build install go-install uninstall test test-ui lint lint-go lint-ui typecheck run-daemon e2e app app-dev package-release
+.PHONY: build install go-install uninstall test test-ui lint lint-go lint-ui typecheck run-daemon e2e frontend-build app app-dev package-release
 
 GO_PACKAGES := ./cmd/hadron ./cmd/hadron-app ./cmd/hadrond ./internal/... ./schemas/...
 GO_LINT_CACHE_DIR := /tmp/hadron-go-build
@@ -49,13 +49,16 @@ lint-ui:
 typecheck:
 	cd cmd/hadron-app/frontend && npm run typecheck
 
+frontend-build:
+	cd cmd/hadron-app/frontend && npm run build
+
 run-daemon:
 	go run ./cmd/hadrond
 
 e2e: build
 	go test -tags e2e -v ./test/e2e/...
 
-app:
+app: frontend-build
 	cd cmd/hadron-app && wails build
 
 app-dev:
