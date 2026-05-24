@@ -27,6 +27,9 @@ import (
 var (
 	globalAddr string
 	httpClient = &http.Client{Timeout: 30 * time.Second}
+	version    = "dev"
+	commit     = "unknown"
+	buildDate  = "unknown"
 )
 
 func closeBody(body io.Closer) {
@@ -59,10 +62,23 @@ func main() {
 		buildTriggerCmd(),
 		buildPackCmd(),
 		buildUnpackCmd(),
+		buildVersionCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+func buildVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("hadron %s\n", version)
+			fmt.Printf("commit: %s\n", commit)
+			fmt.Printf("built: %s\n", buildDate)
+		},
 	}
 }
 

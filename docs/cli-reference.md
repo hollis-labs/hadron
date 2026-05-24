@@ -199,6 +199,24 @@ hadron daemon
 
 ---
 
+## `hadron version`
+
+Print CLI build metadata.
+
+```sh
+hadron version
+```
+
+Example output:
+
+```text
+hadron v0.4.0
+commit: abc1234
+built: 2026-05-24T22:00:00Z
+```
+
+---
+
 ## `hadrond` Daemon
 
 ### `hadrond serve`
@@ -231,3 +249,11 @@ hadrond mcp [flags]
 | `-data` | `~/.hadron` | Data directory |
 | `-token` | — | Bearer token for mutating tools |
 | `-token-scopes` | — | Comma-separated scopes (e.g. `run.write,pipeline.write`) |
+
+### `hadrond version`
+
+Print daemon build metadata.
+
+```sh
+hadrond version
+```

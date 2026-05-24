@@ -50,8 +50,9 @@ go install github.com/hollis-labs/hadron/cmd/hadrond@latest
 go install github.com/hollis-labs/hadron/cmd/hadron@latest
 ```
 
-See [docs/install.md](docs/install.md) for prerequisites, paths, and setup
-details.
+Tagged releases also publish macOS and Linux tarballs for `hadron` and
+`hadrond`. See [docs/install.md](docs/install.md) for prerequisites, paths,
+release artifacts, and setup details.
 
 ## Quick Start
 

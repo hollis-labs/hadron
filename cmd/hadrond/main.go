@@ -32,7 +32,11 @@ import (
 	"github.com/hollis-labs/hadron/internal/trigger"
 )
 
-const version = "0.4.0"
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
 
 func main() {
 	args := os.Args[1:]
@@ -51,6 +55,8 @@ func main() {
 		if err := runMCP(args); err != nil {
 			log.Fatalf("hadrond mcp: %v", err)
 		}
+	case "version", "--version", "-v":
+		printVersion()
 	case "--help", "-h", "help":
 		printUsage()
 	default:
@@ -66,6 +72,13 @@ func printUsage() {
 	fmt.Println("Subcommands:")
 	fmt.Println("  serve   Start HTTP REST API server (default)")
 	fmt.Println("  mcp     Start MCP stdio adapter")
+	fmt.Println("  version Print version information")
+}
+
+func printVersion() {
+	fmt.Printf("hadrond %s\n", version)
+	fmt.Printf("commit: %s\n", commit)
+	fmt.Printf("built: %s\n", buildDate)
 }
 
 func runServe(args []string) error {

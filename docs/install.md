@@ -1,6 +1,7 @@
 # Install Hadron
 
-Hadron is currently distributed source-first during the public beta period.
+Hadron is currently distributed as source installs and GitHub release
+artifacts during the public beta period.
 
 ## Prerequisites
 
@@ -10,6 +11,36 @@ Hadron is currently distributed source-first during the public beta period.
 - optional: Node.js if you are working on the desktop app frontend
 
 ## Install Options
+
+### Download a release artifact
+
+Tagged beta releases publish tarballs for:
+
+- macOS `amd64`
+- macOS `arm64`
+- Linux `amd64`
+- Linux `arm64`
+
+Each archive contains:
+
+- `hadron`
+- `hadrond`
+- `README.md`
+- `LICENSE`
+
+Example:
+
+```sh
+curl -L -o hadron.tar.gz \
+  https://github.com/hollis-labs/hadron/releases/download/v0.4.0/hadron_v0.4.0_darwin_arm64.tar.gz
+tar -xzf hadron.tar.gz
+cd hadron_v0.4.0_darwin_arm64
+install -d "$HOME/.local/bin"
+install -m 0755 hadron hadrond "$HOME/.local/bin/"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Release downloads also include `checksums.txt` for verification.
 
 ### Build in-place
 
@@ -101,5 +132,5 @@ make app-dev
 ## Notes
 
 - Hadron is MIT licensed.
-- Public binary release packaging may change during beta.
-- The current recommended path is source install plus `make install` or `go install`.
+- Public binary packaging may still change during beta.
+- The current recommended paths are release tarballs, `make install`, or `go install`.
