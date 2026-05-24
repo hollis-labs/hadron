@@ -54,6 +54,15 @@ Tagged releases also publish macOS and Linux tarballs for `hadron` and
 `hadrond`. See [docs/install.md](docs/install.md) for prerequisites, paths,
 release artifacts, and setup details.
 
+Planned tap install:
+
+```sh
+brew install hollis-labs/tap/hadron
+```
+
+That path depends on the Hadron repo and release assets being publicly
+downloadable.
+
 ## Quick Start
 
 ```sh

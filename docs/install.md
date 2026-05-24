@@ -42,6 +42,21 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Release downloads also include `checksums.txt` for verification.
 
+### Install from the Hollis Labs tap
+
+Hadron is intended to be installable from:
+
+```sh
+brew install hollis-labs/tap/hadron
+```
+
+Current constraint:
+
+- this only works once the Hadron repo and release assets are publicly downloadable
+
+If the repo or its release artifacts are still private, Homebrew users will get
+download failures from the tap formula.
+
 ### Build in-place
 
 Use this if you are developing Hadron or want repo-local binaries:
@@ -134,3 +149,4 @@ make app-dev
 - Hadron is MIT licensed.
 - Public binary packaging may still change during beta.
 - The current recommended paths are release tarballs, `make install`, or `go install`.
+- Homebrew tap publication depends on public GitHub release accessibility.
