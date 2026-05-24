@@ -3,16 +3,64 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 type Settings struct {
-	BlueprintDir string            `json:"blueprint_dir"`
-	Execution    ExecutionSettings `json:"execution"`
-	Safety       SafetySettings    `json:"safety"`
-	Telemetry    TelemetrySettings `json:"telemetry"`
+	BlueprintDir      string                             `json:"blueprint_dir"`
+	MCPServers        map[string]MCPServerSettings       `json:"mcp_servers,omitempty"`
+	AgentSubstrates   map[string]AgentSubstrateSettings  `json:"agent_substrates,omitempty"`
+	MessageSubstrates map[string]MessageSubstrateSetting `json:"message_substrates,omitempty"`
+	Execution         ExecutionSettings                  `json:"execution"`
+	Safety            SafetySettings                     `json:"safety"`
+	Telemetry         TelemetrySettings                  `json:"telemetry"`
+}
+
+type MCPServerSettings struct {
+	Transport      string            `json:"transport"`
+	Command        string            `json:"command,omitempty"`
+	Args           []string          `json:"args,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	URL            string            `json:"url,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
+}
+
+type AgentSubstrateSettings struct {
+	Kind                   string            `json:"kind"`
+	Provider               string            `json:"provider,omitempty"`
+	Runtime                string            `json:"runtime,omitempty"`
+	Authority              string            `json:"authority,omitempty"`
+	WorkingDirMode         string            `json:"working_dir_mode,omitempty"`
+	AllowGenericSubprocess bool              `json:"allow_generic_subprocess,omitempty"`
+	Command                string            `json:"command,omitempty"`
+	Args                   []string          `json:"args,omitempty"`
+	Env                    map[string]string `json:"env,omitempty"`
+	BaseURL                string            `json:"base_url,omitempty"`
+	Headers                map[string]string `json:"headers,omitempty"`
+	TimeoutSeconds         int               `json:"timeout_seconds,omitempty"`
+	Boot                   AgentBootSettings `json:"boot,omitempty"`
+}
+
+type AgentBootSettings struct {
+	Profile          string `json:"profile,omitempty"`
+	CallbacksProfile string `json:"callbacks_profile,omitempty"`
+	PlantNativeFiles bool   `json:"plant_native_files,omitempty"`
+}
+
+type MessageSubstrateSetting struct {
+	Kind           string            `json:"kind"`
+	Authority      string            `json:"authority,omitempty"`
+	Command        string            `json:"command,omitempty"`
+	Args           []string          `json:"args,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	BaseURL        string            `json:"base_url,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
+	NotifyWake     bool              `json:"notify_wake,omitempty"`
 }
 
 type TelemetrySettings struct {
@@ -48,7 +96,10 @@ func DefaultBlueprintDir() string {
 
 func DefaultSettings() *Settings {
 	return &Settings{
-		BlueprintDir: DefaultBlueprintDir(),
+		BlueprintDir:      DefaultBlueprintDir(),
+		MCPServers:        map[string]MCPServerSettings{},
+		AgentSubstrates:   map[string]AgentSubstrateSettings{},
+		MessageSubstrates: map[string]MessageSubstrateSetting{},
 		Telemetry: TelemetrySettings{
 			Enabled:    true,
 			RetainDays: 30,
@@ -90,6 +141,18 @@ func Load(dataDir string) (*Settings, error) {
 	// Fill default for blueprint_dir if not set (backward compat).
 	if s.BlueprintDir == "" {
 		s.BlueprintDir = DefaultBlueprintDir()
+	}
+	if s.MCPServers == nil {
+		s.MCPServers = map[string]MCPServerSettings{}
+	}
+	if s.AgentSubstrates == nil {
+		s.AgentSubstrates = map[string]AgentSubstrateSettings{}
+	}
+	if s.MessageSubstrates == nil {
+		s.MessageSubstrates = map[string]MessageSubstrateSetting{}
+	}
+	if err := s.Validate(); err != nil {
+		return nil, err
 	}
 
 	return &s, nil
@@ -175,4 +238,44 @@ func (s *Settings) ValidatePath(path string) error {
 
 func (s *Settings) GetDefaultTimeout() int {
 	return s.Execution.DefaultTimeout
+}
+
+func (s *Settings) Validate() error {
+	for name, cfg := range s.AgentSubstrates {
+		if strings.TrimSpace(cfg.Kind) != "go_agent_runtime" {
+			return fmt.Errorf("agent_substrates.%s.kind: unsupported kind %q", name, cfg.Kind)
+		}
+		if strings.TrimSpace(cfg.Provider) == "" {
+			return fmt.Errorf("agent_substrates.%s.provider: required", name)
+		}
+		if strings.TrimSpace(cfg.Runtime) == "" {
+			return fmt.Errorf("agent_substrates.%s.runtime: required", name)
+		}
+		switch strings.TrimSpace(cfg.WorkingDirMode) {
+		case "", "blueprint_dir", "step_dir", "cwd", "process_cwd":
+		default:
+			return fmt.Errorf("agent_substrates.%s.working_dir_mode: unsupported value %q", name, cfg.WorkingDirMode)
+		}
+		if cfg.TimeoutSeconds < 0 {
+			return fmt.Errorf("agent_substrates.%s.timeout_seconds: must be >= 0", name)
+		}
+	}
+	for name, cfg := range s.MessageSubstrates {
+		switch strings.TrimSpace(cfg.Kind) {
+		case "go_messaging":
+		case "go_messaging_http", "tether_http":
+			if strings.TrimSpace(cfg.BaseURL) == "" {
+				return fmt.Errorf("message_substrates.%s.base_url: required", name)
+			}
+			if _, err := url.ParseRequestURI(cfg.BaseURL); err != nil {
+				return fmt.Errorf("message_substrates.%s.base_url: %w", name, err)
+			}
+		default:
+			return fmt.Errorf("message_substrates.%s.kind: unsupported kind %q", name, cfg.Kind)
+		}
+		if cfg.TimeoutSeconds < 0 {
+			return fmt.Errorf("message_substrates.%s.timeout_seconds: must be >= 0", name)
+		}
+	}
+	return nil
 }

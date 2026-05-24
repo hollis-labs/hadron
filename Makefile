@@ -1,15 +1,26 @@
-.PHONY: build install test test-ui lint lint-go lint-ui typecheck run-daemon e2e app app-dev
+.PHONY: build install go-install uninstall test test-ui lint lint-go lint-ui typecheck run-daemon e2e app app-dev
 
 GO_PACKAGES := ./cmd/hadron ./cmd/hadron-app ./cmd/hadrond ./internal/... ./schemas/...
 GO_LINT_CACHE_DIR := /tmp/hadron-go-build
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
 
 build:
+	mkdir -p bin
 	go build -o bin/hadrond ./cmd/hadrond
 	go build -o bin/hadron ./cmd/hadron
 
-install:
+install: build
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 0755 bin/hadrond $(DESTDIR)$(BINDIR)/hadrond
+	install -m 0755 bin/hadron $(DESTDIR)$(BINDIR)/hadron
+
+go-install:
 	go install ./cmd/hadrond
 	go install ./cmd/hadron
+
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/hadrond $(DESTDIR)$(BINDIR)/hadron
 
 test:
 	go test $(GO_PACKAGES)

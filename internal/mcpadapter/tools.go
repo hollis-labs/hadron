@@ -13,12 +13,14 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-mcp/budget"
+	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/lint"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
+	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -26,6 +28,7 @@ import (
 
 var runSeq uint64
 var pipelineSeq uint64
+var messageSeq uint64
 
 func (a *Adapter) registerTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("hadron_health",
@@ -77,6 +80,21 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 		mcp.WithString("workspace_id", mcp.Description("Optional workspace scope check")),
 		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
 	), a.handleRunEvents)
+
+	s.AddTool(mcp.NewTool("hadron_run_operations",
+		mcp.WithDescription("Summarize operation diagnostics for a run across MCP, HTTP, agent launch, and message wait primitives."),
+		mcp.WithString("run_id", mcp.Required(), mcp.Description("Run id")),
+		mcp.WithString("workspace_id", mcp.Description("Optional workspace scope check")),
+		mcp.WithString("kind", mcp.Description("Optional operation kind filter: mcp_call, http_call, message_wait, or agent_launch")),
+		mcp.WithString("cursor", mcp.Description("Optional pagination cursor returned by a previous call")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
+	), a.handleRunOperations)
+
+	s.AddTool(mcp.NewTool("hadron_run_mcp_calls",
+		mcp.WithDescription("Summarize MCP call diagnostics for a run."),
+		mcp.WithString("run_id", mcp.Required(), mcp.Description("Run id")),
+		mcp.WithString("workspace_id", mcp.Description("Optional workspace scope check")),
+	), a.handleRunMCPCalls)
 
 	s.AddTool(mcp.NewTool("hadron_schedules_list",
 		mcp.WithDescription("List schedules for a workspace."),
@@ -190,6 +208,67 @@ func (a *Adapter) registerTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("hadron_trigger_list_mine",
 		mcp.WithDescription("List triggers created by the current MCP session."),
 	), a.handleTriggerListMine)
+
+	s.AddTool(mcp.NewTool("hadron_human_gate_get",
+		mcp.WithDescription("Get a human gate by id."),
+		mcp.WithString("gate_id", mcp.Required(), mcp.Description("Human gate id")),
+		mcp.WithString("workspace_id", mcp.Description("Optional workspace scope check")),
+	), a.handleHumanGateGet)
+
+	s.AddTool(mcp.NewTool("hadron_human_gate_submit",
+		mcp.WithDescription("Submit a decision for a waiting human gate (requires scope human_gate.write)."),
+		mcp.WithString("gate_id", mcp.Required(), mcp.Description("Human gate id")),
+		mcp.WithString("decision", mcp.Required(), mcp.Description("Decision option id to submit")),
+		mcp.WithString("workspace_id", mcp.Description("Optional workspace scope check")),
+	), a.handleHumanGateSubmit)
+
+	s.AddTool(mcp.NewTool("hadron_message_send",
+		mcp.WithDescription("Store a message envelope for a configured message substrate (requires scope message.write)."),
+		mcp.WithString("substrate", mcp.Required(), mcp.Description("Message substrate id from settings.json")),
+		mcp.WithString("kind", mcp.Required(), mcp.Description("Message kind: request, response, notice, status_update, handoff, or escalation")),
+		mcp.WithString("from", mcp.Required(), mcp.Description("Sender URN, e.g. msg://agent/local/reviewer")),
+		mcp.WithString("to", mcp.Required(), mcp.Description("Recipient URN, e.g. msg://agent/local/reviewer")),
+		mcp.WithString("thread_id", mcp.Description("Optional thread id")),
+		mcp.WithString("in_reply_to", mcp.Description("Optional parent message id")),
+		mcp.WithString("payload_json", mcp.Description("Optional JSON payload string")),
+		mcp.WithString("content_type", mcp.Description("Optional content type (default application/json)")),
+		mcp.WithString("metadata_json", mcp.Description("Optional JSON object string for metadata")),
+	), a.handleMessageSend)
+
+	s.AddTool(mcp.NewTool("hadron_messages_inbox",
+		mcp.WithDescription("List messages for a recipient and optional correlation filter."),
+		mcp.WithString("substrate", mcp.Required(), mcp.Description("Message substrate id from settings.json")),
+		mcp.WithString("to", mcp.Required(), mcp.Description("Recipient URN")),
+		mcp.WithString("correlation_id", mcp.Description("Optional thread / reply / correlation filter")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 100)")),
+	), a.handleMessagesInbox)
+
+	s.AddTool(mcp.NewTool("hadron_messages_list",
+		mcp.WithDescription("List messages non-destructively for a recipient and optional correlation filter."),
+		mcp.WithString("substrate", mcp.Required(), mcp.Description("Message substrate id from settings.json")),
+		mcp.WithString("to", mcp.Required(), mcp.Description("Recipient URN")),
+		mcp.WithString("correlation_id", mcp.Description("Optional thread / reply / correlation filter")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 100)")),
+	), a.handleMessagesList)
+
+	s.AddTool(mcp.NewTool("hadron_messages_thread",
+		mcp.WithDescription("List messages in a thread or correlation group."),
+		mcp.WithString("substrate", mcp.Required(), mcp.Description("Message substrate id from settings.json")),
+		mcp.WithString("thread_id", mcp.Required(), mcp.Description("Thread id or correlation id")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 100)")),
+	), a.handleMessagesThread)
+
+	s.AddTool(mcp.NewTool("hadron_message_get",
+		mcp.WithDescription("Get a single stored message by id."),
+		mcp.WithString("substrate", mcp.Description("Optional message substrate id to scope lookup")),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("Message id")),
+	), a.handleMessageGet)
+
+	s.AddTool(mcp.NewTool("hadron_message_consume",
+		mcp.WithDescription("Mark a stored message consumed (requires scope message.write)."),
+		mcp.WithString("substrate", mcp.Description("Optional message substrate id to scope lookup")),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("Message id")),
+	), a.handleMessageConsume)
 
 	// Register blueprint registry tools
 	registerRegistryTools(s, a.registry)
@@ -572,12 +651,12 @@ func (a *Adapter) handleRunEvents(ctx context.Context, req mcp.CallToolRequest) 
 	if runID == "" {
 		return toolError("validation_error", "run_id is required"), nil
 	}
-	runRec, err := a.store.GetRun(ctx, runID)
-	if err != nil {
-		if isNotFound(err) {
+	runRec, getRunErr := a.store.GetRun(ctx, runID)
+	if getRunErr != nil {
+		if isNotFound(getRunErr) {
 			return toolError("not_found", "run not found"), nil
 		}
-		return toolError("internal_error", err.Error()), nil
+		return toolError("internal_error", getRunErr.Error()), nil
 	}
 	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
 		return toolError("not_found", "run not found in workspace"), nil
@@ -601,6 +680,126 @@ func (a *Adapter) handleRunEvents(ctx context.Context, req mcp.CallToolRequest) 
 	env := budget.Apply(out, budget.Config{Limit: limit},
 		"%d events found. Increase limit parameter for more events.")
 	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
+}
+
+func (a *Adapter) handleRunMCPCalls(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	runID := strings.TrimSpace(req.GetString("run_id", ""))
+	if runID == "" {
+		return toolError("validation_error", "run_id is required"), nil
+	}
+	runRec, err := a.store.GetRun(ctx, runID)
+	if err != nil {
+		if isNotFound(err) {
+			return toolError("not_found", "run not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
+		return toolError("not_found", "run not found in workspace"), nil
+	}
+	events, listEventsErr := a.store.ListRunEvents(ctx, runID, 1000)
+	if listEventsErr != nil {
+		return toolError("internal_error", listEventsErr.Error()), nil
+	}
+	items := rundiagnostics.SummarizeMCPCalls(events)
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, map[string]any{
+			"sequence":      item.Sequence,
+			"step_name":     item.StepName,
+			"server":        item.Server,
+			"tool":          item.Tool,
+			"transport":     item.Transport,
+			"status":        item.Status,
+			"retry_count":   item.RetryCount,
+			"attempt_count": item.AttemptCount,
+			"reused_client": item.ReusedClient,
+			"health_probe":  item.HealthProbe,
+			"reconnected":   item.Reconnected,
+			"truncated":     item.Truncated,
+			"result_json":   item.ResultJSON,
+			"error_message": item.ErrorMessage,
+			"started_at":    item.StartedAt,
+			"finished_at":   item.FinishedAt,
+		})
+	}
+	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+}
+
+func (a *Adapter) handleRunOperations(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	runID := strings.TrimSpace(req.GetString("run_id", ""))
+	if runID == "" {
+		return toolError("validation_error", "run_id is required"), nil
+	}
+	runRec, err := a.store.GetRun(ctx, runID)
+	if err != nil {
+		if isNotFound(err) {
+			return toolError("not_found", "run not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
+		return toolError("not_found", "run not found in workspace"), nil
+	}
+	events, err := a.store.ListRunEvents(ctx, runID, 1000)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	items := rundiagnostics.SummarizeOperations(events)
+	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
+	kind := strings.TrimSpace(req.GetString("kind", ""))
+	cursor := strings.TrimSpace(req.GetString("cursor", ""))
+	page, nextCursor, totalCount, ok := filterPagedOperations(items, kind, limit, cursor)
+	if !ok {
+		return toolError("validation_error", "invalid cursor"), nil
+	}
+	out := make([]map[string]any, 0, len(page))
+	for _, item := range page {
+		out = append(out, map[string]any{
+			"sequence":         item.Sequence,
+			"kind":             item.Kind,
+			"step_name":        item.StepName,
+			"status":           item.Status,
+			"started_at":       item.StartedAt,
+			"finished_at":      item.FinishedAt,
+			"error_message":    item.ErrorMessage,
+			"truncated":        item.Truncated,
+			"result_json":      item.ResultJSON,
+			"server":           item.Server,
+			"tool":             item.Tool,
+			"transport":        item.Transport,
+			"retry_count":      item.RetryCount,
+			"attempt_count":    item.AttemptCount,
+			"reused_client":    item.ReusedClient,
+			"health_probe":     item.HealthProbe,
+			"reconnected":      item.Reconnected,
+			"method":           item.Method,
+			"url":              item.URL,
+			"status_code":      item.StatusCode,
+			"duration_ms":      item.DurationMS,
+			"substrate":        item.Substrate,
+			"to":               item.To,
+			"correlation_id":   item.CorrelationID,
+			"timeout_ms":       item.TimeoutMS,
+			"poll_count":       item.PollCount,
+			"message_id":       item.MessageID,
+			"logical_agent_id": item.LogicalAgentID,
+			"launch_id":        item.LaunchID,
+			"gate_id":          item.GateID,
+			"decision":         item.Decision,
+			"prompt":           item.Prompt,
+		})
+	}
+	var next any
+	if nextCursor != "" {
+		next = nextCursor
+	}
+	return toolJSON(map[string]any{
+		"items":       out,
+		"count":       len(out),
+		"total_count": totalCount,
+		"next_cursor": next,
+	}), nil
 }
 
 func (a *Adapter) handleSchedulesList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1340,13 +1539,343 @@ func (a *Adapter) handleTriggerDelete(ctx context.Context, req mcp.CallToolReque
 	return toolJSON(map[string]any{"trigger_id": triggerID, "deleted": true}), nil
 }
 
+func (a *Adapter) handleHumanGateGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	gateID := strings.TrimSpace(req.GetString("gate_id", ""))
+	if gateID == "" {
+		return toolError("validation_error", "gate_id is required"), nil
+	}
+	rec, err := a.store.GetHumanGate(ctx, gateID)
+	if err != nil {
+		if isNotFound(err) {
+			return toolError("not_found", "human gate not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && rec.WorkspaceID != ws {
+		return toolError("not_found", "human gate not found in workspace"), nil
+	}
+	options, err := parseHumanGateOptions(rec.OptionsJSON)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(humanGateEnvelope(rec, options)), nil
+}
+
+func (a *Adapter) handleHumanGateSubmit(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if deny := a.checkScope(ScopeHumanGateWrite); deny != nil {
+		return deny, nil
+	}
+	gateID := strings.TrimSpace(req.GetString("gate_id", ""))
+	if gateID == "" {
+		return toolError("validation_error", "gate_id is required"), nil
+	}
+	decision := strings.TrimSpace(req.GetString("decision", ""))
+	if decision == "" {
+		return toolError("validation_error", "decision is required"), nil
+	}
+	rec, err := a.store.GetHumanGate(ctx, gateID)
+	if err != nil {
+		if isNotFound(err) {
+			return toolError("not_found", "human gate not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && rec.WorkspaceID != ws {
+		return toolError("not_found", "human gate not found in workspace"), nil
+	}
+	if rec.Status != "waiting" {
+		return toolError("conflict", "human gate is not waiting"), nil
+	}
+	options, err := parseHumanGateOptions(rec.OptionsJSON)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	if !humanGateDecisionAllowed(decision, options) {
+		return toolError("validation_error", "decision is not an allowed option"), nil
+	}
+	if submitErr := a.store.SubmitHumanGateDecision(ctx, gateID, decision, time.Now().UTC()); submitErr != nil {
+		if isNotFound(submitErr) {
+			return toolError("conflict", "human gate is not waiting or was not found"), nil
+		}
+		return toolError("internal_error", submitErr.Error()), nil
+	}
+	rec, err = a.store.GetHumanGate(ctx, gateID)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(humanGateEnvelope(rec, options)), nil
+}
+
+func (a *Adapter) handleMessageSend(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if deny := a.checkScope(ScopeMessageWrite); deny != nil {
+		return deny, nil
+	}
+	substrate := strings.TrimSpace(req.GetString("substrate", ""))
+	if substrate == "" {
+		return toolError("validation_error", "substrate is required"), nil
+	}
+	kind := messaging.Kind(strings.TrimSpace(req.GetString("kind", "")))
+	if _, ok := validMCPMessageKinds[kind]; !ok {
+		return toolError("validation_error", "invalid message kind"), nil
+	}
+	fromRaw := strings.TrimSpace(req.GetString("from", ""))
+	toRaw := strings.TrimSpace(req.GetString("to", ""))
+	from, ok := parseURNOK(fromRaw)
+	if !ok {
+		return toolError("validation_error", "invalid from URN"), nil
+	}
+	to, ok := parseURNOK(toRaw)
+	if !ok {
+		return toolError("validation_error", "invalid to URN"), nil
+	}
+	payloadJSON := strings.TrimSpace(req.GetString("payload_json", ""))
+	if payloadJSON == "" {
+		payloadJSON = "null"
+	}
+	if !json.Valid([]byte(payloadJSON)) {
+		return toolError("validation_error", "payload_json must be valid JSON"), nil
+	}
+	metadataJSON := strings.TrimSpace(req.GetString("metadata_json", ""))
+	if metadataJSON == "" {
+		metadataJSON = "{}"
+	}
+	metadata, ok := parseMetadataJSONMap(metadataJSON)
+	if !ok {
+		return toolError("validation_error", "metadata_json must be a JSON object"), nil
+	}
+	threadID := strings.TrimSpace(req.GetString("thread_id", ""))
+	inReplyTo := strings.TrimSpace(req.GetString("in_reply_to", ""))
+	correlationID := firstNonEmpty(metadata["correlation_id"], threadID, inReplyTo)
+	messageID := fmt.Sprintf("msg-%s-%04d", time.Now().UTC().Format("20060102-150405"), messageSeqAdd())
+	rec := persistence.MessageRecord{
+		ID:            messageID,
+		Substrate:     substrate,
+		Kind:          string(kind),
+		Channel:       strings.TrimSpace(req.GetString("channel", "")),
+		FromURN:       from.URN(),
+		ToURN:         to.URN(),
+		ThreadID:      threadID,
+		InReplyTo:     inReplyTo,
+		CorrelationID: correlationID,
+		PayloadJSON:   payloadJSON,
+		ContentType:   defaultString(strings.TrimSpace(req.GetString("content_type", "")), "application/json"),
+		MetadataJSON:  metadataJSON,
+		CreatedAt:     time.Now().UTC(),
+	}
+	if createErr := a.store.CreateMessage(ctx, rec); createErr != nil {
+		return toolError("internal_error", createErr.Error()), nil
+	}
+	env, err := messageRecordEnvelope(rec)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(env), nil
+}
+
+func (a *Adapter) handleMessagesInbox(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	substrate := strings.TrimSpace(req.GetString("substrate", ""))
+	toURN := strings.TrimSpace(req.GetString("to", ""))
+	if substrate == "" || toURN == "" {
+		return toolError("validation_error", "substrate and to are required"), nil
+	}
+	if _, ok := parseURNOK(toURN); !ok {
+		return toolError("validation_error", "invalid to URN"), nil
+	}
+	limit := int(req.GetFloat("limit", 10))
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	recs, err := a.store.ListMessagesByRecipient(ctx, substrate, toURN, strings.TrimSpace(req.GetString("correlation_id", "")), limit)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	items := make([]map[string]any, 0, len(recs))
+	for _, rec := range recs {
+		env, err := messageRecordEnvelope(rec)
+		if err != nil {
+			return toolError("internal_error", err.Error()), nil
+		}
+		items = append(items, env)
+	}
+	return toolJSON(map[string]any{"messages": items, "count": len(items)}), nil
+}
+
+func (a *Adapter) handleMessagesList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	substrate := strings.TrimSpace(req.GetString("substrate", ""))
+	toURN := strings.TrimSpace(req.GetString("to", ""))
+	if substrate == "" || toURN == "" {
+		return toolError("validation_error", "substrate and to are required"), nil
+	}
+	if _, ok := parseURNOK(toURN); !ok {
+		return toolError("validation_error", "invalid to URN"), nil
+	}
+	limit := int(req.GetFloat("limit", 10))
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	recs, err := a.store.ListMessagesByRecipientNonDestructive(ctx, substrate, toURN, strings.TrimSpace(req.GetString("correlation_id", "")), limit)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	items := make([]map[string]any, 0, len(recs))
+	for _, rec := range recs {
+		env, err := messageRecordEnvelope(rec)
+		if err != nil {
+			return toolError("internal_error", err.Error()), nil
+		}
+		items = append(items, env)
+	}
+	return toolJSON(map[string]any{"messages": items, "count": len(items)}), nil
+}
+
+func (a *Adapter) handleMessagesThread(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	substrate := strings.TrimSpace(req.GetString("substrate", ""))
+	threadID := strings.TrimSpace(req.GetString("thread_id", ""))
+	if substrate == "" || threadID == "" {
+		return toolError("validation_error", "substrate and thread_id are required"), nil
+	}
+	limit := int(req.GetFloat("limit", 10))
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	recs, err := a.store.ListMessagesByThread(ctx, substrate, threadID, limit)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	items := make([]map[string]any, 0, len(recs))
+	for _, rec := range recs {
+		env, err := messageRecordEnvelope(rec)
+		if err != nil {
+			return toolError("internal_error", err.Error()), nil
+		}
+		items = append(items, env)
+	}
+	return toolJSON(map[string]any{"messages": items, "count": len(items)}), nil
+}
+
+func (a *Adapter) handleMessageGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	messageID := strings.TrimSpace(req.GetString("message_id", ""))
+	if messageID == "" {
+		return toolError("validation_error", "message_id is required"), nil
+	}
+	substrate := strings.TrimSpace(req.GetString("substrate", ""))
+	if substrate != "" {
+		rec, err := a.store.GetMessage(ctx, messageID)
+		if err == nil && rec.Substrate != substrate {
+			return toolError("not_found", "message not found"), nil
+		}
+		if err != nil {
+			if isNotFound(err) {
+				return toolError("not_found", "message not found"), nil
+			}
+			return toolError("internal_error", err.Error()), nil
+		}
+		env, err := messageRecordEnvelope(rec)
+		if err != nil {
+			return toolError("internal_error", err.Error()), nil
+		}
+		return toolJSON(env), nil
+	}
+	rec, err := a.store.GetMessage(ctx, messageID)
+	if err != nil {
+		if isNotFound(err) {
+			return toolError("not_found", "message not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	env, err := messageRecordEnvelope(rec)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(env), nil
+}
+
+func (a *Adapter) handleMessageConsume(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if deny := a.checkScope(ScopeMessageWrite); deny != nil {
+		return deny, nil
+	}
+	messageID := strings.TrimSpace(req.GetString("message_id", ""))
+	if messageID == "" {
+		return toolError("validation_error", "message_id is required"), nil
+	}
+	substrate := strings.TrimSpace(req.GetString("substrate", ""))
+	if substrate != "" {
+		rec, err := a.store.GetMessage(ctx, messageID)
+		if err == nil && rec.Substrate != substrate {
+			return toolError("not_found", "message not found"), nil
+		}
+		if err != nil {
+			if isNotFound(err) {
+				return toolError("not_found", "message not found"), nil
+			}
+			return toolError("internal_error", err.Error()), nil
+		}
+	}
+	if err := a.store.ConsumeMessage(ctx, messageID, time.Now().UTC()); err != nil {
+		if isNotFound(err) {
+			return toolError("not_found", "message not found"), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	rec, err := a.store.GetMessage(ctx, messageID)
+	if err != nil {
+		if isNotFound(err) {
+			return toolJSON(map[string]any{"message_id": messageID, "status": "consumed"}), nil
+		}
+		return toolError("internal_error", err.Error()), nil
+	}
+	env, err := messageRecordEnvelope(rec)
+	if err != nil {
+		return toolError("internal_error", err.Error()), nil
+	}
+	return toolJSON(env), nil
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+var validMCPMessageKinds = map[messaging.Kind]struct{}{
+	messaging.MsgKindRequest:      {},
+	messaging.MsgKindResponse:     {},
+	messaging.MsgKindNotice:       {},
+	messaging.MsgKindStatusUpdate: {},
+	messaging.MsgKindHandoff:      {},
+	messaging.MsgKindEscalation:   {},
+}
 
 func workspaceDefault(workspaceID string) string {
 	if strings.TrimSpace(workspaceID) == "" {
 		return "default"
 	}
 	return strings.TrimSpace(workspaceID)
+}
+
+func messageSeqAdd() uint64 {
+	return atomic.AddUint64(&messageSeq, 1)
+}
+
+func defaultString(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func nullString(s sql.NullString) any {
@@ -1358,4 +1887,70 @@ func nullString(s sql.NullString) any {
 
 func isNotFound(err error) bool {
 	return errors.Is(err, sql.ErrNoRows) || strings.Contains(strings.ToLower(err.Error()), "no rows")
+}
+
+func filterPagedOperations(items []rundiagnostics.OperationDiagnostic, kind string, limit int, cursor string) ([]rundiagnostics.OperationDiagnostic, string, int, bool) {
+	page, nextCursor, totalCount, err := rundiagnostics.FilterAndPageOperations(items, kind, limit, cursor)
+	if err != nil {
+		return nil, "", 0, false
+	}
+	return page, nextCursor, totalCount, true
+}
+
+func parseURNOK(raw string) (messaging.Address, bool) {
+	addr, err := messaging.ParseURN(raw)
+	if err != nil {
+		return messaging.Address{}, false
+	}
+	return addr, true
+}
+
+func parseMetadataJSONMap(raw string) (map[string]string, bool) {
+	metadata := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return nil, false
+	}
+	return metadata, true
+}
+
+type humanGateOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+func parseHumanGateOptions(raw string) ([]humanGateOption, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []humanGateOption{}, nil
+	}
+	var options []humanGateOption
+	if err := json.Unmarshal([]byte(raw), &options); err != nil {
+		return nil, fmt.Errorf("parse human gate options_json: %w", err)
+	}
+	return options, nil
+}
+
+func humanGateDecisionAllowed(decision string, options []humanGateOption) bool {
+	for _, option := range options {
+		if option.ID == decision {
+			return true
+		}
+	}
+	return false
+}
+
+func humanGateEnvelope(rec persistence.HumanGateRecord, options []humanGateOption) map[string]any {
+	return map[string]any{
+		"id":           rec.ID,
+		"workspace_id": rec.WorkspaceID,
+		"run_id":       rec.RunID,
+		"step_name":    rec.StepName,
+		"prompt":       rec.Prompt,
+		"options":      options,
+		"options_json": rec.OptionsJSON,
+		"status":       rec.Status,
+		"decision":     nullString(rec.Decision),
+		"created_at":   rec.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":   rec.UpdatedAt.UTC().Format(time.RFC3339),
+		"expires_at":   nullString(rec.ExpiresAt),
+	}
 }

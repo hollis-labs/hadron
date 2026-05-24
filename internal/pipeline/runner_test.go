@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -179,6 +180,225 @@ func TestRunner_OutputCapture(t *testing.T) {
 		if ecFloat, ok := ec.(float64); !ok || ecFloat != 0 {
 			t.Fatalf("expected exit_code=0, got %v", ec)
 		}
+	}
+}
+
+func TestRunner_StageWaitTimeoutOverride(t *testing.T) {
+	store := openStore(t)
+	defer func() { _ = store.Close() }()
+	execMgr := execution.NewManager(store, nil, 1, "", nil)
+	defer execMgr.Close()
+	r := NewRunner(store, execMgr)
+
+	dir := t.TempDir()
+	blueprintPath := filepath.Join(dir, "slow-success.yaml")
+	writeFile(t, blueprintPath, `blueprint:
+  name: slow-success
+steps:
+  - section: main
+    tasks:
+      - name: slow
+        cmd: sleep 2
+`)
+	pipelinePath := filepath.Join(dir, "pipeline.yaml")
+	writeFile(t, pipelinePath, `meta:
+  name: wait-override
+defaults:
+  stage_wait_timeout_seconds: 1
+stages:
+  - name: slow
+    blueprint_path: slow-success.yaml
+    wait_timeout_seconds: 3
+`)
+
+	if err := r.Start(context.Background(), "pl-wait-override", pipelinePath, "default"); err != nil {
+		t.Fatalf("start pipeline: %v", err)
+	}
+
+	rec := waitPipelineStatus(t, store, "pl-wait-override", "success")
+	if rec.Status != "success" {
+		t.Fatalf("expected success, got %s", rec.Status)
+	}
+}
+
+func TestRunner_StageWaitTimeoutFailure(t *testing.T) {
+	store := openStore(t)
+	defer func() { _ = store.Close() }()
+	execMgr := execution.NewManager(store, nil, 1, "", nil)
+	defer execMgr.Close()
+	r := NewRunner(store, execMgr)
+
+	dir := t.TempDir()
+	blueprintPath := filepath.Join(dir, "slow.yaml")
+	writeFile(t, blueprintPath, `blueprint:
+  name: slow
+steps:
+  - section: main
+    tasks:
+      - name: slow
+        cmd: sleep 2
+`)
+	pipelinePath := filepath.Join(dir, "pipeline.yaml")
+	writeFile(t, pipelinePath, `meta:
+  name: wait-timeout
+defaults:
+  stage_wait_timeout_seconds: 1
+stages:
+  - name: slow
+    blueprint_path: slow.yaml
+`)
+
+	if err := r.Start(context.Background(), "pl-wait-timeout", pipelinePath, "default"); err != nil {
+		t.Fatalf("start pipeline: %v", err)
+	}
+
+	rec := waitPipelineStatus(t, store, "pl-wait-timeout", "failed")
+	if !rec.ErrorMessage.Valid || !strings.Contains(rec.ErrorMessage.String, "timed out waiting for run") {
+		t.Fatalf("expected timeout error message, got %+v", rec.ErrorMessage)
+	}
+
+	stages, err := store.ListPipelineStageRuns(context.Background(), "pl-wait-timeout")
+	if err != nil {
+		t.Fatalf("list stage runs: %v", err)
+	}
+	if len(stages) != 1 {
+		t.Fatalf("expected 1 stage, got %d", len(stages))
+	}
+	if stages[0].Status != "failed" {
+		t.Fatalf("expected stage failed, got %s", stages[0].Status)
+	}
+
+	var outputs map[string]any
+	if err := json.Unmarshal([]byte(stages[0].OutputsJSON), &outputs); err != nil {
+		t.Fatalf("unmarshal outputs_json: %v", err)
+	}
+	if outputs["status"] != "failed" {
+		t.Fatalf("expected status=failed output, got %v", outputs["status"])
+	}
+	if outputs["error"] == "" {
+		t.Fatalf("expected error output, got %v", outputs)
+	}
+	if got := outputs["wait_timeout_seconds"]; got != float64(1) {
+		t.Fatalf("expected wait_timeout_seconds=1, got %v", got)
+	}
+}
+
+func TestRunner_AsyncStageSucceedsAfterEnqueue(t *testing.T) {
+	store := openStore(t)
+	defer func() { _ = store.Close() }()
+	enq := &recordingEnqueuer{store: store}
+	r := NewRunner(store, enq)
+
+	dir := t.TempDir()
+	pipelinePath := filepath.Join(dir, "pipeline.yaml")
+	writeFile(t, filepath.Join(dir, "launch.yaml"), `blueprint:
+  name: launch
+steps:
+  - section: main
+    tasks:
+      - name: launch
+        cmd: sleep 30
+`)
+	writeFile(t, pipelinePath, `meta:
+  name: async-launch
+stages:
+  - name: launch
+    blueprint_path: launch.yaml
+    async: true
+    wait_timeout_seconds: 1
+    outputs:
+      launched_run_id: run_id
+`)
+
+	if err := r.Start(context.Background(), "pl-async-launch", pipelinePath, "default"); err != nil {
+		t.Fatalf("start pipeline: %v", err)
+	}
+
+	rec := waitPipelineStatus(t, store, "pl-async-launch", "success")
+	if rec.Status != "success" {
+		t.Fatalf("expected success, got %s", rec.Status)
+	}
+	if len(enq.requests) != 1 {
+		t.Fatalf("expected 1 enqueue, got %d", len(enq.requests))
+	}
+
+	stages, err := store.ListPipelineStageRuns(context.Background(), "pl-async-launch")
+	if err != nil {
+		t.Fatalf("list stage runs: %v", err)
+	}
+	if len(stages) != 1 {
+		t.Fatalf("expected 1 stage, got %d", len(stages))
+	}
+	if stages[0].Status != "success" {
+		t.Fatalf("expected async stage status success, got %s", stages[0].Status)
+	}
+
+	var outputs map[string]any
+	if err := json.Unmarshal([]byte(stages[0].OutputsJSON), &outputs); err != nil {
+		t.Fatalf("unmarshal outputs_json: %v", err)
+	}
+	if outputs["run_id"] != enq.requests[0].RunID {
+		t.Fatalf("expected run_id output %q, got %v", enq.requests[0].RunID, outputs["run_id"])
+	}
+	if outputs["launched_run_id"] != enq.requests[0].RunID {
+		t.Fatalf("expected launched_run_id alias %q, got %v", enq.requests[0].RunID, outputs["launched_run_id"])
+	}
+	if outputs["status"] != "launched" {
+		t.Fatalf("expected status=launched, got %v", outputs["status"])
+	}
+}
+
+func TestRunner_AsyncStageOutputFeedsDownstream(t *testing.T) {
+	store := openStore(t)
+	defer func() { _ = store.Close() }()
+	enq := &recordingEnqueuer{store: store}
+	r := NewRunner(store, enq)
+
+	dir := t.TempDir()
+	pipelinePath := filepath.Join(dir, "pipeline.yaml")
+	writeFile(t, filepath.Join(dir, "launch.yaml"), `blueprint:
+  name: launch
+steps:
+  - section: main
+    tasks:
+      - name: launch
+        cmd: sleep 30
+`)
+	writeFile(t, filepath.Join(dir, "poll.yaml"), `blueprint:
+  name: poll
+steps:
+  - section: main
+    tasks:
+      - name: poll
+        cmd: echo polling
+`)
+	writeFile(t, pipelinePath, `meta:
+  name: async-downstream
+stages:
+  - name: launch
+    blueprint_path: launch.yaml
+    async: true
+  - name: poll
+    blueprint_path: poll.yaml
+    async: true
+    depends_on: [launch]
+    inputs:
+      launched_run_id: "{{ .stages.launch.outputs.run_id }}"
+`)
+
+	if err := r.Start(context.Background(), "pl-async-downstream", pipelinePath, "default"); err != nil {
+		t.Fatalf("start pipeline: %v", err)
+	}
+
+	rec := waitPipelineStatus(t, store, "pl-async-downstream", "success")
+	if rec.Status != "success" {
+		t.Fatalf("expected success, got %s", rec.Status)
+	}
+	if len(enq.requests) != 2 {
+		t.Fatalf("expected 2 enqueues, got %d", len(enq.requests))
+	}
+	if got := enq.requests[1].Inputs["launched_run_id"]; got != enq.requests[0].RunID {
+		t.Fatalf("expected downstream launched_run_id %q, got %v", enq.requests[0].RunID, got)
 	}
 }
 
@@ -469,6 +689,42 @@ func openStore(t *testing.T) *persistence.Store {
 		t.Fatalf("open store: %v", err)
 	}
 	return store
+}
+
+func writeFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+type recordingEnqueuer struct {
+	store    *persistence.Store
+	requests []execution.Request
+}
+
+func (e *recordingEnqueuer) Enqueue(ctx context.Context, req execution.Request) error {
+	e.requests = append(e.requests, req)
+	inputJSON := "{}"
+	if len(req.Inputs) > 0 {
+		b, err := json.Marshal(req.Inputs)
+		if err != nil {
+			return err
+		}
+		inputJSON = string(b)
+	}
+	workspaceID := req.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = "default"
+	}
+	return e.store.CreateRun(ctx, persistence.RunRecord{
+		ID:            req.RunID,
+		WorkspaceID:   workspaceID,
+		BlueprintPath: req.BlueprintPath,
+		Status:        "queued",
+		InputJSON:     inputJSON,
+		CreatedAt:     time.Now().UTC(),
+	})
 }
 
 func waitPipelineStatus(t *testing.T, store *persistence.Store, id, want string) persistence.PipelineRunRecord {

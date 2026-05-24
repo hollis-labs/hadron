@@ -36,6 +36,109 @@ stages:
 	}
 }
 
+func TestStageWaitTimeout_DefaultPipelineAndStageOverride(t *testing.T) {
+	spec, err := ParseBytes([]byte(`
+meta:
+  name: waits
+defaults:
+  stage_wait_timeout_seconds: 600
+stages:
+  - name: inherited
+    blueprint_path: ./a.yaml
+  - name: override
+    blueprint_path: ./b.yaml
+    wait_timeout_seconds: 1800
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := spec.StageWaitTimeout(spec.Stages[0]); got != 600 {
+		t.Fatalf("expected pipeline default 600, got %d", got)
+	}
+	if got := spec.StageWaitTimeout(spec.Stages[1]); got != 1800 {
+		t.Fatalf("expected stage override 1800, got %d", got)
+	}
+}
+
+func TestStageWaitTimeout_BackwardCompatibleDefault(t *testing.T) {
+	spec, err := ParseBytes([]byte(`
+meta:
+  name: waits
+stages:
+  - name: default
+    blueprint_path: ./a.yaml
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := spec.StageWaitTimeout(spec.Stages[0]); got != 60 {
+		t.Fatalf("expected default 60, got %d", got)
+	}
+}
+
+func TestStageWaitTimeout_InvalidValues(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "pipeline default",
+			src: `
+meta:
+  name: bad
+defaults:
+  stage_wait_timeout_seconds: 0
+stages:
+  - name: one
+    blueprint_path: ./a.yaml
+`,
+			want: "defaults.stage_wait_timeout_seconds",
+		},
+		{
+			name: "stage override",
+			src: `
+meta:
+  name: bad
+stages:
+  - name: one
+    blueprint_path: ./a.yaml
+    wait_timeout_seconds: 0
+`,
+			want: "wait_timeout_seconds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseBytes([]byte(tt.src))
+			if err == nil {
+				t.Fatalf("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected %q in error, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestStage_Async(t *testing.T) {
+	spec, err := ParseBytes([]byte(`
+meta:
+  name: async-test
+stages:
+  - name: launch
+    blueprint_path: ./launch.yaml
+    async: true
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !spec.Stages[0].Async {
+		t.Fatalf("expected async stage")
+	}
+}
+
 func TestParse_JSONAndJSONC(t *testing.T) {
 	jsonSpec := []byte(`{
   "meta": { "name": "json-pipeline" },

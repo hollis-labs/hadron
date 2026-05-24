@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
@@ -39,6 +40,15 @@ type Store interface {
 	ListTriggers(ctx context.Context) ([]persistence.TriggerRecord, error)
 	DeleteTrigger(ctx context.Context, id string) error
 	ListTriggersByCreatedBy(ctx context.Context, createdBy string) ([]persistence.TriggerRecord, error)
+
+	GetHumanGate(ctx context.Context, id string) (persistence.HumanGateRecord, error)
+	SubmitHumanGateDecision(ctx context.Context, id, decision string, decidedAt time.Time) error
+	CreateMessage(ctx context.Context, rec persistence.MessageRecord) error
+	GetMessage(ctx context.Context, id string) (persistence.MessageRecord, error)
+	ListMessagesByRecipient(ctx context.Context, substrate, toURN, correlationID string, limit int) ([]persistence.MessageRecord, error)
+	ListMessagesByRecipientNonDestructive(ctx context.Context, substrate, toURN, correlationID string, limit int) ([]persistence.MessageRecord, error)
+	ListMessagesByThread(ctx context.Context, substrate, threadID string, limit int) ([]persistence.MessageRecord, error)
+	ConsumeMessage(ctx context.Context, id string, consumedAt time.Time) error
 }
 
 type Runner interface {
@@ -65,7 +75,67 @@ const (
 	ScopeWorkspaceWrite   = "workspace.write"
 	ScopeScheduleWrite    = "schedule.write"
 	ScopeTriggerWrite     = "trigger.write"
+	ScopeHumanGateWrite   = "human_gate.write"
+	ScopeMessageWrite     = "message.write"
 )
+
+func AllScopes() []string {
+	return []string{
+		ScopeRunWrite,
+		ScopeRunCancel,
+		ScopePipelineWrite,
+		ScopeSchedulerControl,
+		ScopeWorkspaceWrite,
+		ScopeScheduleWrite,
+		ScopeTriggerWrite,
+		ScopeHumanGateWrite,
+		ScopeMessageWrite,
+	}
+}
+
+func messageRecordEnvelope(rec persistence.MessageRecord) (map[string]any, error) {
+	from, err := messaging.ParseURN(rec.FromURN)
+	if err != nil {
+		return nil, err
+	}
+	to, err := messaging.ParseURN(rec.ToURN)
+	if err != nil {
+		return nil, err
+	}
+	var payload any
+	if strings.TrimSpace(rec.PayloadJSON) != "" {
+		_ = json.Unmarshal([]byte(rec.PayloadJSON), &payload)
+	}
+	var metadata map[string]string
+	if strings.TrimSpace(rec.MetadataJSON) != "" {
+		_ = json.Unmarshal([]byte(rec.MetadataJSON), &metadata)
+	}
+	out := map[string]any{
+		"id":             rec.ID,
+		"substrate":      rec.Substrate,
+		"kind":           rec.Kind,
+		"channel":        rec.Channel,
+		"from":           from.URN(),
+		"to":             to.URN(),
+		"thread_id":      rec.ThreadID,
+		"in_reply_to":    rec.InReplyTo,
+		"correlation_id": rec.CorrelationID,
+		"payload":        payload,
+		"content_type":   rec.ContentType,
+		"metadata":       metadata,
+		"created_at":     rec.CreatedAt.Format(time.RFC3339Nano),
+	}
+	if rec.DeliveredAt.Valid {
+		out["delivered_at"] = rec.DeliveredAt.String
+	}
+	if rec.ConsumedAt.Valid {
+		out["consumed_at"] = rec.ConsumedAt.String
+	}
+	if rec.CanceledAt.Valid {
+		out["canceled_at"] = rec.CanceledAt.String
+	}
+	return out, nil
+}
 
 // Adapter exposes Hadron read/query surfaces as MCP tools over stdio.
 type Adapter struct {
@@ -157,6 +227,8 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_run_enqueue":        a.handleRunEnqueue,
 		"hadron_run_cancel":         a.handleRunCancel,
 		"hadron_run_events":         a.handleRunEvents,
+		"hadron_run_operations":     a.handleRunOperations,
+		"hadron_run_mcp_calls":      a.handleRunMCPCalls,
 		"hadron_schedules_list":     a.handleSchedulesList,
 		"hadron_schedule_create":    a.handleScheduleCreate,
 		"hadron_schedule_update":    a.handleScheduleUpdate,
@@ -174,6 +246,12 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_trigger_delete":     a.handleTriggerDelete,
 		"hadron_trigger_watch":      a.handleTriggerWatch,
 		"hadron_trigger_list_mine":  a.handleTriggerListMine,
+		"hadron_human_gate_get":     a.handleHumanGateGet,
+		"hadron_human_gate_submit":  a.handleHumanGateSubmit,
+		"hadron_message_send":       a.handleMessageSend,
+		"hadron_messages_inbox":     a.handleMessagesInbox,
+		"hadron_message_get":        a.handleMessageGet,
+		"hadron_message_consume":    a.handleMessageConsume,
 	}
 }
 

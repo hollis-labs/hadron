@@ -218,7 +218,7 @@ hadrond serve [flags]
 
 ### `hadrond mcp`
 
-Starts the MCP stdio adapter for Claude Code integration.
+Starts the MCP stdio adapter for MCP client integration.
 
 ```sh
 hadrond mcp [flags]

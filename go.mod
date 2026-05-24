@@ -31,6 +31,15 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
+	github.com/hollis-labs/go-agent-launch v0.4.0 // indirect
+	github.com/hollis-labs/go-agent-runtime v0.4.0 // indirect
+	github.com/hollis-labs/go-agent-sessions v0.10.0 // indirect
+	github.com/hollis-labs/go-llm-contracts v0.1.0 // indirect
+	github.com/hollis-labs/go-llm-types v0.1.0 // indirect
+	github.com/hollis-labs/go-messaging v0.3.0 // indirect
+	github.com/hollis-labs/go-providers v0.23.0 // indirect
+	github.com/hollis-labs/go-runner v0.4.0 // indirect
+	github.com/hollis-labs/go-sandbox v0.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect

@@ -17,10 +17,12 @@ import (
 
 	feotel "github.com/hollis-labs/go-otel"
 
+	"github.com/hollis-labs/hadron/internal/agentsubstrate"
 	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/config"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
+	"github.com/hollis-labs/hadron/internal/messagesubstrate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/registry"
@@ -132,6 +134,17 @@ func runServe(args []string) error {
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 	serveReg := registry.New(store)
 	pipelineRunner.SetBlueprintResolver(serveReg.Resolve)
+	internalMCP := mcpadapter.New(store, mgr, sched, pipelineRunner, "internal", mcpadapter.AllScopes(),
+		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
+		mcpadapter.WithRegistry(serveReg))
+	internalCaller := mcpadapter.NewInternalCaller(internalMCP, mcpadapter.WithExternalServers(externalMCPServers(sett)))
+	defer func() { _ = internalCaller.Close() }()
+	mgr.SetMCPCaller(internalCaller)
+	agentLauncher := agentsubstrate.NewLauncher(cfg.DataDir, sett.AgentSubstrates)
+	defer func() { _ = agentLauncher.Close() }()
+	mgr.SetAgentLauncher(agentLauncher)
+	messageService := messagesubstrate.New(store, sett.MessageSubstrates)
+	mgr.SetMessageSource(messageService)
 
 	srv := api.NewServer(cfg.Addr, api.Dependencies{
 		Runs:         store,
@@ -139,6 +152,8 @@ func runServe(args []string) error {
 		Pipelines:    store,
 		Workspaces:   store,
 		Triggers:     store,
+		HumanGates:   store,
+		Messages:     messageService,
 		Runner:       mgr,
 		Scheduler:    sched,
 		Pipeline:     pipelineRunner,
@@ -241,6 +256,17 @@ func runMCP(args []string) error {
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 	reg := registry.New(store)
 	pipelineRunner.SetBlueprintResolver(reg.Resolve)
+	internalMCP := mcpadapter.New(store, mgr, sched, pipelineRunner, "internal", mcpadapter.AllScopes(),
+		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
+		mcpadapter.WithRegistry(reg))
+	internalCaller := mcpadapter.NewInternalCaller(internalMCP, mcpadapter.WithExternalServers(externalMCPServers(sett)))
+	defer func() { _ = internalCaller.Close() }()
+	mgr.SetMCPCaller(internalCaller)
+	agentLauncher := agentsubstrate.NewLauncher(cfg.DataDir, sett.AgentSubstrates)
+	defer func() { _ = agentLauncher.Close() }()
+	mgr.SetAgentLauncher(agentLauncher)
+	messageService := messagesubstrate.New(store, sett.MessageSubstrates)
+	mgr.SetMessageSource(messageService)
 
 	var scopes []string
 	if *scopesFlag != "" {
@@ -260,4 +286,34 @@ func runMCP(args []string) error {
 	defer stop()
 
 	return adapter.Run(ctx)
+}
+
+func externalMCPServers(sett *settings.Settings) map[string]mcpadapter.ExternalServerConfig {
+	if sett == nil || len(sett.MCPServers) == 0 {
+		return nil
+	}
+	out := make(map[string]mcpadapter.ExternalServerConfig, len(sett.MCPServers))
+	for name, server := range sett.MCPServers {
+		out[name] = mcpadapter.ExternalServerConfig{
+			Transport:      server.Transport,
+			Command:        server.Command,
+			Args:           append([]string(nil), server.Args...),
+			Env:            cloneStringMap(server.Env),
+			URL:            server.URL,
+			Headers:        cloneStringMap(server.Headers),
+			TimeoutSeconds: server.TimeoutSeconds,
+		}
+	}
+	return out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

@@ -1,0 +1,32 @@
+blueprint:
+  name: agentic-launch-and-wait
+  description: Launch a local runtime-backed agent session, then wait for a correlated mailbox reply.
+
+steps:
+  - section: main
+    tasks:
+      - name: launch-reviewer
+        agent_launch:
+          substrate: local_runtime
+          launch_id: review-sprint
+          logical_agent_id: reviewer-1
+          prompt_append: |
+            Read the injected instructions and reply on the provided mailbox when done.
+          metadata:
+            correlation_id: review-123
+            reply_substrate: local_mailbox
+          injection:
+            native_files:
+              - rel_path: context/reply-contract.md
+                source: |
+                  Reply target: msg://agent/hadron/reviewer-1
+                  Correlation: review-123
+                  Substrate: local_mailbox
+
+      - name: wait-for-review
+        message_wait:
+          substrate: local_mailbox
+          to: msg://agent/hadron/reviewer-1
+          correlation_id: review-123
+          timeout_seconds: 1800
+          poll_interval_seconds: 5

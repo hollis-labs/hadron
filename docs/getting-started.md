@@ -1,15 +1,17 @@
 # Getting Started with Hadron
 
+Hadron is currently in public beta. Start with a source install, then bring up
+the daemon locally.
+
 ## Installation
 
-Build from source (requires Go 1.22+):
+Install instructions live in [install.md](install.md). The shortest path is:
 
 ```sh
-git clone <repo>
+git clone git@github.com:hollis-labs/hadron.git
 cd hadron
-make build
-# Binaries: bin/hadron  bin/hadrond
-export PATH="$PWD/bin:$PATH"
+make install PREFIX="$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 ## First Run
@@ -76,5 +78,6 @@ hadron schedule disable <id>
 
 - [Blueprint spec v0.4](spec-v04.md) — full YAML reference
 - [CLI reference](cli-reference.md) — all commands and flags
-- [MCP setup](mcp-setup.md) — use Hadron with Claude Code
+- [MCP setup](mcp-setup.md) — use Hadron with any MCP client
 - [Safety settings](safety.md) — control what blueprints can do
+- [Beta status](beta-status.md) — current release posture

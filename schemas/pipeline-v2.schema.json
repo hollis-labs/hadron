@@ -15,6 +15,10 @@
       "default": true,
       "description": "When true, a stage failure prevents downstream stages from running. Defaults to true if omitted."
     },
+    "defaults": {
+      "$ref": "#/$defs/Defaults",
+      "description": "Pipeline-level execution defaults applied to stages unless a stage overrides them."
+    },
     "stages": {
       "type": "array",
       "minItems": 1,
@@ -42,6 +46,18 @@
         "version": {
           "type": "integer",
           "description": "Pipeline spec version. 1 = linear (array-order), 2 = DAG (depends_on). Optional; defaults to 1 semantics when omitted."
+        }
+      }
+    },
+    "Defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stage_wait_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Default number of seconds the pipeline runner waits for each stage blueprint run to reach a terminal state. Defaults to 60 when omitted."
         }
       }
     },
@@ -104,6 +120,16 @@
             }
           },
           "description": "Named key-value pairs emitted by the stage. Keys must match ^[a-zA-Z][a-zA-Z0-9_\\-]*$. Values are template strings evaluated after the stage completes."
+        },
+        "wait_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of seconds to wait for this stage's blueprint run to reach a terminal state. Overrides defaults.stage_wait_timeout_seconds."
+        },
+        "async": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the stage succeeds after the blueprint run is enqueued and exposes launch handle outputs instead of waiting for the run to finish."
         }
       }
     }

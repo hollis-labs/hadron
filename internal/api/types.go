@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
@@ -55,6 +56,20 @@ type TriggerStore interface {
 	DeleteExpiredTriggers(ctx context.Context, now time.Time) (int64, error)
 }
 
+type HumanGateStore interface {
+	GetHumanGate(ctx context.Context, id string) (persistence.HumanGateRecord, error)
+	SubmitHumanGateDecision(ctx context.Context, id, decision string, decidedAt time.Time) error
+}
+
+type MessageStore interface {
+	Send(ctx context.Context, substrate string, env messaging.Envelope) (messaging.Envelope, error)
+	Get(ctx context.Context, substrate, id string) (messaging.Envelope, error)
+	Inbox(ctx context.Context, substrate, toURN, correlationID string, limit int) ([]messaging.Envelope, error)
+	List(ctx context.Context, substrate, toURN, correlationID string, limit int) ([]messaging.Envelope, error)
+	Thread(ctx context.Context, substrate, threadID string, limit int) ([]messaging.Envelope, error)
+	Consume(ctx context.Context, substrate, id string) error
+}
+
 type Runner interface {
 	Enqueue(ctx context.Context, req execution.Request) error
 	Cancel(runID string) bool
@@ -78,6 +93,8 @@ type Dependencies struct {
 	Pipelines    PipelineStore
 	Workspaces   WorkspaceStore
 	Triggers     TriggerStore
+	HumanGates   HumanGateStore
+	Messages     MessageStore
 	Runner       Runner
 	Scheduler    Scheduler
 	Pipeline     PipelineRunner

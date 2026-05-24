@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 
 	ctx := context.Background()
 
-	tables := []string{"runs", "schedules", "queue_entries", "pipeline_runs", "pipeline_stage_runs", "settings", "schema_migrations", "run_events", "workspaces"}
+	tables := []string{"runs", "schedules", "queue_entries", "pipeline_runs", "pipeline_stage_runs", "settings", "schema_migrations", "run_events", "workspaces", "human_gates", "messages"}
 	for _, tbl := range tables {
 		var name string
 		err := store.DB().QueryRowContext(ctx,
@@ -416,8 +417,8 @@ func TestUpdateScheduleEnabledAndNext_PreservesNextRunWhenNil(t *testing.T) {
 		t.Fatalf("expected next_run_at preserved through disable as %q, got %+v", nextRun, disabled.NextRunAt)
 	}
 
-	if err := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, true, nil); err != nil {
-		t.Fatalf("re-enable: %v", err)
+	if updateErr := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, true, nil); updateErr != nil {
+		t.Fatalf("re-enable: %v", updateErr)
 	}
 	got, err := store.GetSchedule(ctx, sched.ID)
 	if err != nil {
@@ -432,8 +433,8 @@ func TestUpdateScheduleEnabledAndNext_PreservesNextRunWhenNil(t *testing.T) {
 
 	// A non-nil nextRun still updates the column.
 	newNext := now.Add(2 * time.Hour)
-	if err := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, true, &newNext); err != nil {
-		t.Fatalf("update with explicit next: %v", err)
+	if updateErr := store.UpdateScheduleEnabledAndNext(ctx, sched.ID, true, &newNext); updateErr != nil {
+		t.Fatalf("update with explicit next: %v", updateErr)
 	}
 	got, err = store.GetSchedule(ctx, sched.ID)
 	if err != nil {
@@ -441,5 +442,43 @@ func TestUpdateScheduleEnabledAndNext_PreservesNextRunWhenNil(t *testing.T) {
 	}
 	if want := newNext.Format(time.RFC3339); !got.NextRunAt.Valid || got.NextRunAt.String != want {
 		t.Fatalf("expected next_run_at updated to %q, got %+v", want, got.NextRunAt)
+	}
+}
+
+func TestHumanGateLifecycle(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hadron.db")
+	store, openErr := Open(dbPath)
+	if openErr != nil {
+		t.Fatalf("open store: %v", openErr)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := store.CreateHumanGate(ctx, HumanGateRecord{
+		ID:          "gate-1",
+		WorkspaceID: "default",
+		RunID:       "run-1",
+		StepName:    "approve",
+		Prompt:      "Approve?",
+		OptionsJSON: `[{"id":"approve","label":"Approve"}]`,
+		Status:      "waiting",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("create human gate: %v", err)
+	}
+	if err := store.SubmitHumanGateDecision(ctx, "gate-1", "approve", now.Add(time.Second)); err != nil {
+		t.Fatalf("submit decision: %v", err)
+	}
+	gate, err := store.GetHumanGate(ctx, "gate-1")
+	if err != nil {
+		t.Fatalf("get human gate: %v", err)
+	}
+	if gate.Status != "decided" || !gate.Decision.Valid || gate.Decision.String != "approve" {
+		t.Fatalf("unexpected gate after decision: %+v", gate)
+	}
+	if err := store.SubmitHumanGateDecision(ctx, "gate-1", "deny", now.Add(2*time.Second)); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected second submit to fail with sql.ErrNoRows, got %v", err)
 	}
 }

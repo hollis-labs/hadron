@@ -158,7 +158,17 @@ func (r *runExecution) executeFile(ctx context.Context, bpPath string, inputs ma
 			r.emit(section.Section, step.Name, "step_start", fmt.Sprintf("section %q step[%d] %q started", section.Section, stepIdx, step.Name))
 
 			var stepErr error
-			if strings.TrimSpace(step.Call) != "" {
+			if step.HTTPCall != nil {
+				stepErr = r.executeHTTPCallStep(ctx, section.Section, step)
+			} else if step.MCPCall != nil {
+				stepErr = r.executeMCPCallStep(ctx, section.Section, step)
+			} else if step.MessageWait != nil {
+				stepErr = r.executeMessageWaitStep(ctx, section.Section, step)
+			} else if step.AgentLaunch != nil {
+				stepErr = r.executeAgentLaunchStep(ctx, absPath, section.Section, step)
+			} else if step.HumanGate != nil {
+				stepErr = r.executeHumanGateStep(ctx, section.Section, step)
+			} else if strings.TrimSpace(step.Call) != "" {
 				stepErr = r.executeCallStep(ctx, absPath, importIndex, section.Section, step, depth)
 			} else {
 				stepErr = r.runStep(ctx, section.Section, step)

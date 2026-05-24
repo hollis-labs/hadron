@@ -1,6 +1,6 @@
-import type { Run, RunEvent, ListResponse, Health, EnqueueRunRequest, FileEntry, ValidateResult, Schedule, CreateScheduleRequest, BlueprintInput, ParsedBlueprint, BlueprintMetaSummary, Pipeline, PipelineStage, EnqueuePipelineRequest, Workspace, HadronSettings, TelemetryRunSummary, TelemetryLogEntry } from './types';
+import type { Run, RunEvent, ListResponse, Health, EnqueueRunRequest, FileEntry, ValidateResult, Schedule, CreateScheduleRequest, BlueprintInput, ParsedBlueprint, BlueprintMetaSummary, Pipeline, PipelineStage, EnqueuePipelineRequest, Workspace, HadronSettings, TelemetryRunSummary, TelemetryLogEntry, MCPCallDiagnostic, OperationDiagnostic } from './types';
 import { isDemoMode } from '../demo/demoMode';
-import { DEMO_RUNS, getDemoRunEvents, DEMO_SCHEDULES, DEMO_PIPELINES, getDemoPipelineStages, DEMO_TELEMETRY_RUNS, getDemoTelemetryEntries, DEMO_HEALTH, DEMO_WORKSPACES } from '../demo/data';
+import { DEMO_RUNS, getDemoRunEvents, getDemoRunMCPCalls, getDemoRunOperations, DEMO_SCHEDULES, DEMO_PIPELINES, getDemoPipelineStages, DEMO_TELEMETRY_RUNS, getDemoTelemetryEntries, DEMO_HEALTH, DEMO_WORKSPACES } from '../demo/data';
 
 // ── Base URL management ───────────────────────────────────────────────
 
@@ -88,6 +88,30 @@ export async function listRunEvents(
   if (params?.cursor) q.set('cursor', params.cursor);
   const qs = q.toString() ? `?${q.toString()}` : '';
   return apiFetch<ListResponse<RunEvent>>(`/v1/runs/${runId}/events${qs}`);
+}
+
+export async function listRunMCPCalls(runId: string): Promise<ListResponse<MCPCallDiagnostic> & { count: number }> {
+  if (isDemoMode()) {
+    const items = getDemoRunMCPCalls(runId);
+    return { items, count: items.length };
+  }
+  return apiFetch<ListResponse<MCPCallDiagnostic> & { count: number }>(`/v1/runs/${runId}/mcp-calls`);
+}
+
+export async function listRunOperations(
+  runId: string,
+  params?: { kind?: string; limit?: number; cursor?: string }
+): Promise<ListResponse<OperationDiagnostic> & { count: number; total_count?: number; next_cursor?: string | null }> {
+  if (isDemoMode()) {
+    const items = getDemoRunOperations(runId).filter(item => !params?.kind || item.kind === params.kind);
+    return { items, count: items.length, total_count: items.length, next_cursor: null };
+  }
+  const q = new URLSearchParams();
+  if (params?.kind) q.set('kind', params.kind);
+  if (params?.limit) q.set('limit', String(params.limit));
+  if (params?.cursor) q.set('cursor', params.cursor);
+  const qs = q.toString() ? `?${q.toString()}` : '';
+  return apiFetch<ListResponse<OperationDiagnostic> & { count: number; total_count?: number; next_cursor?: string | null }>(`/v1/runs/${runId}/operations${qs}`);
 }
 
 // ── Schedules ─────────────────────────────────────────────────────────

@@ -21,6 +21,60 @@ export interface RunEvent {
   step_name?: string | null;
 }
 
+export interface MCPCallDiagnostic {
+  sequence: number;
+  step_name: string;
+  server: string;
+  tool: string;
+  transport: string;
+  status: string;
+  retry_count: number;
+  attempt_count: number;
+  reused_client: boolean;
+  health_probe: boolean;
+  reconnected: boolean;
+  truncated: boolean;
+  result_json?: string | null;
+  error_message?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface OperationDiagnostic {
+  sequence: number;
+  kind: 'mcp_call' | 'http_call' | 'message_wait' | 'agent_launch' | 'human_gate' | string;
+  step_name: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  error_message?: string | null;
+  truncated: boolean;
+  result_json?: string | null;
+  server?: string | null;
+  tool?: string | null;
+  transport?: string | null;
+  retry_count: number;
+  attempt_count: number;
+  reused_client: boolean;
+  health_probe: boolean;
+  reconnected: boolean;
+  method?: string | null;
+  url?: string | null;
+  status_code?: number | null;
+  duration_ms?: number | null;
+  substrate?: string | null;
+  to?: string | null;
+  correlation_id?: string | null;
+  timeout_ms?: number | null;
+  poll_count: number;
+  message_id?: string | null;
+  logical_agent_id?: string | null;
+  launch_id?: string | null;
+  gate_id?: string | null;
+  decision?: string | null;
+  prompt?: string | null;
+}
+
 export interface Workspace {
   id: string;
   name: string;

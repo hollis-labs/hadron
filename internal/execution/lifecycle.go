@@ -33,6 +33,18 @@ func NewManager(store RunStore, settings SettingsValidator, workers int, logDir 
 	return m
 }
 
+func (m *Manager) SetMCPCaller(caller MCPCaller) {
+	m.mcpCaller = caller
+}
+
+func (m *Manager) SetMessageSource(source MessageSource) {
+	m.messages = source
+}
+
+func (m *Manager) SetAgentLauncher(launcher AgentLauncher) {
+	m.agents = launcher
+}
+
 // Subscribe returns a channel that receives all events and a cancel func.
 func (m *Manager) Subscribe(buffer int) (<-chan Event, func()) {
 	if buffer <= 0 {

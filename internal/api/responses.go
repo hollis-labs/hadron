@@ -10,6 +10,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
+	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 )
 
 func toWorkspaceResponse(ws persistence.WorkspaceRecord) map[string]any {
@@ -85,6 +86,59 @@ func toPipelineStageResponse(st persistence.PipelineStageRunRecord) map[string]a
 		"status":          st.Status,
 		"created_at":      st.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at":      st.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func toHumanGateResponse(g persistence.HumanGateRecord) map[string]any {
+	return map[string]any{
+		"id":           g.ID,
+		"workspace_id": g.WorkspaceID,
+		"run_id":       g.RunID,
+		"step_name":    g.StepName,
+		"prompt":       g.Prompt,
+		"options_json": g.OptionsJSON,
+		"status":       g.Status,
+		"decision":     nullableString(g.Decision),
+		"created_at":   g.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":   g.UpdatedAt.UTC().Format(time.RFC3339),
+		"expires_at":   nullableString(g.ExpiresAt),
+	}
+}
+
+func toOperationDiagnosticResponse(item rundiagnostics.OperationDiagnostic) map[string]any {
+	return map[string]any{
+		"sequence":         item.Sequence,
+		"kind":             item.Kind,
+		"step_name":        item.StepName,
+		"status":           item.Status,
+		"started_at":       item.StartedAt,
+		"finished_at":      item.FinishedAt,
+		"error_message":    item.ErrorMessage,
+		"truncated":        item.Truncated,
+		"result_json":      item.ResultJSON,
+		"server":           item.Server,
+		"tool":             item.Tool,
+		"transport":        item.Transport,
+		"retry_count":      item.RetryCount,
+		"attempt_count":    item.AttemptCount,
+		"reused_client":    item.ReusedClient,
+		"health_probe":     item.HealthProbe,
+		"reconnected":      item.Reconnected,
+		"method":           item.Method,
+		"url":              item.URL,
+		"status_code":      item.StatusCode,
+		"duration_ms":      item.DurationMS,
+		"substrate":        item.Substrate,
+		"to":               item.To,
+		"correlation_id":   item.CorrelationID,
+		"timeout_ms":       item.TimeoutMS,
+		"poll_count":       item.PollCount,
+		"message_id":       item.MessageID,
+		"logical_agent_id": item.LogicalAgentID,
+		"launch_id":        item.LaunchID,
+		"gate_id":          item.GateID,
+		"decision":         item.Decision,
+		"prompt":           item.Prompt,
 	}
 }
 

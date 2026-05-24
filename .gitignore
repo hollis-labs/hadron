@@ -25,8 +25,15 @@ vendor/
 .vscode/
 *.swp
 
-# Local Env
+# Local agent / client config
 .mcp.json
+.claude/
+.cursor/
+.windsurf/
+.nanite/
+.agentrc/
+AGENTS.md
+CLAUDE.md
 
 # Node / Frontend
 node_modules/

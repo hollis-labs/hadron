@@ -506,6 +506,26 @@
           "type": "string",
           "description": "Invoke an imported blueprint by alias. Mutually exclusive with cmd/run."
         },
+        "http_call": {
+          "$ref": "#/$defs/HTTPCall",
+          "description": "Perform a bounded local HTTP call. Mutually exclusive with cmd/run/call."
+        },
+        "mcp_call": {
+          "$ref": "#/$defs/MCPCall",
+          "description": "Call an MCP tool through Hadron's configured internal MCP caller. Mutually exclusive with cmd/run/call/http_call."
+        },
+        "message_wait": {
+          "$ref": "#/$defs/MessageWait",
+          "description": "Poll a configured message source until a correlated message arrives or the wait times out."
+        },
+        "agent_launch": {
+          "$ref": "#/$defs/AgentLaunch",
+          "description": "Launch a bounded agent through a configured substrate adapter and return durable handles."
+        },
+        "human_gate": {
+          "$ref": "#/$defs/HumanGate",
+          "description": "Pause execution until an operator submits one of the configured decisions."
+        },
         "if": {
           "type": "string",
           "description": "Condition template. Truthy string or shell exit 0 means true."
@@ -620,8 +640,229 @@
       "anyOf": [
         { "required": ["cmd"] },
         { "required": ["run"] },
-        { "required": ["call"] }
+        { "required": ["call"] },
+        { "required": ["http_call"] },
+        { "required": ["mcp_call"] },
+        { "required": ["message_wait"] },
+        { "required": ["agent_launch"] },
+        { "required": ["human_gate"] }
       ],
+      "allOf": [
+        { "not": { "required": ["cmd", "call"] } },
+        { "not": { "required": ["run", "call"] } },
+        { "not": { "required": ["cmd", "http_call"] } },
+        { "not": { "required": ["run", "http_call"] } },
+        { "not": { "required": ["call", "http_call"] } },
+        { "not": { "required": ["cmd", "mcp_call"] } },
+        { "not": { "required": ["run", "mcp_call"] } },
+        { "not": { "required": ["call", "mcp_call"] } },
+        { "not": { "required": ["http_call", "mcp_call"] } },
+        { "not": { "required": ["cmd", "message_wait"] } },
+        { "not": { "required": ["run", "message_wait"] } },
+        { "not": { "required": ["call", "message_wait"] } },
+        { "not": { "required": ["http_call", "message_wait"] } },
+        { "not": { "required": ["mcp_call", "message_wait"] } },
+        { "not": { "required": ["cmd", "agent_launch"] } },
+        { "not": { "required": ["run", "agent_launch"] } },
+        { "not": { "required": ["call", "agent_launch"] } },
+        { "not": { "required": ["http_call", "agent_launch"] } },
+        { "not": { "required": ["mcp_call", "agent_launch"] } },
+        { "not": { "required": ["message_wait", "agent_launch"] } },
+        { "not": { "required": ["cmd", "human_gate"] } },
+        { "not": { "required": ["run", "human_gate"] } },
+        { "not": { "required": ["call", "human_gate"] } },
+        { "not": { "required": ["http_call", "human_gate"] } },
+        { "not": { "required": ["mcp_call", "human_gate"] } },
+        { "not": { "required": ["message_wait", "human_gate"] } },
+        { "not": { "required": ["agent_launch", "human_gate"] } }
+      ],
+      "additionalProperties": false
+    },
+    "HTTPCall": {
+      "type": "object",
+      "description": "Structured local HTTP request executed without shelling out.",
+      "required": ["url"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "description": "HTTP method. Defaults to GET when omitted."
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "HTTP or HTTPS URL. Runtime execution is currently local-only."
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Request timeout in seconds. Falls back to task/default timeout when omitted or 0."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "body": {
+          "type": "string"
+        },
+        "body_json": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "not": {
+        "required": ["body", "body_json"]
+      },
+      "additionalProperties": false
+    },
+    "MCPCall": {
+      "type": "object",
+      "description": "Structured MCP tool request executed through an internal MCP caller.",
+      "required": ["server", "tool"],
+      "properties": {
+        "server": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "MessageWait": {
+      "type": "object",
+      "description": "Deterministic wait for a correlated message from a configured substrate.",
+      "required": ["substrate", "to", "correlation_id", "timeout_seconds"],
+      "properties": {
+        "substrate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "poll_interval_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Polling interval in seconds. Defaults to 1 when omitted or 0."
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentLaunch": {
+      "type": "object",
+      "description": "Bounded agent launch request. Returns durable handles rather than waiting for completion.",
+      "required": ["substrate", "launch_id", "logical_agent_id"],
+      "properties": {
+        "substrate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "launch_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logical_agent_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_append": {
+          "type": "string"
+        },
+        "injection": {
+          "$ref": "#/$defs/AgentInjection"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentInjection": {
+      "type": "object",
+      "properties": {
+        "native_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentNativeFile"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentNativeFile": {
+      "type": "object",
+      "required": ["rel_path", "source"],
+      "properties": {
+        "rel_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "HumanGate": {
+      "type": "object",
+      "description": "Operator approval gate that pauses a run until a decision is submitted or timeout expires.",
+      "required": ["prompt", "options", "timeout_seconds"],
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/HumanGateOption"
+          }
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "poll_interval_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Polling interval in seconds. Defaults to 1 when omitted or 0."
+        }
+      },
+      "additionalProperties": false
+    },
+    "HumanGateOption": {
+      "type": "object",
+      "required": ["id", "label"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
       "additionalProperties": false
     },
     "ActionHook": {

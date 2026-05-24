@@ -48,6 +48,7 @@ func main() {
 		buildBlueprintCmd(),
 		buildScheduleCmd(),
 		buildPipelineCmd(),
+		buildGateCmd(),
 		buildWorkspaceCmd(),
 		buildDaemonCmd(),
 		buildLintCmd(),
@@ -470,6 +471,49 @@ func buildPipelineCmd() *cobra.Command {
 	runCmd.Flags().StringVar(&wsID, "workspace", "default", "workspace ID")
 
 	cmd.AddCommand(runCmd)
+	return cmd
+}
+
+// ── gate ──────────────────────────────────────────────────────────────────────
+
+func buildGateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "gate",
+		Short: "Inspect and decide human gates",
+	}
+
+	getCmd := &cobra.Command{
+		Use:   "get <gate-id>",
+		Short: "Show a human gate",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var result map[string]any
+			if err := httpGet(globalAddr+"/v1/human-gates/"+args[0], &result); err != nil {
+				return err
+			}
+			b, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(b))
+			return nil
+		},
+	}
+
+	submitCmd := &cobra.Command{
+		Use:   "submit <gate-id> <decision>",
+		Short: "Submit a human gate decision",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var result map[string]any
+			if err := postJSON(globalAddr+"/v1/human-gates/"+args[0]+"/decision", map[string]any{
+				"decision": args[1],
+			}, &result); err != nil {
+				return err
+			}
+			fmt.Printf("gate %s decided: %s\n", args[0], args[1])
+			return nil
+		},
+	}
+
+	cmd.AddCommand(getCmd, submitCmd)
 	return cmd
 }
 

@@ -1,5 +1,5 @@
 // Demo data for GUI testing without a running daemon
-import type { Run, RunEvent, Schedule, Pipeline, PipelineStage, Health, Workspace, TelemetryRunSummary, TelemetryLogEntry } from '../api/types';
+import type { Run, RunEvent, Schedule, Pipeline, PipelineStage, Health, Workspace, TelemetryRunSummary, TelemetryLogEntry, MCPCallDiagnostic, OperationDiagnostic } from '../api/types';
 
 // ── Helpers ──
 
@@ -190,6 +190,131 @@ export function getDemoRunEvents(runId: string): RunEvent[] {
     { id: 9, run_id: runId, event_type: 'step_end', step_name: `run-${bp}`, message: 'Done', created_at: run.ended_at! },
     { id: 10, run_id: runId, event_type: 'cleanup', step_name: 'cleanup', message: 'Cleaning up temp files', created_at: run.ended_at! },
     { id: 11, run_id: runId, event_type: 'run_end', message: 'Blueprint execution completed successfully', created_at: run.ended_at! },
+  ];
+}
+
+export function getDemoRunMCPCalls(runId: string): MCPCallDiagnostic[] {
+  if (runId !== 'run-demo-003-i9j0k1l2') return [];
+  return [
+    {
+      sequence: 1,
+      step_name: 'build',
+      server: 'hadron',
+      tool: 'hadron_health',
+      transport: 'internal',
+      status: 'success',
+      retry_count: 0,
+      attempt_count: 1,
+      reused_client: false,
+      health_probe: false,
+      reconnected: false,
+      truncated: false,
+      result_json: '{"status":"ok"}',
+      started_at: minutesAgo(2),
+      finished_at: minutesAgo(2),
+    },
+    {
+      sequence: 2,
+      step_name: 'build',
+      server: 'tether',
+      tool: 'repo_status',
+      transport: 'streamable_http',
+      status: 'success',
+      retry_count: 1,
+      attempt_count: 2,
+      reused_client: true,
+      health_probe: true,
+      reconnected: true,
+      truncated: false,
+      result_json: '{"branch":"main","dirty":false}',
+      started_at: minutesAgo(1),
+      finished_at: minutesAgo(1),
+    },
+  ];
+}
+
+export function getDemoRunOperations(runId: string): OperationDiagnostic[] {
+  if (runId !== 'run-demo-003-i9j0k1l2') return [];
+  return [
+    {
+      sequence: 1,
+      kind: 'http_call',
+      step_name: 'build',
+      status: 'success',
+      method: 'GET',
+      url: 'http://127.0.0.1:8095/v1/health',
+      status_code: 200,
+      duration_ms: 14,
+      result_json: '{"status":"ok"}',
+      truncated: false,
+      retry_count: 0,
+      attempt_count: 0,
+      reused_client: false,
+      health_probe: false,
+      reconnected: false,
+      poll_count: 0,
+      started_at: minutesAgo(3),
+      finished_at: minutesAgo(3),
+    },
+    {
+      sequence: 2,
+      kind: 'message_wait',
+      step_name: 'build',
+      status: 'success',
+      substrate: 'tether',
+      to: 'mailbox://agent/replies',
+      correlation_id: 'corr-123',
+      timeout_ms: 2000,
+      poll_count: 1,
+      message_id: 'msg-1',
+      result_json: '{"approved":true}',
+      truncated: false,
+      retry_count: 0,
+      attempt_count: 0,
+      reused_client: false,
+      health_probe: false,
+      reconnected: false,
+      started_at: minutesAgo(2),
+      finished_at: minutesAgo(2),
+    },
+    {
+      sequence: 3,
+      kind: 'agent_launch',
+      step_name: 'build',
+      status: 'success',
+      substrate: 'tether',
+      launch_id: 'torque-monitor-correlator',
+      logical_agent_id: 'torque-monitor-correlator',
+      result_json: '{"session_id":"session-1","mailbox":"mailbox://agent/replies"}',
+      truncated: false,
+      retry_count: 0,
+      attempt_count: 0,
+      reused_client: false,
+      health_probe: false,
+      reconnected: false,
+      poll_count: 0,
+      started_at: minutesAgo(2),
+      finished_at: minutesAgo(2),
+    },
+    {
+      sequence: 4,
+      kind: 'mcp_call',
+      step_name: 'build',
+      status: 'success',
+      server: 'tether',
+      tool: 'repo_status',
+      transport: 'streamable_http',
+      retry_count: 1,
+      attempt_count: 2,
+      reused_client: true,
+      health_probe: true,
+      reconnected: true,
+      truncated: false,
+      poll_count: 0,
+      result_json: '{"branch":"main","dirty":false}',
+      started_at: minutesAgo(1),
+      finished_at: minutesAgo(1),
+    },
   ];
 }
 

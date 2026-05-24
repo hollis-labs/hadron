@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/pipeline"
+	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/trigger"
 )
@@ -59,6 +61,16 @@ func NewServer(addr string, deps Dependencies) *Server {
 	// Triggers — CRUD for webhook trigger definitions
 	mux.HandleFunc("/v1/triggers", s.handleWebhookTriggers)
 	mux.HandleFunc("/v1/triggers/", s.handleWebhookTriggerByID)
+
+	// Human gates
+	mux.HandleFunc("/v1/human-gates/", s.handleHumanGateByID)
+
+	// Messages
+	mux.HandleFunc("/v1/messages", s.handleMessagesCollection)
+	mux.HandleFunc("/v1/messages/inbox", s.handleMessagesInbox)
+	mux.HandleFunc("/v1/messages/list", s.handleMessagesList)
+	mux.HandleFunc("/v1/messages/thread/", s.handleMessagesThread)
+	mux.HandleFunc("/v1/messages/", s.handleMessageByID)
 
 	// Webhook catch-all — incoming webhook requests
 	if s.triggerManager != nil {
@@ -131,6 +143,105 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"version": "0.4.0",
 		"service": "hadrond",
 	})
+}
+
+// ── Human Gates ───────────────────────────────────────────────────────────────
+
+func (s *Server) handleHumanGateByID(w http.ResponseWriter, r *http.Request) {
+	if s.deps.HumanGates == nil {
+		writeError(w, http.StatusServiceUnavailable, "human gates unavailable")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/v1/human-gates/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeError(w, http.StatusBadRequest, "gate id is required")
+		return
+	}
+	gateID := parts[0]
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		gate, err := s.deps.HumanGates.GetHumanGate(r.Context(), gateID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+				writeError(w, http.StatusNotFound, "human gate not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, toHumanGateResponse(gate))
+		return
+	}
+	if len(parts) == 2 && parts[1] == "decision" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		var body struct {
+			Decision string `json:"decision"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		decision := strings.TrimSpace(body.Decision)
+		if decision == "" {
+			writeError(w, http.StatusBadRequest, "decision is required")
+			return
+		}
+		current, err := s.deps.HumanGates.GetHumanGate(r.Context(), gateID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+				writeError(w, http.StatusNotFound, "human gate not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if current.Status != "waiting" {
+			writeError(w, http.StatusConflict, "human gate is not waiting")
+			return
+		}
+		if !humanGateDecisionAllowed(current.OptionsJSON, decision) {
+			writeError(w, http.StatusBadRequest, "decision is not an allowed option")
+			return
+		}
+		if submitErr := s.deps.HumanGates.SubmitHumanGateDecision(r.Context(), gateID, decision, time.Now().UTC()); submitErr != nil {
+			if errors.Is(submitErr, sql.ErrNoRows) || strings.Contains(submitErr.Error(), "no rows") {
+				writeError(w, http.StatusConflict, "human gate is not waiting or was not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, submitErr.Error())
+			return
+		}
+		gate, err := s.deps.HumanGates.GetHumanGate(r.Context(), gateID)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"id": gateID, "decision": decision, "status": "decided"})
+			return
+		}
+		writeJSON(w, http.StatusOK, toHumanGateResponse(gate))
+		return
+	}
+	writeError(w, http.StatusNotFound, "not found")
+}
+
+func humanGateDecisionAllowed(optionsJSON, decision string) bool {
+	var options []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(optionsJSON), &options); err != nil {
+		return false
+	}
+	for _, opt := range options {
+		if opt.ID == decision {
+			return true
+		}
+	}
+	return false
 }
 
 // ── A2A Agent Card ────────────────────────────────────────────────────────────
@@ -269,6 +380,10 @@ func (s *Server) handleRunByID(w http.ResponseWriter, r *http.Request) {
 		s.cancelRun(w, r, runID)
 	case sub == "events" && r.Method == http.MethodGet:
 		s.listRunEvents(w, r, runID)
+	case sub == "operations" && r.Method == http.MethodGet:
+		s.listRunOperations(w, r, runID)
+	case sub == "mcp-calls" && r.Method == http.MethodGet:
+		s.listRunMCPCalls(w, r, runID)
 	default:
 		writeError(w, http.StatusNotFound, "not found")
 	}
@@ -432,6 +547,93 @@ func (s *Server) listRunEvents(w http.ResponseWriter, r *http.Request, runID str
 		out = append(out, toRunEventResponse(ev))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": nextCursor})
+}
+
+func (s *Server) listRunMCPCalls(w http.ResponseWriter, r *http.Request, runID string) {
+	if _, err := s.deps.Runs.GetRun(r.Context(), runID); err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "run not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	events, err := s.deps.Runs.ListRunEvents(r.Context(), runID, 1000)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	items := rundiagnostics.SummarizeMCPCalls(events)
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, map[string]any{
+			"sequence":      item.Sequence,
+			"step_name":     item.StepName,
+			"server":        item.Server,
+			"tool":          item.Tool,
+			"transport":     item.Transport,
+			"status":        item.Status,
+			"retry_count":   item.RetryCount,
+			"attempt_count": item.AttemptCount,
+			"reused_client": item.ReusedClient,
+			"health_probe":  item.HealthProbe,
+			"reconnected":   item.Reconnected,
+			"truncated":     item.Truncated,
+			"result_json":   item.ResultJSON,
+			"error_message": item.ErrorMessage,
+			"started_at":    item.StartedAt,
+			"finished_at":   item.FinishedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "count": len(out)})
+}
+
+func (s *Server) listRunOperations(w http.ResponseWriter, r *http.Request, runID string) {
+	if _, err := s.deps.Runs.GetRun(r.Context(), runID); err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "run not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	events, err := s.deps.Runs.ListRunEvents(r.Context(), runID, 1000)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	items := rundiagnostics.SummarizeOperations(events)
+	q := r.URL.Query()
+	kind := strings.TrimSpace(q.Get("kind"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 {
+		limit = 50
+	}
+	cursor := strings.TrimSpace(q.Get("cursor"))
+	page, nextCursor, totalCount, err := rundiagnostics.FilterAndPageOperations(items, kind, limit, cursor)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid cursor")
+		return
+	}
+
+	out := make([]map[string]any, 0, len(page))
+	for _, item := range page {
+		out = append(out, toOperationDiagnosticResponse(item))
+	}
+	var next any
+	if nextCursor != "" {
+		next = nextCursor
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":       out,
+		"count":       len(out),
+		"total_count": totalCount,
+		"next_cursor": next,
+	})
 }
 
 // ── Schedules ─────────────────────────────────────────────────────────────────

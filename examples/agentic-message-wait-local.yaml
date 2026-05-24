@@ -1,0 +1,27 @@
+blueprint:
+  name: agentic-message-wait-local
+  description: Demonstrates Hadron's local go_messaging mailbox with a self-call into the Hadron MCP adapter.
+
+steps:
+  - section: main
+    tasks:
+      - name: seed-reply
+        mcp_call:
+          server: hadron
+          tool: hadron_message_send
+          arguments:
+            substrate: local_mailbox
+            kind: notice
+            from: msg://service/hadron/operator
+            to: msg://agent/hadron/reviewer-1
+            thread_id: review-123
+            payload_json: '{"approved":true,"source":"example"}'
+            metadata_json: '{"correlation_id":"review-123"}'
+
+      - name: wait-for-reply
+        message_wait:
+          substrate: local_mailbox
+          to: msg://agent/hadron/reviewer-1
+          correlation_id: review-123
+          timeout_seconds: 30
+          poll_interval_seconds: 1

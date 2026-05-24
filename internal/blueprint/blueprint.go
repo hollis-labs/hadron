@@ -271,6 +271,11 @@ type Step struct {
 	Cmd             string            `yaml:"cmd" json:"cmd"`
 	Run             string            `yaml:"run" json:"run"`
 	Call            string            `yaml:"call" json:"call"`
+	HTTPCall        *HTTPCall         `yaml:"http_call" json:"http_call"`
+	MCPCall         *MCPCall          `yaml:"mcp_call" json:"mcp_call"`
+	MessageWait     *MessageWait      `yaml:"message_wait" json:"message_wait"`
+	AgentLaunch     *AgentLaunch      `yaml:"agent_launch" json:"agent_launch"`
+	HumanGate       *HumanGate        `yaml:"human_gate" json:"human_gate"`
 	If              string            `yaml:"if" json:"if"`
 	With            map[string]any    `yaml:"with" json:"with"`
 	Dir             string            `yaml:"dir" json:"dir"`
@@ -286,12 +291,70 @@ type Step struct {
 	OnFail          []ActionHook      `yaml:"on_fail" json:"on_fail"`
 }
 
+type HTTPCall struct {
+	Method         string            `yaml:"method" json:"method"`
+	URL            string            `yaml:"url" json:"url"`
+	TimeoutSeconds int               `yaml:"timeout_seconds" json:"timeout_seconds"`
+	Headers        map[string]string `yaml:"headers" json:"headers"`
+	Body           string            `yaml:"body" json:"body"`
+	BodyJSON       map[string]any    `yaml:"body_json" json:"body_json"`
+}
+
+type MCPCall struct {
+	Server    string         `yaml:"server" json:"server"`
+	Tool      string         `yaml:"tool" json:"tool"`
+	Arguments map[string]any `yaml:"arguments" json:"arguments"`
+}
+
+type MessageWait struct {
+	Substrate           string `yaml:"substrate" json:"substrate"`
+	To                  string `yaml:"to" json:"to"`
+	CorrelationID       string `yaml:"correlation_id" json:"correlation_id"`
+	TimeoutSeconds      int    `yaml:"timeout_seconds" json:"timeout_seconds"`
+	PollIntervalSeconds int    `yaml:"poll_interval_seconds" json:"poll_interval_seconds"`
+}
+
+type AgentLaunch struct {
+	Substrate      string         `yaml:"substrate" json:"substrate"`
+	LaunchID       string         `yaml:"launch_id" json:"launch_id"`
+	LogicalAgentID string         `yaml:"logical_agent_id" json:"logical_agent_id"`
+	PromptAppend   string         `yaml:"prompt_append" json:"prompt_append"`
+	Injection      AgentInjection `yaml:"injection" json:"injection"`
+	Metadata       map[string]any `yaml:"metadata" json:"metadata"`
+}
+
+type AgentInjection struct {
+	NativeFiles []AgentNativeFile `yaml:"native_files" json:"native_files"`
+}
+
+type AgentNativeFile struct {
+	RelPath string `yaml:"rel_path" json:"rel_path"`
+	Source  string `yaml:"source" json:"source"`
+}
+
+type HumanGate struct {
+	Prompt              string            `yaml:"prompt" json:"prompt"`
+	Options             []HumanGateOption `yaml:"options" json:"options"`
+	TimeoutSeconds      int               `yaml:"timeout_seconds" json:"timeout_seconds"`
+	PollIntervalSeconds int               `yaml:"poll_interval_seconds" json:"poll_interval_seconds"`
+}
+
+type HumanGateOption struct {
+	ID    string `yaml:"id" json:"id"`
+	Label string `yaml:"label" json:"label"`
+}
+
 // rawStepYAML captures both canonical and compat field names for YAML unmarshal.
 type rawStepYAML struct {
 	Name                 string            `yaml:"name"`
 	Cmd                  string            `yaml:"cmd"`
 	Run                  string            `yaml:"run"`
 	Call                 string            `yaml:"call"`
+	HTTPCall             *HTTPCall         `yaml:"http_call"`
+	MCPCall              *MCPCall          `yaml:"mcp_call"`
+	MessageWait          *MessageWait      `yaml:"message_wait"`
+	AgentLaunch          *AgentLaunch      `yaml:"agent_launch"`
+	HumanGate            *HumanGate        `yaml:"human_gate"`
 	If                   string            `yaml:"if"`
 	Condition            string            `yaml:"condition"` // compat → if
 	With                 map[string]any    `yaml:"with"`
@@ -325,6 +388,11 @@ func (t *Step) UnmarshalYAML(value *yaml.Node) error {
 	t.Cmd = raw.Cmd
 	t.Run = raw.Run
 	t.Call = raw.Call
+	t.HTTPCall = raw.HTTPCall
+	t.MCPCall = raw.MCPCall
+	t.MessageWait = raw.MessageWait
+	t.AgentLaunch = raw.AgentLaunch
+	t.HumanGate = raw.HumanGate
 	t.If = raw.If
 	if t.If == "" {
 		t.If = raw.Condition
@@ -371,6 +439,11 @@ type rawStepJSON struct {
 	Cmd                  string            `json:"cmd"`
 	Run                  string            `json:"run"`
 	Call                 string            `json:"call"`
+	HTTPCall             *HTTPCall         `json:"http_call"`
+	MCPCall              *MCPCall          `json:"mcp_call"`
+	MessageWait          *MessageWait      `json:"message_wait"`
+	AgentLaunch          *AgentLaunch      `json:"agent_launch"`
+	HumanGate            *HumanGate        `json:"human_gate"`
 	If                   string            `json:"if"`
 	Condition            string            `json:"condition"`
 	With                 map[string]any    `json:"with"`
@@ -404,6 +477,11 @@ func (t *Step) UnmarshalJSON(data []byte) error {
 	t.Cmd = raw.Cmd
 	t.Run = raw.Run
 	t.Call = raw.Call
+	t.HTTPCall = raw.HTTPCall
+	t.MCPCall = raw.MCPCall
+	t.MessageWait = raw.MessageWait
+	t.AgentLaunch = raw.AgentLaunch
+	t.HumanGate = raw.HumanGate
 	t.If = raw.If
 	if t.If == "" {
 		t.If = raw.Condition
@@ -554,13 +632,28 @@ func Validate(bp *Blueprint) error {
 			cmd := strings.TrimSpace(step.Cmd)
 			run := strings.TrimSpace(step.Run)
 			call := strings.TrimSpace(step.Call)
+			hasCommand := cmd != "" || run != ""
+			hasCall := call != ""
+			hasHTTPCall := step.HTTPCall != nil
+			hasMCPCall := step.MCPCall != nil
+			hasMessageWait := step.MessageWait != nil
+			hasAgentLaunch := step.AgentLaunch != nil
+			hasHumanGate := step.HumanGate != nil
 			// normalize run → cmd
 			if cmd == "" && run != "" {
-				cmd = run
 				bp.Steps[si].Steps[ti].Cmd = run
 			}
-			if cmd == "" && call == "" {
-				return fmt.Errorf("%s (%q): step must have cmd or call", path, step.Name)
+			executableKinds := 0
+			for _, hasKind := range []bool{hasCommand, hasCall, hasHTTPCall, hasMCPCall, hasMessageWait, hasAgentLaunch, hasHumanGate} {
+				if hasKind {
+					executableKinds++
+				}
+			}
+			if executableKinds == 0 {
+				return fmt.Errorf("%s (%q): step must have cmd, run, call, http_call, mcp_call, message_wait, agent_launch, or human_gate", path, step.Name)
+			}
+			if executableKinds > 1 {
+				return fmt.Errorf("%s (%q): step must have exactly one executable kind", path, step.Name)
 			}
 			if step.Retry < 0 {
 				return fmt.Errorf("%s.retry: must be >= 0", path)
@@ -576,6 +669,89 @@ func Validate(bp *Blueprint) error {
 			}
 			if step.TimeoutSeconds < 0 {
 				return fmt.Errorf("%s.timeout_seconds: must be >= 0", path)
+			}
+			if step.HTTPCall != nil {
+				if strings.TrimSpace(step.HTTPCall.URL) == "" {
+					return fmt.Errorf("%s.http_call.url: required", path)
+				}
+				if step.HTTPCall.TimeoutSeconds < 0 {
+					return fmt.Errorf("%s.http_call.timeout_seconds: must be >= 0", path)
+				}
+				if strings.TrimSpace(step.HTTPCall.Body) != "" && len(step.HTTPCall.BodyJSON) > 0 {
+					return fmt.Errorf("%s.http_call: body and body_json are mutually exclusive", path)
+				}
+			}
+			if step.MCPCall != nil {
+				if strings.TrimSpace(step.MCPCall.Server) == "" {
+					return fmt.Errorf("%s.mcp_call.server: required", path)
+				}
+				if strings.TrimSpace(step.MCPCall.Tool) == "" {
+					return fmt.Errorf("%s.mcp_call.tool: required", path)
+				}
+			}
+			if step.MessageWait != nil {
+				if strings.TrimSpace(step.MessageWait.Substrate) == "" {
+					return fmt.Errorf("%s.message_wait.substrate: required", path)
+				}
+				if strings.TrimSpace(step.MessageWait.To) == "" {
+					return fmt.Errorf("%s.message_wait.to: required", path)
+				}
+				if strings.TrimSpace(step.MessageWait.CorrelationID) == "" {
+					return fmt.Errorf("%s.message_wait.correlation_id: required", path)
+				}
+				if step.MessageWait.TimeoutSeconds <= 0 {
+					return fmt.Errorf("%s.message_wait.timeout_seconds: must be greater than 0", path)
+				}
+				if step.MessageWait.PollIntervalSeconds < 0 {
+					return fmt.Errorf("%s.message_wait.poll_interval_seconds: must be >= 0", path)
+				}
+			}
+			if step.AgentLaunch != nil {
+				if strings.TrimSpace(step.AgentLaunch.Substrate) == "" {
+					return fmt.Errorf("%s.agent_launch.substrate: required", path)
+				}
+				if strings.TrimSpace(step.AgentLaunch.LaunchID) == "" {
+					return fmt.Errorf("%s.agent_launch.launch_id: required", path)
+				}
+				if strings.TrimSpace(step.AgentLaunch.LogicalAgentID) == "" {
+					return fmt.Errorf("%s.agent_launch.logical_agent_id: required", path)
+				}
+				for i, file := range step.AgentLaunch.Injection.NativeFiles {
+					if strings.TrimSpace(file.RelPath) == "" {
+						return fmt.Errorf("%s.agent_launch.injection.native_files[%d].rel_path: required", path, i)
+					}
+					if strings.TrimSpace(file.Source) == "" {
+						return fmt.Errorf("%s.agent_launch.injection.native_files[%d].source: required", path, i)
+					}
+				}
+			}
+			if step.HumanGate != nil {
+				if strings.TrimSpace(step.HumanGate.Prompt) == "" {
+					return fmt.Errorf("%s.human_gate.prompt: required", path)
+				}
+				if len(step.HumanGate.Options) == 0 {
+					return fmt.Errorf("%s.human_gate.options: must contain at least one option", path)
+				}
+				seenOptions := map[string]struct{}{}
+				for i, opt := range step.HumanGate.Options {
+					id := strings.TrimSpace(opt.ID)
+					if id == "" {
+						return fmt.Errorf("%s.human_gate.options[%d].id: required", path, i)
+					}
+					if _, exists := seenOptions[id]; exists {
+						return fmt.Errorf("%s.human_gate.options[%d].id: duplicate option %q", path, i, id)
+					}
+					seenOptions[id] = struct{}{}
+					if strings.TrimSpace(opt.Label) == "" {
+						return fmt.Errorf("%s.human_gate.options[%d].label: required", path, i)
+					}
+				}
+				if step.HumanGate.TimeoutSeconds <= 0 {
+					return fmt.Errorf("%s.human_gate.timeout_seconds: must be greater than 0", path)
+				}
+				if step.HumanGate.PollIntervalSeconds < 0 {
+					return fmt.Errorf("%s.human_gate.poll_interval_seconds: must be >= 0", path)
+				}
 			}
 		}
 	}
@@ -829,6 +1005,31 @@ func RenderForExecution(bp *Blueprint, ctx map[string]any) (*Blueprint, error) {
 			if t.Call, err = renderString(t.Call, ctx); err != nil {
 				return nil, fmt.Errorf("render steps[%d].steps[%d].call: %w", si, ti, err)
 			}
+			if t.HTTPCall != nil {
+				if renderErr := renderHTTPCall(t.HTTPCall, ctx); renderErr != nil {
+					return nil, fmt.Errorf("render steps[%d].steps[%d].http_call: %w", si, ti, renderErr)
+				}
+			}
+			if t.MCPCall != nil {
+				if renderErr := renderMCPCall(t.MCPCall, ctx); renderErr != nil {
+					return nil, fmt.Errorf("render steps[%d].steps[%d].mcp_call: %w", si, ti, renderErr)
+				}
+			}
+			if t.MessageWait != nil {
+				if renderErr := renderMessageWait(t.MessageWait, ctx); renderErr != nil {
+					return nil, fmt.Errorf("render steps[%d].steps[%d].message_wait: %w", si, ti, renderErr)
+				}
+			}
+			if t.AgentLaunch != nil {
+				if renderErr := renderAgentLaunch(t.AgentLaunch, ctx); renderErr != nil {
+					return nil, fmt.Errorf("render steps[%d].steps[%d].agent_launch: %w", si, ti, renderErr)
+				}
+			}
+			if t.HumanGate != nil {
+				if renderErr := renderHumanGate(t.HumanGate, ctx); renderErr != nil {
+					return nil, fmt.Errorf("render steps[%d].steps[%d].human_gate: %w", si, ti, renderErr)
+				}
+			}
 			if t.If, err = renderString(t.If, ctx); err != nil {
 				return nil, fmt.Errorf("render steps[%d].steps[%d].if: %w", si, ti, err)
 			}
@@ -1067,6 +1268,108 @@ func renderMapValues(in map[string]any, ctx map[string]any) (map[string]any, err
 		out[k] = rendered
 	}
 	return out, nil
+}
+
+func renderHTTPCall(call *HTTPCall, ctx map[string]any) error {
+	var err error
+	if call.Method, err = renderString(call.Method, ctx); err != nil {
+		return fmt.Errorf("method: %w", err)
+	}
+	if call.URL, err = renderString(call.URL, ctx); err != nil {
+		return fmt.Errorf("url: %w", err)
+	}
+	if call.Body, err = renderString(call.Body, ctx); err != nil {
+		return fmt.Errorf("body: %w", err)
+	}
+	for k, v := range call.Headers {
+		rendered, rerr := renderString(v, ctx)
+		if rerr != nil {
+			return fmt.Errorf("headers.%s: %w", k, rerr)
+		}
+		call.Headers[k] = rendered
+	}
+	renderedBodyJSON, err := renderMapValues(call.BodyJSON, ctx)
+	if err != nil {
+		return fmt.Errorf("body_json: %w", err)
+	}
+	call.BodyJSON = renderedBodyJSON
+	return nil
+}
+
+func renderMCPCall(call *MCPCall, ctx map[string]any) error {
+	var err error
+	if call.Server, err = renderString(call.Server, ctx); err != nil {
+		return fmt.Errorf("server: %w", err)
+	}
+	if call.Tool, err = renderString(call.Tool, ctx); err != nil {
+		return fmt.Errorf("tool: %w", err)
+	}
+	renderedArgs, err := renderMapValues(call.Arguments, ctx)
+	if err != nil {
+		return fmt.Errorf("arguments: %w", err)
+	}
+	call.Arguments = renderedArgs
+	return nil
+}
+
+func renderMessageWait(wait *MessageWait, ctx map[string]any) error {
+	var err error
+	if wait.Substrate, err = renderString(wait.Substrate, ctx); err != nil {
+		return fmt.Errorf("substrate: %w", err)
+	}
+	if wait.To, err = renderString(wait.To, ctx); err != nil {
+		return fmt.Errorf("to: %w", err)
+	}
+	if wait.CorrelationID, err = renderString(wait.CorrelationID, ctx); err != nil {
+		return fmt.Errorf("correlation_id: %w", err)
+	}
+	return nil
+}
+
+func renderAgentLaunch(launch *AgentLaunch, ctx map[string]any) error {
+	var err error
+	if launch.Substrate, err = renderString(launch.Substrate, ctx); err != nil {
+		return fmt.Errorf("substrate: %w", err)
+	}
+	if launch.LaunchID, err = renderString(launch.LaunchID, ctx); err != nil {
+		return fmt.Errorf("launch_id: %w", err)
+	}
+	if launch.LogicalAgentID, err = renderString(launch.LogicalAgentID, ctx); err != nil {
+		return fmt.Errorf("logical_agent_id: %w", err)
+	}
+	if launch.PromptAppend, err = renderString(launch.PromptAppend, ctx); err != nil {
+		return fmt.Errorf("prompt_append: %w", err)
+	}
+	renderedMetadata, err := renderMapValues(launch.Metadata, ctx)
+	if err != nil {
+		return fmt.Errorf("metadata: %w", err)
+	}
+	launch.Metadata = renderedMetadata
+	for i := range launch.Injection.NativeFiles {
+		if launch.Injection.NativeFiles[i].RelPath, err = renderString(launch.Injection.NativeFiles[i].RelPath, ctx); err != nil {
+			return fmt.Errorf("injection.native_files[%d].rel_path: %w", i, err)
+		}
+		if launch.Injection.NativeFiles[i].Source, err = renderString(launch.Injection.NativeFiles[i].Source, ctx); err != nil {
+			return fmt.Errorf("injection.native_files[%d].source: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func renderHumanGate(gate *HumanGate, ctx map[string]any) error {
+	var err error
+	if gate.Prompt, err = renderString(gate.Prompt, ctx); err != nil {
+		return fmt.Errorf("prompt: %w", err)
+	}
+	for i := range gate.Options {
+		if gate.Options[i].ID, err = renderString(gate.Options[i].ID, ctx); err != nil {
+			return fmt.Errorf("options[%d].id: %w", i, err)
+		}
+		if gate.Options[i].Label, err = renderString(gate.Options[i].Label, ctx); err != nil {
+			return fmt.Errorf("options[%d].label: %w", i, err)
+		}
+	}
+	return nil
 }
 
 func renderHooks(in Hooks, ctx map[string]any) (Hooks, error) {

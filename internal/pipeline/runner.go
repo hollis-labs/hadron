@@ -59,6 +59,7 @@ type StageResult struct {
 	ExitCode int
 	Stdout   string
 	Stderr   string
+	Error    string
 }
 
 func (r *Runner) Start(ctx context.Context, pipelineRunID, pipelinePath, workspaceID string) error {
@@ -171,6 +172,7 @@ func (r *Runner) execute(pipelineRunID, pipelinePath, workspaceID string) {
 					baseDir:              baseDir,
 					stage:                st,
 					stageIdx:             si,
+					waitTimeout:          time.Duration(spec.StageWaitTimeout(st)) * time.Second,
 					stageResults:         stageResults,
 					mu:                   &mu,
 					pipelineInputs:       pipelineInputs,
@@ -183,12 +185,20 @@ func (r *Runner) execute(pipelineRunID, pipelinePath, workspaceID string) {
 
 		// Collect results into shared state and check for failures.
 		levelFailed := false
+		var levelErr error
 		for _, r := range results {
 			mu.Lock()
 			stageResults[r.stage.Name] = r.result
 			mu.Unlock()
 			if r.result.Status == "failed" {
 				levelFailed = true
+				if levelErr == nil {
+					if r.err != nil {
+						levelErr = r.err
+					} else if r.result.Error != "" {
+						levelErr = errors.New(r.result.Error)
+					}
+				}
 			}
 		}
 
@@ -196,6 +206,9 @@ func (r *Runner) execute(pipelineRunID, pipelinePath, workspaceID string) {
 			// Mark all remaining stages as skipped.
 			r.skipRemainingStages(ctx, pipelineRunID, stageIndex, stageResults, levels, level)
 			msg := fmt.Sprintf("level containing %s failed; stop_on_fail=true", levelStageNames(level))
+			if levelErr != nil {
+				msg = fmt.Sprintf("%s: %v", msg, levelErr)
+			}
 			_ = r.store.SetPipelineRunFinished(ctx, pipelineRunID, "failed", time.Now().UTC(), &msg)
 			return
 		}
@@ -210,6 +223,7 @@ type executeStageParams struct {
 	baseDir              string
 	stage                Stage
 	stageIdx             int
+	waitTimeout          time.Duration
 	stageResults         map[string]*StageResult
 	mu                   *sync.Mutex
 	pipelineInputs       map[string]string
@@ -267,10 +281,30 @@ func (r *Runner) executeStage(ctx context.Context, p executeStageParams) (*Stage
 		return &StageResult{Status: "failed"}, fmt.Errorf("enqueue stage %d run: %w", p.stageIdx, err)
 	}
 
-	runRec, waitErr := r.waitForRunTerminal(ctx, runID, 60*time.Second)
+	if st.Async {
+		outputsMap := asyncStageOutputs(runID, st)
+		outputsJSON, _ := json.Marshal(outputsMap)
+		_ = r.store.UpdatePipelineStageRunOutputs(ctx, p.pipelineRunID, p.stageIdx, string(outputsJSON))
+		_ = r.store.UpdatePipelineStageRunStatus(ctx, p.pipelineRunID, p.stageIdx, "success")
+		return &StageResult{
+			Status:   "success",
+			ExitCode: 0,
+			Outputs:  outputsMap,
+		}, nil
+	}
+
+	runRec, waitErr := r.waitForRunTerminal(ctx, runID, p.waitTimeout)
 	if waitErr != nil {
 		_ = r.store.UpdatePipelineStageRunStatus(ctx, p.pipelineRunID, p.stageIdx, "failed")
-		return &StageResult{Status: "failed"}, fmt.Errorf("stage %d wait failed: %w", p.stageIdx, waitErr)
+		outputsMap := map[string]any{
+			"status":               "failed",
+			"exit_code":            1,
+			"error":                waitErr.Error(),
+			"wait_timeout_seconds": int(p.waitTimeout / time.Second),
+		}
+		outputsJSON, _ := json.Marshal(outputsMap)
+		_ = r.store.UpdatePipelineStageRunOutputs(ctx, p.pipelineRunID, p.stageIdx, string(outputsJSON))
+		return &StageResult{Status: "failed", ExitCode: 1, Outputs: outputsMap, Error: waitErr.Error()}, fmt.Errorf("stage %d wait failed: %w", p.stageIdx, waitErr)
 	}
 
 	// Capture outputs from run events.
@@ -308,6 +342,30 @@ func (r *Runner) executeStage(ctx context.Context, p executeStageParams) (*Stage
 	_ = r.store.UpdatePipelineStageRunStatus(ctx, p.pipelineRunID, p.stageIdx, "failed")
 	result.Status = "failed"
 	return result, nil
+}
+
+func asyncStageOutputs(runID string, st Stage) map[string]any {
+	outputs := map[string]any{
+		"run_id":    runID,
+		"status":    "launched",
+		"exit_code": 0,
+	}
+	for key, expr := range st.Outputs {
+		if _, alreadySet := outputs[key]; alreadySet {
+			continue
+		}
+		switch strings.TrimSpace(expr) {
+		case "run_id":
+			outputs[key] = runID
+		case "status":
+			outputs[key] = "launched"
+		case "exit_code":
+			outputs[key] = 0
+		default:
+			outputs[key] = expr
+		}
+	}
+	return outputs
 }
 
 // captureStageOutputs extracts outputs from run events.

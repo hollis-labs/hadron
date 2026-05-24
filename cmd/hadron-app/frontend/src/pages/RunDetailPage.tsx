@@ -4,9 +4,10 @@ import { useNavigation } from '../contexts/NavigationContext';
 import { usePoll } from '../hooks/usePoll';
 import { useRunEvents } from '../hooks/useRunEvents';
 import { getRun, cancelRun } from '../api/client';
+import { RunOperationsPanel } from '../components/runs/RunOperationsPanel';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { Spinner } from '../components/ui/Spinner';
-import { ChevronDown, Copy, Square, RefreshCw } from 'lucide-react';
+import { ChevronDown, Copy, RefreshCw, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatDuration } from '../utils/format';
@@ -14,8 +15,6 @@ import { shortPath } from '../utils/path';
 import type { RunEvent } from '../api/types';
 
 const TERMINAL = new Set(['success', 'failed', 'canceled', 'cancelled']);
-
-// ── Task grouping ────────────────────────────────────────────────────
 
 interface TaskGroup {
   stepName: string;
@@ -25,7 +24,6 @@ interface TaskGroup {
   endedAt?: string;
 }
 
-// Status priority: higher number = more terminal. Only allow forward transitions.
 const STATUS_RANK: Record<string, number> = {
   pending: 0,
   running: 1,
@@ -34,10 +32,15 @@ const STATUS_RANK: Record<string, number> = {
   failed: 2,
 };
 
-function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
-  // Events may arrive in DESC order from the API — sort ascending by id for correct status progression.
-  const sorted = [...events].sort((a, b) => a.id - b.id);
+const TASK_ICON: Record<string, { char: string; cls: string }> = {
+  success: { char: '✓', cls: 'success' },
+  failed: { char: '✗', cls: 'failed' },
+  running: { char: '↻', cls: 'running' },
+  skipped: { char: '—', cls: 'queued' },
+};
 
+function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
+  const sorted = [...events].sort((a, b) => a.id - b.id);
   const groups = new Map<string, TaskGroup>();
   const order: string[] = [];
 
@@ -63,7 +66,6 @@ function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
       nextStatus = 'skipped';
       group.endedAt = event.created_at;
     } else if (t === 'step_skipped_error') {
-      // continue_on_error was set — override prior step_error, mark as success (non-fatal)
       nextStatus = 'success';
       group.endedAt = event.created_at;
     } else if (t === 'step_error' || t === 'step_call_error' || t === 'error' || t === 'failed') {
@@ -71,7 +73,6 @@ function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
       group.endedAt = event.created_at;
     }
 
-    // Only allow forward status transitions (pending → running → terminal)
     if (nextStatus && (STATUS_RANK[nextStatus] ?? 0) >= (STATUS_RANK[group.status] ?? 0)) {
       group.status = nextStatus;
     }
@@ -79,13 +80,6 @@ function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
 
   return order.map(step => groups.get(step)!);
 }
-
-const TASK_ICON: Record<string, { char: string; cls: string }> = {
-  success: { char: '✓', cls: 'success' },
-  failed: { char: '✗', cls: 'failed' },
-  running: { char: '↻', cls: 'running' },
-  skipped: { char: '—', cls: 'queued' },
-};
 
 function eventTypeColorClass(eventType: string): string {
   if (eventType.includes('error') || eventType.includes('fail')) return 'text-red-400';
@@ -99,8 +93,6 @@ function eventMessageColorClass(eventType: string): string {
   if (eventType.includes('success') || eventType.includes('complete')) return 'text-blue-400';
   return 'text-muted-foreground';
 }
-
-// ── Main component ───────────────────────────────────────────────────
 
 export function RunDetailPage() {
   const nav = useNavigation();
@@ -142,7 +134,9 @@ export function RunDetailPage() {
     try {
       await cancelRun(runId);
       toast.success('Run canceled');
-    } catch { /* ignore */ }
+    } catch {
+      // ignore
+    }
   };
 
   const toggleGroup = (stepName: string) => {
@@ -159,7 +153,6 @@ export function RunDetailPage() {
 
   return (
     <div className="flex flex-col h-full gap-4">
-      {/* Run header */}
       {run && (
         <div className="flex items-start justify-between gap-4">
           <div className="flex flex-col gap-2">
@@ -190,7 +183,6 @@ export function RunDetailPage() {
         </div>
       )}
 
-      {/* Progress bar */}
       {realGroups.length > 0 && (
         <div>
           <div className="flex justify-between mb-1">
@@ -209,7 +201,6 @@ export function RunDetailPage() {
         </div>
       )}
 
-      {/* Error banner */}
       {run?.error_message && (
         <div className="rounded-lg border border-red-500/30 bg-card overflow-hidden px-4 py-3 text-red-400">
           {run.error_message}
@@ -221,7 +212,8 @@ export function RunDetailPage() {
         </div>
       )}
 
-      {/* View toggle */}
+      <RunOperationsPanel runId={runId} isTerminal={isTerminal} />
+
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold text-foreground">Tasks</span>
         <div className="flex bg-muted border border-border rounded-md p-0.5 gap-0.5">
@@ -246,7 +238,6 @@ export function RunDetailPage() {
         </div>
       </div>
 
-      {/* Task list */}
       <div ref={logRef} className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2">
         {events.length === 0 ? (
           <div className="text-muted-foreground p-8 text-center">

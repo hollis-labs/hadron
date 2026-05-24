@@ -287,9 +287,7 @@ func (a *App) CreateBlueprintFile(dir string, filename string, content string) (
 	if _, err := os.Stat(fullPath); err == nil {
 		return "", fmt.Errorf("file already exists: %s", fullPath)
 	}
-	// New blueprints get conventional 0644 permissions — a blueprint is
-	// project content, not private state, and is typically committed.
-	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
 		return "", fmt.Errorf("create blueprint: %w", err)
 	}
 	return fullPath, nil

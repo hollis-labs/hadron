@@ -89,3 +89,36 @@ type WorkspaceRecord struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+type HumanGateRecord struct {
+	ID          string
+	WorkspaceID string
+	RunID       string
+	StepName    string
+	Prompt      string
+	OptionsJSON string
+	Status      string
+	Decision    sql.NullString
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ExpiresAt   sql.NullString
+}
+
+type MessageRecord struct {
+	ID            string
+	Substrate     string
+	Kind          string
+	Channel       string
+	FromURN       string
+	ToURN         string
+	ThreadID      string
+	InReplyTo     string
+	CorrelationID string
+	PayloadJSON   string
+	ContentType   string
+	MetadataJSON  string
+	CreatedAt     time.Time
+	DeliveredAt   sql.NullString
+	ConsumedAt    sql.NullString
+	CanceledAt    sql.NullString
+}

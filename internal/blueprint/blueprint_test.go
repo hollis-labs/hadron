@@ -2,6 +2,7 @@ package blueprint
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -194,6 +195,283 @@ func TestValidate_TaskNeitherCmdNorCall(t *testing.T) {
 	}
 	if err := Validate(bp); err == nil {
 		t.Fatal("expected error for task without cmd or call")
+	}
+}
+
+func TestParse_HTTPCall(t *testing.T) {
+	bp, err := ParseBytes([]byte(`
+blueprint:
+  name: http-call
+steps:
+  - section: Probe
+    tasks:
+      - name: health
+        http_call:
+          method: GET
+          url: http://127.0.0.1:8990/health
+          timeout_seconds: 5
+          headers:
+            Accept: application/json
+`))
+	if err != nil {
+		t.Fatalf("parse http_call: %v", err)
+	}
+	call := bp.Steps[0].Steps[0].HTTPCall
+	if call == nil {
+		t.Fatalf("expected http_call")
+	}
+	if call.Method != "GET" || call.URL != "http://127.0.0.1:8990/health" {
+		t.Fatalf("unexpected http_call: %+v", call)
+	}
+	if call.Headers["Accept"] != "application/json" {
+		t.Fatalf("expected Accept header, got %+v", call.Headers)
+	}
+}
+
+func TestValidate_HTTPCallExclusiveExecutableKind(t *testing.T) {
+	_, err := ParseBytes([]byte(`
+blueprint:
+  name: bad-http-call
+steps:
+  - section: Probe
+    tasks:
+      - name: health
+        cmd: echo no
+        http_call:
+          url: http://127.0.0.1:8990/health
+`))
+	if err == nil {
+		t.Fatal("expected executable kind validation error")
+	}
+	if !strings.Contains(err.Error(), "exactly one executable kind") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_HTTPCallRequiresURL(t *testing.T) {
+	_, err := ParseBytes([]byte(`
+blueprint:
+  name: bad-http-call
+steps:
+  - section: Probe
+    tasks:
+      - name: health
+        http_call:
+          method: GET
+`))
+	if err == nil {
+		t.Fatal("expected http_call url validation error")
+	}
+	if !strings.Contains(err.Error(), "http_call.url") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParse_MCPCall(t *testing.T) {
+	bp, err := ParseBytes([]byte(`
+blueprint:
+  name: mcp-call
+inputs:
+  - name: workspace_id
+    type: string
+steps:
+  - section: Probe
+    tasks:
+      - name: list-runs
+        mcp_call:
+          server: torque
+          tool: torque_runs_list
+          arguments:
+            workspace_id: "{{ .inputs.workspace_id }}"
+            limit: 50
+`))
+	if err != nil {
+		t.Fatalf("parse mcp_call: %v", err)
+	}
+	call := bp.Steps[0].Steps[0].MCPCall
+	if call == nil {
+		t.Fatalf("expected mcp_call")
+	}
+	if call.Server != "torque" || call.Tool != "torque_runs_list" {
+		t.Fatalf("unexpected mcp_call: %+v", call)
+	}
+	if call.Arguments["limit"] != 50 {
+		t.Fatalf("expected limit argument, got %+v", call.Arguments)
+	}
+}
+
+func TestValidate_MCPCallRequiresServerAndTool(t *testing.T) {
+	_, err := ParseBytes([]byte(`
+blueprint:
+  name: bad-mcp-call
+steps:
+  - section: Probe
+    tasks:
+      - name: list-runs
+        mcp_call:
+          server: torque
+`))
+	if err == nil {
+		t.Fatal("expected mcp_call tool validation error")
+	}
+	if !strings.Contains(err.Error(), "mcp_call.tool") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParse_MessageWait(t *testing.T) {
+	bp, err := ParseBytes([]byte(`
+blueprint:
+  name: message-wait
+steps:
+  - section: Wait
+    tasks:
+      - name: reply
+        message_wait:
+          substrate: tether
+          to: mailbox://agent/replies
+          correlation_id: corr-123
+          timeout_seconds: 30
+          poll_interval_seconds: 2
+`))
+	if err != nil {
+		t.Fatalf("parse message_wait: %v", err)
+	}
+	wait := bp.Steps[0].Steps[0].MessageWait
+	if wait == nil {
+		t.Fatalf("expected message_wait")
+	}
+	if wait.Substrate != "tether" || wait.CorrelationID != "corr-123" {
+		t.Fatalf("unexpected message_wait: %+v", wait)
+	}
+}
+
+func TestValidate_MessageWaitRequiresTimeout(t *testing.T) {
+	_, err := ParseBytes([]byte(`
+blueprint:
+  name: bad-message-wait
+steps:
+  - section: Wait
+    tasks:
+      - name: reply
+        message_wait:
+          substrate: tether
+          to: mailbox://agent/replies
+          correlation_id: corr-123
+`))
+	if err == nil {
+		t.Fatal("expected message_wait timeout validation error")
+	}
+	if !strings.Contains(err.Error(), "message_wait.timeout_seconds") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParse_AgentLaunch(t *testing.T) {
+	bp, err := ParseBytes([]byte(`
+blueprint:
+  name: agent-launch
+inputs:
+  - name: state_artifact
+    type: string
+steps:
+  - section: Launch
+    tasks:
+      - name: correlator
+        agent_launch:
+          substrate: tether
+          launch_id: torque-monitor-correlator
+          logical_agent_id: torque-monitor-correlator
+          prompt_append: |
+            Read the injected monitor artifacts.
+          injection:
+            native_files:
+              - rel_path: context/torque-state.json
+                source: "{{ .inputs.state_artifact }}"
+          metadata:
+            workflow: monitor
+`))
+	if err != nil {
+		t.Fatalf("parse agent_launch: %v", err)
+	}
+	launch := bp.Steps[0].Steps[0].AgentLaunch
+	if launch == nil {
+		t.Fatalf("expected agent_launch")
+	}
+	if launch.Substrate != "tether" || launch.LaunchID != "torque-monitor-correlator" {
+		t.Fatalf("unexpected agent_launch: %+v", launch)
+	}
+	if len(launch.Injection.NativeFiles) != 1 {
+		t.Fatalf("expected one native file, got %+v", launch.Injection.NativeFiles)
+	}
+}
+
+func TestValidate_AgentLaunchRequiresIDs(t *testing.T) {
+	_, err := ParseBytes([]byte(`
+blueprint:
+  name: bad-agent-launch
+steps:
+  - section: Launch
+    tasks:
+      - name: correlator
+        agent_launch:
+          substrate: tether
+          launch_id: torque-monitor-correlator
+`))
+	if err == nil {
+		t.Fatal("expected agent_launch logical_agent_id validation error")
+	}
+	if !strings.Contains(err.Error(), "agent_launch.logical_agent_id") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParse_HumanGate(t *testing.T) {
+	bp, err := ParseBytes([]byte(`
+blueprint:
+  name: human-gate
+steps:
+  - section: Gate
+    tasks:
+      - name: approve
+        human_gate:
+          prompt: "Approve remediation?"
+          options:
+            - id: approve
+              label: Approve
+            - id: deny
+              label: Deny
+          timeout_seconds: 60
+`))
+	if err != nil {
+		t.Fatalf("parse human_gate: %v", err)
+	}
+	gate := bp.Steps[0].Steps[0].HumanGate
+	if gate == nil {
+		t.Fatalf("expected human_gate")
+	}
+	if gate.Prompt != "Approve remediation?" || len(gate.Options) != 2 {
+		t.Fatalf("unexpected human_gate: %+v", gate)
+	}
+}
+
+func TestValidate_HumanGateRequiresOptions(t *testing.T) {
+	_, err := ParseBytes([]byte(`
+blueprint:
+  name: bad-human-gate
+steps:
+  - section: Gate
+    tasks:
+      - name: approve
+        human_gate:
+          prompt: "Approve?"
+          timeout_seconds: 60
+`))
+	if err == nil {
+		t.Fatal("expected human_gate options validation error")
+	}
+	if !strings.Contains(err.Error(), "human_gate.options") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
