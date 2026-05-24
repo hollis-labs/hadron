@@ -1,5 +1,6 @@
 node_modules/
-dist/
+dist/*
+!dist/.gitkeep
 coverage/
 *.timestamp-*.js
 *.timestamp-*.mjs

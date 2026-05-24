@@ -1,18 +1,40 @@
 # Install Hadron
 
-Hadron is currently distributed as source installs and GitHub release
-artifacts during the public beta period.
+Hadron is distributed during beta as:
+
+- Homebrew via `hollis-labs/tap`
+- GitHub release tarballs
+- source installs from this repo
+- `go install` for Go-based environments
 
 ## Prerequisites
 
-- Go 1.26.3 or newer
-- `make`
-- optional: `golangci-lint`, `staticcheck`, `errcheck`, and `govulncheck` for `make lint`
-- optional: Node.js if you are working on the desktop app frontend
+- macOS or Linux
+- no separate database dependency; Hadron uses local SQLite
+- if building from source: Go `1.26.3+` and `make`
+- if developing the desktop app: Node.js for frontend tasks
 
-## Install Options
+## Recommended Paths
 
-### Download a release artifact
+### Homebrew
+
+```sh
+brew install hollis-labs/tap/hadron
+```
+
+This installs:
+
+- `hadron`
+- `hadrond`
+
+Verify:
+
+```sh
+hadron version
+hadrond version
+```
+
+### Release Tarballs
 
 Tagged beta releases publish tarballs for:
 
@@ -32,34 +54,21 @@ Example:
 
 ```sh
 curl -L -o hadron.tar.gz \
-  https://github.com/hollis-labs/hadron/releases/download/v0.4.0/hadron_v0.4.0_darwin_arm64.tar.gz
+  https://github.com/hollis-labs/hadron/releases/download/v0.4.2-beta.1/hadron_v0.4.2-beta.1_darwin_arm64.tar.gz
 tar -xzf hadron.tar.gz
-cd hadron_v0.4.0_darwin_arm64
+cd hadron_v0.4.2-beta.1_darwin_arm64
 install -d "$HOME/.local/bin"
 install -m 0755 hadron hadrond "$HOME/.local/bin/"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Release downloads also include `checksums.txt` for verification.
+Releases also include `checksums.txt`.
 
-### Install from the Hollis Labs tap
+## Source Installs
 
-Hadron is intended to be installable from:
+### Build In Place
 
-```sh
-brew install hollis-labs/tap/hadron
-```
-
-Current constraint:
-
-- this only works once the Hadron repo and release assets are publicly downloadable
-
-If the repo or its release artifacts are still private, Homebrew users will get
-download failures from the tap formula.
-
-### Build in-place
-
-Use this if you are developing Hadron or want repo-local binaries:
+Use this if you want repo-local binaries:
 
 ```sh
 git clone git@github.com:hollis-labs/hadron.git
@@ -68,14 +77,9 @@ make build
 export PATH="$PWD/bin:$PATH"
 ```
 
-This produces:
+### Install Into A Prefix
 
-- `bin/hadrond`
-- `bin/hadron`
-
-### Install into a prefix
-
-Use this if you want normal shell-visible binaries without relying on `GOPATH`:
+Use this if you want shell-visible binaries from a source checkout:
 
 ```sh
 git clone git@github.com:hollis-labs/hadron.git
@@ -89,20 +93,20 @@ Defaults:
 - `PREFIX=/usr/local`
 - `BINDIR=$(PREFIX)/bin`
 
-You can override either value:
+Example custom target:
 
 ```sh
 make install BINDIR="$HOME/bin"
 ```
 
-### Install with `go install`
+### `go install`
 
 ```sh
 go install github.com/hollis-labs/hadron/cmd/hadrond@latest
 go install github.com/hollis-labs/hadron/cmd/hadron@latest
 ```
 
-This installs into your Go bin directory, usually one of:
+This installs into one of:
 
 - `$GOBIN`
 - `$GOPATH/bin`
@@ -130,9 +134,21 @@ hadron validate examples/hello-hadron.yaml
 hadron run examples/hello-hadron.yaml
 ```
 
+## Daemon And MCP Modes
+
+Hadron has two different runtime modes:
+
+- `hadrond serve`
+  - runs the local HTTP daemon used by the CLI and desktop app
+- `hadrond mcp`
+  - runs a stdio MCP server for agent clients
+
+They can point at the same `~/.hadron` data directory and SQLite database.
+
 ## Desktop App
 
-The Wails desktop app is still part of the beta surface and is built separately:
+The Wails desktop app is still part of the beta surface and is built
+separately:
 
 ```sh
 make app
@@ -147,6 +163,6 @@ make app-dev
 ## Notes
 
 - Hadron is MIT licensed.
-- Public binary packaging may still change during beta.
-- The current recommended paths are release tarballs, `make install`, or `go install`.
-- Homebrew tap publication depends on public GitHub release accessibility.
+- The CLI and daemon are beta software; expect continued UX and docs iteration.
+- Homebrew and release tarballs are the cleanest non-source install paths today.
+- Source installs remain the best fit when you are editing Hadron itself.

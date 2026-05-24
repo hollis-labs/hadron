@@ -1,7 +1,10 @@
 @import "tailwindcss";
+@import "@hollis-labs/sysop-ui/theme.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+
+@source "../node_modules/@hollis-labs/sysop-ui/dist";
 
 @custom-variant dark (&:is(.dark *));
 

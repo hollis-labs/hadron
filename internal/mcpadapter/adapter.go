@@ -139,15 +139,16 @@ func messageRecordEnvelope(rec persistence.MessageRecord) (map[string]any, error
 
 // Adapter exposes Hadron read/query surfaces as MCP tools over stdio.
 type Adapter struct {
-	store        Store
-	runner       Runner
-	sched        SchedulerControl
-	pipeline     PipelineRunner
-	registry     *registry.Registry
-	token        string
-	scopes       map[string]struct{}
-	blueprintDir string
-	sessionID    string // unique ID for this MCP session, used for trigger ownership
+	store         Store
+	runner        Runner
+	sched         SchedulerControl
+	pipeline      PipelineRunner
+	registry      *registry.Registry
+	token         string
+	scopes        map[string]struct{}
+	blueprintDir  string
+	serverVersion string
+	sessionID     string // unique ID for this MCP session, used for trigger ownership
 }
 
 func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRunner, token string, scopes []string, opts ...Option) *Adapter {
@@ -160,14 +161,15 @@ func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRu
 		scopeSet[s] = struct{}{}
 	}
 	a := &Adapter{
-		store:        store,
-		runner:       runner,
-		sched:        sched,
-		pipeline:     pipeline,
-		token:        strings.TrimSpace(token),
-		scopes:       scopeSet,
-		blueprintDir: settings.DefaultBlueprintDir(),
-		sessionID:    fmt.Sprintf("mcp-%s", time.Now().UTC().Format("20060102-150405")),
+		store:         store,
+		runner:        runner,
+		sched:         sched,
+		pipeline:      pipeline,
+		token:         strings.TrimSpace(token),
+		scopes:        scopeSet,
+		blueprintDir:  settings.DefaultBlueprintDir(),
+		serverVersion: "dev",
+		sessionID:     fmt.Sprintf("mcp-%s", time.Now().UTC().Format("20060102-150405")),
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -191,6 +193,15 @@ func WithBlueprintDir(dir string) Option {
 func WithRegistry(reg *registry.Registry) Option {
 	return func(a *Adapter) {
 		a.registry = reg
+	}
+}
+
+// WithServerVersion sets the MCP server version exposed to clients.
+func WithServerVersion(version string) Option {
+	return func(a *Adapter) {
+		if strings.TrimSpace(version) != "" {
+			a.serverVersion = strings.TrimSpace(version)
+		}
 	}
 }
 
@@ -218,6 +229,7 @@ func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string
 // buildHandlerMap returns a map of tool name → handler function for direct invocation.
 func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){
+		"hadron_skills":             a.handleHadronSkills,
 		"hadron_health":             a.handleHealth,
 		"hadron_workspaces_list":    a.handleWorkspacesList,
 		"hadron_workspace_get":      a.handleWorkspaceGet,
@@ -240,6 +252,10 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_blueprint_lint":     a.handleBlueprintLint,
 		"hadron_blueprints_list":    a.handleBlueprintsList,
 		"hadron_blueprint_get":      a.handleBlueprintGet,
+		"hadron_blueprint_discover": a.handleBlueprintDiscover,
+		"hadron_blueprint_broker":   a.handleBlueprintBroker,
+		"hadron_blueprint_search":   a.handleBlueprintSearch,
+		"hadron_blueprint_schema":   a.handleBlueprintSchema,
 		"hadron_schedule_delete":    a.handleScheduleDelete,
 		"hadron_triggers_list":      a.handleTriggersList,
 		"hadron_trigger_create":     a.handleTriggerCreate,
@@ -256,12 +272,7 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 }
 
 func (a *Adapter) Run(ctx context.Context) error {
-	s := server.NewMCPServer(
-		"hadron",
-		"0.4.0",
-		server.WithToolCapabilities(true),
-	)
-	a.registerTools(s)
+	s := a.newServer()
 	ctxFunc := func(_ context.Context) context.Context { return ctx }
 	return server.ServeStdio(s, server.WithStdioContextFunc(ctxFunc))
 }
