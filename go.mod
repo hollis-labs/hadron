@@ -5,8 +5,14 @@ go 1.26.3
 require (
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/hollis-labs/go-mcp v0.0.2
+	github.com/hollis-labs/go-agent-launch v0.4.0
+	github.com/hollis-labs/go-agent-runtime v0.4.0
+	github.com/hollis-labs/go-agent-sessions v0.10.0
+	github.com/hollis-labs/go-llm-types v0.1.0
+	github.com/hollis-labs/go-mcp v0.1.0
+	github.com/hollis-labs/go-messaging v0.3.0
 	github.com/hollis-labs/go-otel v0.0.2
+	github.com/hollis-labs/go-providers v0.23.0
 	github.com/hollis-labs/go-scheduler v0.1.0
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
@@ -31,13 +37,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
-	github.com/hollis-labs/go-agent-launch v0.4.0 // indirect
-	github.com/hollis-labs/go-agent-runtime v0.4.0 // indirect
-	github.com/hollis-labs/go-agent-sessions v0.10.0 // indirect
 	github.com/hollis-labs/go-llm-contracts v0.1.0 // indirect
-	github.com/hollis-labs/go-llm-types v0.1.0 // indirect
-	github.com/hollis-labs/go-messaging v0.3.0 // indirect
-	github.com/hollis-labs/go-providers v0.23.0 // indirect
 	github.com/hollis-labs/go-runner v0.4.0 // indirect
 	github.com/hollis-labs/go-sandbox v0.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

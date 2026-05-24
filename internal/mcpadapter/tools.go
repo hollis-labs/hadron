@@ -1108,7 +1108,7 @@ func (a *Adapter) handleAgentCard(_ context.Context, req mcp.CallToolRequest) (*
 			Description:        skill.Description,
 			URL:                baseURL,
 			Provider:           agentcard.Provider{Organization: "Hadron"},
-			Version:            "0.4.0",
+			Version:            a.serverVersion,
 			Capabilities:       agentcard.Capabilities{Streaming: false, PushNotifications: false},
 			DefaultInputModes:  []string{"application/json"},
 			DefaultOutputModes: []string{"application/json"},

@@ -377,17 +377,32 @@ func (a *Adapter) resolveBlueprintPath(bpPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if _, statErr := os.Stat(absPath); statErr != nil {
+		return "", statErr
+	}
+
 	absDir, err := filepath.Abs(a.blueprintDir)
 	if err != nil {
 		return "", err
 	}
-	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
-		return "", fmt.Errorf("path is outside the blueprints directory")
-	}
-	if _, err := os.Stat(absPath); err != nil {
+
+	resolvedDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
 		return "", err
 	}
-	return absPath, nil
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", err
+	}
+
+	relPath, err := filepath.Rel(resolvedDir, resolvedPath)
+	if err != nil {
+		return "", err
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path is outside the blueprints directory")
+	}
+	return resolvedPath, nil
 }
 
 func (a *Adapter) resolveBlueprintReference(ref string) (string, error) {

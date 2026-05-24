@@ -209,7 +209,7 @@ func newExternalClient(ctx context.Context, cfg ExternalServerConfig) (externalC
 			return nil, fmt.Errorf("start mcp stdio server %q: %w", cfg.Command, err)
 		}
 		initReq := mcp.InitializeRequest{}
-		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "0.4.0"}
+		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "dev"}
 		if _, err := client.Initialize(ctx, initReq); err != nil {
 			_ = client.Close()
 			return nil, fmt.Errorf("initialize mcp server %q: %w", cfg.Command, err)
@@ -235,7 +235,7 @@ func newExternalClient(ctx context.Context, cfg ExternalServerConfig) (externalC
 			return nil, fmt.Errorf("start mcp streamable_http client %q: %w", cfg.URL, err)
 		}
 		initReq := mcp.InitializeRequest{}
-		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "0.4.0"}
+		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "dev"}
 		if _, err := client.Initialize(ctx, initReq); err != nil {
 			_ = client.Close()
 			return nil, fmt.Errorf("initialize mcp server %q: %w", cfg.URL, err)
@@ -261,7 +261,7 @@ func newExternalClient(ctx context.Context, cfg ExternalServerConfig) (externalC
 			return nil, fmt.Errorf("start mcp sse client %q: %w", cfg.URL, err)
 		}
 		initReq := mcp.InitializeRequest{}
-		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "0.4.0"}
+		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "dev"}
 		if _, err := client.Initialize(ctx, initReq); err != nil {
 			_ = client.Close()
 			return nil, fmt.Errorf("initialize mcp server %q: %w", cfg.URL, err)

@@ -148,6 +148,7 @@ func runServe(args []string) error {
 	serveReg := registry.New(store)
 	pipelineRunner.SetBlueprintResolver(serveReg.Resolve)
 	internalMCP := mcpadapter.New(store, mgr, sched, pipelineRunner, "internal", mcpadapter.AllScopes(),
+		mcpadapter.WithServerVersion(version),
 		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
 		mcpadapter.WithRegistry(serveReg))
 	internalCaller := mcpadapter.NewInternalCaller(internalMCP, mcpadapter.WithExternalServers(externalMCPServers(sett)))
@@ -270,6 +271,7 @@ func runMCP(args []string) error {
 	reg := registry.New(store)
 	pipelineRunner.SetBlueprintResolver(reg.Resolve)
 	internalMCP := mcpadapter.New(store, mgr, sched, pipelineRunner, "internal", mcpadapter.AllScopes(),
+		mcpadapter.WithServerVersion(version),
 		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
 		mcpadapter.WithRegistry(reg))
 	internalCaller := mcpadapter.NewInternalCaller(internalMCP, mcpadapter.WithExternalServers(externalMCPServers(sett)))
@@ -292,6 +294,7 @@ func runMCP(args []string) error {
 	}
 
 	adapter := mcpadapter.New(store, mgr, sched, pipelineRunner, *tokenFlag, scopes,
+		mcpadapter.WithServerVersion(version),
 		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
 		mcpadapter.WithRegistry(reg))
 

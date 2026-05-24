@@ -20,10 +20,8 @@ type toolBehavior struct {
 func (a *Adapter) newServer() *server.MCPServer {
 	s := server.NewMCPServer(
 		"Hadron by Hollis Labs",
-		"0.4.0",
+		a.serverVersion,
 		server.WithToolCapabilities(true),
-		server.WithPromptCapabilities(false),
-		server.WithResourceCapabilities(false, false),
 		server.WithPromptCompletionProvider(a),
 		server.WithResourceCompletionProvider(a),
 		server.WithCompletions(),

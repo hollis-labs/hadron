@@ -139,15 +139,16 @@ func messageRecordEnvelope(rec persistence.MessageRecord) (map[string]any, error
 
 // Adapter exposes Hadron read/query surfaces as MCP tools over stdio.
 type Adapter struct {
-	store        Store
-	runner       Runner
-	sched        SchedulerControl
-	pipeline     PipelineRunner
-	registry     *registry.Registry
-	token        string
-	scopes       map[string]struct{}
-	blueprintDir string
-	sessionID    string // unique ID for this MCP session, used for trigger ownership
+	store         Store
+	runner        Runner
+	sched         SchedulerControl
+	pipeline      PipelineRunner
+	registry      *registry.Registry
+	token         string
+	scopes        map[string]struct{}
+	blueprintDir  string
+	serverVersion string
+	sessionID     string // unique ID for this MCP session, used for trigger ownership
 }
 
 func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRunner, token string, scopes []string, opts ...Option) *Adapter {
@@ -160,14 +161,15 @@ func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRu
 		scopeSet[s] = struct{}{}
 	}
 	a := &Adapter{
-		store:        store,
-		runner:       runner,
-		sched:        sched,
-		pipeline:     pipeline,
-		token:        strings.TrimSpace(token),
-		scopes:       scopeSet,
-		blueprintDir: settings.DefaultBlueprintDir(),
-		sessionID:    fmt.Sprintf("mcp-%s", time.Now().UTC().Format("20060102-150405")),
+		store:         store,
+		runner:        runner,
+		sched:         sched,
+		pipeline:      pipeline,
+		token:         strings.TrimSpace(token),
+		scopes:        scopeSet,
+		blueprintDir:  settings.DefaultBlueprintDir(),
+		serverVersion: "dev",
+		sessionID:     fmt.Sprintf("mcp-%s", time.Now().UTC().Format("20060102-150405")),
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -191,6 +193,15 @@ func WithBlueprintDir(dir string) Option {
 func WithRegistry(reg *registry.Registry) Option {
 	return func(a *Adapter) {
 		a.registry = reg
+	}
+}
+
+// WithServerVersion sets the MCP server version exposed to clients.
+func WithServerVersion(version string) Option {
+	return func(a *Adapter) {
+		if strings.TrimSpace(version) != "" {
+			a.serverVersion = strings.TrimSpace(version)
+		}
 	}
 }
 

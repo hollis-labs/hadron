@@ -213,6 +213,35 @@ func TestMCP_BlueprintSearch_RequiresQuery(t *testing.T) {
 	}
 }
 
+func TestMCP_BlueprintGet_RejectsSymlinkEscape(t *testing.T) {
+	store := newTestStore(t)
+	blueprintDir := t.TempDir()
+	outsideDir := t.TempDir()
+	outsidePath := filepath.Join(outsideDir, "outside.yaml")
+	content := strings.TrimSpace(`
+blueprint:
+  name: outside
+steps:
+  - section: main
+    tasks:
+      - name: noop
+        cmd: echo outside
+`)
+	if err := os.WriteFile(outsidePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write outside blueprint: %v", err)
+	}
+	linkPath := filepath.Join(blueprintDir, "linked.yaml")
+	if err := os.Symlink(outsidePath, linkPath); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+
+	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "", nil, mcpadapter.WithBlueprintDir(blueprintDir))
+	out := callTool(t, adapter, "hadron_blueprint_get", map[string]any{"blueprint_path": linkPath})
+	if out["code"] != "validation_error" {
+		t.Fatalf("expected validation_error for symlink escape, got %#v", out)
+	}
+}
+
 func TestMCP_MessageSendGetAndInbox(t *testing.T) {
 	store := newTestStore(t)
 	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "internal", mcpadapter.AllScopes())
