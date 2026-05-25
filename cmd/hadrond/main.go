@@ -156,8 +156,9 @@ func runServe(args []string) error {
 	mgr.SetMCPCaller(internalCaller)
 	agentLauncher := agentsubstrate.NewLauncher(cfg.DataDir, sett.AgentSubstrates)
 	defer func() { _ = agentLauncher.Close() }()
-	mgr.SetAgentLauncher(agentLauncher)
 	messageService := messagesubstrate.New(store, sett.MessageSubstrates)
+	agentLauncher.SetReplyMessenger(messageService)
+	mgr.SetAgentLauncher(agentLauncher)
 	mgr.SetMessageSource(messageService)
 
 	srv := api.NewServer(cfg.Addr, api.Dependencies{
@@ -279,8 +280,9 @@ func runMCP(args []string) error {
 	mgr.SetMCPCaller(internalCaller)
 	agentLauncher := agentsubstrate.NewLauncher(cfg.DataDir, sett.AgentSubstrates)
 	defer func() { _ = agentLauncher.Close() }()
-	mgr.SetAgentLauncher(agentLauncher)
 	messageService := messagesubstrate.New(store, sett.MessageSubstrates)
+	agentLauncher.SetReplyMessenger(messageService)
+	mgr.SetAgentLauncher(agentLauncher)
 	mgr.SetMessageSource(messageService)
 
 	var scopes []string

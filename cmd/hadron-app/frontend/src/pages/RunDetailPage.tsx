@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { formatDuration } from '../utils/format';
 import { shortPath } from '../utils/path';
 import type { RunEvent } from '../api/types';
+import { collapseWaitPollEvents, isWaitingForReply, waitPollSummaryEventType } from './runDetailPage.helpers';
 
 const TERMINAL = new Set(['success', 'failed', 'canceled', 'cancelled']);
 
@@ -84,12 +85,14 @@ function groupEventsByStep(events: RunEvent[]): TaskGroup[] {
 function eventTypeColorClass(eventType: string): string {
   if (eventType.includes('error') || eventType.includes('fail')) return 'text-red-400';
   if (eventType.includes('start') || eventType.includes('complete') || eventType.includes('success')) return 'text-blue-400';
+  if (eventType === waitPollSummaryEventType()) return 'text-amber-400';
   if (eventType.includes('log')) return 'text-muted-foreground';
   return 'text-accent';
 }
 
 function eventMessageColorClass(eventType: string): string {
   if (eventType === 'stderr' || eventType.includes('error')) return 'text-red-400';
+  if (eventType === waitPollSummaryEventType()) return 'text-amber-400';
   if (eventType.includes('success') || eventType.includes('complete')) return 'text-blue-400';
   return 'text-muted-foreground';
 }
@@ -106,6 +109,7 @@ export function RunDetailPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const taskGroups = useMemo(() => groupEventsByStep(events), [events]);
+  const rawEvents = useMemo(() => collapseWaitPollEvents(events), [events]);
 
   useEffect(() => {
     setExpandedGroups(prev => {
@@ -245,7 +249,7 @@ export function RunDetailPage() {
           </div>
         ) : viewMode === 'raw' ? (
           <div className="rounded-lg border border-border bg-card overflow-hidden p-4">
-            {events.map(ev => (
+            {rawEvents.map(ev => (
               <div key={ev.id} className="flex gap-3 font-mono text-sm leading-relaxed py-px">
                 <span className={cn("shrink-0 text-xs min-w-[90px]", eventTypeColorClass(ev.event_type))}>
                   [{ev.event_type}]
@@ -267,6 +271,8 @@ export function RunDetailPage() {
             const displayName = group.stepName === '__global__' ? 'Global' : group.stepName;
             const duration = group.startedAt ? formatDuration(group.startedAt, group.endedAt) : '';
             const isRunning = group.status === 'running';
+            const waitingForReply = isRunning && isWaitingForReply(group.events);
+            const visibleEvents = collapseWaitPollEvents(group.events);
 
             return (
               <div
@@ -292,7 +298,7 @@ export function RunDetailPage() {
                     "font-mono text-sm",
                     isRunning ? "text-amber-400" : "text-muted-foreground"
                   )}>
-                    {isRunning ? '(running)' : duration}
+                    {waitingForReply ? 'waiting for reply…' : isRunning ? '(running)' : duration}
                   </span>
                   <Button
                     variant="ghost"
@@ -317,7 +323,7 @@ export function RunDetailPage() {
 
                 {isExpanded && (
                   <div className="border-t border-border bg-background p-4 max-h-[300px] overflow-y-auto">
-                    {group.events.map(ev => (
+                    {visibleEvents.map(ev => (
                       <div key={ev.id} className="flex gap-3 font-mono text-sm leading-relaxed py-px">
                         <span className="text-muted-foreground shrink-0 text-xs min-w-[72px] select-none">
                           {ev.created_at ? new Date(ev.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}

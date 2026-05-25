@@ -2,6 +2,7 @@ package agentsubstrate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,8 +15,10 @@ import (
 	runtimebootdir "github.com/hollis-labs/go-agent-runtime/bootdir"
 	"github.com/hollis-labs/go-agent-runtime/runtimebind"
 	"github.com/hollis-labs/go-agent-runtime/runtimekind"
+	"github.com/hollis-labs/go-agent-runtime/turn"
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/go-providers/provider"
 
 	"github.com/hollis-labs/hadron/internal/execution"
@@ -31,13 +34,22 @@ const (
 	workingDirModeCWD      = "cwd"
 	workingDirModeProcess  = "process_cwd"
 	sessionShutdownTimeout = 5 * time.Second
+	hadronClientName       = "hadron"
+	hadronClientVersion    = "0.1-dev"
 )
 
 type Launcher struct {
 	dataDir    string
 	substrates map[string]settings.AgentSubstrateSettings
 	sessions   *agentsessions.Manager
+	codexTurns turn.CodexAppServerCache
+	replies    replyMessenger
 	seq        atomic.Uint64
+}
+
+type replyMessenger interface {
+	Send(ctx context.Context, substrate string, env messaging.Envelope) (messaging.Envelope, error)
+	List(ctx context.Context, substrate, toURN, correlationID string, limit int) ([]messaging.Envelope, error)
 }
 
 func NewLauncher(dataDir string, substrates map[string]settings.AgentSubstrateSettings) *Launcher {
@@ -50,6 +62,10 @@ func NewLauncher(dataDir string, substrates map[string]settings.AgentSubstrateSe
 		substrates: cloned,
 		sessions:   agentsessions.NewManager(nil),
 	}
+}
+
+func (l *Launcher) SetReplyMessenger(m replyMessenger) {
+	l.replies = m
 }
 
 func (l *Launcher) Close() error {
@@ -124,6 +140,9 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 	if err != nil {
 		return execution.AgentLaunchResult{}, err
 	}
+	kickoffPayload := launchKickoffPayload(adapter)
+	eventCh := make(chan llmtypes.StreamEvent, 128)
+	startOpts.EventFanout = eventCh
 
 	if err := l.sessions.Start(ctx, agentsessions.StartRequest{
 		ID:      sessionID,
@@ -138,6 +157,11 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 		},
 	}); err != nil {
 		return execution.AgentLaunchResult{}, fmt.Errorf("start session: %w", err)
+	}
+	if len(kickoffPayload) > 0 {
+		kickoffCtx := context.WithoutCancel(ctx)
+		//nolint:gosec // kickoff turn is intentionally async and detached from request cancellation
+		go l.runKickoffTurn(kickoffCtx, sessionID, mailbox, req, binding.Provider, eventCh, kickoffPayload)
 	}
 
 	result := execution.AgentLaunchResult{
@@ -202,8 +226,123 @@ func buildStartOptions(dataDir, workspaceDir, bootDir, projectDir string, cfg se
 		opts.Env = mergeEnv(cfg.Env, renderEnv(spec.EnvAmendments, bootDir, projectDir))
 		opts.ExtraArgs = append(opts.ExtraArgs, renderProjectDirArgs(spec.ProjectDirArg, bootDir, projectDir)...)
 	}
+	opts.Env = prependEnvPath(opts.Env, bootDir)
 
 	return opts, nil
+}
+
+func launchKickoffPayload(adapter provider.CLIAdapter) []byte {
+	if _, ok := adapter.(provider.BootDirProvider); ok {
+		return []byte("Boot @./boot.md")
+	}
+	return nil
+}
+
+func (l *Launcher) runKickoffTurn(ctx context.Context, sessionID, mailbox string, req execution.AgentLaunchRequest, providerName string, eventCh <-chan llmtypes.StreamEvent, payload []byte) {
+	replySubstrate := strings.TrimSpace(anyString(req.Metadata["reply_substrate"]))
+	correlationID := strings.TrimSpace(anyString(req.Metadata["correlation_id"]))
+
+	var output strings.Builder
+	stopDrain := make(chan struct{})
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for {
+			select {
+			case <-stopDrain:
+				return
+			case ev := <-eventCh:
+				if ev.Type == llmtypes.EventDelta && ev.Content != "" {
+					output.WriteString(ev.Content)
+				}
+			}
+		}
+	}()
+
+	sendErr := l.sendTurn(ctx, sessionID, providerName, string(payload))
+	close(stopDrain)
+	<-drained
+
+	if replySubstrate == "" || correlationID == "" || l.replies == nil {
+		return
+	}
+	sendCtx, sendCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer sendCancel()
+	if existing, err := l.replies.List(sendCtx, replySubstrate, mailbox, correlationID, 1); err == nil && len(existing) > 0 {
+		return
+	}
+
+	replyPayload := map[string]any{
+		"session_id": sessionID,
+		"source":     "hadron-launcher",
+	}
+	text := strings.TrimSpace(output.String())
+	switch {
+	case text != "":
+		replyPayload["text"] = text
+		replyPayload["status"] = "assistant_output"
+	case sendErr != nil:
+		replyPayload["status"] = "agent_failed"
+		replyPayload["error"] = sendErr.Error()
+	default:
+		replyPayload["status"] = "agent_completed_no_output"
+		replyPayload["error"] = "agent session completed without sending an explicit reply"
+	}
+	body, err := json.Marshal(replyPayload)
+	if err != nil {
+		return
+	}
+	to, err := messaging.ParseURN(mailbox)
+	if err != nil {
+		return
+	}
+	_, _ = l.replies.Send(sendCtx, replySubstrate, messaging.Envelope{
+		Kind:        messaging.MsgKindNotice,
+		From:        messaging.Address{Kind: messaging.KindService, Authority: authorityFromMailbox(mailbox), ID: "launcher"},
+		To:          to,
+		ThreadID:    correlationID,
+		Payload:     body,
+		Metadata:    map[string]string{"correlation_id": correlationID},
+		ContentType: "application/json",
+	})
+}
+
+func (l *Launcher) sendTurn(ctx context.Context, sessionID, providerName, text string) error {
+	info, ok := l.sessions.Get(sessionID)
+	if !ok {
+		return agentsessions.ErrSessionNotRunning
+	}
+	switch {
+	case info.Caps.JsonRpcStdio:
+		if normalizedProviderName(providerName) == "codex" {
+			return l.codexTurns.SendTurn(ctx, sessionID, launcherJSONRPCSender{
+				manager:   l.sessions,
+				sessionID: sessionID,
+			}, text, turn.CodexAppServerOptions{
+				ClientName:    hadronClientName,
+				ClientVersion: hadronClientVersion,
+				CWD:           info.Workdir,
+			})
+		}
+		return turn.SendTurn(ctx, launcherInputSender{
+			manager:   l.sessions,
+			sessionID: sessionID,
+		}, text, turn.Options{
+			Provider: providerName,
+			Runtime:  runtimekind.JSONRPCStdio,
+		})
+	case info.Caps.StreamingStdio:
+		framed, err := turn.Frame(text, turn.Options{
+			Provider: providerName,
+			Runtime:  runtimekind.StreamingStdio,
+		})
+		if err != nil {
+			return fmt.Errorf("frame streaming-stdio turn: %w", err)
+		}
+		return l.sessions.SendInput(sessionID, framed)
+	default:
+		return l.sessions.SendInput(sessionID, []byte(text))
+	}
 }
 
 func materializeBootDir(bootDir string, spec provider.BootDirSpec, plantCtx provider.PlantContext, req execution.AgentLaunchRequest, cfg settings.AgentSubstrateSettings) error {
@@ -361,6 +500,24 @@ type genericCLIAdapter struct {
 	name string
 }
 
+type launcherInputSender struct {
+	manager   *agentsessions.Manager
+	sessionID string
+}
+
+func (s launcherInputSender) SendInput(_ context.Context, data []byte) error {
+	return s.manager.SendInput(s.sessionID, data)
+}
+
+type launcherJSONRPCSender struct {
+	manager   *agentsessions.Manager
+	sessionID string
+}
+
+func (s launcherJSONRPCSender) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	return s.manager.JsonRpcCall(ctx, s.sessionID, method, params)
+}
+
 func (a *genericCLIAdapter) Name() string { return a.name }
 
 func (a *genericCLIAdapter) BuildArgs(prompt, _ string, _ string) []string {
@@ -422,6 +579,26 @@ func renderProjectDirArgs(pattern, bootDir, projectDir string) []string {
 		return []string{parts[0]}
 	}
 	return []string{parts[0], strings.TrimSpace(parts[1])}
+}
+
+func prependEnvPath(env []string, dir string) []string {
+	if strings.TrimSpace(dir) == "" {
+		return env
+	}
+	prefix := dir
+	for i, entry := range env {
+		if !strings.HasPrefix(entry, "PATH=") {
+			continue
+		}
+		current := strings.TrimPrefix(entry, "PATH=")
+		if strings.HasPrefix(current, prefix+string(os.PathListSeparator)) || current == prefix {
+			return env
+		}
+		cloned := append([]string(nil), env...)
+		cloned[i] = "PATH=" + prefix + string(os.PathListSeparator) + current
+		return cloned
+	}
+	return append(env, "PATH="+prefix)
 }
 
 func mailboxURN(authority, logicalAgentID string) string {

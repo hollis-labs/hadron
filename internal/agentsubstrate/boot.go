@@ -20,6 +20,8 @@ const (
 	callbackProfilesDir     = "callback-profiles"
 	callbackDetailsRelPath  = "hadron/callbacks.json"
 	callbackGuideRelPath    = "hadron/callbacks.md"
+	callbackEnvRelPath      = "hadron/callback.env"
+	replyHelperRelPath      = "hadron-reply"
 	defaultBootSystemPrompt = "You are a task-scoped automation agent launched by Hadron. Work within the provided project context, boot files, and callback contract."
 )
 
@@ -135,6 +137,11 @@ func renderCallbacksProfile(dataDir, projectDir, profile string, ctx bootRenderC
 		return "", nil, nil
 	}
 	if profile == sharedCallbacksProfile {
+		replySubstrate := strings.TrimSpace(anyString(ctx.Metadata["reply_substrate"]))
+		if replySubstrate == "" {
+			replySubstrate = "local_mailbox"
+		}
+		correlationID := strings.TrimSpace(anyString(ctx.Metadata["correlation_id"]))
 		details := map[string]any{
 			"mailbox_urn":      ctx.MailboxURN,
 			"session_id":       ctx.SessionID,
@@ -144,11 +151,15 @@ func renderCallbacksProfile(dataDir, projectDir, profile string, ctx bootRenderC
 			"project_dir":      ctx.ProjectDir,
 			"blueprint_path":   ctx.BlueprintPath,
 			"metadata":         ctx.Metadata,
+			"reply_substrate":  replySubstrate,
+			"correlation_id":   correlationID,
 		}
 		body, _ := json.MarshalIndent(details, "", "  ")
 		files := []runtimebootdir.File{
 			{RelPath: callbackDetailsRelPath, Content: string(body) + "\n", Mode: 0o644},
 			{RelPath: callbackGuideRelPath, Content: renderSharedCallbacksText(ctx) + "\n", Mode: 0o644},
+			{RelPath: callbackEnvRelPath, Content: renderSharedCallbackEnv(ctx, replySubstrate, correlationID) + "\n", Mode: 0o644},
+			{RelPath: replyHelperRelPath, Content: renderReplyHelperScript(), Mode: 0o755},
 		}
 		return renderSharedCallbacksText(ctx), files, nil
 	}
@@ -169,8 +180,55 @@ func renderSharedCallbacksText(ctx bootRenderContext) string {
 		"",
 		"The file `hadron/callbacks.json` contains the launch metadata Hadron generated for this session.",
 		"When replying through a go-messaging-compatible substrate, preserve the workflow's correlation value in `thread_id` or `metadata.correlation_id`.",
+		"Use the local `hadron-reply` helper to send a reply back to the workflow.",
+		"Example: `hadron-reply \"hadron live reply ok\"`",
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderSharedCallbackEnv(ctx bootRenderContext, replySubstrate, correlationID string) string {
+	fromURN := fmt.Sprintf("msg://service/%s/launched-agent", authorityFromMailbox(ctx.MailboxURN))
+	return strings.Join([]string{
+		fmt.Sprintf("HADRON_REPLY_SUBSTRATE='%s'", shellSingleQuote(replySubstrate)),
+		fmt.Sprintf("HADRON_REPLY_TO='%s'", shellSingleQuote(ctx.MailboxURN)),
+		fmt.Sprintf("HADRON_REPLY_FROM='%s'", shellSingleQuote(fromURN)),
+		fmt.Sprintf("HADRON_REPLY_CORRELATION_ID='%s'", shellSingleQuote(correlationID)),
+		": \"${HADRON_DAEMON_ADDR:=http://127.0.0.1:8095}\"",
+	}, "\n")
+}
+
+func renderReplyHelperScript() string {
+	return strings.Join([]string{
+		"#!/bin/sh",
+		"set -eu",
+		"",
+		"if [ \"$#\" -lt 1 ]; then",
+		"  echo 'usage: hadron-reply <message>' >&2",
+		"  exit 2",
+		"fi",
+		"",
+		"BOOT_DIR=\"$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\"",
+		". \"$BOOT_DIR/hadron/callback.env\"",
+		"",
+		"body=\"$*\"",
+		"escaped_body=$(printf '%s' \"$body\" | tr '\n' ' ' | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')",
+		"escaped_corr=$(printf '%s' \"$HADRON_REPLY_CORRELATION_ID\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')",
+		"payload=$(cat <<EOF",
+		"{",
+		"  \"substrate\": \"$HADRON_REPLY_SUBSTRATE\",",
+		"  \"kind\": \"notice\",",
+		"  \"from\": \"$HADRON_REPLY_FROM\",",
+		"  \"to\": \"$HADRON_REPLY_TO\",",
+		"  \"thread_id\": \"$HADRON_REPLY_CORRELATION_ID\",",
+		"  \"payload\": {\"text\": \"$escaped_body\"},",
+		"  \"metadata\": {\"correlation_id\": \"$escaped_corr\"}",
+		"}",
+		"EOF",
+		")",
+		"curl -fsS -X POST \"$HADRON_DAEMON_ADDR/v1/messages\" \\",
+		"  -H 'Content-Type: application/json' \\",
+		"  -d \"$payload\"",
+	}, "\n")
 }
 
 func readProfileText(dataDir, projectDir, dirName, profile string) (string, error) {
@@ -214,6 +272,25 @@ func renderProfileTemplate(content string, ctx bootRenderContext) string {
 		out = strings.ReplaceAll(out, token, value)
 	}
 	return strings.TrimSpace(out)
+}
+
+func anyString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func authorityFromMailbox(mailboxURN string) string {
+	parts := strings.Split(strings.TrimSpace(mailboxURN), "/")
+	if len(parts) >= 5 && strings.TrimSpace(parts[3]) != "" {
+		return parts[3]
+	}
+	return "local"
+}
+
+func shellSingleQuote(v string) string {
+	return strings.ReplaceAll(v, "'", "'\"'\"'")
 }
 
 func findProjectAgentInstructions(projectDir string) (string, string) {
