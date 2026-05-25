@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -34,6 +36,7 @@ const (
 	workingDirModeCWD      = "cwd"
 	workingDirModeProcess  = "process_cwd"
 	sessionShutdownTimeout = 5 * time.Second
+	replyOutboxWatchWindow = 2 * time.Minute
 	hadronClientName       = "hadron"
 	hadronClientVersion    = "0.1-dev"
 )
@@ -133,6 +136,9 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 	}
 	if mkdirErr := os.MkdirAll(bootDir, 0o750); mkdirErr != nil {
 		return execution.AgentLaunchResult{}, fmt.Errorf("ensure boot dir: %w", mkdirErr)
+	}
+	if mkdirErr := os.MkdirAll(filepath.Join(bootDir, replyOutboxRelDir), 0o750); mkdirErr != nil {
+		return execution.AgentLaunchResult{}, fmt.Errorf("ensure reply outbox dir: %w", mkdirErr)
 	}
 
 	mailbox := mailboxURN(cfg.Authority, req.LogicalAgentID)
@@ -241,6 +247,8 @@ func launchKickoffPayload(adapter provider.CLIAdapter) []byte {
 func (l *Launcher) runKickoffTurn(ctx context.Context, sessionID, mailbox string, req execution.AgentLaunchRequest, providerName string, eventCh <-chan llmtypes.StreamEvent, payload []byte) {
 	replySubstrate := strings.TrimSpace(anyString(req.Metadata["reply_substrate"]))
 	correlationID := strings.TrimSpace(anyString(req.Metadata["correlation_id"]))
+	disableFallbackReply := anyBool(req.Metadata["disable_fallback_reply"])
+	outboxDir := filepath.Join(l.dataDir, "agents", "sessions", sessionID, "boot", replyOutboxRelDir)
 
 	var output strings.Builder
 	stopDrain := make(chan struct{})
@@ -258,12 +266,37 @@ func (l *Launcher) runKickoffTurn(ctx context.Context, sessionID, mailbox string
 			}
 		}
 	}()
+	if replySubstrate != "" && correlationID != "" && l.replies != nil {
+		watchCtx, watchCancel := context.WithTimeout(context.Background(), replyOutboxWatchWindow)
+		go func() {
+			defer watchCancel()
+			l.watchReplyOutbox(watchCtx, outboxDir)
+		}()
+	}
 
 	sendErr := l.sendTurn(ctx, sessionID, providerName, string(payload))
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer finalCancel()
+finalReplyDrain:
+	for {
+		_, err := l.deliverReplyOutbox(finalCtx, outboxDir)
+		if err == nil {
+			break
+		}
+		log.Printf("agentsubstrate: deliver reply outbox retry: session=%s dir=%s err=%v", sessionID, outboxDir, err)
+		select {
+		case <-finalCtx.Done():
+			break finalReplyDrain
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 	close(stopDrain)
 	<-drained
 
 	if replySubstrate == "" || correlationID == "" || l.replies == nil {
+		return
+	}
+	if disableFallbackReply {
 		return
 	}
 	sendCtx, sendCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -305,6 +338,94 @@ func (l *Launcher) runKickoffTurn(ctx context.Context, sessionID, mailbox string
 		Metadata:    map[string]string{"correlation_id": correlationID},
 		ContentType: "application/json",
 	})
+}
+
+func (l *Launcher) watchReplyOutbox(ctx context.Context, outboxDir string) {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		delivered, err := l.deliverReplyOutbox(ctx, outboxDir)
+		if err != nil {
+			log.Printf("agentsubstrate: deliver reply outbox: dir=%s err=%v", outboxDir, err)
+		}
+		if delivered > 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (l *Launcher) deliverReplyOutbox(ctx context.Context, outboxDir string) (int, error) {
+	if l == nil || l.replies == nil || strings.TrimSpace(outboxDir) == "" {
+		return 0, nil
+	}
+	entries, err := os.ReadDir(outboxDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	delivered := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(outboxDir, entry.Name())
+		body, err := os.ReadFile(path) // #nosec G304 -- path is scoped to the Hadron-managed outbox directory.
+		if err != nil {
+			continue
+		}
+		var payload struct {
+			Substrate     string `json:"substrate"`
+			To            string `json:"to"`
+			From          string `json:"from"`
+			CorrelationID string `json:"correlation_id"`
+			Text          string `json:"text"`
+		}
+		if unmarshalErr := json.Unmarshal(body, &payload); unmarshalErr != nil {
+			_ = os.Remove(path)
+			continue
+		}
+		to, err := messaging.ParseURN(payload.To)
+		if err != nil {
+			_ = os.Remove(path)
+			continue
+		}
+		fromAuthority := authorityFromMailbox(payload.To)
+		fromID := "launched-agent"
+		if from := strings.TrimSpace(payload.From); from != "" {
+			parts := strings.Split(from, "/")
+			if len(parts) >= 5 {
+				if strings.TrimSpace(parts[3]) != "" {
+					fromAuthority = strings.TrimSpace(parts[3])
+				}
+				if strings.TrimSpace(parts[4]) != "" {
+					fromID = strings.TrimSpace(parts[4])
+				}
+			}
+		}
+		env := messaging.Envelope{
+			Kind:        messaging.MsgKindNotice,
+			From:        messaging.Address{Kind: messaging.KindService, Authority: fromAuthority, ID: fromID},
+			To:          to,
+			ThreadID:    payload.CorrelationID,
+			Payload:     json.RawMessage(fmt.Sprintf(`{"text":%q}`, payload.Text)),
+			Metadata:    map[string]string{"correlation_id": payload.CorrelationID},
+			ContentType: "application/json",
+		}
+		if _, err := l.replies.Send(ctx, payload.Substrate, env); err != nil {
+			return delivered, err
+		}
+		_ = os.Remove(path)
+		delivered++
+	}
+	return delivered, nil
 }
 
 func (l *Launcher) sendTurn(ctx context.Context, sessionID, providerName, text string) error {

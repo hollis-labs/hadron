@@ -22,10 +22,12 @@ const (
 	callbackGuideRelPath    = "hadron/callbacks.md"
 	callbackEnvRelPath      = "hadron/callback.env"
 	replyHelperRelPath      = "hadron-reply"
+	replyOutboxRelDir       = "memories/hadron-replies"
 	defaultBootSystemPrompt = "You are a task-scoped automation agent launched by Hadron. Work within the provided project context, boot files, and callback contract."
 )
 
 type bootRenderContext struct {
+	DataDir          string
 	SessionID        string
 	SessionURN       string
 	MailboxURN       string
@@ -44,6 +46,7 @@ type bootRenderContext struct {
 }
 
 func renderBootArtifacts(dataDir string, cfg settings.AgentSubstrateSettings, ctx bootRenderContext) (string, string, []runtimebootdir.File, error) {
+	ctx.DataDir = dataDir
 	projectAgentFile, projectAgentText := findProjectAgentInstructions(ctx.ProjectDir)
 	projectSpecPath, projectSpecText := findProjectSpec(ctx.ProjectDir)
 	ctx.ProjectAgentFile = projectAgentFile
@@ -188,11 +191,15 @@ func renderSharedCallbacksText(ctx bootRenderContext) string {
 
 func renderSharedCallbackEnv(ctx bootRenderContext, replySubstrate, correlationID string) string {
 	fromURN := fmt.Sprintf("msg://service/%s/launched-agent", authorityFromMailbox(ctx.MailboxURN))
+	stateDBPath := filepath.Join(ctx.DataDir, "state", "hadron.db")
+	replyOutboxPath := filepath.Join(ctx.BootDir, replyOutboxRelDir)
 	return strings.Join([]string{
-		fmt.Sprintf("HADRON_REPLY_SUBSTRATE='%s'", shellSingleQuote(replySubstrate)),
-		fmt.Sprintf("HADRON_REPLY_TO='%s'", shellSingleQuote(ctx.MailboxURN)),
-		fmt.Sprintf("HADRON_REPLY_FROM='%s'", shellSingleQuote(fromURN)),
-		fmt.Sprintf("HADRON_REPLY_CORRELATION_ID='%s'", shellSingleQuote(correlationID)),
+		fmt.Sprintf("export HADRON_REPLY_SUBSTRATE='%s'", shellSingleQuote(replySubstrate)),
+		fmt.Sprintf("export HADRON_REPLY_TO='%s'", shellSingleQuote(ctx.MailboxURN)),
+		fmt.Sprintf("export HADRON_REPLY_FROM='%s'", shellSingleQuote(fromURN)),
+		fmt.Sprintf("export HADRON_REPLY_CORRELATION_ID='%s'", shellSingleQuote(correlationID)),
+		fmt.Sprintf("export HADRON_REPLY_OUTBOX='%s'", shellSingleQuote(replyOutboxPath)),
+		fmt.Sprintf("export HADRON_STATE_DB='%s'", shellSingleQuote(stateDBPath)),
 		": \"${HADRON_DAEMON_ADDR:=http://127.0.0.1:8095}\"",
 	}, "\n")
 }
@@ -211,6 +218,68 @@ func renderReplyHelperScript() string {
 		". \"$BOOT_DIR/hadron/callback.env\"",
 		"",
 		"body=\"$*\"",
+		"if [ \"$HADRON_REPLY_SUBSTRATE\" = \"local_mailbox\" ] && [ -n \"${HADRON_REPLY_OUTBOX:-}\" ] && command -v python3 >/dev/null 2>&1; then",
+		"  python3 - \"$body\" <<'PY'",
+		"import json",
+		"import os",
+		"import pathlib",
+		"import sys",
+		"import uuid",
+		"",
+		"body = sys.argv[1]",
+		"outbox_dir = pathlib.Path(os.environ['HADRON_REPLY_OUTBOX'])",
+		"outbox_dir.mkdir(parents=True, exist_ok=True)",
+		"payload = {",
+		"    'substrate': os.environ['HADRON_REPLY_SUBSTRATE'],",
+		"    'to': os.environ['HADRON_REPLY_TO'],",
+		"    'from': os.environ['HADRON_REPLY_FROM'],",
+		"    'correlation_id': os.environ.get('HADRON_REPLY_CORRELATION_ID', ''),",
+		"    'text': body,",
+		"}",
+		"tmp_path = outbox_dir / ('.reply-' + uuid.uuid4().hex + '.tmp')",
+		"final_path = outbox_dir / ('reply-' + uuid.uuid4().hex + '.json')",
+		"tmp_path.write_text(json.dumps(payload, separators=(',', ':')), encoding='utf-8')",
+		"tmp_path.replace(final_path)",
+		"PY",
+		"  exit 0",
+		"fi",
+		"",
+		"if [ \"$HADRON_REPLY_SUBSTRATE\" = \"local_mailbox\" ] && [ -n \"${HADRON_STATE_DB:-}\" ] && [ -f \"$HADRON_STATE_DB\" ] && command -v python3 >/dev/null 2>&1; then",
+		"  python3 - \"$body\" <<'PY'",
+		"import datetime",
+		"import json",
+		"import os",
+		"import sqlite3",
+		"import sys",
+		"import uuid",
+		"",
+		"body = sys.argv[1]",
+		"db_path = os.environ['HADRON_STATE_DB']",
+		"substrate = os.environ['HADRON_REPLY_SUBSTRATE']",
+		"to_urn = os.environ['HADRON_REPLY_TO']",
+		"from_urn = os.environ['HADRON_REPLY_FROM']",
+		"corr = os.environ.get('HADRON_REPLY_CORRELATION_ID', '')",
+		"now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')",
+		"message_id = 'msg-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:8]",
+		"payload_json = json.dumps({'text': body}, separators=(',', ':'))",
+		"metadata_json = json.dumps({'correlation_id': corr}, separators=(',', ':'))",
+		"conn = sqlite3.connect(db_path)",
+		"try:",
+		"    conn.execute(",
+		"        '''INSERT INTO messages(",
+		"            id, substrate, kind, channel, from_urn, to_urn, thread_id, in_reply_to,",
+		"            correlation_id, payload_json, content_type, metadata_json, created_at,",
+		"            delivered_at, consumed_at, canceled_at",
+		"        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)''',",
+		"        (message_id, substrate, 'notice', '', from_urn, to_urn, corr, '', corr, payload_json, 'application/json', metadata_json, now),",
+		"    )",
+		"    conn.commit()",
+		"finally:",
+		"    conn.close()",
+		"PY",
+		"  exit 0",
+		"fi",
+		"",
 		"escaped_body=$(printf '%s' \"$body\" | tr '\n' ' ' | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')",
 		"escaped_corr=$(printf '%s' \"$HADRON_REPLY_CORRELATION_ID\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')",
 		"payload=$(cat <<EOF",
@@ -279,6 +348,18 @@ func anyString(v any) string {
 		return s
 	}
 	return ""
+}
+
+func anyBool(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		trimmed := strings.TrimSpace(strings.ToLower(x))
+		return trimmed == "1" || trimmed == "true" || trimmed == "yes"
+	default:
+		return false
+	}
 }
 
 func authorityFromMailbox(mailboxURN string) string {
