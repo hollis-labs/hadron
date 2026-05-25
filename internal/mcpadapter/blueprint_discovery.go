@@ -28,6 +28,24 @@ type blueprintCatalogEntry struct {
 	Reasons     []string
 }
 
+var discoveryStopWords = map[string]struct{}{
+	"a": {}, "an": {}, "and": {}, "any": {}, "are": {}, "as": {}, "at": {}, "be": {}, "by": {},
+	"do": {}, "for": {}, "from": {}, "get": {}, "give": {}, "how": {}, "i": {}, "if": {}, "in": {},
+	"into": {}, "is": {}, "it": {}, "its": {}, "me": {}, "my": {}, "of": {}, "on": {}, "or": {},
+	"our": {}, "please": {}, "show": {}, "so": {}, "tell": {}, "that": {}, "the": {}, "their": {},
+	"them": {}, "there": {}, "these": {}, "this": {}, "to": {}, "us": {}, "want": {}, "we": {},
+	"what": {}, "when": {}, "where": {}, "which": {}, "who": {}, "why": {}, "with": {}, "you": {},
+	"your": {}, "looking": {}, "look": {}, "need": {}, "seeking": {}, "find": {},
+}
+
+var discoveryGenericIntentWords = map[string]struct{}{
+	"app": {}, "agent": {}, "automation": {}, "backup": {}, "build": {}, "check": {}, "create": {},
+	"debug": {}, "deploy": {}, "directory": {}, "docs": {}, "model": {}, "provider": {}, "project": {},
+	"release": {}, "reply": {}, "run": {}, "script": {}, "search": {}, "service": {}, "setup": {},
+	"show": {}, "smoke": {}, "summarize": {}, "task": {}, "test": {}, "tool": {}, "wait": {}, "workflow": {},
+	"working": {},
+}
+
 func (a *Adapter) registerBlueprintDiscoveryTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("hadron_blueprint_discover",
 		mcp.WithDescription("Discover blueprints from the configured blueprint directory. Use this first when you need a likely-fit workflow and do not know the exact file path yet."),
@@ -192,13 +210,17 @@ func (a *Adapter) discoverBlueprints(query, tagFilter string, limit int, require
 
 	tagFilter = strings.ToLower(strings.TrimSpace(tagFilter))
 	queryWords := tokeniseDiscoveryText(query)
+	significantWords := filterSignificantDiscoveryTerms(queryWords)
 	filtered := make([]blueprintCatalogEntry, 0, len(entries))
 	for _, entry := range entries {
 		if tagFilter != "" && !catalogHasTag(entry.Tags, tagFilter) {
 			continue
 		}
-		score, reasons := scoreBlueprintEntry(entry, queryWords)
+		score, reasons, matchedSpecific := scoreBlueprintEntry(entry, queryWords, significantWords)
 		if requireQuery && score == 0 {
+			continue
+		}
+		if len(significantWords) > 0 && !matchedSpecific {
 			continue
 		}
 		entry.Score = score
@@ -307,47 +329,70 @@ func (a *Adapter) loadBlueprintCatalog() ([]blueprintCatalogEntry, error) {
 	return entries, nil
 }
 
-func scoreBlueprintEntry(entry blueprintCatalogEntry, queryWords map[string]struct{}) (int, []string) {
+func scoreBlueprintEntry(entry blueprintCatalogEntry, queryWords map[string]struct{}, significantWords map[string]struct{}) (int, []string, bool) {
 	if len(queryWords) == 0 {
-		return 0, nil
+		return 0, nil, false
 	}
-	words := tokeniseDiscoveryText(strings.Join([]string{
-		entry.Name,
-		entry.Slug,
-		entry.Title,
+	primaryWords := tokeniseDiscoveryText(strings.Join([]string{entry.Name, entry.Slug, entry.Title}, " "))
+	tagWords := tokeniseDiscoveryText(strings.Join(entry.Tags, " "))
+	secondaryWords := tokeniseDiscoveryText(strings.Join([]string{
 		entry.Description,
-		strings.Join(entry.Tags, " "),
 		strings.Join(entry.Required, " "),
 	}, " "))
 
 	score := 0
 	reasons := []string{}
+	matchedSpecific := false
 	for word := range queryWords {
-		if _, ok := words[word]; !ok {
+		weight := 0
+		reason := ""
+		switch {
+		case containsWord(primaryWords, word):
+			weight = 10
+			reason = "matched title/name: " + word
+		case containsWord(tagWords, word):
+			weight = 8
+			reason = "matched tag: " + word
+		case containsWord(secondaryWords, word):
+			weight = 4
+			reason = "matched description/input: " + word
+		}
+		if weight == 0 {
 			continue
 		}
-		score++
-		switch {
-		case containsFold(entry.Name, word) || containsFold(entry.Title, word):
-			reasons = append(reasons, "matched title/name: "+word)
-		case containsTagFold(entry.Tags, word):
-			reasons = append(reasons, "matched tag: "+word)
-		default:
-			reasons = append(reasons, "matched description/input: "+word)
+		score += weight
+		reasons = append(reasons, reason)
+		if _, ok := significantWords[word]; ok {
+			matchedSpecific = true
 		}
 	}
-	return score, reasons
+	return score, reasons, matchedSpecific
 }
 
 func tokeniseDiscoveryText(s string) map[string]struct{} {
 	words := map[string]struct{}{}
 	isAlnum := func(r rune) bool { return 'a' <= r && r <= 'z' || '0' <= r && r <= '9' }
 	for _, word := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !isAlnum(r) }) {
-		if len(word) > 1 {
-			words[word] = struct{}{}
+		if len(word) <= 1 {
+			continue
 		}
+		if _, skip := discoveryStopWords[word]; skip {
+			continue
+		}
+		words[word] = struct{}{}
 	}
 	return words
+}
+
+func filterSignificantDiscoveryTerms(words map[string]struct{}) map[string]struct{} {
+	significant := make(map[string]struct{}, len(words))
+	for word := range words {
+		if _, generic := discoveryGenericIntentWords[word]; generic {
+			continue
+		}
+		significant[word] = struct{}{}
+	}
+	return significant
 }
 
 func catalogHasTag(tags []string, target string) bool {
@@ -359,17 +404,9 @@ func catalogHasTag(tags []string, target string) bool {
 	return false
 }
 
-func containsTagFold(tags []string, target string) bool {
-	for _, tag := range tags {
-		if containsFold(tag, target) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsFold(s, sub string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
+func containsWord(words map[string]struct{}, target string) bool {
+	_, ok := words[target]
+	return ok
 }
 
 func (a *Adapter) resolveBlueprintPath(bpPath string) (string, error) {

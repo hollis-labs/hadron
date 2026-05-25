@@ -50,8 +50,16 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function ListBlueprintFilesInDir(arg1) {
+  return window['go']['main']['App']['ListBlueprintFilesInDir'](arg1);
+}
+
 export function ListFilesInDir(arg1) {
   return window['go']['main']['App']['ListFilesInDir'](arg1);
+}
+
+export function ListPipelineFilesInDir(arg1) {
+  return window['go']['main']['App']['ListPipelineFilesInDir'](arg1);
 }
 
 export function ListTelemetryRuns() {

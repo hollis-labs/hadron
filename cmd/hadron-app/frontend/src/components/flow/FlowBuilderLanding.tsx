@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, FileCode, Plus } from 'lucide-react';
-import { getBlueprintDir, listFilesInDir } from '@/api/client';
+import { getBlueprintDir, listPipelineFilesInDir } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -21,23 +21,16 @@ export function FlowBuilderLanding({ onOpen }: FlowBuilderLandingProps) {
         if (!rootDir) return;
         const all: { name: string; path: string }[] = [];
 
-        // Scan pipelines/ subdirectory (all YAML files are pipelines there)
-        // Plus scan other dirs for files containing "pipeline" in name
-        const queue: { dir: string; depth: number; isPipelineDir: boolean }[] = [
-          { dir: rootDir, depth: 0, isPipelineDir: false },
-        ];
+        const queue: { dir: string; depth: number }[] = [{ dir: rootDir, depth: 0 }];
         while (queue.length > 0) {
-          const { dir, depth, isPipelineDir } = queue.shift()!;
+          const { dir, depth } = queue.shift()!;
           try {
-            const entries = await listFilesInDir(dir);
+            const entries = await listPipelineFilesInDir(dir);
             if (!entries) continue;
             for (const e of entries) {
               if (e.isDir && depth < 3) {
-                // Mark pipelines/ subtree so all YAML files within are included
-                const inPipelines = isPipelineDir || /pipelines?$/i.test(e.name);
-                queue.push({ dir: e.path, depth: depth + 1, isPipelineDir: inPipelines });
+                queue.push({ dir: e.path, depth: depth + 1 });
               } else if (!e.isDir && /\.(yaml|yml)$/i.test(e.name)) {
-                if (!isPipelineDir && !e.name.toLowerCase().includes('pipeline')) continue;
                 const rel = e.path.startsWith(rootDir)
                   ? e.path.slice(rootDir.length + 1).replace(/\.(yaml|yml)$/i, '')
                   : e.name.replace(/\.(yaml|yml)$/i, '');

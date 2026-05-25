@@ -176,6 +176,16 @@ export async function listFilesInDir(dir: string): Promise<FileEntry[]> {
   return [];
 }
 
+export async function listBlueprintFilesInDir(dir: string): Promise<FileEntry[]> {
+  if (go?.ListBlueprintFilesInDir) return go.ListBlueprintFilesInDir(dir);
+  return [];
+}
+
+export async function listPipelineFilesInDir(dir: string): Promise<FileEntry[]> {
+  if (go?.ListPipelineFilesInDir) return go.ListPipelineFilesInDir(dir);
+  return [];
+}
+
 export async function validateBlueprintFile(path: string): Promise<ValidateResult> {
   if (go?.ValidateBlueprintFile) return go.ValidateBlueprintFile(path);
   return { valid: false, error: 'Wails binding not available' };

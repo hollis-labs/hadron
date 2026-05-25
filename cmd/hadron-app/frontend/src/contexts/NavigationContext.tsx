@@ -1,5 +1,4 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
-import { readBlueprintFile } from '../api/client';
 import type { NavPage } from '../components/layout/AppNav';
 
 interface NavigationContextValue {
@@ -51,17 +50,6 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openBlueprint = useCallback(async (path: string) => {
-    // Detect if file is a pipeline spec (has stages: key) vs a blueprint
-    try {
-      const content = await readBlueprintFile(path);
-      if (/^stages:/m.test(content)) {
-        setSelectedPipelinePath(path);
-        setPage('pipelineDetail');
-        return;
-      }
-    } catch {
-      // Fall through to blueprint detail
-    }
     setSelectedBlueprintPath(path);
     setPage('blueprintDetail');
   }, []);

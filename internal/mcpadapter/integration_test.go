@@ -205,6 +205,42 @@ func TestMCP_BlueprintDiscoverAndSchema(t *testing.T) {
 	}
 }
 
+func TestMCP_BlueprintBroker_RequiresSpecificTermMatch(t *testing.T) {
+	store := newTestStore(t)
+	dir := newBlueprintDir(t)
+	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "", nil, mcpadapter.WithBlueprintDir(dir))
+
+	out := callTool(t, adapter, "hadron_blueprint_broker", map[string]any{
+		"query": "Looking for a Laravel build",
+	})
+
+	items, ok := out["items"].([]any)
+	if !ok {
+		t.Fatalf("expected items array, got %#v", out)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no broker hits without a specific term match, got %#v", items)
+	}
+}
+
+func TestMCP_BlueprintBroker_FiltersLowSignalPromptWords(t *testing.T) {
+	store := newTestStore(t)
+	dir := newBlueprintDir(t)
+	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "", nil, mcpadapter.WithBlueprintDir(dir))
+
+	out := callTool(t, adapter, "hadron_blueprint_broker", map[string]any{
+		"query": "Please confirm your model, provider, and working directory.",
+	})
+
+	items, ok := out["items"].([]any)
+	if !ok {
+		t.Fatalf("expected items array, got %#v", out)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no broker hits for a non-workflow introspection query, got %#v", items)
+	}
+}
+
 func TestMCP_BlueprintSearch_RequiresQuery(t *testing.T) {
 	adapter := newTestAdapter(t)
 	out := callTool(t, adapter, "hadron_blueprint_search", map[string]any{})

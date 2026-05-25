@@ -26,7 +26,11 @@ export function GetPreference(arg1:string):Promise<string>;
 
 export function GetSettings():Promise<string>;
 
+export function ListBlueprintFilesInDir(arg1:string):Promise<Array<main.FileEntry>>;
+
 export function ListFilesInDir(arg1:string):Promise<Array<main.FileEntry>>;
+
+export function ListPipelineFilesInDir(arg1:string):Promise<Array<main.FileEntry>>;
 
 export function ListTelemetryRuns():Promise<string>;
 

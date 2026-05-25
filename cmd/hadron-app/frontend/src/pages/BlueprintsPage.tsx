@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { openDirectoryDialog, listFilesInDir, validateBlueprintFile, enqueueRun, parseBlueprintInputs, deleteBlueprintFile, getBlueprintMetadata, getSettings, createDirectory, selectDirectoryDialog, moveBlueprintFile, copyBlueprintFile, archiveBlueprintFile, getBlueprintDir, setBlueprintDir } from '../api/client';
+import { openDirectoryDialog, listBlueprintFilesInDir, validateBlueprintFile, enqueueRun, parseBlueprintInputs, deleteBlueprintFile, getBlueprintMetadata, getSettings, createDirectory, selectDirectoryDialog, moveBlueprintFile, copyBlueprintFile, archiveBlueprintFile, getBlueprintDir, setBlueprintDir } from '../api/client';
 import { ValidateResult, FileEntry, BlueprintInput, BlueprintMetaSummary } from '../api/types';
 import { Input } from '@/components/ui/input';
 import { FolderOpen, FolderPlus, Play, CheckCircle, ChevronLeft, Folder, FileCode, Plus, Trash2, RefreshCw, MoveRight, Copy, Archive, MoreHorizontal } from 'lucide-react';
@@ -38,7 +38,7 @@ export function BlueprintsPage() {
   const loadDir = useCallback(async (dir: string) => {
     setError(null);
     try {
-      const items = await listFilesInDir(dir);
+      const items = await listBlueprintFilesInDir(dir);
       setEntries(items ?? []);
     } catch (err) {
       setError(String(err));

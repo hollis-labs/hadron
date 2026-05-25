@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { usePoll } from '../hooks/usePoll';
-import { openDirectoryDialog, listFilesInDir, enqueuePipeline, listPipelines, getPipelineStages, readBlueprintFile, deleteBlueprintFile } from '../api/client';
+import { openDirectoryDialog, listPipelineFilesInDir, enqueuePipeline, listPipelines, getPipelineStages, readBlueprintFile, deleteBlueprintFile } from '../api/client';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatDuration, formatTime } from '../utils/format';
 import { shortPath } from '../utils/path';
@@ -52,7 +52,7 @@ export function PipelinesPage() {
   const loadDir = async (dir: string) => {
     setDirError(null);
     try {
-      const items = await listFilesInDir(dir);
+      const items = await listPipelineFilesInDir(dir);
       setEntries(items ?? []);
     } catch (err) {
       setDirError(String(err));

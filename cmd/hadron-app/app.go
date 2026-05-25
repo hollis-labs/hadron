@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/blueprint"
+	hadronpipeline "github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/telemetry"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -146,6 +147,28 @@ func (a *App) SelectDirectoryDialog() string {
 
 // ListFilesInDir lists files and directories in the given path.
 func (a *App) ListFilesInDir(dir string) ([]FileEntry, error) {
+	return a.listFilesInDir(dir, fileKindAny)
+}
+
+// ListBlueprintFilesInDir lists directories and blueprint YAML files in the given path.
+func (a *App) ListBlueprintFilesInDir(dir string) ([]FileEntry, error) {
+	return a.listFilesInDir(dir, fileKindBlueprint)
+}
+
+// ListPipelineFilesInDir lists directories and pipeline YAML files in the given path.
+func (a *App) ListPipelineFilesInDir(dir string) ([]FileEntry, error) {
+	return a.listFilesInDir(dir, fileKindPipeline)
+}
+
+type fileKind int
+
+const (
+	fileKindAny fileKind = iota
+	fileKindBlueprint
+	fileKindPipeline
+)
+
+func (a *App) listFilesInDir(dir string, kind fileKind) ([]FileEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read dir: %w", err)
@@ -162,15 +185,41 @@ func (a *App) ListFilesInDir(dir string) ([]FileEntry, error) {
 			Path:  filepath.Join(dir, name),
 			IsDir: e.IsDir(),
 		}
-		if !e.IsDir() {
-			ext := strings.ToLower(filepath.Ext(name))
-			if ext != ".yaml" && ext != ".yml" {
+		if e.IsDir() {
+			items = append(items, entry)
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		if kind != fileKindAny {
+			matches, matchErr := fileMatchesKind(entry.Path, kind)
+			if matchErr != nil || !matches {
 				continue
 			}
 		}
 		items = append(items, entry)
 	}
 	return items, nil
+}
+
+func fileMatchesKind(path string, kind fileKind) (bool, error) {
+	switch kind {
+	case fileKindBlueprint:
+		if _, err := blueprint.ParseFile(path); err != nil {
+			return false, err
+		}
+		return true, nil
+	case fileKindPipeline:
+		if _, err := hadronpipeline.ParseFile(path); err != nil {
+			return false, err
+		}
+		return true, nil
+	default:
+		return true, nil
+	}
 }
 
 // ValidateBlueprintFile reads the file at path and validates it via hadrond.

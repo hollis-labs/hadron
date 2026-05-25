@@ -2,7 +2,7 @@ import { useState, useEffect, type DragEvent } from 'react';
 import { Plus, Search, FileCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { getBlueprintDir, listFilesInDir } from '../../api/client';
+import { getBlueprintDir, listBlueprintFilesInDir } from '../../api/client';
 import type { FileEntry } from '../../api/types';
 
 interface NodePaletteProps {
@@ -33,14 +33,11 @@ export function NodePalette({ onAddBlankNode }: NodePaletteProps) {
     getBlueprintDir()
       .then(dir => {
         if (!dir) return;
-        return listFilesInDir(dir);
+        return listBlueprintFilesInDir(dir);
       })
       .then(entries => {
         if (!entries) return;
-        // Filter to YAML files only (not dirs, not pipeline specs)
-        const yamlFiles = entries.filter(
-          e => !e.isDir && /\.(yaml|yml)$/i.test(e.name)
-        );
+        const yamlFiles = entries.filter(e => !e.isDir && /\.(yaml|yml)$/i.test(e.name));
         setBlueprints(yamlFiles);
       })
       .catch(() => {})
