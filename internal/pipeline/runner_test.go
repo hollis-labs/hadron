@@ -39,6 +39,11 @@ func TestRunner_ExecutesStagesInOrder(t *testing.T) {
 	if stages[0].StageIndex != 0 || stages[1].StageIndex != 1 {
 		t.Fatalf("unexpected stage order: %+v", stages)
 	}
+	for _, stage := range stages {
+		if _, err := store.GetRun(context.Background(), stage.RunID); err != nil {
+			t.Fatalf("stage %s references missing run %q: %v", stage.StageName, stage.RunID, err)
+		}
+	}
 }
 
 func TestRunner_StopOnFailDefault(t *testing.T) {

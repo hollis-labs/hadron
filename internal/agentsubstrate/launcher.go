@@ -36,7 +36,7 @@ const (
 	workingDirModeCWD      = "cwd"
 	workingDirModeProcess  = "process_cwd"
 	sessionShutdownTimeout = 5 * time.Second
-	replyOutboxWatchWindow = 2 * time.Minute
+	replyOutboxWatchWindow = 15 * time.Minute
 	hadronClientName       = "hadron"
 	hadronClientVersion    = "0.1-dev"
 )

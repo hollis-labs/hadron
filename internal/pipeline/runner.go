@@ -126,7 +126,7 @@ func (r *Runner) execute(pipelineRunID, pipelinePath, workspaceID string) {
 	// Pre-register all stage runs with "pending" status.
 	for i, st := range spec.Stages {
 		now := time.Now().UTC()
-		runID := fmt.Sprintf("plr-%s-%02d-%d", pipelineRunID, i, now.UnixNano())
+		runID := stageRunID(pipelineRunID, i)
 		if err := r.store.AddPipelineStageRun(ctx, persistence.PipelineStageRunRecord{
 			WorkspaceID:   workspaceID,
 			PipelineRunID: pipelineRunID,
@@ -266,7 +266,7 @@ func (r *Runner) executeStage(ctx context.Context, p executeStageParams) (*Stage
 		}
 	}
 
-	runID := fmt.Sprintf("plr-%s-%02d-%d", p.pipelineRunID, p.stageIdx, time.Now().UTC().UnixNano())
+	runID := stageRunID(p.pipelineRunID, p.stageIdx)
 
 	// Resolve stage inputs.
 	resolvedInputs := resolveStageInputs(st.Inputs, p.stageOutputsSnapshot, p.pipelineInputs)
@@ -342,6 +342,10 @@ func (r *Runner) executeStage(ctx context.Context, p executeStageParams) (*Stage
 	_ = r.store.UpdatePipelineStageRunStatus(ctx, p.pipelineRunID, p.stageIdx, "failed")
 	result.Status = "failed"
 	return result, nil
+}
+
+func stageRunID(pipelineRunID string, stageIdx int) string {
+	return fmt.Sprintf("plr-%s-%02d", pipelineRunID, stageIdx)
 }
 
 func asyncStageOutputs(runID string, st Stage) map[string]any {

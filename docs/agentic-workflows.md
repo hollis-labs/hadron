@@ -1,7 +1,7 @@
 # Agentic Workflows With Hadron
 
 **Status:** implementation audit and operator guide  
-**Date:** 2026-05-24  
+**Date:** 2026-05-25  
 **Audience:** Hadron users, workflow authors, and agent integrators
 
 Hadron now has first-class structured workflow steps for agent-facing work, and
@@ -22,6 +22,30 @@ It also supports the pipeline controls added for longer-lived workflows:
 - `defaults.stage_wait_timeout_seconds`
 - `stages[].wait_timeout_seconds`
 - `stages[].async`
+
+## Latest Local Dogfood Result
+
+On 2026-05-25 Hadron successfully completed a realistic local AI pipeline:
+
+- Pipeline run: `pl-20260525-164402-0001`
+- Run token: `dogfood-20260525164403`
+- Output directory:
+  `/Users/chrispian/dev/chrispian/inbox/hadron-dogfood/runs/dogfood-20260525164403`
+- Final artifact:
+  `newsletter.html`
+
+The pipeline did all of the following:
+
+- fetched multiple AI/agentic-development sources in fan-out
+- normalized 106 source items
+- launched a synthesis agent and waited for `{"text":"synthesis complete"}`
+- passed the synthesis artifact into an HTML-writing agent
+- waited for `{"text":"html complete"}`
+- verified `newsletter.html`, `newsletter.md`, and
+  `artifacts/final-manifest.json`
+
+This is the current best proof that AI step output can be incorporated into
+later steps in a real Hadron workflow.
 
 ## Production Status Matrix
 
@@ -178,6 +202,9 @@ Current limitations:
   - `message_substrates[*].kind = "tether_http"` as the Tether-aligned alias
 - wake/notify delivery is not required for correctness; the current model is
   durable polling first
+- `message_wait` currently emits a `message_wait_poll` event for every poll
+  interval. That is useful for debugging but too noisy for GUI/operator logs;
+  replace the repeated log stream with a compact progress indicator.
 
 ### `agent_launch`
 
@@ -207,6 +234,9 @@ Current limitations:
   and waiting step share a configured `go_messaging` mailbox contract
 - sessions are launched and tracked, but first-class attach/resume UX remains a
   later milestone
+- launched-agent reply relay now watches explicit reply outboxes for 15 minutes.
+  This is intentionally longer than the original two-minute window because real
+  local AI stages can take several minutes before calling `hadron-reply`.
 
 ## Observability
 
@@ -238,9 +268,10 @@ For a workflow that must work in the current daemon without extra embedding:
 
 The audit points to this order:
 
-1. add richer boot-profile compilation if the simple file-backed renderer proves too narrow
-2. add more complete remote message surfaces beyond pull-inbox semantics
-3. expand example workflows and operator docs around reply contracts
-4. harden step-level docs and diagnostics around adapter configuration failures
-5. add first-class session inspection/attach surfaces only if the workflow need
+1. reduce `message_wait` poll-noise in run events and GUI diagnostics
+2. add richer boot-profile compilation if the simple file-backed renderer proves too narrow
+3. add more complete remote message surfaces beyond pull-inbox semantics
+4. expand example workflows and operator docs around reply contracts
+5. harden step-level docs and diagnostics around adapter configuration failures
+6. add first-class session inspection/attach surfaces only if the workflow need
    remains strong after message substrates land

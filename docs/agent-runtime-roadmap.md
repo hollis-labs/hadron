@@ -1,7 +1,7 @@
 # Hadron Agent Runtime And Messaging Roadmap
 
-**Status:** in progress  
-**Date:** 2026-05-24  
+**Status:** local AI workflow proof completed; hardening follow-up active  
+**Date:** 2026-05-25  
 **Audience:** Hadron implementers, agent substrate maintainers, workflow authors
 
 ## Why This Exists
@@ -58,10 +58,56 @@ The remaining stock-daemon work is now:
 
 - deepen message substrate coverage beyond the first local adapter
 - integrate launch boot/profile settings more fully
+- reduce `message_wait` poll-noise in run logs and GUI diagnostics
 
 So the problem is no longer blueprint shape or the absence of a default daemon
-path. The remaining problems are **message substrate breadth, autonomous
-end-to-end proof, and deeper launch/profile integration**.
+path. The remaining problems are **message substrate breadth, operator-facing
+diagnostics, shareable examples, and deeper launch/profile integration**.
+
+## 2026-05-25 Dogfood Proof
+
+Hadron now has a successful local dogfood run proving a realistic
+`agent_launch -> message_wait -> agent_launch -> message_wait` pipeline:
+
+- Pipeline: `pl-20260525-164402-0001`
+- Run token: `dogfood-20260525164403`
+- Workspace: `/Users/chrispian/dev/chrispian/inbox/hadron-dogfood`
+- Final HTML:
+  `/Users/chrispian/dev/chrispian/inbox/hadron-dogfood/runs/dogfood-20260525164403/newsletter.html`
+
+The workflow fetches AI/agentic-development sources in fan-out, normalizes the
+raw artifacts, launches an AI synthesis agent, passes the synthesis into an HTML
+writer agent, waits for explicit mailbox replies, and verifies final local
+artifacts.
+
+What this proved:
+
+- fan-out pipeline stages work for bounded source fetches
+- source normalization can enforce a minimum corpus size before AI stages run
+- launched agents can write run-local artifacts and send explicit replies
+- AI output from one stage can be incorporated by a later AI stage
+- local `go_agent_runtime` + local `go_messaging` is viable for real workflows
+
+Hardening that landed from the proof:
+
+- launched-agent reply outbox watcher was extended from 2 minutes to 15 minutes,
+  because realistic AI stages can reply after the original watch window closed
+- pipeline stage `run_id` bookkeeping now uses deterministic stage run IDs so
+  `pipeline_stage_runs.run_id` points to the actual underlying run
+- dogfood blueprints now use run-local artifact directories to avoid late-agent
+  writes clobbering outputs from later runs
+- fetch dogfood blueprints use HTTPS-only source validation and a 1 MiB curl
+  max file size cap
+
+Remaining follow-ups:
+
+- `message_wait` still emits one `message_wait_poll` event per poll interval;
+  this is correct but too noisy for GUI/operator logs and should become a
+  compact progress indicator
+- AI examples should keep prompts bounded or use larger stage waits; full-source
+  synthesis commonly takes 2-5 minutes
+- dogfood source lists should be promoted into shareable sample blueprints only
+  after one more docs/examples pass
 
 ## Decision
 
@@ -424,11 +470,17 @@ substrate boundary.
 
 ### Slice 6 — `agent_launch -> message_wait` End-To-End
 
+Status: completed for the local runtime/local mailbox path on 2026-05-25.
+
 - launch an agent through the real launch substrate
 - wait for a durable reply through the real message substrate
 - capture operation diagnostics across both steps
 
 ### Slice 7 — Examples And Docs
+
+Status: in progress. The dogfood newsletter workflow exists locally under
+`/Users/chrispian/dev/chrispian/inbox/hadron-dogfood/blueprints`; promote a
+cleaned, general-purpose variant into repo examples after the docs pass.
 
 - add narrow runnable examples
 - document supported substrate kinds
