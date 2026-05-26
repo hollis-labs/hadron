@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	runtimebootdir "github.com/hollis-labs/go-agent-runtime/bootdir"
+	runtimebootdir "github.com/hollis-labs/agentkit/agentruntime/bootdir"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/settings"

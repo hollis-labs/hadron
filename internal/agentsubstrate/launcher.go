@@ -13,12 +13,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	agentlaunch "github.com/hollis-labs/go-agent-launch/agentlaunch"
-	runtimebootdir "github.com/hollis-labs/go-agent-runtime/bootdir"
-	"github.com/hollis-labs/go-agent-runtime/runtimebind"
-	"github.com/hollis-labs/go-agent-runtime/runtimekind"
-	"github.com/hollis-labs/go-agent-runtime/turn"
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentlaunch "github.com/hollis-labs/agentkit/agentlaunch"
+	launcherpkg "github.com/hollis-labs/agentkit/agentlaunch/launcher"
+	"github.com/hollis-labs/agentkit/agentlaunch/providerplant"
+	"github.com/hollis-labs/agentkit/agentlaunch/sessionshim"
+	runtimebootdir "github.com/hollis-labs/agentkit/agentruntime/bootdir"
+	"github.com/hollis-labs/agentkit/agentruntime/runtimebind"
+	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	"github.com/hollis-labs/agentkit/agentruntime/turn"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/go-providers/provider"
@@ -129,31 +132,19 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 	}
 
 	sessionID := l.nextSessionID(req)
-	workspaceDir := filepath.Join(l.dataDir, "agents", "sessions", sessionID)
-	bootDir := filepath.Join(workspaceDir, "boot")
-	if mkdirErr := os.MkdirAll(filepath.Join(workspaceDir, "logs"), 0o750); mkdirErr != nil {
-		return execution.AgentLaunchResult{}, fmt.Errorf("ensure workspace dir: %w", mkdirErr)
-	}
-	if mkdirErr := os.MkdirAll(bootDir, 0o750); mkdirErr != nil {
-		return execution.AgentLaunchResult{}, fmt.Errorf("ensure boot dir: %w", mkdirErr)
-	}
-	if mkdirErr := os.MkdirAll(filepath.Join(bootDir, replyOutboxRelDir), 0o750); mkdirErr != nil {
-		return execution.AgentLaunchResult{}, fmt.Errorf("ensure reply outbox dir: %w", mkdirErr)
-	}
-
 	mailbox := mailboxURN(cfg.Authority, req.LogicalAgentID)
-	startOpts, err := buildStartOptions(l.dataDir, workspaceDir, bootDir, projectDir, cfg, req, sessionID, mailbox, adapter)
+	sessionLaunch, bootDir, workspaceDir, err := buildSessionLaunch(ctx, l.dataDir, cfg, req, sessionID, mailbox, projectDir, binding, adapter)
 	if err != nil {
 		return execution.AgentLaunchResult{}, err
 	}
 	kickoffPayload := launchKickoffPayload(adapter)
 	eventCh := make(chan llmtypes.StreamEvent, 128)
-	startOpts.EventFanout = eventCh
+	sessionLaunch.Options.EventFanout = eventCh
 
 	if err := l.sessions.Start(ctx, agentsessions.StartRequest{
 		ID:      sessionID,
 		Runtime: runtime,
-		Options: startOpts,
+		Options: sessionLaunch.Options,
 		SessionMeta: map[string]string{
 			"substrate":        req.Substrate,
 			"launch_id":        req.LaunchID,
@@ -167,7 +158,7 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 	if len(kickoffPayload) > 0 {
 		kickoffCtx := context.WithoutCancel(ctx)
 		//nolint:gosec // kickoff turn is intentionally async and detached from request cancellation
-		go l.runKickoffTurn(kickoffCtx, sessionID, mailbox, req, binding.Provider, eventCh, kickoffPayload)
+		go l.runKickoffTurn(kickoffCtx, sessionID, mailbox, bootDir, req, binding.Provider, eventCh, kickoffPayload)
 	}
 
 	result := execution.AgentLaunchResult{
@@ -186,7 +177,12 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 	return result, nil
 }
 
-func buildStartOptions(dataDir, workspaceDir, bootDir, projectDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox string, adapter provider.CLIAdapter) (agentsessions.StartOptions, error) {
+func buildSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir string, binding runtimebind.Binding, adapter provider.CLIAdapter) (sessionshim.SessionLaunch, string, string, error) {
+	workspaceDir := filepath.Join(dataDir, "agents", "sessions", sessionID)
+	if supportsAgentkitLaunch(binding) {
+		return buildAgentkitSessionLaunch(ctx, dataDir, cfg, req, sessionID, mailbox, projectDir, workspaceDir, adapter)
+	}
+	bootDir := filepath.Join(workspaceDir, "boot")
 	bootPrompt, bootContent, extraFiles, err := renderBootArtifacts(dataDir, cfg, bootRenderContext{
 		SessionID:      sessionID,
 		SessionURN:     sessionURN(cfg.Authority, sessionID),
@@ -201,16 +197,97 @@ func buildStartOptions(dataDir, workspaceDir, bootDir, projectDir string, cfg se
 		InjectedFiles:  req.Injection.NativeFiles,
 	})
 	if err != nil {
-		return agentsessions.StartOptions{}, err
+		return sessionshim.SessionLaunch{}, "", "", err
 	}
+	return buildFallbackSessionLaunch(cfg, req, workspaceDir, projectDir, bootPrompt, bootContent, extraFiles, adapter)
+}
 
+func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir, workspaceDir string, adapter provider.CLIAdapter) (sessionshim.SessionLaunch, string, string, error) {
+	bootPrompt, bootContent, _, err := renderBootArtifacts(dataDir, cfg, bootRenderContext{
+		SessionID:      sessionID,
+		SessionURN:     sessionURN(cfg.Authority, sessionID),
+		MailboxURN:     mailbox,
+		ProjectDir:     projectDir,
+		BlueprintPath:  req.BlueprintPath,
+		LaunchID:       req.LaunchID,
+		LogicalAgentID: req.LogicalAgentID,
+		PromptAppend:   req.PromptAppend,
+		Metadata:       req.Metadata,
+		InjectedFiles:  req.Injection.NativeFiles,
+	})
+	if err != nil {
+		return sessionshim.SessionLaunch{}, "", "", err
+	}
+	plan, err := buildLaunchPlan(cfg, req, projectDir, workspaceDir, bootPrompt, bootContent, nil)
+	if err != nil {
+		return sessionshim.SessionLaunch{}, "", "", err
+	}
+	compiled, err := launcherpkg.Compile(ctx, plan)
+	if err != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("compile launch plan: %w", err)
+	}
+	bootDirAdapter, ok := adapter.(provider.BootDirProvider)
+	if !ok {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("adapter %q does not support bootdir planting", adapter.Name())
+	}
+	prepared, err := providerplant.PrepareAndPlant(ctx, compiled, providerplant.WithPlantOption(providerplant.WithAdapter(bootDirAdapter)))
+	if err != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("prepare launch: %w", err)
+	}
+	_, _, extraFiles, err := renderBootArtifacts(dataDir, cfg, bootRenderContext{
+		SessionID:      sessionID,
+		SessionURN:     sessionURN(cfg.Authority, sessionID),
+		MailboxURN:     mailbox,
+		ProjectDir:     projectDir,
+		BlueprintPath:  req.BlueprintPath,
+		BootDir:        prepared.PlantedBootDir,
+		LaunchID:       req.LaunchID,
+		LogicalAgentID: req.LogicalAgentID,
+		PromptAppend:   req.PromptAppend,
+		Metadata:       req.Metadata,
+		InjectedFiles:  req.Injection.NativeFiles,
+	})
+	if err != nil {
+		return sessionshim.SessionLaunch{}, "", "", err
+	}
+	if len(extraFiles) > 0 {
+		if _, writeErr := (runtimebootdir.Writer{}).WriteFiles(prepared.PlantedBootDir, extraFiles); writeErr != nil {
+			return sessionshim.SessionLaunch{}, "", "", writeErr
+		}
+	}
+	if mkdirErr := os.MkdirAll(filepath.Join(prepared.WorkspaceDir, "logs"), 0o750); mkdirErr != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure workspace dir: %w", mkdirErr)
+	}
+	if mkdirErr := os.MkdirAll(filepath.Join(prepared.PlantedBootDir, replyOutboxRelDir), 0o750); mkdirErr != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure reply outbox dir: %w", mkdirErr)
+	}
+	sessionLaunch, err := sessionshim.ToSessionLaunch(prepared)
+	if err != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("build session launch: %w", err)
+	}
+	sessionLaunch.Options.Env = mergeEnv(cfg.Env, envMapToKV(prepared.Env))
+	sessionLaunch.Options.LogPath = filepath.Join(prepared.WorkspaceDir, "logs", "session.log")
+	sessionLaunch.Options.Env = prependEnvPath(sessionLaunch.Options.Env, prepared.PlantedBootDir)
+	return sessionLaunch, prepared.PlantedBootDir, prepared.WorkspaceDir, nil
+}
+
+func buildFallbackSessionLaunch(cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, workspaceDir, projectDir, bootPrompt, bootContent string, extraFiles []runtimebootdir.File, adapter provider.CLIAdapter) (sessionshim.SessionLaunch, string, string, error) {
+	bootDir := filepath.Join(workspaceDir, "boot")
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "logs"), 0o750); err != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure workspace dir: %w", err)
+	}
+	if err := os.MkdirAll(bootDir, 0o750); err != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure boot dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(bootDir, replyOutboxRelDir), 0o750); err != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure reply outbox dir: %w", err)
+	}
 	opts := agentsessions.StartOptions{
 		Workdir:      bootDir,
 		WorkspaceDir: workspaceDir,
 		LogPath:      filepath.Join(workspaceDir, "logs", "session.log"),
 		Env:          mergeEnv(cfg.Env, nil),
 	}
-
 	if bp, ok := adapter.(provider.BootDirProvider); ok {
 		spec := bp.BootDirSpec()
 		plantCtx := provider.PlantContext{
@@ -221,11 +298,11 @@ func buildStartOptions(dataDir, workspaceDir, bootDir, projectDir string, cfg se
 			BootDir:      bootDir,
 		}
 		if err := materializeBootDir(bootDir, spec, plantCtx, req, cfg); err != nil {
-			return agentsessions.StartOptions{}, err
+			return sessionshim.SessionLaunch{}, "", "", err
 		}
 		if len(extraFiles) > 0 {
 			if _, err := (runtimebootdir.Writer{}).WriteFiles(bootDir, extraFiles); err != nil {
-				return agentsessions.StartOptions{}, err
+				return sessionshim.SessionLaunch{}, "", "", err
 			}
 		}
 		opts.Workdir = spec.SpawnWorkdir(bootDir, projectDir)
@@ -233,8 +310,7 @@ func buildStartOptions(dataDir, workspaceDir, bootDir, projectDir string, cfg se
 		opts.ExtraArgs = append(opts.ExtraArgs, renderProjectDirArgs(spec.ProjectDirArg, bootDir, projectDir)...)
 	}
 	opts.Env = prependEnvPath(opts.Env, bootDir)
-
-	return opts, nil
+	return sessionshim.SessionLaunch{Options: opts}, bootDir, workspaceDir, nil
 }
 
 func launchKickoffPayload(adapter provider.CLIAdapter) []byte {
@@ -244,11 +320,11 @@ func launchKickoffPayload(adapter provider.CLIAdapter) []byte {
 	return nil
 }
 
-func (l *Launcher) runKickoffTurn(ctx context.Context, sessionID, mailbox string, req execution.AgentLaunchRequest, providerName string, eventCh <-chan llmtypes.StreamEvent, payload []byte) {
+func (l *Launcher) runKickoffTurn(ctx context.Context, sessionID, mailbox, bootDir string, req execution.AgentLaunchRequest, providerName string, eventCh <-chan llmtypes.StreamEvent, payload []byte) {
 	replySubstrate := strings.TrimSpace(anyString(req.Metadata["reply_substrate"]))
 	correlationID := strings.TrimSpace(anyString(req.Metadata["correlation_id"]))
 	disableFallbackReply := anyBool(req.Metadata["disable_fallback_reply"])
-	outboxDir := filepath.Join(l.dataDir, "agents", "sessions", sessionID, "boot", replyOutboxRelDir)
+	outboxDir := filepath.Join(bootDir, replyOutboxRelDir)
 
 	var output strings.Builder
 	stopDrain := make(chan struct{})
@@ -586,6 +662,102 @@ func newAdapter(binding runtimebind.Binding, cfg settings.AgentSubstrateSettings
 	}, caps, nil
 }
 
+func supportsAgentkitLaunch(binding runtimebind.Binding) bool {
+	switch binding.Provider {
+	case "claude", "codex", "opencode":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, projectDir, workspaceDir, bootPrompt, bootContent string, extraFiles []runtimebootdir.File) (agentlaunch.LaunchPlan, error) {
+	overlay := make(map[string]string, len(extraFiles))
+	for _, file := range extraFiles {
+		if err := agentlaunch.ValidateBootDirRelPath(file.RelPath); err != nil {
+			return agentlaunch.LaunchPlan{}, fmt.Errorf("extra boot file %q: %w", file.RelPath, err)
+		}
+		overlay[file.RelPath] = file.Content
+	}
+	nativeFiles := make([]agentlaunch.NativeFile, 0, len(req.Injection.NativeFiles))
+	if cfg.Boot.PlantNativeFiles {
+		for _, file := range req.Injection.NativeFiles {
+			nativeFiles = append(nativeFiles, agentlaunch.NativeFile{
+				Kind:    agentlaunch.NativeFileRaw,
+				RelPath: file.RelPath,
+				Content: file.Source,
+				Mode:    0o644,
+			})
+		}
+	}
+	projectID := sanitizeIDPart(filepath.Base(projectDir))
+	if projectID == "" {
+		projectID = "project"
+	}
+	agentID := sanitizeIDPart(req.LogicalAgentID)
+	if agentID == "" {
+		agentID = sanitizeIDPart(req.LaunchID)
+	}
+	if agentID == "" {
+		agentID = "agent"
+	}
+	return agentlaunch.LaunchPlan{
+		Project: agentlaunch.ProjectSpec{
+			ID:   projectID,
+			Name: filepath.Base(projectDir),
+			Root: projectDir,
+		},
+		Agent: agentlaunch.AgentSpec{
+			ID:   agentID,
+			Name: req.LogicalAgentID,
+		},
+		Provider: agentlaunch.ProviderSpec{
+			ID:     normalizedProviderName(cfg.Provider),
+			Binary: cfg.Command,
+			Env:    mapsClone(cfg.Env),
+		},
+		Runtime: agentlaunch.RuntimeKind(cfg.Runtime),
+		Workspace: agentlaunch.WorkspaceSpec{
+			Mode:         agentlaunch.WorkspaceFresh,
+			WorkspaceDir: workspaceDir,
+			Workdir:      projectDir,
+		},
+		BootProfile: agentlaunch.BootProfileRef{
+			Inline: &agentlaunch.BootProfileInline{
+				BootPrompt:  bootPrompt,
+				BootContent: bootContent,
+				BootMode:    agentlaunch.BootModePlanted,
+			},
+		},
+		Injection: agentlaunch.InjectionSpec{
+			BootDirOverlay: overlay,
+			NativeFiles:    nativeFiles,
+		},
+		Mode: agentlaunch.LaunchBackground,
+		Metadata: agentlaunch.Metadata{
+			Labels: map[string]string{
+				"substrate": req.Substrate,
+				"launch_id": req.LaunchID,
+			},
+			Annotations: map[string]string{
+				"blueprint_path":   req.BlueprintPath,
+				"logical_agent_id": req.LogicalAgentID,
+			},
+		},
+	}, nil
+}
+
+func mapsClone(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 type scopedCLIAdapter struct {
 	inner    provider.CLIAdapter
 	binary   string
@@ -671,6 +843,22 @@ func mergeEnv(extra map[string]string, appended []string) []string {
 	}
 	env = append(env, appended...)
 	return env
+}
+
+func envMapToKV(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+"="+env[k])
+	}
+	return out
 }
 
 func renderEnv(in []string, bootDir, projectDir string) []string {

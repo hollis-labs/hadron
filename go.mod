@@ -5,10 +5,8 @@ go 1.26.3
 require (
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/hollis-labs/go-agent-launch v0.4.0
-	github.com/hollis-labs/go-agent-runtime v0.4.0
-	github.com/hollis-labs/go-agent-sessions v0.10.0
-	github.com/hollis-labs/go-llm-types v0.1.0
+	github.com/hollis-labs/agentkit v0.3.0
+	github.com/hollis-labs/go-llm-types v0.3.0
 	github.com/hollis-labs/go-mcp v0.1.0
 	github.com/hollis-labs/go-messaging v0.3.0
 	github.com/hollis-labs/go-otel v0.1.0
@@ -22,6 +20,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
+
+replace github.com/hollis-labs/agentkit => ../../libs/agentkit
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -37,9 +37,9 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
-	github.com/hollis-labs/go-llm-contracts v0.1.0 // indirect
-	github.com/hollis-labs/go-runner v0.4.0 // indirect
-	github.com/hollis-labs/go-sandbox v0.1.0 // indirect
+	github.com/hollis-labs/go-llm-contracts v0.3.0 // indirect
+	github.com/hollis-labs/go-runner v0.5.0 // indirect
+	github.com/hollis-labs/go-sandbox v0.2.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
