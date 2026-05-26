@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	feotel "github.com/hollis-labs/go-otel"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Store is the persistence interface required by the trigger manager.
@@ -73,14 +75,18 @@ func (m *Manager) StartFileWatchers() {
 	defer m.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx, span := feotel.StartSpan(ctx, "hadron.trigger.file_watchers.start")
+	defer span.End()
 	m.watchCtx = ctx
 	m.watchCancel = cancel
 
 	triggers, err := m.store.ListFileWatchTriggers(ctx)
 	if err != nil {
+		span.RecordError(err)
 		log.Printf("trigger: failed to list file_watch triggers: %v", err)
 		return
 	}
+	span.SetAttributes(attribute.Int("hadron.trigger.file_watch.count", len(triggers)))
 
 	for _, t := range triggers {
 		m.startWatcherLocked(t)
@@ -131,6 +137,15 @@ func (m *Manager) startWatcherLocked(trigger persistence.TriggerRecord) {
 
 // runFileWatcher processes fsnotify events for a single trigger with debouncing.
 func (m *Manager) runFileWatcher(ctx context.Context, fw *fileWatcher, trigger persistence.TriggerRecord) {
+	ctx, span := feotel.StartSpan(ctx, "hadron.trigger.file_watch.loop")
+	span.SetAttributes(
+		attribute.String("hadron.trigger.id", trigger.ID),
+		attribute.String("hadron.workspace.id", trigger.WorkspaceID),
+		attribute.String("hadron.blueprint.path", trigger.BlueprintPath),
+		attribute.Bool("hadron.trigger.one_shot", trigger.OneShot),
+		attribute.Int64("hadron.trigger.debounce_ms", fw.debounce.Milliseconds()),
+	)
+	defer span.End()
 	defer func() { _ = fw.watcher.Close() }()
 
 	// Parse event filter if present in extract_inputs.
@@ -184,6 +199,16 @@ func (m *Manager) runFileWatcher(ctx context.Context, fw *fileWatcher, trigger p
 // fireFileWatch enqueues a blueprint run for a file-watch trigger event.
 func (m *Manager) fireFileWatch(trigger persistence.TriggerRecord, event fsnotify.Event) {
 	ctx := context.Background()
+	ctx, span := feotel.StartSpan(ctx, "hadron.trigger.file_watch.fire")
+	span.SetAttributes(
+		attribute.String("hadron.trigger.id", trigger.ID),
+		attribute.String("hadron.workspace.id", trigger.WorkspaceID),
+		attribute.String("hadron.blueprint.path", trigger.BlueprintPath),
+		attribute.String("hadron.trigger.file.path", event.Name),
+		attribute.String("hadron.trigger.file.event", fsEventType(event.Op)),
+		attribute.Bool("hadron.trigger.one_shot", trigger.OneShot),
+	)
+	defer span.End()
 
 	inputs := map[string]any{
 		"changed_file": event.Name,
@@ -192,12 +217,14 @@ func (m *Manager) fireFileWatch(trigger persistence.TriggerRecord, event fsnotif
 
 	n := m.seq.Add(1)
 	runID := fmt.Sprintf("fwatch-%s-%04d", time.Now().UTC().Format("20060102-150405"), n)
+	span.SetAttributes(attribute.String("hadron.run.id", runID))
 	if err := m.runner.Enqueue(ctx, execution.Request{
 		RunID:         runID,
 		WorkspaceID:   trigger.WorkspaceID,
 		BlueprintPath: trigger.BlueprintPath,
 		Inputs:        inputs,
 	}); err != nil {
+		span.RecordError(err)
 		log.Printf("trigger: failed to enqueue file_watch run for %s: %v", trigger.ID, err)
 		return
 	}
@@ -246,7 +273,15 @@ func (m *Manager) StopFileWatchers() {
 
 // CleanExpiredTriggers deletes triggers where ttl_expires_at < now.
 func (m *Manager) CleanExpiredTriggers(ctx context.Context) (int64, error) {
-	return m.store.DeleteExpiredTriggers(ctx, time.Now())
+	ctx, span := feotel.StartSpan(ctx, "hadron.trigger.ttl.cleanup")
+	defer span.End()
+	deleted, err := m.store.DeleteExpiredTriggers(ctx, time.Now())
+	if err != nil {
+		span.RecordError(err)
+		return 0, err
+	}
+	span.SetAttributes(attribute.Int64("hadron.trigger.expired.deleted_count", deleted))
+	return deleted, nil
 }
 
 // StartTTLCleanup starts a background goroutine that cleans expired triggers every interval.
@@ -327,18 +362,32 @@ func (m *Manager) handleWebhookCatchAll(w http.ResponseWriter, r *http.Request) 
 // HandleWebhook processes an incoming webhook request for a specific trigger.
 func (m *Manager) HandleWebhook(trigger *persistence.TriggerRecord, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	ctx, span := feotel.StartSpan(ctx, "hadron.trigger.webhook.handle")
+	span.SetAttributes(
+		attribute.String("hadron.trigger.id", trigger.ID),
+		attribute.String("hadron.workspace.id", trigger.WorkspaceID),
+		attribute.String("hadron.blueprint.path", trigger.BlueprintPath),
+		attribute.Bool("hadron.trigger.one_shot", trigger.OneShot),
+		attribute.String("http.route", "/hooks/{path}"),
+		attribute.String("http.target", r.URL.Path),
+	)
+	defer span.End()
 
 	// Read body
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024)) // 10MB limit
 	if err != nil {
+		span.RecordError(err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
 		return
 	}
+	span.SetAttributes(attribute.Int("http.request.body.size", len(body)))
 
 	// Validate secret if configured
 	if trigger.SecretHash.Valid && trigger.SecretHash.String != "" {
 		sig := r.Header.Get("X-Hub-Signature-256")
 		if !validateSignature(body, trigger.SecretHash.String, sig) {
+			err := fmt.Errorf("invalid signature")
+			span.RecordError(err)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid signature"})
 			return
 		}
@@ -349,21 +398,25 @@ func (m *Manager) HandleWebhook(trigger *persistence.TriggerRecord, w http.Respo
 	if trigger.ExtractInputs.Valid && trigger.ExtractInputs.String != "" {
 		extracted, err := extractInputs(trigger.ExtractInputs.String, body, r)
 		if err != nil {
+			span.RecordError(err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "input extraction failed: " + err.Error()})
 			return
 		}
 		inputs = extracted
 	}
+	span.SetAttributes(attribute.Int("hadron.trigger.input.count", len(inputs)))
 
 	// Enqueue run
 	n := m.seq.Add(1)
 	runID := fmt.Sprintf("hook-%s-%04d", time.Now().UTC().Format("20060102-150405"), n)
+	span.SetAttributes(attribute.String("hadron.run.id", runID))
 	if err := m.runner.Enqueue(ctx, execution.Request{
 		RunID:         runID,
 		WorkspaceID:   trigger.WorkspaceID,
 		BlueprintPath: trigger.BlueprintPath,
 		Inputs:        inputs,
 	}); err != nil {
+		span.RecordError(err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	feotel "github.com/hollis-labs/go-otel"
 	gosched "github.com/hollis-labs/go-scheduler"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // scheduleJobType tags every job the scheduler dispatches. Hadron schedules
@@ -40,10 +42,19 @@ type storeAdapter struct {
 // neutral go-scheduler Schedule. Records with an unparseable next-run are
 // returned with a zero NextRun, which the engine skips.
 func (a storeAdapter) ListDueSchedules(ctx context.Context, now time.Time, limit int) ([]gosched.Schedule, error) {
+	ctx, span := feotel.StartSpan(ctx, "hadron.scheduler.list_due")
+	span.SetAttributes(
+		attribute.String("hollis.component", "scheduler"),
+		attribute.String("hadron.scheduler.now", now.UTC().Format(time.RFC3339Nano)),
+		attribute.Int("hadron.scheduler.limit", limit),
+	)
+	defer span.End()
 	recs, err := a.Store.ListDueSchedules(ctx, now, limit)
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
+	span.SetAttributes(attribute.Int("hadron.scheduler.due_record_count", len(recs)))
 	out := make([]gosched.Schedule, 0, len(recs))
 	for _, rec := range recs {
 		sched, convErr := toSchedule(rec)
@@ -54,6 +65,7 @@ func (a storeAdapter) ListDueSchedules(ctx context.Context, now time.Time, limit
 		}
 		out = append(out, sched)
 	}
+	span.SetAttributes(attribute.Int("hadron.scheduler.dispatchable_count", len(out)))
 	return out, nil
 }
 
@@ -109,10 +121,23 @@ type runnerAdapter struct {
 // A duplicate-run race is reported back to the engine as ErrDuplicateJob so
 // the schedule is requeued without counting a worker error.
 func (r runnerAdapter) Enqueue(ctx context.Context, job gosched.Job) error {
+	ctx, span := feotel.StartSpan(ctx, "hadron.scheduler.enqueue")
+	span.SetAttributes(
+		attribute.String("hollis.component", "scheduler"),
+		attribute.String("hadron.schedule.id", job.ScheduleID),
+		attribute.String("hadron.run.id", job.RunID),
+		attribute.String("hadron.job.type", job.JobType),
+	)
+	defer span.End()
 	var payload schedulePayload
 	if err := json.Unmarshal(job.Payload, &payload); err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("decode schedule payload: %w", err)
 	}
+	span.SetAttributes(
+		attribute.String("hadron.workspace.id", payload.WorkspaceID),
+		attribute.String("hadron.blueprint.path", payload.BlueprintPath),
+	)
 	err := r.mgr.Enqueue(ctx, execution.Request{
 		WorkspaceID:   payload.WorkspaceID,
 		RunID:         job.RunID,
@@ -120,7 +145,12 @@ func (r runnerAdapter) Enqueue(ctx context.Context, job gosched.Job) error {
 		Inputs:        map[string]any{},
 	})
 	if err != nil && isDuplicateRun(err) {
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("hadron.scheduler.duplicate_run", true))
 		return fmt.Errorf("enqueue scheduled run %s: %w", job.RunID, gosched.ErrDuplicateJob)
+	}
+	if err != nil {
+		span.RecordError(err)
 	}
 	return err
 }
