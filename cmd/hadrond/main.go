@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -124,6 +125,14 @@ func runServe(args []string) error {
 	} else {
 		defer func() { _ = otelShutdown(otelCtx) }()
 	}
+
+	// Install a trace-correlated slog handler as the process default. Any code
+	// that emits via slog with a traced context (current code uses stdlib log,
+	// but future migrations + imported libraries that use slog) automatically
+	// includes trace_id / span_id fields. NewLogHandler wraps an inner handler
+	// (text on stderr here) and is a no-op for untraced contexts, so this is
+	// safe to install unconditionally — even when OTel init failed above.
+	slog.SetDefault(slog.New(feotel.NewLogHandler(slog.NewTextHandler(os.Stderr, nil))))
 
 	store, err := persistence.Open(cfg.DBPath)
 	if err != nil {
