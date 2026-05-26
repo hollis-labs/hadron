@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/go-otel/propagation"
 	"github.com/hollis-labs/hadron/internal/execution"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
@@ -135,10 +136,12 @@ func (c *InternalCaller) callExternalTool(ctx context.Context, serverName, toolN
 	metadata.Reconnected = reconnected
 
 	for attempt := 0; attempt < 2; attempt++ {
+		callArguments := cloneAnyMap(arguments)
+		callArguments = propagation.InjectMCP(ctx, callArguments)
 		result, err := entry.client.CallTool(ctx, mcp.CallToolRequest{
 			Params: mcp.CallToolParams{
 				Name:      toolName,
-				Arguments: arguments,
+				Arguments: callArguments,
 			},
 		})
 		if err == nil {
@@ -291,6 +294,17 @@ func cloneStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
 	for k, v := range in {
 		out[k] = v
 	}

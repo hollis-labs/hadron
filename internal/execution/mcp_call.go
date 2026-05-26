@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	feotel "github.com/hollis-labs/go-otel"
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/hollis-labs/hadron/internal/blueprint"
 )
 
@@ -14,8 +17,19 @@ func (r *runExecution) executeMCPCallStep(ctx context.Context, section string, s
 	if step.MCPCall == nil {
 		return fmt.Errorf("step %q has no mcp_call", step.Name)
 	}
+	ctx, span := feotel.StartSpan(ctx, "hadron.step.mcp_call")
+	span.SetAttributes(
+		attribute.String("hadron.section", section),
+		attribute.String("hadron.step.name", step.Name),
+		attribute.String("hadron.run.id", r.runID),
+		attribute.String("hadron.workspace.id", r.workspaceID),
+		attribute.String("hadron.mcp.server", step.MCPCall.Server),
+		attribute.String("hadron.mcp.tool", step.MCPCall.Tool),
+	)
+	defer span.End()
 	if r.manager.mcpCaller == nil {
 		err := fmt.Errorf("mcp_call caller is not configured")
+		span.RecordError(err)
 		r.emit(section, step.Name, "mcp_call_error", err.Error())
 		return err
 	}
@@ -25,6 +39,7 @@ func (r *runExecution) executeMCPCallStep(ctx context.Context, section string, s
 
 	result, err := r.manager.mcpCaller.CallTool(ctx, call.Server, call.Tool, call.Arguments)
 	if err != nil {
+		span.RecordError(err)
 		r.emit(section, step.Name, "mcp_call_error", err.Error())
 		return fmt.Errorf("mcp_call: %w", err)
 	}
@@ -37,6 +52,14 @@ func (r *runExecution) executeMCPCallStep(ctx context.Context, section string, s
 	}
 
 	if metadata != nil {
+		span.SetAttributes(
+			attribute.String("hadron.mcp.transport", metadata.Transport),
+			attribute.Bool("hadron.mcp.reused_client", metadata.ReusedClient),
+			attribute.Bool("hadron.mcp.health_probe", metadata.HealthProbe),
+			attribute.Bool("hadron.mcp.reconnected", metadata.Reconnected),
+			attribute.Int("hadron.mcp.retry_count", metadata.RetryCount),
+			attribute.Int("hadron.mcp.attempt_count", metadata.AttemptCount),
+		)
 		transportPayload := map[string]any{
 			"server":        metadata.Server,
 			"tool":          call.Tool,
@@ -70,6 +93,7 @@ func (r *runExecution) executeMCPCallStep(ctx context.Context, section string, s
 
 	resultJSONBytes, err := json.Marshal(actualResult)
 	if err != nil {
+		span.RecordError(err)
 		r.emit(section, step.Name, "mcp_call_error", err.Error())
 		return fmt.Errorf("mcp_call marshal result: %w", err)
 	}

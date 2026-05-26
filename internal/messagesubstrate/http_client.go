@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-messaging"
+	"github.com/hollis-labs/go-otel/propagation"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/settings"
@@ -233,6 +234,7 @@ func (c *remoteMessageClient) newRequest(ctx context.Context, method, path strin
 	for k, v := range c.headers {
 		req.Header.Set(k, v)
 	}
+	propagation.InjectHTTP(ctx, req)
 	return req, nil
 }
 

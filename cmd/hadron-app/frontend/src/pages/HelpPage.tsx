@@ -412,7 +412,7 @@ export function HelpPage() {
           <div className="rounded-lg border border-border bg-card p-4">
             <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-2">Pages Overview</div>
             <div className="text-sm text-muted-foreground leading-relaxed">
-              <div><strong className="text-blue-400">Dashboard</strong> — Run stats, activity timeline, blueprint success rates</div>
+              <div><strong className="text-blue-400">Operations</strong> — Default landing view for run stats, activity, and blueprint health</div>
               <div><strong className="text-blue-400">Blueprints</strong> — Browse, create, edit, run, and manage blueprint YAML files</div>
               <div><strong className="text-blue-400">Pipelines</strong> — Chain blueprints into multi-stage workflows</div>
               <div><strong className="text-blue-400">Run Log</strong> — History of all blueprint runs with status, duration, and details</div>

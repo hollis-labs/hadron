@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"time"
 
+	feotel "github.com/hollis-labs/go-otel"
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/hollis-labs/hadron/internal/blueprint"
 )
 
@@ -16,8 +19,21 @@ func (r *runExecution) executeMessageWaitStep(ctx context.Context, section strin
 	if step.MessageWait == nil {
 		return fmt.Errorf("step %q has no message_wait", step.Name)
 	}
+	ctx, span := feotel.StartSpan(ctx, "hadron.step.message_wait")
+	span.SetAttributes(
+		attribute.String("hadron.section", section),
+		attribute.String("hadron.step.name", step.Name),
+		attribute.String("hadron.run.id", r.runID),
+		attribute.String("hadron.workspace.id", r.workspaceID),
+		attribute.String("hadron.message.substrate", step.MessageWait.Substrate),
+		attribute.String("hadron.message.to", step.MessageWait.To),
+		attribute.String("hadron.message.correlation_id", step.MessageWait.CorrelationID),
+		attribute.Int("hadron.message.timeout_seconds", step.MessageWait.TimeoutSeconds),
+	)
+	defer span.End()
 	if r.manager.messages == nil {
 		err := fmt.Errorf("message_wait source is not configured")
+		span.RecordError(err)
 		r.emit(section, step.Name, "message_wait_error", err.Error())
 		return err
 	}
@@ -48,10 +64,12 @@ func (r *runExecution) executeMessageWaitStep(ctx context.Context, section strin
 	for {
 		msg, err := r.manager.messages.PollMessage(waitCtx, query)
 		if err != nil {
+			span.RecordError(err)
 			r.emit(section, step.Name, "message_wait_error", err.Error())
 			return fmt.Errorf("message_wait: %w", err)
 		}
 		if msg != nil {
+			span.SetAttributes(attribute.String("hadron.message.id", msg.ID))
 			r.emitMessageWaitReply(section, step.Name, msg)
 			return nil
 		}
@@ -63,9 +81,11 @@ func (r *runExecution) executeMessageWaitStep(ctx context.Context, section strin
 			timer.Stop()
 			if errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
 				err := fmt.Errorf("message_wait timed out after %s", timeout)
+				span.RecordError(err)
 				r.emit(section, step.Name, "message_wait_timeout", err.Error())
 				return err
 			}
+			span.RecordError(waitCtx.Err())
 			r.emit(section, step.Name, "message_wait_error", waitCtx.Err().Error())
 			return waitCtx.Err()
 		case <-timer.C:

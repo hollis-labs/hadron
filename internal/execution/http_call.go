@@ -12,6 +12,10 @@ import (
 	"strings"
 	"time"
 
+	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/go-otel/propagation"
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/hollis-labs/hadron/internal/blueprint"
 )
 
@@ -21,14 +25,24 @@ func (r *runExecution) executeHTTPCallStep(ctx context.Context, section string, 
 	if step.HTTPCall == nil {
 		return fmt.Errorf("step %q has no http_call", step.Name)
 	}
+	ctx, span := feotel.StartSpan(ctx, "hadron.step.http_call")
+	span.SetAttributes(
+		attribute.String("hadron.section", section),
+		attribute.String("hadron.step.name", step.Name),
+		attribute.String("hadron.run.id", r.runID),
+		attribute.String("hadron.workspace.id", r.workspaceID),
+	)
+	defer span.End()
 	call := step.HTTPCall
 	method := strings.ToUpper(strings.TrimSpace(call.Method))
 	if method == "" {
 		method = http.MethodGet
 	}
 	if err := validateLocalHTTPURL(call.URL); err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("http_call safety check: %w", err)
 	}
+	span.SetAttributes(httpCallSpanAttributes(method, call.URL)...)
 
 	timeout := call.TimeoutSeconds
 	if timeout == 0 {
@@ -47,6 +61,7 @@ func (r *runExecution) executeHTTPCallStep(ctx context.Context, section string, 
 
 	body, contentType, err := httpCallRequestBody(call)
 	if err != nil {
+		span.RecordError(err)
 		return err
 	}
 
@@ -60,8 +75,10 @@ func (r *runExecution) executeHTTPCallStep(ctx context.Context, section string, 
 
 	req, err := http.NewRequestWithContext(stepCtx, method, call.URL, body)
 	if err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("http_call request: %w", err)
 	}
+	propagation.InjectHTTP(ctx, req)
 	for k, v := range call.Headers {
 		req.Header.Set(k, v)
 	}
@@ -71,6 +88,7 @@ func (r *runExecution) executeHTTPCallStep(ctx context.Context, section string, 
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		span.RecordError(err)
 		r.emit(section, step.Name, "http_call_error", err.Error())
 		return fmt.Errorf("http_call: %w", err)
 	}
@@ -78,6 +96,7 @@ func (r *runExecution) executeHTTPCallStep(ctx context.Context, section string, 
 
 	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPCallBodyBytes+1))
 	if err != nil {
+		span.RecordError(err)
 		r.emit(section, step.Name, "http_call_error", err.Error())
 		return fmt.Errorf("http_call read response: %w", err)
 	}
@@ -96,6 +115,10 @@ func (r *runExecution) executeHTTPCallStep(ctx context.Context, section string, 
 		"body_json":   bodyJSON,
 		"truncated":   truncated,
 	}
+	span.SetAttributes(
+		attribute.Int("http.status_code", resp.StatusCode),
+		attribute.Int64("hadron.http.duration_ms", result["duration_ms"].(int64)),
+	)
 	resultJSON, _ := json.Marshal(result)
 	r.emit(section, step.Name, "http_call_response", string(resultJSON))
 	r.emit(section, step.Name, "log", fmt.Sprintf("::set-output status_code=%d", resp.StatusCode))
@@ -106,10 +129,31 @@ func (r *runExecution) executeHTTPCallStep(ctx context.Context, section string, 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		err := fmt.Errorf("http_call returned status %d", resp.StatusCode)
+		span.RecordError(err)
 		r.emit(section, step.Name, "http_call_error", err.Error())
 		return err
 	}
 	return nil
+}
+
+func httpCallSpanAttributes(method, rawURL string) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		attribute.String("http.method", method),
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return attrs
+	}
+	if parsed.Scheme != "" {
+		attrs = append(attrs, attribute.String("url.scheme", parsed.Scheme))
+	}
+	if parsed.Host != "" {
+		attrs = append(attrs, attribute.String("server.address", parsed.Host))
+	}
+	if parsed.Path != "" {
+		attrs = append(attrs, attribute.String("url.path", parsed.Path))
+	}
+	return attrs
 }
 
 func httpCallRequestBody(call *blueprint.HTTPCall) (io.Reader, string, error) {

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	feotel "github.com/hollis-labs/go-otel"
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/hollis-labs/hadron/internal/blueprint"
 )
 
@@ -15,8 +18,21 @@ func (r *runExecution) executeAgentLaunchStep(ctx context.Context, blueprintPath
 	if step.AgentLaunch == nil {
 		return fmt.Errorf("step %q has no agent_launch", step.Name)
 	}
+	ctx, span := feotel.StartSpan(ctx, "hadron.step.agent_launch")
+	span.SetAttributes(
+		attribute.String("hadron.section", section),
+		attribute.String("hadron.step.name", step.Name),
+		attribute.String("hadron.run.id", r.runID),
+		attribute.String("hadron.workspace.id", r.workspaceID),
+		attribute.String("hadron.blueprint.path", blueprintPath),
+		attribute.String("hadron.agent.substrate", step.AgentLaunch.Substrate),
+		attribute.String("hadron.agent.launch_id", step.AgentLaunch.LaunchID),
+		attribute.String("hadron.agent.logical_id", step.AgentLaunch.LogicalAgentID),
+	)
+	defer span.End()
 	if r.manager.agents == nil {
 		err := fmt.Errorf("agent_launch launcher is not configured")
+		span.RecordError(err)
 		r.emit(section, step.Name, "agent_launch_error", err.Error())
 		return err
 	}
@@ -40,9 +56,14 @@ func (r *runExecution) executeAgentLaunchStep(ctx context.Context, blueprintPath
 
 	result, err := r.manager.agents.LaunchAgent(stepCtx, req)
 	if err != nil {
+		span.RecordError(err)
 		r.emit(section, step.Name, "agent_launch_error", err.Error())
 		return fmt.Errorf("agent_launch: %w", err)
 	}
+	span.SetAttributes(
+		attribute.String("hadron.agent.session_id", result.SessionID),
+		attribute.String("hadron.agent.mailbox", result.Mailbox),
+	)
 
 	outputs := map[string]any{
 		"session_id":  result.SessionID,
@@ -54,6 +75,7 @@ func (r *runExecution) executeAgentLaunchStep(ctx context.Context, blueprintPath
 	}
 	outputJSONBytes, err := json.Marshal(outputs)
 	if err != nil {
+		span.RecordError(err)
 		r.emit(section, step.Name, "agent_launch_error", err.Error())
 		return fmt.Errorf("agent_launch marshal result: %w", err)
 	}

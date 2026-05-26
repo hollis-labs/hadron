@@ -8,7 +8,7 @@ interface AppNavProps {
 }
 
 const MAIN_NAV: { page: NavPage; label: string; icon: React.ReactNode; parents?: NavPage[] }[] = [
-  { page: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+  { page: 'dashboard', label: 'Operations', icon: <LayoutDashboard size={18} /> },
   { page: 'blueprints', label: 'Blueprints', icon: <FileText size={18} />, parents: ['blueprintDetail', 'blueprintWizard'] },
   { page: 'pipelines', label: 'Pipelines', icon: <GitBranch size={18} />, parents: ['pipelineDetail'] },
   { page: 'flowBuilder', label: 'Flow Builder', icon: <Workflow size={18} /> },

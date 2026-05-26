@@ -25,7 +25,7 @@ declare global {
 }
 
 const PAGE_TITLES: Record<NavPage, string> = {
-  dashboard: 'Dashboard',
+  dashboard: 'Operations',
   blueprints: 'Blueprint Browser',
   blueprintDetail: 'Blueprint Detail',
   blueprintWizard: 'Blueprint Wizard',

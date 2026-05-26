@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	feotel "github.com/hollis-labs/go-otel"
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/persistence"
 )
@@ -16,6 +19,15 @@ func (r *runExecution) executeHumanGateStep(ctx context.Context, section string,
 	if step.HumanGate == nil {
 		return fmt.Errorf("step %q has no human_gate", step.Name)
 	}
+	ctx, span := feotel.StartSpan(ctx, "hadron.step.human_gate")
+	span.SetAttributes(
+		attribute.String("hadron.section", section),
+		attribute.String("hadron.step.name", step.Name),
+		attribute.String("hadron.run.id", r.runID),
+		attribute.String("hadron.workspace.id", r.workspaceID),
+		attribute.Int("hadron.human_gate.timeout_seconds", step.HumanGate.TimeoutSeconds),
+	)
+	defer span.End()
 	gate := step.HumanGate
 	gateID := fmt.Sprintf("gate-%s-%s-%d", r.runID, safeGateIDPart(step.Name), time.Now().UTC().UnixNano())
 	timeout := time.Duration(gate.TimeoutSeconds) * time.Second
@@ -37,8 +49,10 @@ func (r *runExecution) executeHumanGateStep(ctx context.Context, section string,
 		UpdatedAt:   time.Now().UTC(),
 		ExpiresAt:   sql.NullString{String: expiresAt.Format(time.RFC3339), Valid: true},
 	}); err != nil {
+		span.RecordError(err)
 		return err
 	}
+	span.SetAttributes(attribute.String("hadron.human_gate.id", gateID))
 
 	startPayload, _ := json.Marshal(map[string]any{
 		"gate_id":         gateID,
@@ -53,15 +67,18 @@ func (r *runExecution) executeHumanGateStep(ctx context.Context, section string,
 	for time.Now().Before(deadline) {
 		rec, err := r.manager.store.GetHumanGate(ctx, gateID)
 		if err != nil {
+			span.RecordError(err)
 			r.emit(section, step.Name, "human_gate_error", err.Error())
 			return fmt.Errorf("human_gate: %w", err)
 		}
 		if rec.Status == "decided" && rec.Decision.Valid {
 			if !validHumanGateDecision(gate.Options, rec.Decision.String) {
 				err := fmt.Errorf("human_gate decision %q is not an allowed option", rec.Decision.String)
+				span.RecordError(err)
 				r.emit(section, step.Name, "human_gate_error", err.Error())
 				return err
 			}
+			span.SetAttributes(attribute.String("hadron.human_gate.decision", rec.Decision.String))
 			payload, _ := json.Marshal(map[string]any{
 				"gate_id":  gateID,
 				"decision": rec.Decision.String,
@@ -75,6 +92,7 @@ func (r *runExecution) executeHumanGateStep(ctx context.Context, section string,
 		select {
 		case <-ctx.Done():
 			timer.Stop()
+			span.RecordError(ctx.Err())
 			r.emit(section, step.Name, "human_gate_error", ctx.Err().Error())
 			return ctx.Err()
 		case <-timer.C:
@@ -82,6 +100,7 @@ func (r *runExecution) executeHumanGateStep(ctx context.Context, section string,
 	}
 	_ = r.manager.store.ExpireHumanGate(context.Background(), gateID, time.Now().UTC())
 	err := fmt.Errorf("human_gate timed out after %s", timeout)
+	span.RecordError(err)
 	r.emit(section, step.Name, "human_gate_timeout", err.Error())
 	return err
 }

@@ -76,8 +76,8 @@ export function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-xl font-semibold text-foreground tracking-tight">Overview</div>
-          <div className="text-sm text-muted-foreground">Last 24 hours</div>
+          <div className="text-xl font-semibold text-foreground tracking-tight">Operations Overview</div>
+          <div className="text-sm text-muted-foreground">Run health and recent activity</div>
         </div>
         <Button variant="ghost" onClick={refresh} title="Refresh (R)">
           <RefreshCw size={14} />

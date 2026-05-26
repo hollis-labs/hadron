@@ -112,7 +112,13 @@ func runServe(args []string) error {
 
 	// Initialize OpenTelemetry tracing.
 	otelCtx := context.Background()
-	otelShutdown, otelErr := feotel.Init(otelCtx, feotel.WithServiceName("hadron"))
+	otelShutdown, otelErr := feotel.Init(
+		otelCtx,
+		feotel.WithServiceName("hadron"),
+		feotel.WithServiceVersion(version),
+		feotel.WithServiceNamespace("hollis"),
+		feotel.WithEnvironment(hadronEnvironment()),
+	)
 	if otelErr != nil {
 		log.Printf("warning: OTel init failed: %v", otelErr)
 	} else {
@@ -304,6 +310,15 @@ func runMCP(args []string) error {
 	defer stop()
 
 	return adapter.Run(ctx)
+}
+
+func hadronEnvironment() string {
+	for _, key := range []string{"HOLLIS_ENV", "APP_ENV", "ENV"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return "development"
 }
 
 func externalMCPServers(sett *settings.Settings) map[string]mcpadapter.ExternalServerConfig {
