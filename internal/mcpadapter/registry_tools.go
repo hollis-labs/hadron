@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/registry"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -36,11 +37,13 @@ func registerRegistryTools(s *server.MCPServer, reg *registry.Registry) {
 	s.AddTool(mcp.NewTool("hadron_registry_search",
 		mcp.WithDescription("Search the blueprint registry by keyword (matches name, slug, description, tags)."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		query := strings.TrimSpace(req.GetString("query", ""))
 		if query == "" {
 			return toolError("validation_error", "query is required"), nil
 		}
+		limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
 		entries, err := reg.Search(query)
 		if err != nil {
 			return toolError("internal_error", err.Error()), nil
@@ -58,7 +61,9 @@ func registerRegistryTools(s *server.MCPServer, reg *registry.Registry) {
 				"indexed_at":  e.IndexedAt,
 			})
 		}
-		return toolJSON(map[string]any{"items": items, "count": len(items)}), nil
+		env := budget.Apply(items, budget.Config{Limit: limit},
+			"%d matches found. Narrow the query or use hadron_registry_show with a specific name for full details.")
+		return mcp.NewToolResultText(budget.ToolJSON(env)), nil
 	})
 
 	s.AddTool(mcp.NewTool("hadron_registry_show",
@@ -88,8 +93,10 @@ func registerRegistryTools(s *server.MCPServer, reg *registry.Registry) {
 	})
 
 	s.AddTool(mcp.NewTool("hadron_registry_list",
-		mcp.WithDescription("List all blueprints in the local registry."),
+		mcp.WithDescription("List blueprints in the local registry. Use hadron_registry_search for keyword lookups on a large registry."),
+		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
 		entries, err := reg.List()
 		if err != nil {
 			return toolError("internal_error", err.Error()), nil
@@ -103,6 +110,8 @@ func registerRegistryTools(s *server.MCPServer, reg *registry.Registry) {
 				"indexed_at": e.IndexedAt,
 			})
 		}
-		return toolJSON(map[string]any{"items": items, "count": len(items)}), nil
+		env := budget.Apply(items, budget.Config{Limit: limit},
+			"%d blueprints registered. Use hadron_registry_search to narrow, or hadron_registry_show for full details on one entry.")
+		return mcp.NewToolResultText(budget.ToolJSON(env)), nil
 	})
 }
