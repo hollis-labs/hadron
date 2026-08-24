@@ -478,6 +478,9 @@ func (s *WorkflowStateStore) loadWorkflowRecovery(ctx context.Context, query wor
 		if node.Status == workflowruntime.NodeReady {
 			result.Ready = append(result.Ready, node)
 		}
+		if node.Status == workflowruntime.NodeRunning {
+			result.Running = append(result.Running, node)
+		}
 		if node.Status == workflowruntime.NodeWaiting {
 			result.Waiting = append(result.Waiting, node)
 		}
@@ -494,16 +497,36 @@ func (s *WorkflowStateStore) loadWorkflowRecovery(ctx context.Context, query wor
 		return result, fmt.Errorf("recover workflow nodes: %w", err)
 	}
 	_ = nodeRows.Close()
+	openWaits, waitErr := s.RecoverOpenWaits(ctx, workflowruntime.OpenWaitQuery{RunID: query.RunID})
+	if waitErr != nil {
+		return result, waitErr
+	}
+	for _, wait := range openWaits {
+		due := workflowNextWaitAction(wait)
+		if !due.IsZero() && !due.After(query.Now) {
+			result.DueTimers = append(result.DueTimers, wait)
+		}
+	}
 
 	sortWorkflowRecoveryNodes(result.Ready)
+	sortWorkflowRecoveryNodes(result.Running)
 	sortWorkflowRecoveryNodes(result.Waiting)
 	sortWorkflowRecoveryNodes(result.Leased)
 	sortWorkflowRecoveryNodes(result.ExpiredLeases)
+	sort.Slice(result.DueTimers, func(i, j int) bool {
+		left, right := workflowNextWaitAction(result.DueTimers[i]), workflowNextWaitAction(result.DueTimers[j])
+		if !left.Equal(right) {
+			return left.Before(right)
+		}
+		return result.DueTimers[i].Ref.ID < result.DueTimers[j].Ref.ID
+	})
 	result.ActiveRuns = limitWorkflowRecovery(result.ActiveRuns, query.Limit)
 	result.Ready = limitWorkflowRecovery(result.Ready, query.Limit)
+	result.Running = limitWorkflowRecovery(result.Running, query.Limit)
 	result.Waiting = limitWorkflowRecovery(result.Waiting, query.Limit)
 	result.Leased = limitWorkflowRecovery(result.Leased, query.Limit)
 	result.ExpiredLeases = limitWorkflowRecovery(result.ExpiredLeases, query.Limit)
+	result.DueTimers = limitWorkflowRecovery(result.DueTimers, query.Limit)
 	return result, nil
 }
 

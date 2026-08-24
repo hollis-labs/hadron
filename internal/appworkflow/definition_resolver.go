@@ -163,6 +163,20 @@ func (r *DefinitionResolver) Verifiers() verification.Registry {
 	return r.verifiers
 }
 
+// RecoveryDependencyOptions returns the resolver's frozen dependency
+// extractor catalog. The map is copied so recovery and callers cannot mutate
+// the compiler semantics retained by the resolver.
+func (r *DefinitionResolver) RecoveryDependencyOptions() compile.DependencyOptions {
+	if r == nil {
+		return compile.DependencyOptions{}
+	}
+	extractors := make(map[string]compile.VerificationExpressionExtractor, len(r.dependencies.VerificationExtractors))
+	for name, extractor := range r.dependencies.VerificationExtractors {
+		extractors[name] = extractor
+	}
+	return compile.DependencyOptions{VerificationExtractors: extractors}
+}
+
 // ResolveSource authorizes and resolves exact source bytes without compiling.
 func (r *DefinitionResolver) ResolveSource(ctx context.Context, requested graph.DefinitionRef) (ResolvedSource, error) {
 	requested, err := r.authorizeRequested(ctx, requested)

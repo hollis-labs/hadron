@@ -76,6 +76,112 @@ func TestHostGraphNativeStartInspectExplainReplayAndActivation(t *testing.T) {
 	}
 }
 
+func TestPinnedRecoveryPlanFollowsReplayOfReplayAcrossSQLiteRestart(t *testing.T) {
+	fixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, compilePinnedReplayHostPlan(t))
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+	request := fixture.startRequest("replay-root", "replay-root-start", "user:replay")
+	started, startErr := fixture.host.StartRun(authenticatedContext(t.Context(), "user:replay"), request)
+	if startErr != nil || started.Run == nil {
+		t.Fatalf("StartRun = %#v, %v", started, startErr)
+	}
+	nodeID := fixture.plan.Graph.Nodes[0].ID
+	rootNode, loadErr := fixture.state.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: request.RunID, NodeID: nodeID})
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if _, err := fixture.state.TransitionNode(t.Context(), workflowruntime.NodeTransitionRequest{InvocationID: rootNode.ID, ExpectedGeneration: rootNode.Generation, To: workflowruntime.NodeSkipped, At: fixture.now.Add(time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	rootRun, _ := fixture.state.LoadRun(t.Context(), request.RunID)
+	if _, err := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: rootRun.ID, ExpectedGeneration: rootRun.Generation, To: workflowruntime.RunSucceeded, At: fixture.now.Add(2 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	registry := stepkind.NewRegistry()
+	if err := registry.Register(transform.New()); err != nil {
+		t.Fatal(err)
+	}
+	plans := appworkflow.PinnedRecoveryPlanSource{Roots: fixture.journal, Children: fixture.journal, State: fixture.state, Replays: fixture.state}
+	replay := workflowruntime.ReplayService{Store: fixture.state, Replay: fixture.state, Inputs: fixture.state, Control: fixture.state, Plans: plans, Registry: registry}
+	first, replayErr := replay.Rerun(t.Context(), workflowruntime.ReplayRequest{SourceRunID: request.RunID, RunID: "replay-one", FromNodeID: nodeID, IdempotencyKey: "replay-one", At: fixture.now.Add(3 * time.Second)})
+	if replayErr != nil || first.Outcome != workflowruntime.IdempotencyApplied {
+		t.Fatalf("first replay = %#v, %v", first, replayErr)
+	}
+	firstNode, _ := fixture.state.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: first.Run.ID, NodeID: nodeID})
+	if _, err := fixture.state.TransitionNode(t.Context(), workflowruntime.NodeTransitionRequest{InvocationID: firstNode.ID, ExpectedGeneration: firstNode.Generation, To: workflowruntime.NodeSkipped, At: fixture.now.Add(4 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	firstRun, _ := fixture.state.LoadRun(t.Context(), first.Run.ID)
+	if _, err := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: firstRun.ID, ExpectedGeneration: firstRun.Generation, To: workflowruntime.RunSucceeded, At: fixture.now.Add(5 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	second, replayErr := replay.Rerun(t.Context(), workflowruntime.ReplayRequest{SourceRunID: first.Run.ID, RunID: "replay-two", FromNodeID: nodeID, IdempotencyKey: "replay-two", At: fixture.now.Add(6 * time.Second)})
+	if replayErr != nil || second.Outcome != workflowruntime.IdempotencyApplied {
+		t.Fatalf("replay of replay = %#v, %v", second, replayErr)
+	}
+	if _, err := fixture.journal.LoadStart(t.Context(), second.Run.ID); !errors.Is(err, workflowruntime.ErrNotFound) {
+		t.Fatalf("replay target unexpectedly has root start record: %v", err)
+	}
+	if _, err := fixture.journal.LoadChildRunRequest(t.Context(), second.Run.ID); !errors.Is(err, workflowruntime.ErrNotFound) {
+		t.Fatalf("replay target unexpectedly has child start record: %v", err)
+	}
+	var databasePath string
+	if err := fixture.store.DB().QueryRow(`SELECT file FROM pragma_database_list WHERE name = 'main'`).Scan(&databasePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.host.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopenedStore, openErr := persistence.Open(databasePath)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	t.Cleanup(func() { _ = reopenedStore.Close() })
+	reopenedState, stateErr := persistence.NewWorkflowStateStore(reopenedStore)
+	if stateErr != nil {
+		t.Fatal(stateErr)
+	}
+	reopenedJournal, err := persistence.NewWorkflowHostStore(reopenedStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedPlans := appworkflow.PinnedRecoveryPlanSource{Roots: reopenedJournal, Children: reopenedJournal, State: reopenedState, Replays: reopenedState}
+	secondRun, err := reopenedState.LoadRun(t.Context(), second.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := reopenedPlans.LoadRecoveryPlan(t.Context(), secondRun)
+	if err != nil || pinned.Ref != secondRun.Plan || pinned.Plan.Graph.ID != fixture.plan.Graph.ID {
+		t.Fatalf("reopened pinned replay plan = %#v, %v", pinned, err)
+	}
+	explained, err := (workflowruntime.ExplainService{Store: reopenedState, Control: reopenedState, Replay: reopenedState, Plans: reopenedPlans}).Explain(t.Context(), second.Run.ID, fixture.now.Add(7*time.Second))
+	if err != nil || explained.Replay == nil || explained.Replay.SourceRunID != first.Run.ID || len(explained.Invocations) != 1 {
+		t.Fatalf("reopened replay explanation = %#v, %v", explained, err)
+	}
+
+	cycle := replayPlanOverride{ReplayStore: reopenedState, provenance: workflowruntime.ReplayProvenance{RunID: second.Run.ID, SourceRunID: second.Run.ID, FromNodeID: nodeID, PlanDigest: secondRun.Plan.Digest, IdempotencyKey: "cycle", CreatedAt: fixture.now}}
+	cyclePlans := reopenedPlans
+	cyclePlans.Replays = cycle
+	if _, err := cyclePlans.LoadRecoveryPlan(t.Context(), secondRun); !errors.Is(err, appworkflow.ErrInvalidHost) {
+		t.Fatalf("replay provenance cycle = %v", err)
+	}
+	differentPlan := workflowruntime.PlanRef{ID: "other", Version: "v1", Digest: values.SHA256Digest([]byte("other")), SchemaVersion: secondRun.Plan.SchemaVersion}
+	if _, _, err := reopenedState.CreateRun(t.Context(), workflowruntime.CreateRunRequest{ID: "other-source", Plan: differentPlan, Status: workflowruntime.RunPending, StartIdempotencyKey: "other-source", CreatedAt: fixture.now}); err != nil {
+		t.Fatal(err)
+	}
+	mismatch := replayPlanOverride{ReplayStore: reopenedState, provenance: workflowruntime.ReplayProvenance{RunID: second.Run.ID, SourceRunID: "other-source", FromNodeID: nodeID, PlanDigest: secondRun.Plan.Digest, IdempotencyKey: "mismatch", CreatedAt: fixture.now}}
+	mismatchPlans := reopenedPlans
+	mismatchPlans.Replays = mismatch
+	if _, err := mismatchPlans.LoadRecoveryPlan(t.Context(), secondRun); !errors.Is(err, appworkflow.ErrInvalidHost) {
+		t.Fatalf("replay source-plan mismatch = %v", err)
+	}
+}
+
 func TestHostAuthenticatesBeforeResolvingFirstStart(t *testing.T) {
 	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
 	if err := fixture.host.Start(t.Context()); err != nil {
@@ -560,23 +666,8 @@ func TestHostFinalizerCancellationFailsClosedWithoutControlFlowStore(t *testing.
 		Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now }), RecoveryInterval: time.Hour,
 		ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := host.Start(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
-	request := fixture.startRequest("run-missing-control", "start-missing-control", "test")
-	if _, err := host.StartRun(t.Context(), request); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := host.CancelRun(t.Context(), appworkflow.CancelRunRequest{RunID: request.RunID, IdempotencyKey: "cancel-missing-control"}); !errors.Is(err, appworkflow.ErrInvalidHost) {
-		t.Fatalf("missing ControlFlowStore cancellation = %v", err)
-	}
-	run, _ := fixture.state.LoadRun(t.Context(), request.RunID)
-	if run.Status != workflowruntime.RunRunning {
-		t.Fatalf("missing-control cancellation mutated run = %#v", run)
+	if host != nil || !errors.Is(err, appworkflow.ErrInvalidHost) {
+		t.Fatalf("missing recovery/control stores Host = %#v, %v", host, err)
 	}
 }
 
@@ -651,7 +742,7 @@ func TestHostCancellationLoadsPinnedChildStartGraphAndPreservesChildCleanup(t *t
 
 func TestHostCancellationRefreshesEntireTreeAfterCASReachabilityChange(t *testing.T) {
 	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
-	state := &injectTreeCASStore{StateStore: fixture.state, ControlFlowStore: fixture.state}
+	state := &injectTreeCASStore{StateStore: fixture.state, ControlFlowStore: fixture.state, RecoveryStore: fixture.state, NodeInputStore: fixture.state, RunPolicyStore: fixture.state}
 	host, hostErr := appworkflow.New(appworkflow.Options{
 		State: state, Journal: fixture.journal, Definitions: definitionProvider{plan: fixture.plan},
 		Identity: identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
@@ -884,7 +975,7 @@ func TestHostRestartMaterializesPendingChildBeforeCancellationTree(t *testing.T)
 		t.Fatalf("recovered child intent = %#v, %v", intent, err)
 	}
 	cleanup, err := fixture.state.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: childRequest.ChildRunID, NodeID: "cleanup"})
-	if err != nil || cleanup.Status != workflowruntime.NodePending {
+	if err != nil || cleanup.Status != workflowruntime.NodeReady || cleanup.Inputs == nil {
 		t.Fatalf("preserved child cleanup = %#v, %v", cleanup, err)
 	}
 	pending, err := fixture.journal.ListPendingCancellations(t.Context(), 0)
@@ -895,7 +986,7 @@ func TestHostRestartMaterializesPendingChildBeforeCancellationTree(t *testing.T)
 
 func TestHostCancellationBoundsCASChurnAndLeavesRecoveryWork(t *testing.T) {
 	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
-	churning := &alwaysCASStateStore{StateStore: fixture.state}
+	churning := &alwaysCASStateStore{StateStore: fixture.state, ControlFlowStore: fixture.state, RecoveryStore: fixture.state, NodeInputStore: fixture.state, RunPolicyStore: fixture.state}
 	identity := identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
 		principal, _ := ctx.Value(authenticatedPrincipalKey{}).(string)
 		return hoststate.IdentityBinding{Principal: principal, SourceAuthority: request.SourceAuthority, Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
@@ -1226,6 +1317,22 @@ func seedRunningCallParent(t *testing.T, fixture *hostFixture) workflowruntime.S
 	if _, _, err := workflowruntime.StartBoundRun(t.Context(), fixture.state, *bound.Run, "call-parent-start"); err != nil {
 		t.Fatal(err)
 	}
+	identity := hoststate.IdentityBinding{Principal: "seed", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}
+	facts, err := policyFactsForSeed(bound.Run.Plan, bound.Run.ID, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := hoststate.StartRecord{Run: *bound.Run, Plan: *fixture.plan, Requested: fixture.plan.Definition, StartKey: "call-parent-start", RequestDigest: values.SHA256Digest([]byte("call-parent-request")), CallerInputHash: values.SHA256Digest([]byte("call-parent-input")), Identity: identity, Facts: facts, Decision: hoststate.PolicyDecision{ID: "call-parent-decision", RunID: bound.Run.ID, Operation: "start", Outcome: hoststate.PolicyAllow, Reason: "seed", DecidedAt: fixture.now}, RecordedAt: fixture.now}
+	start, _, err := fixture.journal.RecordStart(t.Context(), record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []hoststate.StartPhase{hoststate.StartRunCreated, hoststate.StartNodesMaterialized, hoststate.StartRunning} {
+		start, err = fixture.journal.AdvanceStart(t.Context(), hoststate.AdvanceStartRequest{RunID: bound.Run.ID, ExpectedGeneration: start.Generation, From: start.Phase, To: phase, At: fixture.now})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	run, err := fixture.state.LoadRun(t.Context(), bound.Run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -1234,7 +1341,7 @@ func seedRunningCallParent(t *testing.T, fixture *hostFixture) workflowruntime.S
 		t.Fatal(transitionErr)
 	}
 	inputs := bound.Run.InputsRef
-	node, err := fixture.state.CreateNodeInvocation(t.Context(), workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{ID: workflowruntime.NodeInvocationID{RunID: run.ID, NodeID: "call"}, Status: workflowruntime.NodePending, Inputs: &inputs, CreatedAt: fixture.now, UpdatedAt: fixture.now}})
+	node, err := fixture.state.CreateNodeInvocation(t.Context(), workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{ID: workflowruntime.NodeInvocationID{RunID: run.ID, NodeID: "echo"}, Status: workflowruntime.NodePending, Inputs: &inputs, CreatedAt: fixture.now, UpdatedAt: fixture.now}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1250,7 +1357,7 @@ func seedRunningCallParent(t *testing.T, fixture *hostFixture) workflowruntime.S
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: node.ID, ExpectedNodeGeneration: current.Generation, Claim: workflowruntime.ClaimProof{Owner: claimed.Lease.Owner, Token: claimed.Lease.Token, Generation: claimed.Lease.Generation}, Executor: workflowruntime.ExecutorMetadata{Kind: "call", Version: "v1", Target: "local"}, At: fixture.now})
+	started, err := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: node.ID, ExpectedNodeGeneration: current.Generation, Claim: workflowruntime.ClaimProof{Owner: claimed.Lease.Owner, Token: claimed.Lease.Token, Generation: claimed.Lease.Generation}, Executor: workflowruntime.ExecutorMetadata{Kind: transform.Name, Version: transform.Version, Target: "local"}, At: fixture.now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1259,12 +1366,16 @@ func seedRunningCallParent(t *testing.T, fixture *hostFixture) workflowruntime.S
 
 func childRecoveryRequest(t *testing.T, plan *workflowcompile.ExecutionPlan, parent workflowruntime.NodeInvocationID) calladapter.ChildRunRequest {
 	t.Helper()
-	provenance := plan.Provenance
-	provenance.Digest = plan.Digest
-	definition := graph.DefinitionRef{Authority: provenance.Authority, Kind: "workflow", ID: plan.ID, Locator: provenance.Locator, Version: plan.Graph.Version, Digest: plan.Digest, Provenance: &provenance}
-	planRef := workflowruntime.PlanRef{ID: plan.ID, Version: plan.Graph.Version, Digest: plan.Digest, SchemaVersion: plan.SchemaVersion}
+	childDigest, err := workflowcompile.GraphDigest(plan.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenance := plan.Graph.Provenance
+	provenance.Digest = childDigest
+	definition := graph.DefinitionRef{Authority: provenance.Authority, Kind: "workflow", ID: plan.ID, Locator: provenance.Locator, Version: plan.Graph.Version, Digest: childDigest, Provenance: &provenance}
+	planRef := workflowruntime.PlanRef{ID: plan.ID, Version: plan.Graph.Version, Digest: childDigest, SchemaVersion: plan.SchemaVersion}
 	resolvedGraph := plan.Graph
-	resolvedGraph.Digest = plan.Digest
+	resolvedGraph.Digest = childDigest
 	resolvedGraph.Provenance = provenance
 	rootDigest := values.SHA256Digest([]byte("recovery-root"))
 	root := graph.DefinitionRef{Authority: "test", Kind: "workflow", ID: "recovery-root", Version: "v1", Digest: rootDigest}
@@ -1286,6 +1397,15 @@ type hostAttemptCancelerFunc func(context.Context, workflowruntime.AttemptSnapsh
 
 func (f hostAttemptCancelerFunc) CancelAttempt(ctx context.Context, attempt workflowruntime.AttemptSnapshot) error {
 	return f(ctx, attempt)
+}
+
+type replayPlanOverride struct {
+	workflowruntime.ReplayStore
+	provenance workflowruntime.ReplayProvenance
+}
+
+func (s replayPlanOverride) LoadReplayProvenance(context.Context, workflowruntime.RunID) (workflowruntime.ReplayProvenance, error) {
+	return s.provenance, nil
 }
 
 func authenticatedContext(ctx context.Context, principal string) context.Context {
@@ -1316,7 +1436,35 @@ steps:
 	if result.Plan == nil || len(result.Diagnostics) != 0 {
 		t.Fatalf("Compile = %#v", result)
 	}
-	return result.Plan
+	return inferHostPlan(t, result.Plan)
+}
+
+func compilePinnedReplayHostPlan(t *testing.T) *workflowcompile.ExecutionPlan {
+	t.Helper()
+	source := workflowcompile.LoadBytes("host-pinned-replay.workflow.yaml", []byte(`workflow:
+  name: Host Pinned Replay Fixture
+  version: v1
+inputs:
+  - name: message
+    type: string
+    required: true
+steps:
+  - name: Echo
+    kind_version: v1
+    transform:
+      result: inputs.message
+    with:
+      message: inputs.message
+    effects: [compute]
+`))
+	if source.Source == nil || len(source.Diagnostics) != 0 {
+		t.Fatalf("LoadBytes pinned replay = %#v", source)
+	}
+	result := workflowcompile.Compile(source.Source)
+	if result.Plan == nil || len(result.Diagnostics) != 0 {
+		t.Fatalf("Compile pinned replay = %#v", result)
+	}
+	return inferHostPlan(t, result.Plan)
 }
 
 func compileFinalizerHostPlan(t *testing.T) *workflowcompile.ExecutionPlan {
@@ -1346,7 +1494,7 @@ finally:
 	if result.Plan == nil || len(result.Diagnostics) != 0 {
 		t.Fatalf("Compile finalizer = %#v", result)
 	}
-	return result.Plan
+	return inferHostPlan(t, result.Plan)
 }
 
 func compileControlRoutePlan(t *testing.T) *workflowcompile.ExecutionPlan {
@@ -1387,6 +1535,15 @@ steps:
 	result := workflowcompile.Compile(source.Source)
 	if result.Plan == nil || len(result.Diagnostics) != 0 {
 		t.Fatalf("Compile = %#v", result)
+	}
+	return inferHostPlan(t, result.Plan)
+}
+
+func inferHostPlan(t *testing.T, plan *workflowcompile.ExecutionPlan) *workflowcompile.ExecutionPlan {
+	t.Helper()
+	result := workflowcompile.InferValueDependencies(plan, workflowcompile.DependencyOptions{})
+	if result.Plan == nil || len(result.Diagnostics) != 0 {
+		t.Fatalf("InferValueDependencies = %#v", result)
 	}
 	return result.Plan
 }
@@ -1475,6 +1632,10 @@ func (f identityProviderFunc) BindIdentity(ctx context.Context, request appworkf
 
 type alwaysCASStateStore struct {
 	workflowruntime.StateStore
+	workflowruntime.ControlFlowStore
+	workflowruntime.RecoveryStore
+	workflowruntime.NodeInputStore
+	workflowruntime.RunPolicyStore
 	calls atomic.Int32
 }
 
@@ -1483,6 +1644,9 @@ type stateStoreOnly struct{ workflowruntime.StateStore }
 type injectTreeCASStore struct {
 	workflowruntime.StateStore
 	workflowruntime.ControlFlowStore
+	workflowruntime.RecoveryStore
+	workflowruntime.NodeInputStore
+	workflowruntime.RunPolicyStore
 	inject func() error
 	calls  atomic.Int32
 }
@@ -1548,6 +1712,11 @@ func (j *differentPlanPolicyJournal) RecordPolicyEvaluation(_ context.Context, e
 func (s *alwaysCASStateStore) RequestRunCancellation(_ context.Context, request workflowruntime.RequestRunCancellationRequest) (workflowruntime.RequestRunCancellationResult, error) {
 	s.calls.Add(1)
 	return workflowruntime.RequestRunCancellationResult{}, &workflowruntime.CASMismatchError{Resource: "test cancellation churn", Expected: request.ExpectedGeneration, Actual: request.ExpectedGeneration + 1}
+}
+
+func (s *alwaysCASStateStore) RequestRunCancellationWithFinalizers(_ context.Context, request workflowruntime.RequestRunCancellationWithFinalizersRequest) (workflowruntime.RequestRunCancellationWithFinalizersResult, error) {
+	s.calls.Add(1)
+	return workflowruntime.RequestRunCancellationWithFinalizersResult{}, &workflowruntime.CASMismatchError{Resource: "test cancellation-tree churn", Expected: request.Cancellation.ExpectedGeneration, Actual: request.Cancellation.ExpectedGeneration + 1}
 }
 
 type childMaterializerFunc func(context.Context, calladapter.ChildRunRequest) error

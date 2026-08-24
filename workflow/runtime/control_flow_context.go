@@ -19,6 +19,16 @@ func BuildExpressionContext(ctx context.Context, store StateStore, control Contr
 		return values.ExpressionContext{}, fmt.Errorf("%w: context and state store are required", ErrInvalidControlFlow)
 	}
 	result := values.ExpressionContext{Steps: make(map[string]values.StepContext, len(workflow.Nodes))}
+	run, err := store.LoadRun(ctx, runID)
+	if err != nil {
+		return values.ExpressionContext{}, err
+	}
+	if run.Inputs != nil {
+		result.Inputs, err = store.LoadValues(ctx, *run.Inputs)
+		if err != nil {
+			return values.ExpressionContext{}, err
+		}
+	}
 	for _, definition := range workflow.Nodes {
 		id := NodeInvocationID{RunID: runID, NodeID: definition.ID}
 		node, err := store.LoadNodeInvocation(ctx, id)
@@ -175,23 +185,31 @@ type ProgressControlNodeRequest struct {
 	At                time.Time
 }
 
-// ProgressControlNode applies a persisted switch/catch selection before normal
-// readiness. An unselected route is durably skipped; a selected catch source is
-// success-equivalent only for its handler and retains its typed error binding.
-func (c *ControlFlowCoordinator) ProgressControlNode(ctx context.Context, request ProgressControlNodeRequest) (ProgressNodeResult, error) {
+type ControlNodePreview struct {
+	Target       graph.Node
+	Dependencies []DependencyRef
+	Context      values.ExpressionContext
+	RouteOwned   bool
+	Selected     bool
+	OwnerIDs     []NodeInvocationID
+}
+
+// PreviewControlNode reconstructs the authoritative route decision set and
+// catch locals without changing lifecycle state. Drivers use it to determine
+// eligibility before persisting node-local inputs.
+func (c *ControlFlowCoordinator) PreviewControlNode(ctx context.Context, request ProgressControlNodeRequest) (ControlNodePreview, error) {
 	if err := c.validate(ctx); err != nil {
-		return ProgressNodeResult{}, err
+		return ControlNodePreview{}, err
 	}
-	var target graph.Node
-	found := false
+	var preview ControlNodePreview
 	for _, node := range request.Graph.Nodes {
 		if node.ID == request.InvocationID.NodeID {
-			target, found = node, true
+			preview.Target = node
 			break
 		}
 	}
-	if !found {
-		return ProgressNodeResult{}, fmt.Errorf("%w: target node is absent from graph", ErrInvalidControlFlow)
+	if preview.Target.ID == "" {
+		return ControlNodePreview{}, fmt.Errorf("%w: target node is absent from graph", ErrInvalidControlFlow)
 	}
 	type owner struct {
 		source graph.Node
@@ -201,107 +219,116 @@ func (c *ControlFlowCoordinator) ProgressControlNode(ctx context.Context, reques
 	for _, source := range request.Graph.Nodes {
 		for _, rule := range source.Catch {
 			for _, id := range rule.Targets {
-				if id == target.ID {
-					routes = append(routes, owner{source: source, kind: ControlCatch})
+				if id == preview.Target.ID {
+					routes = append(routes, owner{source, ControlCatch})
 				}
 			}
 		}
 		if source.Switch != nil {
 			for _, arm := range source.Switch.Arms {
 				for _, id := range arm.Targets {
-					if id == target.ID {
-						routes = append(routes, owner{source: source, kind: ControlSwitch})
+					if id == preview.Target.ID {
+						routes = append(routes, owner{source, ControlSwitch})
 					}
 				}
 			}
 			for _, id := range source.Switch.Default {
-				if id == target.ID {
-					routes = append(routes, owner{source: source, kind: ControlSwitch})
+				if id == preview.Target.ID {
+					routes = append(routes, owner{source, ControlSwitch})
 				}
 			}
 		}
 	}
-	dependencies := make([]DependencyRef, 0, len(request.Dependencies)+len(routes))
+	preview.Context = request.ExpressionContext
 	for _, dependency := range request.Dependencies {
 		if dependency.InvocationID.RunID != request.InvocationID.RunID {
-			return ProgressNodeResult{}, fmt.Errorf("%w: route dependency belongs to another run", ErrInvalidControlFlow)
+			return ControlNodePreview{}, fmt.Errorf("%w: route dependency belongs to another run", ErrInvalidControlFlow)
 		}
-		dependencies = mergeControlDependency(dependencies, dependency)
+		preview.Dependencies = mergeControlDependency(preview.Dependencies, dependency)
 	}
-	if len(routes) != 0 {
-		sort.Slice(routes, func(i, j int) bool {
-			if routes[i].source.ID != routes[j].source.ID {
-				return routes[i].source.ID < routes[j].source.ID
-			}
-			return routes[i].kind < routes[j].kind
-		})
-		uniqueRoutes := routes[:0]
-		for _, route := range routes {
-			if len(uniqueRoutes) == 0 || uniqueRoutes[len(uniqueRoutes)-1].source.ID != route.source.ID || uniqueRoutes[len(uniqueRoutes)-1].kind != route.kind {
-				uniqueRoutes = append(uniqueRoutes, route)
-			}
+	if len(routes) == 0 {
+		preview.Selected = true
+		return preview, nil
+	}
+	preview.RouteOwned = true
+	sort.Slice(routes, func(i, j int) bool {
+		if routes[i].source.ID != routes[j].source.ID {
+			return routes[i].source.ID < routes[j].source.ID
 		}
-		routes = uniqueRoutes
-		selectedCount := 0
-		ownerIDs := make([]NodeInvocationID, 0, len(routes))
-		for _, route := range routes {
-			sourceID := NodeInvocationID{RunID: request.InvocationID.RunID, NodeID: route.source.ID}
-			ownerIDs = appendUniqueInvocation(ownerIDs, sourceID)
-			decision, err := c.Control.LoadControlDecision(ctx, ControlDecisionID{Source: sourceID, Kind: route.kind})
-			if errors.Is(err, ErrNotFound) {
-				source, loadErr := c.Store.LoadNodeInvocation(ctx, sourceID)
-				if loadErr != nil {
-					return ProgressNodeResult{}, loadErr
-				}
-				if !source.Status.Terminal() || controlRouteApplicable(route.kind, source.Status) {
-					return ProgressNodeResult{}, ErrControlFlowPending
-				}
-				// A terminal source with an inapplicable route kind will never
-				// produce that decision. It is deterministically unselected.
-				continue
-			}
-			if err != nil {
-				return ProgressNodeResult{}, err
-			}
-			selected := false
-			for _, routeTarget := range decision.Targets {
-				if routeTarget == request.InvocationID {
-					selected = true
-					break
-				}
-			}
-			if !selected {
-				continue
-			}
-			selectedCount++
-			dependencies = mergeControlDependency(dependencies, DependencyRef{InvocationID: sourceID, FailureHandled: route.kind == ControlCatch})
-			if route.kind == ControlCatch && decision.BindAs != "" {
-				name, local, bindErr := CatchBinding(ctx, c.Store, c.Control, decision.ID)
-				if bindErr != nil {
-					return ProgressNodeResult{}, bindErr
-				}
-				if _, exists := request.ExpressionContext.Locals[name]; exists {
-					return ProgressNodeResult{}, fmt.Errorf("%w: catch binding %q shadows an existing local", ErrControlFlowConflict, name)
-				}
-				request.ExpressionContext.Locals = cloneValueSet(request.ExpressionContext.Locals)
-				if request.ExpressionContext.Locals == nil {
-					request.ExpressionContext.Locals = make(values.ValueSet)
-				}
-				for key, value := range local {
-					request.ExpressionContext.Locals[key] = value
-				}
-			}
+		return routes[i].kind < routes[j].kind
+	})
+	unique := routes[:0]
+	for _, route := range routes {
+		if len(unique) == 0 || unique[len(unique)-1].source.ID != route.source.ID || unique[len(unique)-1].kind != route.kind {
+			unique = append(unique, route)
 		}
-		if selectedCount == 0 {
-			snapshot, loadErr := c.Store.LoadNodeInvocation(ctx, request.InvocationID)
+	}
+	for _, route := range unique {
+		sourceID := NodeInvocationID{RunID: request.InvocationID.RunID, NodeID: route.source.ID}
+		preview.OwnerIDs = appendUniqueInvocation(preview.OwnerIDs, sourceID)
+		decision, err := c.Control.LoadControlDecision(ctx, ControlDecisionID{Source: sourceID, Kind: route.kind})
+		if errors.Is(err, ErrNotFound) {
+			source, loadErr := c.Store.LoadNodeInvocation(ctx, sourceID)
 			if loadErr != nil {
-				return ProgressNodeResult{}, loadErr
+				return ControlNodePreview{}, loadErr
 			}
-			reason := &BlockedReason{Code: "control_route_not_selected", Message: "no owning control-flow route selected this node", Dependencies: ownerIDs, Details: map[string]string{"owners": fmt.Sprint(len(routes))}}
-			return NewProgressionCoordinator(c.Store, c.Evaluator).skipNode(ctx, snapshot, reason, false, false, request.At)
+			if !source.Status.Terminal() || controlRouteApplicable(route.kind, source.Status) {
+				return ControlNodePreview{}, ErrControlFlowPending
+			}
+			continue
+		}
+		if err != nil {
+			return ControlNodePreview{}, err
+		}
+		selected := false
+		for _, target := range decision.Targets {
+			if target == request.InvocationID {
+				selected = true
+				break
+			}
+		}
+		if !selected {
+			continue
+		}
+		preview.Selected = true
+		preview.Dependencies = mergeControlDependency(preview.Dependencies, DependencyRef{InvocationID: sourceID, FailureHandled: route.kind == ControlCatch})
+		if route.kind == ControlCatch && decision.BindAs != "" {
+			name, local, bindErr := CatchBinding(ctx, c.Store, c.Control, decision.ID)
+			if bindErr != nil {
+				return ControlNodePreview{}, bindErr
+			}
+			if _, exists := preview.Context.Locals[name]; exists {
+				return ControlNodePreview{}, fmt.Errorf("%w: catch binding %q shadows an existing local", ErrControlFlowConflict, name)
+			}
+			preview.Context.Locals = cloneValueSet(preview.Context.Locals)
+			if preview.Context.Locals == nil {
+				preview.Context.Locals = make(values.ValueSet)
+			}
+			for key, value := range local {
+				preview.Context.Locals[key] = value
+			}
 		}
 	}
-	return NewProgressionCoordinator(c.Store, c.Evaluator).ProgressNode(ctx, ProgressNodeRequest{InvocationID: request.InvocationID, Dependencies: dependencies, Rule: target.ReadyWhen, Predicate: target.If, ExpressionContext: request.ExpressionContext, ExpressionOptions: request.ExpressionOptions, At: request.At})
+	return preview, nil
+}
+
+// ProgressControlNode applies a persisted switch/catch selection before normal
+// readiness. An unselected route is durably skipped; a selected catch source is
+// success-equivalent only for its handler and retains its typed error binding.
+func (c *ControlFlowCoordinator) ProgressControlNode(ctx context.Context, request ProgressControlNodeRequest) (ProgressNodeResult, error) {
+	preview, err := c.PreviewControlNode(ctx, request)
+	if err != nil {
+		return ProgressNodeResult{}, err
+	}
+	if preview.RouteOwned && !preview.Selected {
+		snapshot, loadErr := c.Store.LoadNodeInvocation(ctx, request.InvocationID)
+		if loadErr != nil {
+			return ProgressNodeResult{}, loadErr
+		}
+		reason := &BlockedReason{Code: "control_route_not_selected", Message: "no owning control-flow route selected this node", Dependencies: preview.OwnerIDs, Details: map[string]string{"owners": fmt.Sprint(len(preview.OwnerIDs))}}
+		return NewProgressionCoordinator(c.Store, c.Evaluator).skipNode(ctx, snapshot, reason, false, false, request.At)
+	}
+	return NewProgressionCoordinator(c.Store, c.Evaluator).ProgressNode(ctx, ProgressNodeRequest{InvocationID: request.InvocationID, Dependencies: preview.Dependencies, Rule: preview.Target.ReadyWhen, Predicate: preview.Target.If, ExpressionContext: preview.Context, ExpressionOptions: request.ExpressionOptions, At: request.At})
 }
 
 func mergeControlDependency(dependencies []DependencyRef, incoming DependencyRef) []DependencyRef {
@@ -473,15 +500,37 @@ func strictSubset(inner, outer map[string]struct{}) bool {
 // ProgressFinally makes one finalizer eligible only after its durable scope is
 // terminal and all remote cancellation intents are resolved.
 func (c *ControlFlowCoordinator) ProgressFinally(ctx context.Context, workflow graph.Graph, invocation NodeInvocationID, expressionContext values.ExpressionContext, expressionOptions values.ExpressionOptions, at time.Time) (ProgressNodeResult, error) {
-	if err := c.validate(ctx); err != nil {
-		return ProgressNodeResult{}, err
-	}
-	intent, err := c.Control.LoadTerminalIntent(ctx, invocation.RunID)
+	preview, err := c.PreviewFinally(ctx, workflow, invocation, expressionContext)
 	if err != nil {
 		return ProgressNodeResult{}, err
 	}
+	return NewProgressionCoordinator(c.Store, c.Evaluator).ProgressNode(ctx, ProgressNodeRequest{
+		InvocationID: invocation, Dependencies: preview.Dependencies, Rule: graph.ReadyAllDone,
+		Predicate: preview.Definition.If, ExpressionContext: preview.Context, ExpressionOptions: expressionOptions, At: at,
+	})
+}
+
+// FinalizerPreview is the read-only, durable eligibility/context projection
+// shared by input binding and finalizer progression. It prevents recovery from
+// evaluating or persisting cleanup inputs before the exact scope is eligible.
+type FinalizerPreview struct {
+	Definition   graph.Node
+	Context      values.ExpressionContext
+	Dependencies []DependencyRef
+}
+
+// PreviewFinally validates terminal-intent ownership, nested ordering, and
+// cancellation reconciliation without mutating state.
+func (c *ControlFlowCoordinator) PreviewFinally(ctx context.Context, workflow graph.Graph, invocation NodeInvocationID, expressionContext values.ExpressionContext) (FinalizerPreview, error) {
+	if err := c.validate(ctx); err != nil {
+		return FinalizerPreview{}, err
+	}
+	intent, err := c.Control.LoadTerminalIntent(ctx, invocation.RunID)
+	if err != nil {
+		return FinalizerPreview{}, err
+	}
 	if intent.Status != TerminalIntentPending {
-		return ProgressNodeResult{}, fmt.Errorf("%w: terminal intent is complete", ErrControlFlowConflict)
+		return FinalizerPreview{}, fmt.Errorf("%w: terminal intent is complete", ErrControlFlowConflict)
 	}
 	var selected *FinalizerScope
 	for index := range intent.Finalizers {
@@ -491,7 +540,7 @@ func (c *ControlFlowCoordinator) ProgressFinally(ctx context.Context, workflow g
 		}
 	}
 	if selected == nil {
-		return ProgressNodeResult{}, fmt.Errorf("%w: invocation is not a declared finalizer", ErrInvalidControlFlow)
+		return FinalizerPreview{}, fmt.Errorf("%w: invocation is not a declared finalizer", ErrInvalidControlFlow)
 	}
 	var definition *graph.Node
 	for index := range workflow.Nodes {
@@ -501,10 +550,10 @@ func (c *ControlFlowCoordinator) ProgressFinally(ctx context.Context, workflow g
 		}
 	}
 	if definition == nil {
-		return ProgressNodeResult{}, fmt.Errorf("%w: declared finalizer is absent from supplied graph", ErrControlFlowConflict)
+		return FinalizerPreview{}, fmt.Errorf("%w: declared finalizer is absent from supplied graph", ErrControlFlowConflict)
 	}
 	if definition.Finally == nil {
-		return ProgressNodeResult{}, fmt.Errorf("%w: declared finalizer is ordinary in supplied graph", ErrControlFlowConflict)
+		return FinalizerPreview{}, fmt.Errorf("%w: declared finalizer is ordinary in supplied graph", ErrControlFlowConflict)
 	}
 	for _, prerequisite := range intent.Finalizers {
 		if prerequisite.Order >= selected.Order || !containsInvocation(selected.Scope, prerequisite.Invocation) {
@@ -512,37 +561,42 @@ func (c *ControlFlowCoordinator) ProgressFinally(ctx context.Context, workflow g
 		}
 		node, loadErr := c.Store.LoadNodeInvocation(ctx, prerequisite.Invocation)
 		if loadErr != nil {
-			return ProgressNodeResult{}, loadErr
+			return FinalizerPreview{}, loadErr
 		}
 		if !node.Status.Terminal() {
-			return ProgressNodeResult{}, ErrControlFlowPending
+			return FinalizerPreview{}, ErrControlFlowPending
 		}
 	}
 	pending, recoverErr := c.Store.RecoverCancellationIntents(ctx, CancellationIntentQuery{RunID: invocation.RunID})
 	if recoverErr != nil {
-		return ProgressNodeResult{}, recoverErr
+		return FinalizerPreview{}, recoverErr
 	}
 	for _, item := range pending {
 		if item.Status == CancellationPending {
-			return ProgressNodeResult{}, ErrControlFlowPending
+			return FinalizerPreview{}, ErrControlFlowPending
 		}
 	}
 	durableContext, err := BuildExpressionContext(ctx, c.Store, c.Control, workflow, invocation.RunID)
 	if err != nil {
-		return ProgressNodeResult{}, err
+		return FinalizerPreview{}, err
 	}
-	expressionContext.Steps = durableContext.Steps
+	if expressionContext.Inputs == nil {
+		expressionContext.Inputs = durableContext.Inputs
+	}
+	if expressionContext.Steps == nil {
+		expressionContext.Steps = durableContext.Steps
+	}
 	expressionContext.Run = cloneAnyMap(expressionContext.Run)
 	expressionContext.Run["status"] = string(intent.IntendedStatus)
 	expressionContext.Run["finally"] = map[string]any{"order": selected.Order, "node_id": invocation.NodeID}
 	if intent.Error != nil {
 		set, loadErr := c.Store.LoadValues(ctx, *intent.Error)
 		if loadErr != nil {
-			return ProgressNodeResult{}, loadErr
+			return FinalizerPreview{}, loadErr
 		}
 		typed, exists := set["error"]
 		if !exists || typed.Type != values.TypeObject {
-			return ProgressNodeResult{}, fmt.Errorf("%w: terminal intent error values are malformed", ErrInvalidControlFlow)
+			return FinalizerPreview{}, fmt.Errorf("%w: terminal intent error values are malformed", ErrInvalidControlFlow)
 		}
 		// Store validation guarantees a private/run-retained inline error. It
 		// remains typed at rest and is unwrapped only into the private evaluator
@@ -555,7 +609,7 @@ func (c *ControlFlowCoordinator) ProgressFinally(ctx context.Context, workflow g
 	}
 	for _, need := range definition.Needs {
 		if err := graph.ValidateID(need.Node); err != nil {
-			return ProgressNodeResult{}, fmt.Errorf("%w: finalizer need: %w", ErrInvalidControlFlow, err)
+			return FinalizerPreview{}, fmt.Errorf("%w: finalizer need: %w", ErrInvalidControlFlow, err)
 		}
 		dependencies = mergeControlDependency(dependencies, DependencyRef{InvocationID: NodeInvocationID{RunID: invocation.RunID, NodeID: need.Node}})
 	}
@@ -564,14 +618,11 @@ func (c *ControlFlowCoordinator) ProgressFinally(ctx context.Context, workflow g
 			continue
 		}
 		if err := graph.ValidateID(edge.From); err != nil {
-			return ProgressNodeResult{}, fmt.Errorf("%w: finalizer edge: %w", ErrInvalidControlFlow, err)
+			return FinalizerPreview{}, fmt.Errorf("%w: finalizer edge: %w", ErrInvalidControlFlow, err)
 		}
 		dependencies = mergeControlDependency(dependencies, DependencyRef{InvocationID: NodeInvocationID{RunID: invocation.RunID, NodeID: edge.From}})
 	}
-	return NewProgressionCoordinator(c.Store, c.Evaluator).ProgressNode(ctx, ProgressNodeRequest{
-		InvocationID: invocation, Dependencies: dependencies, Rule: graph.ReadyAllDone,
-		Predicate: definition.If, ExpressionContext: expressionContext, ExpressionOptions: expressionOptions, At: at,
-	})
+	return FinalizerPreview{Definition: *definition, Context: expressionContext, Dependencies: dependencies}, nil
 }
 
 func containsInvocation(input []NodeInvocationID, candidate NodeInvocationID) bool {

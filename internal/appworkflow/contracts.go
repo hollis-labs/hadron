@@ -178,18 +178,25 @@ type Options struct {
 	// Verifiers is the exact host verification catalog. Nil adopts a catalog
 	// exposed by Definitions when available, otherwise the deterministic core.
 	// Construction freezes implementations and specs for the Host lifetime.
-	Verifiers          verification.Registry
-	DryRun             DryRunSupport
-	Activations        workflowwait.ActivationScheduler
-	Waits              *runtime.WaitCoordinator
-	Cancellation       *runtime.CancellationCoordinator
-	RecoveryHooks      []RecoveryHook
-	ChildRuns          ChildRunMaterializer
-	Telemetry          TelemetrySink
-	Artifacts          values.ArtifactStore
-	Clock              Clock
-	RecoveryInterval   time.Duration
-	RecoveryBatchLimit int
+	Verifiers     verification.Registry
+	DryRun        DryRunSupport
+	Activations   workflowwait.ActivationScheduler
+	Waits         *runtime.WaitCoordinator
+	Cancellation  *runtime.CancellationCoordinator
+	RecoveryHooks []RecoveryHook
+	// RecoveryRepeatPolicy authorizes crash/replay repetition after the core
+	// executor effect and idempotency floors have passed. Nil keeps the
+	// extraction-safe low-effect-only default.
+	RecoveryRepeatPolicy runtime.RepeatPolicy
+	// RecoveryRetryAuthorizer may grant graph retry for consequential effects;
+	// nil preserves RetryEvaluator's fail-closed default.
+	RecoveryRetryAuthorizer runtime.RetryAuthorizer
+	ChildRuns               ChildRunMaterializer
+	Telemetry               TelemetrySink
+	Artifacts               values.ArtifactStore
+	Clock                   Clock
+	RecoveryInterval        time.Duration
+	RecoveryBatchLimit      int
 }
 
 func normalizeIdentity(binding hoststate.IdentityBinding) hoststate.IdentityBinding {

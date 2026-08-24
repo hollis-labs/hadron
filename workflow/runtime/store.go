@@ -188,9 +188,11 @@ type RecoveryQuery struct {
 type RecoverySnapshot struct {
 	ActiveRuns    []RunSnapshot
 	Ready         []NodeInvocationSnapshot
+	Running       []NodeInvocationSnapshot
 	Waiting       []NodeInvocationSnapshot
 	Leased        []NodeInvocationSnapshot
 	ExpiredLeases []NodeInvocationSnapshot
+	DueTimers     []WaitSnapshot
 }
 
 // StateStore is the high-level, extraction-ready runtime persistence contract.

@@ -44,6 +44,7 @@ type Host struct {
 	activations  workflowwait.ActivationScheduler
 	waits        *runtime.WaitCoordinator
 	cancellation *runtime.CancellationCoordinator
+	coreRecovery RecoveryHook
 	hooks        []RecoveryHook
 	childSource  ChildRunRecoverySource
 	childDefs    ChildRunDefinitionSource
@@ -84,6 +85,12 @@ func New(options Options) (*Host, error) {
 		if nilInterface(hook) {
 			return nil, fmt.Errorf("%w: recovery hook[%d] is nil", ErrInvalidHost, index)
 		}
+	}
+	if options.RecoveryRepeatPolicy != nil && nilInterface(options.RecoveryRepeatPolicy) {
+		return nil, fmt.Errorf("%w: recovery repeat policy must not be typed nil", ErrInvalidHost)
+	}
+	if options.RecoveryRetryAuthorizer != nil && nilInterface(options.RecoveryRetryAuthorizer) {
+		return nil, fmt.Errorf("%w: recovery retry authorizer must not be typed nil", ErrInvalidHost)
 	}
 	childSource, hasChildSource := options.Journal.(ChildRunRecoverySource)
 	childDefs, _ := options.Journal.(ChildRunDefinitionSource)
@@ -127,10 +134,26 @@ func New(options Options) (*Host, error) {
 		copyCoordinator.Store, copyCoordinator.Registry = options.State, registry
 		cancellation = &copyCoordinator
 	}
+	recoveryStore, recoveryOK := options.State.(runtime.RecoveryStore)
+	inputStore, inputOK := options.State.(runtime.NodeInputStore)
+	controlStore, controlOK := options.State.(runtime.ControlFlowStore)
+	policyStore, policyOK := options.State.(runtime.RunPolicyStore)
+	if !recoveryOK || nilInterface(recoveryStore) || !inputOK || nilInterface(inputStore) ||
+		!controlOK || nilInterface(controlStore) || !policyOK || nilInterface(policyStore) {
+		return nil, fmt.Errorf("%w: state must provide recovery, input-binding, control-flow, and run-policy stores", ErrInvalidHost)
+	}
+	dependencyOptions := compileDependencyOptions(options.Definitions)
+	coreRecovery := CoreRecoveryHook{Coordinator: &runtime.RecoveryCoordinator{
+		Store: options.State, Recovery: recoveryStore, Inputs: inputStore, Control: controlStore,
+		Plans: PinnedRecoveryPlanSource{Roots: options.Journal, Children: childDefs, State: options.State,
+			Replays: recoveryStore, DependencyOptions: dependencyOptions},
+		Registry: registry, Policy: options.RecoveryRepeatPolicy, RetryAuthorizer: options.RecoveryRetryAuthorizer,
+		Policies: policyStore, Waits: waits,
+	}, Limit: options.RecoveryBatchLimit}
 	return &Host{
 		state: options.State, journal: options.Journal, definitions: options.Definitions,
 		identity: options.Identity, policy: options.Policy, dryRun: options.DryRun,
-		activations: options.Activations, waits: waits, cancellation: cancellation,
+		activations: options.Activations, waits: waits, cancellation: cancellation, coreRecovery: coreRecovery,
 		hooks: append([]RecoveryHook(nil), options.RecoveryHooks...), telemetry: options.Telemetry,
 		childSource: childSource, childDefs: childDefs, childRuns: options.ChildRuns,
 		artifacts: options.Artifacts, clock: clock, registry: registry, verifiers: verifiers, dispatcher: dispatcher,
@@ -417,17 +440,21 @@ func (h *Host) recover(ctx context.Context, startup bool) error {
 			}
 		}
 	}
-	if h.waits != nil {
-		if _, err := h.waits.RecoverWaits(ctx, runtime.OpenWaitQuery{Limit: h.batchLimit}, now); err != nil {
-			return fmt.Errorf("recover waits: %w", err)
-		}
-	}
 	if h.cancellation != nil {
 		if _, failures, err := h.cancellation.Recover(ctx, runtime.CancellationIntentQuery{Limit: h.batchLimit}); err != nil {
 			return fmt.Errorf("recover cancellation: %w", err)
 		} else if len(failures) != 0 {
 			return fmt.Errorf("recover cancellation intents: %w", errors.Join(failures...))
 		}
+	}
+	// Core recovery is installed for every Host and runs after exact child and
+	// cancellation restoration but before extension hooks can observe or admit
+	// ordinary work.
+	if nilInterface(h.coreRecovery) {
+		return fmt.Errorf("recover workflow core: %w", ErrInvalidHost)
+	}
+	if err := h.coreRecovery.RecoverWorkflow(ctx, runtime.RecoverySnapshot{}, now); err != nil {
+		return fmt.Errorf("recover workflow core: %w", err)
 	}
 	snapshot, err := h.state.Recovery(ctx, runtime.RecoveryQuery{Now: now, Limit: h.batchLimit})
 	if err != nil {

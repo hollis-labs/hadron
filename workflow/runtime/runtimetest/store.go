@@ -43,6 +43,11 @@ type Store struct {
 	controlCancelTrees  map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest
 	runPolicyDecisions  map[workflowruntime.RunID]workflowruntime.RunPolicyDecisionSnapshot
 	runPolicyRequests   map[string]workflowruntime.ApplyRunFailurePolicyRequest
+	crashRecoveries     map[string]crashRecoveryRecord
+	nodeInputBindings   map[string]nodeInputBindingRecord
+	nodeInputOwners     map[workflowruntime.NodeInvocationID]string
+	replays             map[workflowruntime.RunID]workflowruntime.ReplayProvenance
+	replayKeys          map[string]replayRecord
 
 	valueSets    map[string]storedValues
 	nextValueSet uint64
@@ -139,6 +144,11 @@ func NewStore() *Store {
 		controlCancelTrees:   make(map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest),
 		runPolicyDecisions:   make(map[workflowruntime.RunID]workflowruntime.RunPolicyDecisionSnapshot),
 		runPolicyRequests:    make(map[string]workflowruntime.ApplyRunFailurePolicyRequest),
+		crashRecoveries:      make(map[string]crashRecoveryRecord),
+		nodeInputBindings:    make(map[string]nodeInputBindingRecord),
+		nodeInputOwners:      make(map[workflowruntime.NodeInvocationID]string),
+		replays:              make(map[workflowruntime.RunID]workflowruntime.ReplayProvenance),
+		replayKeys:           make(map[string]replayRecord),
 		valueSets:            make(map[string]storedValues),
 		plans:                make(map[string]workflowruntime.PlanRef),
 		events:               make(map[workflowruntime.RunID][]workflowruntime.Event),
@@ -819,6 +829,9 @@ func (s *Store) Recovery(ctx context.Context, query workflowruntime.RecoveryQuer
 		if node.Status == workflowruntime.NodeReady {
 			result.Ready = append(result.Ready, copyNode)
 		}
+		if node.Status == workflowruntime.NodeRunning {
+			result.Running = append(result.Running, copyNode)
+		}
 		if node.Status == workflowruntime.NodeWaiting {
 			result.Waiting = append(result.Waiting, copyNode)
 		}
@@ -830,16 +843,38 @@ func (s *Store) Recovery(ctx context.Context, query workflowruntime.RecoveryQuer
 			}
 		}
 	}
+	for _, wait := range s.waits {
+		if query.RunID != "" && query.RunID != wait.Invocation.RunID {
+			continue
+		}
+		if wait.Status != workflowruntime.WaitOpen {
+			continue
+		}
+		due := nextWaitAction(wait)
+		if !due.IsZero() && !due.After(query.Now) {
+			result.DueTimers = append(result.DueTimers, cloneWait(wait))
+		}
+	}
 	sort.Slice(result.ActiveRuns, func(i, j int) bool { return result.ActiveRuns[i].ID < result.ActiveRuns[j].ID })
 	sortNodes(result.Ready)
+	sortNodes(result.Running)
 	sortNodes(result.Waiting)
 	sortNodes(result.Leased)
 	sortNodes(result.ExpiredLeases)
+	sort.Slice(result.DueTimers, func(i, j int) bool {
+		left, right := nextWaitAction(result.DueTimers[i]), nextWaitAction(result.DueTimers[j])
+		if !left.Equal(right) {
+			return left.Before(right)
+		}
+		return result.DueTimers[i].Ref.ID < result.DueTimers[j].Ref.ID
+	})
 	result.ActiveRuns = limit(result.ActiveRuns, query.Limit)
 	result.Ready = limit(result.Ready, query.Limit)
+	result.Running = limit(result.Running, query.Limit)
 	result.Waiting = limit(result.Waiting, query.Limit)
 	result.Leased = limit(result.Leased, query.Limit)
 	result.ExpiredLeases = limit(result.ExpiredLeases, query.Limit)
+	result.DueTimers = limit(result.DueTimers, query.Limit)
 	return result, nil
 }
 
