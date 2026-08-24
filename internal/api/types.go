@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/hadron/internal/a2a"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
@@ -86,19 +87,36 @@ type PipelineRunner interface {
 	Start(ctx context.Context, pipelineRunID, pipelinePath, workspaceID string) error
 }
 
+// WorkflowRequestAuthenticator authenticates the HTTP request and applies the
+// caller's exposure profile to the requested operation. The returned context
+// carries authenticated facts consumed again by appworkflow.IdentityProvider;
+// handlers never synthesize a principal from request JSON.
+type WorkflowRequestAuthenticator interface {
+	AuthenticateWorkflowRequest(*http.Request, appworkflow.WorkflowAccessIntent) (context.Context, error)
+}
+
+type WorkflowRequestAuthenticatorFunc func(*http.Request, appworkflow.WorkflowAccessIntent) (context.Context, error)
+
+func (f WorkflowRequestAuthenticatorFunc) AuthenticateWorkflowRequest(request *http.Request, intent appworkflow.WorkflowAccessIntent) (context.Context, error) {
+	return f(request, intent)
+}
+
 // Dependencies groups daemon services used by the API handlers.
 type Dependencies struct {
-	Runs         RunStore
-	Schedules    ScheduleStore
-	Pipelines    PipelineStore
-	Workspaces   WorkspaceStore
-	Triggers     TriggerStore
-	HumanGates   HumanGateStore
-	Messages     MessageStore
-	Runner       Runner
-	Scheduler    Scheduler
-	Pipeline     PipelineRunner
-	BlueprintDir string
+	Runs          RunStore
+	Schedules     ScheduleStore
+	Pipelines     PipelineStore
+	Workspaces    WorkspaceStore
+	Triggers      TriggerStore
+	HumanGates    HumanGateStore
+	Messages      MessageStore
+	Runner        Runner
+	Scheduler     Scheduler
+	Pipeline      PipelineRunner
+	Workflows     appworkflow.WorkflowOperations
+	WorkflowReads appworkflow.WorkflowRunReadOperations
+	WorkflowAuth  WorkflowRequestAuthenticator
+	BlueprintDir  string
 }
 
 type Server struct {

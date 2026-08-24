@@ -41,6 +41,10 @@ func NewServer(addr string, deps Dependencies) *Server {
 	}
 
 	mux.HandleFunc("/v1/health", s.handleHealth)
+	mux.HandleFunc("/v1/workflows/validate", s.handleWorkflowValidate)
+	mux.HandleFunc("/v1/workflows/explain", s.handleWorkflowExplain)
+	mux.HandleFunc("/v1/workflows/runs", s.handleWorkflowRuns)
+	mux.HandleFunc("/v1/workflows/runs/", s.handleWorkflowRunAction)
 
 	// Workspaces
 	mux.HandleFunc("/v1/workspaces", s.handleWorkspaces)
@@ -120,7 +124,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

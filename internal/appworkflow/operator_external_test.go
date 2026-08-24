@@ -1,15 +1,19 @@
 package appworkflow_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
@@ -103,6 +107,90 @@ func TestWorkflowOperatorRunAccessIsAuthenticatedAndDelegable(t *testing.T) {
 	}
 }
 
+func TestWorkflowOperatorReadProjectionsAuthorizeBeforeRendering(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+	ctx := authenticatedContext(t.Context(), "user:owner")
+	start := fixture.startRequest("operator-read-run", "operator-read-start", "ignored")
+	if _, err := fixture.host.StartRun(ctx, start); err != nil {
+		t.Fatal(err)
+	}
+
+	inspections := 0
+	nodeID := workflowruntime.NodeInvocationID{RunID: start.RunID, NodeID: fixture.plan.Graph.Nodes[0].ID}
+	inspector := graphInspectorFunc(func(_ context.Context, query rundiagnostics.Query) (rundiagnostics.Result, error) {
+		inspections++
+		return rundiagnostics.Result{
+			Run:       rundiagnostics.RunDiagnostic{ID: query.RunID},
+			Nodes:     []rundiagnostics.NodeDiagnostic{{ID: nodeID, Wait: &rundiagnostics.WaitDiagnostic{ID: "wait-read"}}},
+			Values:    []rundiagnostics.ValueSetDiagnostic{{Roles: []string{"run.inputs"}}},
+			Events:    []workflowruntime.RenderedEvent{{RunID: query.RunID, Type: "safe.event", Masked: true}},
+			Truncated: rundiagnostics.Truncation{Attempts: true, Values: true, Events: true},
+		}, nil
+	})
+	var authorized []appworkflow.RunOperation
+	operator, err := appworkflow.NewWorkflowOperator(appworkflow.WorkflowOperatorOptions{
+		Host: fixture.host, Diagnostics: inspector,
+		Replay: replayRunnerFunc(func(context.Context, workflowruntime.ReplayRequest) (workflowruntime.BeginReplayResult, error) {
+			return workflowruntime.BeginReplayResult{}, nil
+		}),
+		RunAccess: appworkflow.RunOperationAuthorizerFunc(func(_ context.Context, request appworkflow.RunOperationAuthorization) error {
+			authorized = append(authorized, request.Operation)
+			if request.Display == nil || request.Display.RevealsPrivate() {
+				return appworkflow.ErrPolicyDenied
+			}
+			return nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := appworkflow.WorkflowRunReadRequest{RunID: start.RunID, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}}
+	waits, err := operator.ListWorkflowWaits(ctx, request)
+	if err != nil || len(waits.Waits) != 1 || !waits.Truncated {
+		t.Fatalf("waits=%#v error=%v", waits, err)
+	}
+	projectedValues, err := operator.FetchWorkflowValues(ctx, request)
+	if err != nil || len(projectedValues.Values) != 1 || !projectedValues.Truncated {
+		t.Fatalf("values=%#v error=%v", projectedValues, err)
+	}
+	events, err := operator.FetchWorkflowEvents(ctx, request)
+	if err != nil || len(events.Events) != 1 || !events.Truncated {
+		t.Fatalf("events=%#v error=%v", events, err)
+	}
+	if inspections != 3 {
+		t.Fatalf("inspections=%d", inspections)
+	}
+	request.Display.Private = values.PrivateDisplayReveal
+	for _, read := range []func() error{
+		func() error { _, readErr := operator.ListWorkflowWaits(ctx, request); return readErr },
+		func() error { _, readErr := operator.FetchWorkflowValues(ctx, request); return readErr },
+		func() error { _, readErr := operator.FetchWorkflowEvents(ctx, request); return readErr },
+	} {
+		if readErr := read(); !errors.Is(readErr, appworkflow.ErrPolicyDenied) {
+			t.Fatalf("private read error=%v", readErr)
+		}
+	}
+	if inspections != 3 {
+		t.Fatalf("unauthorized private display reached renderer: inspections=%d", inspections)
+	}
+	wantOperations := []appworkflow.RunOperation{
+		appworkflow.RunOperationWaits, appworkflow.RunOperationValues, appworkflow.RunOperationEvents,
+		appworkflow.RunOperationWaits, appworkflow.RunOperationValues, appworkflow.RunOperationEvents,
+	}
+	if len(authorized) != len(wantOperations) {
+		t.Fatalf("authorized operations=%v", authorized)
+	}
+	for index := range wantOperations {
+		if authorized[index] != wantOperations[index] {
+			t.Fatalf("authorized operations=%v", authorized)
+		}
+	}
+}
+
 func TestWorkflowOperatorValidateAndExplainDoNotAdmitRunningWork(t *testing.T) {
 	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
 	host := newOperatorHost(t, fixture, nil)
@@ -141,6 +229,58 @@ func TestWorkflowOperatorValidateAndExplainDoNotAdmitRunningWork(t *testing.T) {
 	}
 	if nodes, err := fixture.state.ListRunInvocations(t.Context(), "explain-only"); !errors.Is(err, workflowruntime.ErrNotFound) || len(nodes) != 0 {
 		t.Fatalf("dry-run nodes=%#v error=%v", nodes, err)
+	}
+}
+
+func TestWorkflowHTTPRebindsAuthenticatedContextAtAppBoundary(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	host := newOperatorHost(t, fixture, nil)
+	if err := host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
+	operator, err := appworkflow.NewWorkflowOperator(appworkflow.WorkflowOperatorOptions{
+		Host: host,
+		Diagnostics: graphInspectorFunc(func(context.Context, rundiagnostics.Query) (rundiagnostics.Result, error) {
+			return rundiagnostics.Result{}, nil
+		}),
+		Replay: replayRunnerFunc(func(context.Context, workflowruntime.ReplayRequest) (workflowruntime.BeginReplayResult, error) {
+			return workflowruntime.BeginReplayResult{}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(api.NewServer("", api.Dependencies{
+		Workflows: operator,
+		WorkflowAuth: api.WorkflowRequestAuthenticatorFunc(func(request *http.Request, _ appworkflow.WorkflowAccessIntent) (context.Context, error) {
+			return authenticatedContext(request.Context(), "user:http-authenticated"), nil
+		}),
+	}).Handler())
+	defer server.Close()
+	body, err := json.Marshal(appworkflow.ValidateWorkflowRequest{
+		Definition: fixture.plan.Definition,
+		Identity:   appworkflow.IdentityRequest{PrincipalHint: "user:forged", SourceAuthority: "forged", Attributes: map[string]string{"exposure_ref": "forged"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/v1/workflows/validate", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	var result appworkflow.ValidateWorkflowResult
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || result.Plan == nil {
+		t.Fatalf("status=%d result=%#v", response.StatusCode, result)
 	}
 }
 
@@ -190,6 +330,10 @@ func TestWorkflowOperatorResumeUsesAuthenticatedResponderNotRunOwner(t *testing.
 	if !strings.Contains(string(encoded), `"outcome":"applied"`) || !strings.Contains(string(encoded), `"id":"`+string(firstWait)+`"`) {
 		t.Fatalf("safe resume result omitted identifiers/status: %s", encoded)
 	}
+	replayed, replayErr := operator.ResumeWorkflowRun(authenticatedContext(t.Context(), "user:approver"), appworkflow.ResumeWorkflowRunRequest{RunID: "operator-resume-one", Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}, WaitID: firstWait, Correlation: "correlation-" + string(firstWait), Token: firstToken, WakeSource: workflowwait.WakeGate, Payload: payload, IdempotencyKey: "resume-one"})
+	if replayErr != nil || replayed.Outcome != workflowruntime.ResumeReplayed || replayed.Wait == nil || replayed.Wait.ID != firstWait {
+		t.Fatalf("duplicate resume=%#v error=%v", replayed, replayErr)
+	}
 
 	secondToken := "operator-resume-token-two"
 	secondWait := seedOperatorWait(t, host, fixture, waits, "operator-resume-two", "wait-operator-two", secondToken)
@@ -204,7 +348,7 @@ func TestWorkflowOperatorResumeUsesAuthenticatedResponderNotRunOwner(t *testing.
 	mu.Lock()
 	got := append([]string(nil), responders...)
 	mu.Unlock()
-	if len(got) != 2 || got[0] != "user:approver" || got[1] != "user:intruder" {
+	if len(got) != 3 || got[0] != "user:approver" || got[1] != "user:approver" || got[2] != "user:intruder" {
 		t.Fatalf("authenticated responders=%v", got)
 	}
 }

@@ -31,8 +31,42 @@ type WorkflowOperations interface {
 	RerunWorkflow(context.Context, RerunWorkflowRequest) (RerunWorkflowResult, error)
 }
 
+// WorkflowRunReadOperations extends the command surface with bounded, safe
+// projections used by HTTP and presentation clients. Implementations must
+// authorize each request before returning diagnostic data.
+type WorkflowRunReadOperations interface {
+	ListWorkflowWaits(context.Context, WorkflowRunReadRequest) (WorkflowWaitListResult, error)
+	FetchWorkflowValues(context.Context, WorkflowRunReadRequest) (WorkflowValueListResult, error)
+	FetchWorkflowEvents(context.Context, WorkflowRunReadRequest) (WorkflowEventListResult, error)
+}
+
 type RunID = workflowruntime.RunID
 type WaitID = workflowruntime.WaitID
+
+type WorkflowAccessOperation string
+
+const (
+	WorkflowAccessValidate WorkflowAccessOperation = "validate"
+	WorkflowAccessExplain  WorkflowAccessOperation = "explain"
+	WorkflowAccessRun      WorkflowAccessOperation = "run"
+	WorkflowAccessInspect  WorkflowAccessOperation = "inspect"
+	WorkflowAccessCancel   WorkflowAccessOperation = "cancel"
+	WorkflowAccessResume   WorkflowAccessOperation = "resume"
+	WorkflowAccessRerun    WorkflowAccessOperation = "rerun"
+	WorkflowAccessWaits    WorkflowAccessOperation = "list_waits"
+	WorkflowAccessValues   WorkflowAccessOperation = "fetch_values"
+	WorkflowAccessEvents   WorkflowAccessOperation = "fetch_events"
+)
+
+// WorkflowAccessIntent is the non-secret operation metadata supplied to a
+// transport authenticator/profile boundary. Authentication facts themselves
+// remain in the returned context and are rebound by Host.
+type WorkflowAccessIntent struct {
+	Operation  WorkflowAccessOperation `json:"operation"`
+	Definition *graph.DefinitionRef    `json:"definition,omitempty"`
+	RunID      workflowruntime.RunID   `json:"run_id,omitempty"`
+	Display    *values.DisplayPolicy   `json:"display,omitempty"`
+}
 
 type ValidateWorkflowRequest struct {
 	Definition graph.DefinitionRef `json:"definition"`
@@ -77,6 +111,39 @@ type InspectWorkflowRunRequest struct {
 	ActivationLimit int                   `json:"activation_limit,omitempty"`
 }
 
+type WorkflowRunReadRequest struct {
+	RunID        workflowruntime.RunID `json:"run_id"`
+	Identity     IdentityRequest       `json:"identity"`
+	Display      values.DisplayPolicy  `json:"display,omitempty"`
+	NodeLimit    int                   `json:"node_limit,omitempty"`
+	AttemptLimit int                   `json:"attempt_limit,omitempty"`
+	EventLimit   int                   `json:"event_limit,omitempty"`
+	ValueLimit   int                   `json:"value_limit,omitempty"`
+}
+
+type WorkflowWaitListItem struct {
+	NodeID workflowruntime.NodeInvocationID `json:"node_id"`
+	Wait   rundiagnostics.WaitDiagnostic    `json:"wait"`
+}
+
+type WorkflowWaitListResult struct {
+	RunID     workflowruntime.RunID  `json:"run_id"`
+	Waits     []WorkflowWaitListItem `json:"waits"`
+	Truncated bool                   `json:"truncated"`
+}
+
+type WorkflowValueListResult struct {
+	RunID     workflowruntime.RunID               `json:"run_id"`
+	Values    []rundiagnostics.ValueSetDiagnostic `json:"values"`
+	Truncated bool                                `json:"truncated"`
+}
+
+type WorkflowEventListResult struct {
+	RunID     workflowruntime.RunID           `json:"run_id"`
+	Events    []workflowruntime.RenderedEvent `json:"events"`
+	Truncated bool                            `json:"truncated"`
+}
+
 type CancelWorkflowRunRequest struct {
 	RunID          workflowruntime.RunID `json:"run_id"`
 	Identity       IdentityRequest       `json:"identity"`
@@ -102,6 +169,12 @@ const (
 	WorkflowErrorCodePolicyDenied         = "policy_denied"
 	WorkflowErrorCodeConfirmationRequired = "confirmation_required"
 	WorkflowErrorCodePinRejected          = "pin_rejected"
+	WorkflowErrorCodeInvalidRequest       = "invalid_request"
+	WorkflowErrorCodeUnauthenticated      = "unauthenticated"
+	WorkflowErrorCodeNotFound             = "not_found"
+	WorkflowErrorCodeIdempotencyConflict  = "idempotency_conflict"
+	WorkflowErrorCodeUnavailable          = "unavailable"
+	WorkflowErrorCodeInternal             = "internal_error"
 )
 
 type CancelWorkflowRunResult struct {
@@ -183,6 +256,9 @@ const (
 	RunOperationInspect RunOperation = "inspect"
 	RunOperationCancel  RunOperation = "cancel"
 	RunOperationRerun   RunOperation = "rerun"
+	RunOperationWaits   RunOperation = "list_waits"
+	RunOperationValues  RunOperation = "fetch_values"
+	RunOperationEvents  RunOperation = "fetch_events"
 )
 
 type RunOperationAuthorization struct {
@@ -280,6 +356,46 @@ func (s *WorkflowOperator) InspectWorkflowRun(ctx context.Context, request Inspe
 		return rundiagnostics.Result{}, err
 	}
 	return s.diagnostics.Inspect(ctx, rundiagnostics.Query{RunID: request.RunID, Now: s.host.now(), Display: request.Display, NodeLimit: request.NodeLimit, AttemptLimit: request.AttemptLimit, EventLimit: request.EventLimit, ValueLimit: request.ValueLimit, ResourceLimit: request.ResourceLimit, ActivationLimit: request.ActivationLimit})
+}
+
+func (s *WorkflowOperator) ListWorkflowWaits(ctx context.Context, request WorkflowRunReadRequest) (WorkflowWaitListResult, error) {
+	inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationWaits)
+	if err != nil {
+		return WorkflowWaitListResult{}, err
+	}
+	result := WorkflowWaitListResult{RunID: request.RunID, Waits: []WorkflowWaitListItem{}, Truncated: inspection.Truncated.Nodes || inspection.Truncated.Attempts}
+	for _, node := range inspection.Nodes {
+		if node.Wait != nil {
+			result.Waits = append(result.Waits, WorkflowWaitListItem{NodeID: node.ID, Wait: *node.Wait})
+		}
+	}
+	return result, nil
+}
+
+func (s *WorkflowOperator) FetchWorkflowValues(ctx context.Context, request WorkflowRunReadRequest) (WorkflowValueListResult, error) {
+	inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationValues)
+	if err != nil {
+		return WorkflowValueListResult{}, err
+	}
+	return WorkflowValueListResult{RunID: request.RunID, Values: inspection.Values, Truncated: inspection.Truncated.Values}, nil
+}
+
+func (s *WorkflowOperator) FetchWorkflowEvents(ctx context.Context, request WorkflowRunReadRequest) (WorkflowEventListResult, error) {
+	inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationEvents)
+	if err != nil {
+		return WorkflowEventListResult{}, err
+	}
+	return WorkflowEventListResult{RunID: request.RunID, Events: inspection.Events, Truncated: inspection.Truncated.Events}, nil
+}
+
+func (s *WorkflowOperator) inspectWorkflowProjection(ctx context.Context, request WorkflowRunReadRequest, operation RunOperation) (rundiagnostics.Result, error) {
+	if err := request.Display.Validate(); err != nil {
+		return rundiagnostics.Result{}, fmt.Errorf("invalid workflow display policy: %w", err)
+	}
+	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: operation, RunID: request.RunID, Display: &request.Display}, request.Identity); err != nil {
+		return rundiagnostics.Result{}, err
+	}
+	return s.diagnostics.Inspect(ctx, rundiagnostics.Query{RunID: request.RunID, Now: s.host.now(), Display: request.Display, NodeLimit: request.NodeLimit, AttemptLimit: request.AttemptLimit, EventLimit: request.EventLimit, ValueLimit: request.ValueLimit})
 }
 
 func (s *WorkflowOperator) CancelWorkflowRun(ctx context.Context, request CancelWorkflowRunRequest) (CancelWorkflowRunResult, error) {

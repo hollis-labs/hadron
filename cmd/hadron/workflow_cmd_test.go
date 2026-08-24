@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
@@ -403,6 +404,34 @@ func TestWorkflowDaemonClientUsesTypedRoutesBoundsAndRedactedErrors(t *testing.T
 		t.Fatalf("preserved pin rejection=%#v error=%v", rejected, err)
 	}
 }
+
+func TestWorkflowDaemonClientIsCompatibleWithGraphNativeAPIServer(t *testing.T) {
+	service := completeWorkflowSpy()
+	plan := workflowruntime.PlanRef{ID: "http-compatible", Version: "v1", Digest: values.SHA256Digest([]byte("http-compatible")), SchemaVersion: "1"}
+	service.validate = func(ctx context.Context, request appworkflow.ValidateWorkflowRequest) (appworkflow.ValidateWorkflowResult, error) {
+		if ctx.Value(workflowHTTPCompatibilityKey{}) != "authenticated" || request.Identity.SourceAuthority != "http" || request.Identity.PrincipalHint != "" || request.Identity.Attributes != nil {
+			t.Fatalf("context=%v identity=%#v", ctx.Value(workflowHTTPCompatibilityKey{}), request.Identity)
+		}
+		return appworkflow.ValidateWorkflowResult{Definition: request.Definition, Plan: &plan}, nil
+	}
+	server := httptest.NewServer(api.NewServer("", api.Dependencies{
+		Workflows: service,
+		WorkflowAuth: api.WorkflowRequestAuthenticatorFunc(func(request *http.Request, _ appworkflow.WorkflowAccessIntent) (context.Context, error) {
+			return context.WithValue(request.Context(), workflowHTTPCompatibilityKey{}, "authenticated"), nil
+		}),
+	}).Handler())
+	defer server.Close()
+	client := workflowDaemonClient{baseURL: func() string { return server.URL }, client: server.Client()}
+	result, err := client.ValidateWorkflow(t.Context(), appworkflow.ValidateWorkflowRequest{
+		Definition: graph.DefinitionRef{Kind: appworkflow.DefinitionKindRegistry, ID: "team/http", Version: "v1"},
+		Identity:   appworkflow.IdentityRequest{PrincipalHint: "untrusted-cli-hint", SourceAuthority: "cli", Attributes: map[string]string{"exposure_ref": "forged"}},
+	})
+	if err != nil || result.Plan == nil || *result.Plan != plan {
+		t.Fatalf("result=%#v error=%v", result, err)
+	}
+}
+
+type workflowHTTPCompatibilityKey struct{}
 
 func TestWorkflowCommandPropagatesOutputWriteFailures(t *testing.T) {
 	writeErr := errors.New("output unavailable")
