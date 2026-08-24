@@ -194,6 +194,12 @@ func (s *Store) ApplyExternalOperation(ctx context.Context, request workflowrunt
 	if currentAttempt.Generation != request.ExpectedAttemptGeneration {
 		return workflowruntime.ApplyExternalOperationResult{}, casMismatch("external operation attempt", request.ExpectedAttemptGeneration, currentAttempt.Generation)
 	}
+	if run, ok := s.runs[request.Attempt.Invocation.RunID]; ok && !run.Status.Active() {
+		allowedCanceledResolution := run.Status == workflowruntime.RunCanceled && request.Status == stepkind.ObservationCanceled && request.NextNodeStatus == workflowruntime.NodeCanceled
+		if !allowedCanceledResolution {
+			return workflowruntime.ApplyExternalOperationResult{}, invalid(errors.New("terminal run fences external mutation"))
+		}
+	}
 	if currentOperation.Status != stepkind.ObservationPending || currentNode.Status != workflowruntime.NodeWaiting || currentNode.Wait != nil || currentNode.Lease != nil ||
 		currentNode.LatestAttempt != request.Attempt.Number || currentAttempt.Status != workflowruntime.NodeRunning || !currentAttempt.FinishedAt.IsZero() {
 		return workflowruntime.ApplyExternalOperationResult{}, invalid(errors.New("external observation requires a pending operation and matching waiting unfinished attempt"))

@@ -49,7 +49,15 @@ func (s *WorkflowStateStore) ClaimNode(ctx context.Context, request workflowrunt
 			return workflowCAS("node claim", request.ExpectedClaimGeneration, current.ClaimGeneration)
 		}
 		now := request.Now.UTC()
-		if current.Status != workflowruntime.NodeReady ||
+		run, err := loadWorkflowRun(ctx, query, current.ID.RunID)
+		if err != nil {
+			return err
+		}
+		eligible, err := workflowFanOutClaimEligible(ctx, query, current, now)
+		if err != nil {
+			return err
+		}
+		if !run.Status.Active() || !eligible || current.Status != workflowruntime.NodeReady ||
 			(current.Lease != nil && current.Lease.ExpiresAt.After(now)) {
 			result = workflowruntime.ClaimResult{Acquired: false}
 			return recordWorkflowClaimIdempotency(ctx, query, request.IdempotencyKey, requestJSON, result)

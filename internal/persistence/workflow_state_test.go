@@ -24,7 +24,11 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_node_leases": "table", "workflow_claim_idempotency": "table",
 		"workflow_attempts": "table", "workflow_waits": "table",
 		"workflow_wait_attempt_bindings": "table", "workflow_external_operations": "table",
-		"workflow_wait_resume_idempotency": "table", "workflow_wait_resume_results": "table",
+		"workflow_retry_activations": "table", "workflow_retry_activation_idempotency": "table",
+		"workflow_fanouts": "table", "workflow_fanout_items": "table",
+		"workflow_child_runs": "table", "workflow_cancellation_intents": "table",
+		"workflow_run_cancellation_idempotency": "table",
+		"workflow_wait_resume_idempotency":      "table", "workflow_wait_resume_results": "table",
 		"workflow_wait_suspend_idempotency": "table", "workflow_wait_timeout_idempotency": "table",
 		"workflow_value_sets":      "table",
 		"workflow_event_sequences": "table", "workflow_events": "table",
@@ -36,11 +40,15 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"idx_workflow_waits_correlation": "index", "idx_workflow_value_sets_digest": "index",
 		"idx_workflow_wait_attempt_lookup": "index", "idx_workflow_external_operations_recovery": "index",
 		"idx_workflow_external_operations_cancel": "index",
-		"idx_workflow_events_type":                "index", "idx_workflow_cache_expiry": "index",
+		"idx_workflow_retry_activations_recovery": "index", "idx_workflow_fanout_items_invocation": "index",
+		"idx_workflow_cancellation_intents_recovery": "index", "idx_workflow_child_runs_parent": "index",
+		"idx_workflow_events_type": "index", "idx_workflow_cache_expiry": "index",
 		"idx_workflow_pins_expiry": "index", "idx_workflow_activations_run": "index",
 		"idx_workflow_activations_registration": "index",
 		"workflow_events_reject_update":         "trigger", "workflow_events_reject_delete": "trigger",
 		"workflow_external_operations_immutable_binding": "trigger", "workflow_external_operations_reject_delete": "trigger",
+		"workflow_retry_activations_immutable_attempt": "trigger", "workflow_fanout_items_immutable": "trigger",
+		"workflow_fanout_items_reject_delete": "trigger", "workflow_child_runs_immutable": "trigger", "workflow_child_runs_reject_delete": "trigger",
 	}
 	for name, kind := range objects {
 		var found string
@@ -50,11 +58,11 @@ SELECT name FROM sqlite_master WHERE type = ? AND name = ?`, kind, name).Scan(&f
 		}
 	}
 	var migrations int
-	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 16`).Scan(&migrations); err != nil {
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 17`).Scan(&migrations); err != nil {
 		t.Fatalf("read migration version: %v", err)
 	}
 	if migrations != 1 {
-		t.Fatalf("migration 16 count = %d, want 1", migrations)
+		t.Fatalf("migration 17 count = %d, want 1", migrations)
 	}
 
 	var planSQL string

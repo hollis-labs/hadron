@@ -177,6 +177,69 @@ BEGIN SELECT RAISE(ABORT, 'reject external observation'); END`); execErr != nil 
 	}
 }
 
+func TestWorkflowSQLiteTerminalRunFencesExternalMutation(t *testing.T) {
+	t.Run("pending after canceled", func(t *testing.T) {
+		_, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "external-canceled-run.db"))
+		fixture := prepareWorkflowSQLiteExternal(t, state, "canceled-run", workflowTestTime())
+		run, _ := state.LoadRun(context.Background(), fixture.attempt.ID.Invocation.RunID)
+		_, err := state.RequestRunCancellation(context.Background(), workflowruntime.RequestRunCancellationRequest{
+			RunID: run.ID, ExpectedGeneration: run.Generation, IdempotencyKey: "cancel-external-run",
+			Reason: workflowruntime.Failure{Code: "user_canceled", Message: "run canceled by user"}, At: fixture.base.Add(4 * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		operation, _ := state.LoadExternalOperation(context.Background(), fixture.attempt.ID)
+		node, _ := state.LoadNodeInvocation(context.Background(), fixture.node.ID)
+		attempt, _ := state.LoadAttempt(context.Background(), fixture.attempt.ID)
+		beforeEvents, _ := state.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: run.ID})
+		_, applyErr := state.ApplyExternalOperation(context.Background(), workflowruntime.ApplyExternalOperationRequest{
+			Attempt: fixture.attempt.ID, ExpectedOperationGeneration: operation.Generation,
+			ExpectedNodeGeneration: node.Generation, ExpectedAttemptGeneration: attempt.Generation,
+			Status: stepkind.ObservationPending, Progress: map[string]string{"state": "canceling"},
+			ObservedAt: fixture.base.Add(5 * time.Second), At: fixture.base.Add(5 * time.Second),
+		})
+		if !errors.Is(applyErr, workflowruntime.ErrInvalidRecord) {
+			t.Fatalf("pending mutation after cancellation error = %v", applyErr)
+		}
+		after, _ := state.LoadExternalOperation(context.Background(), fixture.attempt.ID)
+		afterEvents, _ := state.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: run.ID})
+		if after.Generation != operation.Generation || len(afterEvents) != len(beforeEvents) {
+			t.Fatalf("rejected pending mutation changed operation=%#v/%#v events=%d/%d", operation, after, len(beforeEvents), len(afterEvents))
+		}
+	})
+
+	t.Run("canceled observation after succeeded", func(t *testing.T) {
+		_, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "external-succeeded-run.db"))
+		fixture := prepareWorkflowSQLiteExternal(t, state, "succeeded-run", workflowTestTime())
+		run, _ := state.LoadRun(context.Background(), fixture.attempt.ID.Invocation.RunID)
+		running, err := state.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunRunning, At: fixture.base.Add(4 * time.Second)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := state.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: running.Snapshot.Generation, To: workflowruntime.RunSucceeded, At: fixture.base.Add(5 * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+		operation, _ := state.LoadExternalOperation(context.Background(), fixture.attempt.ID)
+		beforeEvents, _ := state.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: run.ID})
+		failure := workflowruntime.Failure{Code: "remote_canceled", Message: "remote operation canceled"}
+		_, applyErr := state.ApplyExternalOperation(context.Background(), workflowruntime.ApplyExternalOperationRequest{
+			Attempt: fixture.attempt.ID, ExpectedOperationGeneration: operation.Generation,
+			ExpectedNodeGeneration: fixture.node.Generation, ExpectedAttemptGeneration: fixture.attempt.Generation,
+			Status: stepkind.ObservationCanceled, Failure: &failure, NextNodeStatus: workflowruntime.NodeCanceled,
+			ObservedAt: fixture.base.Add(6 * time.Second), At: fixture.base.Add(6 * time.Second),
+		})
+		if !errors.Is(applyErr, workflowruntime.ErrInvalidRecord) {
+			t.Fatalf("canceled completion after success error = %v", applyErr)
+		}
+		after, _ := state.LoadExternalOperation(context.Background(), fixture.attempt.ID)
+		afterEvents, _ := state.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: run.ID})
+		if after.Generation != operation.Generation || len(afterEvents) != len(beforeEvents) {
+			t.Fatalf("rejected canceled completion changed operation=%#v/%#v events=%d/%d", operation, after, len(beforeEvents), len(afterEvents))
+		}
+	})
+}
+
 func TestWorkflowSQLiteExternalRecoveryUsesSemanticFractionalTimeOrder(t *testing.T) {
 	_, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "external-order.db"))
 	target := time.Date(2026, time.August, 24, 18, 0, 0, 0, time.UTC)

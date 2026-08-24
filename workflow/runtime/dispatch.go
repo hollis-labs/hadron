@@ -140,6 +140,7 @@ type StepDispatcher struct {
 	retention   RetentionHook
 	redactor    *values.Redactor
 	waits       *WaitCoordinator
+	retry       *RetryCoordinator
 }
 
 // DispatcherOptions supplies extraction-safe dispatcher collaborators.
@@ -151,6 +152,7 @@ type DispatcherOptions struct {
 	RetentionHook      RetentionHook
 	Redactor           *values.Redactor
 	WaitCoordinator    *WaitCoordinator
+	RetryCoordinator   *RetryCoordinator
 }
 
 // NewStepDispatcher constructs a registry-driven dispatcher. A nil Now uses
@@ -170,6 +172,11 @@ func NewStepDispatcher(options DispatcherOptions) (*StepDispatcher, error) {
 		store: options.Store, registry: options.Registry, now: now,
 		disposition: options.FailureDisposition, retention: options.RetentionHook,
 		redactor: options.Redactor,
+	}
+	if options.RetryCoordinator != nil {
+		retry := *options.RetryCoordinator
+		retry.Store = options.Store
+		dispatcher.retry = &retry
 	}
 	if waitStore, ok := options.Store.(WaitStore); ok {
 		coordinator := WaitCoordinator{Store: waitStore}
@@ -357,6 +364,9 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	if schemaErr := values.ValidateValueSetSchema(spec.OutputSchema, stepResult.Outputs); schemaErr != nil {
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, schemaErr)
 	}
+	if schemaErr := validateDeclaredNodeOutputs(request.Node.Outputs, stepResult.Outputs); schemaErr != nil {
+		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, schemaErr)
+	}
 
 	outputRef, err := SaveValuesWithRetention(durableCtx, d.store, d.retention, SaveValuesRequest{
 		Owner: ValueOwner{
@@ -492,7 +502,8 @@ func (d *StepDispatcher) finishFailure(
 	failure, attemptStatus := executionFailure(code, cause)
 	next := attemptStatus
 	var policyErr error
-	if d.disposition != nil && (attemptStatus == NodeFailed || attemptStatus == NodeTimedOut || attemptStatus == NodeCrashed) {
+	retryHandled := d.retry != nil && request.Node.Retry != nil && (attemptStatus == NodeFailed || attemptStatus == NodeTimedOut || attemptStatus == NodeCrashed)
+	if !retryHandled && d.disposition != nil && (attemptStatus == NodeFailed || attemptStatus == NodeTimedOut || attemptStatus == NodeCrashed) {
 		candidate, err := d.disposition.NextNodeStatus(ctx, FailureDispositionRequest{
 			Spec: spec, Attempt: result.Attempt, Failure: failure, Status: attemptStatus,
 		})
@@ -510,6 +521,29 @@ func (d *StepDispatcher) finishFailure(
 		}
 	}
 	persistedFailure := maskDispatchFailure(failure, d.redactor)
+	if retryHandled {
+		timeoutKind := TimeoutKind(persistedFailure.Details["timeout_kind"])
+		if !timeoutKind.Valid() {
+			timeoutKind = ""
+		}
+		at := d.atOrAfter(result.Attempt.StartedAt)
+		if at.Before(result.Node.UpdatedAt) {
+			at = result.Node.UpdatedAt
+		}
+		scheduled, decision, retryErr := d.retry.Schedule(ctx, ScheduleRetryCommand{
+			Node: request.Node, Spec: spec, NodeSnapshot: result.Node, Attempt: result.Attempt,
+			Claim: claim, Failure: persistedFailure, AttemptStatus: attemptStatus,
+			Timeout: timeoutKind, IdempotencyKey: request.IdempotencyKey, At: at,
+		})
+		if decision.Retry && scheduled.Activation.ID != "" {
+			result.Node, result.Attempt = scheduled.Node, scheduled.Attempt
+			d.finalize(ctx, request, kind, prepared, produced, cause, &result)
+			return result, dispatchError(stage, request, errors.Join(cause, retryErr))
+		}
+		if retryErr != nil {
+			policyErr = errors.Join(policyErr, retryErr)
+		}
+	}
 	finished, finishErr := d.store.FinishNodeAttempt(ctx, FinishNodeAttemptRequest{
 		InvocationID: result.Attempt.ID.Invocation, AttemptNumber: result.Attempt.ID.Number,
 		ExpectedNodeGeneration: result.Node.Generation, ExpectedAttemptGeneration: result.Attempt.Generation,
@@ -526,6 +560,83 @@ func (d *StepDispatcher) finishFailure(
 		returnCause = errors.Join(ErrStepValidation, returnCause)
 	}
 	return result, dispatchError(stage, request, returnCause)
+}
+
+// NodeOutputValidationError preserves the graph source of one declared output
+// while unwrapping the canonical values-layer schema or shape error.
+type NodeOutputValidationError struct {
+	Output string
+	Source *graph.SourceRef
+	Cause  error
+}
+
+func (e *NodeOutputValidationError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	location := ""
+	if e.Source != nil {
+		location = fmt.Sprintf(" at %s:%d", e.Source.Locator, e.Source.StartLine)
+	}
+	return fmt.Sprintf("declared node output %q%s: %v", e.Output, location, e.Cause)
+}
+
+func (e *NodeOutputValidationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func validateDeclaredNodeOutputs(declarations []graph.OutputSpec, output values.ValueSet) error {
+	if len(declarations) == 0 {
+		return nil
+	}
+	declared := make(map[string]graph.OutputSpec, len(declarations))
+	for _, declaration := range declarations {
+		if declaration.Name == "" {
+			return &NodeOutputValidationError{Cause: errors.New("output declaration name is required")}
+		}
+		if _, duplicate := declared[declaration.Name]; duplicate {
+			return &NodeOutputValidationError{Output: declaration.Name, Source: cloneDispatchSource(declaration.Source), Cause: errors.New("duplicate output declaration")}
+		}
+		declared[declaration.Name] = declaration
+	}
+	expected := make([]string, 0, len(declared))
+	for name := range declared {
+		expected = append(expected, name)
+	}
+	sort.Strings(expected)
+	for _, name := range expected {
+		declaration := declared[name]
+		value, ok := output[name]
+		if !ok {
+			return &NodeOutputValidationError{Output: name, Source: cloneDispatchSource(declaration.Source), Cause: errors.New("required declared output is missing")}
+		}
+		if err := values.ValidateValueSchema(declaration.Schema, value); err != nil {
+			return &NodeOutputValidationError{Output: name, Source: cloneDispatchSource(declaration.Source), Cause: err}
+		}
+	}
+	actual := make([]string, 0, len(output))
+	for name := range output {
+		actual = append(actual, name)
+	}
+	sort.Strings(actual)
+	for _, name := range actual {
+		if _, ok := declared[name]; !ok {
+			return &NodeOutputValidationError{Output: name, Cause: errors.New("executor produced an undeclared output")}
+		}
+	}
+	return nil
+}
+
+func cloneDispatchSource(source *graph.SourceRef) *graph.SourceRef {
+	if source == nil {
+		return nil
+	}
+	copySource := *source
+	copySource.Path = append([]string(nil), source.Path...)
+	return &copySource
 }
 
 func (d *StepDispatcher) finalize(

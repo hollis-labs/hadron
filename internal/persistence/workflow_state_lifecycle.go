@@ -238,6 +238,13 @@ func (s *WorkflowStateStore) FinishNodeAttempt(ctx context.Context, request work
 		if currentNode.Generation != request.ExpectedNodeGeneration {
 			return workflowCAS("node invocation", request.ExpectedNodeGeneration, currentNode.Generation)
 		}
+		run, runLoadErr := loadWorkflowRun(ctx, query, currentNode.ID.RunID)
+		if runLoadErr != nil {
+			return runLoadErr
+		}
+		if !run.Status.Active() {
+			return workflowInvalid(errors.New("terminal run fences attempt completion"))
+		}
 		if currentNode.Status != workflowruntime.NodeRunning {
 			return workflowNodeTransitionError(currentNode, request.NextNodeStatus, "finishing requires running node")
 		}

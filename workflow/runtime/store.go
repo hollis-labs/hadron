@@ -198,6 +198,9 @@ type RecoverySnapshot struct {
 // idempotency, append-only event, and recovery-query semantics.
 type StateStore interface {
 	ExternalOperationStore
+	RetryStore
+	FanOutStore
+	CancellationStore
 
 	CreateRun(context.Context, CreateRunRequest) (RunSnapshot, IdempotencyOutcome, error)
 	LoadRun(context.Context, RunID) (RunSnapshot, error)

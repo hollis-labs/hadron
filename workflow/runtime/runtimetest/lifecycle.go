@@ -229,6 +229,9 @@ func (s *Store) StartNodeAttempt(ctx context.Context, request workflowruntime.St
 	if err := s.validateAttemptHistoryLocked(current); err != nil {
 		return workflowruntime.StartNodeAttemptResult{}, err
 	}
+	if err := s.enforceFanOutStartLocked(current); err != nil {
+		return workflowruntime.StartNodeAttemptResult{}, err
+	}
 
 	attemptNumber := current.LatestAttempt + 1
 	attemptID := workflowruntime.AttemptID{Invocation: current.ID, Number: attemptNumber}
@@ -290,6 +293,9 @@ func (s *Store) FinishNodeAttempt(ctx context.Context, request workflowruntime.F
 	}
 	if currentNode.Generation != request.ExpectedNodeGeneration {
 		return workflowruntime.FinishNodeAttemptResult{}, casMismatch("node invocation", request.ExpectedNodeGeneration, currentNode.Generation)
+	}
+	if run, exists := s.runs[currentNode.ID.RunID]; exists && !run.Status.Active() {
+		return workflowruntime.FinishNodeAttemptResult{}, invalid(errors.New("terminal run fences attempt completion"))
 	}
 	if currentNode.Status != workflowruntime.NodeRunning {
 		return workflowruntime.FinishNodeAttemptResult{}, transitionError(currentNode, request.NextNodeStatus, "finishing requires running node")

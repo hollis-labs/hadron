@@ -20,17 +20,23 @@ import (
 type Store struct {
 	mu sync.RWMutex
 
-	runs               map[workflowruntime.RunID]workflowruntime.RunSnapshot
-	runStarts          map[string]runStartRecord
-	nodes              map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot
-	attempts           map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
-	waits              map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
-	waitAttempts       map[workflowruntime.WaitID]workflowruntime.AttemptID
-	suspends           map[workflowruntime.WaitID]suspendRecord
-	waitResumes        map[string]waitResumeRecord
-	waitResumeResults  map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult
-	timeouts           map[string]timeoutRecord
-	externalOperations map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot
+	runs                map[workflowruntime.RunID]workflowruntime.RunSnapshot
+	runStarts           map[string]runStartRecord
+	nodes               map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot
+	attempts            map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
+	waits               map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
+	waitAttempts        map[workflowruntime.WaitID]workflowruntime.AttemptID
+	suspends            map[workflowruntime.WaitID]suspendRecord
+	waitResumes         map[string]waitResumeRecord
+	waitResumeResults   map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult
+	timeouts            map[string]timeoutRecord
+	externalOperations  map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot
+	retryActivations    map[string]workflowruntime.RetryActivationSnapshot
+	retryActivationKeys map[string]retryActivationRecord
+	fanOuts             map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot
+	childRuns           map[workflowruntime.RunID][]workflowruntime.ChildRunLink
+	cancellationIntents map[string]workflowruntime.CancellationIntentSnapshot
+	cancellationKeys    map[string]cancellationRecord
 
 	valueSets    map[string]storedValues
 	nextValueSet uint64
@@ -80,29 +86,45 @@ type activationRecord struct {
 	result  workflowruntime.ExternalActivationSnapshot
 }
 
+type retryActivationRecord struct {
+	request workflowruntime.ActivateNodeRetryRequest
+	result  workflowruntime.ActivateNodeRetryResult
+}
+
+type cancellationRecord struct {
+	request workflowruntime.RequestRunCancellationRequest
+	result  workflowruntime.RequestRunCancellationResult
+}
+
 var _ workflowruntime.StateStore = (*Store)(nil)
 
 // NewStore returns an empty StateStore fake.
 func NewStore() *Store {
 	return &Store{
-		runs:               make(map[workflowruntime.RunID]workflowruntime.RunSnapshot),
-		runStarts:          make(map[string]runStartRecord),
-		nodes:              make(map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot),
-		attempts:           make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
-		waits:              make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
-		waitAttempts:       make(map[workflowruntime.WaitID]workflowruntime.AttemptID),
-		suspends:           make(map[workflowruntime.WaitID]suspendRecord),
-		waitResumes:        make(map[string]waitResumeRecord),
-		waitResumeResults:  make(map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult),
-		timeouts:           make(map[string]timeoutRecord),
-		externalOperations: make(map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot),
-		valueSets:          make(map[string]storedValues),
-		plans:              make(map[string]workflowruntime.PlanRef),
-		events:             make(map[workflowruntime.RunID][]workflowruntime.Event),
-		claims:             make(map[string]claimRecord),
-		cache:              make(map[string]workflowruntime.CacheEntry),
-		pins:               make(map[string]workflowruntime.PinnedValue),
-		activations:        make(map[string]activationRecord),
+		runs:                make(map[workflowruntime.RunID]workflowruntime.RunSnapshot),
+		runStarts:           make(map[string]runStartRecord),
+		nodes:               make(map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot),
+		attempts:            make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
+		waits:               make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
+		waitAttempts:        make(map[workflowruntime.WaitID]workflowruntime.AttemptID),
+		suspends:            make(map[workflowruntime.WaitID]suspendRecord),
+		waitResumes:         make(map[string]waitResumeRecord),
+		waitResumeResults:   make(map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult),
+		timeouts:            make(map[string]timeoutRecord),
+		externalOperations:  make(map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot),
+		retryActivations:    make(map[string]workflowruntime.RetryActivationSnapshot),
+		retryActivationKeys: make(map[string]retryActivationRecord),
+		fanOuts:             make(map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot),
+		childRuns:           make(map[workflowruntime.RunID][]workflowruntime.ChildRunLink),
+		cancellationIntents: make(map[string]workflowruntime.CancellationIntentSnapshot),
+		cancellationKeys:    make(map[string]cancellationRecord),
+		valueSets:           make(map[string]storedValues),
+		plans:               make(map[string]workflowruntime.PlanRef),
+		events:              make(map[workflowruntime.RunID][]workflowruntime.Event),
+		claims:              make(map[string]claimRecord),
+		cache:               make(map[string]workflowruntime.CacheEntry),
+		pins:                make(map[string]workflowruntime.PinnedValue),
+		activations:         make(map[string]activationRecord),
 	}
 }
 
@@ -474,7 +496,17 @@ func (s *Store) ClaimNode(ctx context.Context, request workflowruntime.ClaimNode
 		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
 		return result, nil
 	}
+	if run, exists := s.runs[current.ID.RunID]; exists && !run.Status.Active() {
+		result := workflowruntime.ClaimResult{Acquired: false}
+		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
+		return result, nil
+	}
 	if current.Lease != nil && current.Lease.ExpiresAt.After(request.Now) {
+		result := workflowruntime.ClaimResult{Acquired: false}
+		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
+		return result, nil
+	}
+	if !s.fanOutClaimEligibleLocked(current, request.Now) {
 		result := workflowruntime.ClaimResult{Acquired: false}
 		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
 		return result, nil
