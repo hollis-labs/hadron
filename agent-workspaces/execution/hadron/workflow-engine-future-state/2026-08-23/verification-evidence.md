@@ -39,3 +39,22 @@ integrated it as `65a7aeb`.
 | integration `65a7aeb` | `git diff --check HEAD^..HEAD` | pass |
 | integration `65a7aeb` | old active-path `rg` check | pass; no matches |
 | integration `65a7aeb` | `go test ./...` | pass |
+
+## W00-T03
+
+Reviewed the complete source commit, rejected its initial heuristic stdlib
+classification, and accepted amended source commit `54c7c85` as integration
+commit `1fc2dbc` after exact GOROOT membership and a dotless-path regression
+case were added.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `54c7c85` | `git diff --check a3a993d..54c7c85` | pass |
+| source worktree `54c7c85` | `go test -v ./workflow/internal/importguard` | pass; negative fixture produced the expected boundary failure |
+| source worktree `54c7c85` | `go test ./workflow/...` | pass |
+| source worktree `54c7c85` | `make test` | pass |
+| source worktree `54c7c85` | `go test ./...` | pass |
+| integration `1fc2dbc` | `git diff --check HEAD^..HEAD` | pass |
+| integration `1fc2dbc` | `go test -v ./workflow/internal/importguard` | pass |
+| integration `1fc2dbc` | `make test` | pass |
+| integration `1fc2dbc` | `go test ./...` | pass |
