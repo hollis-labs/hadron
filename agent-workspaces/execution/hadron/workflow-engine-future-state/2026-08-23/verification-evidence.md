@@ -1160,3 +1160,9 @@ after credential-shaped lease owners were masked and proven absent from JSON.
 | source worktree `c8b57bc` | diagnostics at `-count=10`; appworkflow/persistence/API suites; focused race; import guard; vet; targeted golangci; module diff; full repository suite | pass; full suite passed on clean rerun after known agentsubstrate/runtime timing flakes |
 | independent source review `c8b57bc` | focused diagnostics/appworkflow/persistence/API at `-count=3`; diagnostics/persistence race suite; committed diff, redaction, and activation-join audit | pass |
 | integration `ddc2030` | focused diagnostics/appworkflow/persistence/API at `-count=3`; `go test -count=1 ./...`; `go test -count=3 ./internal/agentsubstrate` | task-focused suite pass; full suite reached only the recorded agentsubstrate outbox timing fixture; immediate isolated package rerun passed three consecutive times |
+
+## Integration lint baseline before Wave 06 hardening
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| integration `1ef7d40` | `make lint` | `go vet`, `golangci-lint`, and `staticcheck` pass; `errcheck` fails on two ignored standard-library results and nine ignored `requireExpressionError` test-helper results, all present on the clean integration baseline; assigned to W06-T07 release hardening |

@@ -257,6 +257,19 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0TVDTR35JQ92KMGBRN6K841`.
 
+- The current integration baseline does not pass `make lint`: `go vet`,
+  `golangci-lint`, and `staticcheck` are green, but `errcheck` reports two
+  ignored standard-library results (`cmd/hadron/build_cmd.go:39` and
+  `internal/offlinebuild/builder_test.go:290`) plus nine ignored
+  `requireExpressionError` test-helper results in
+  `workflow/values/expression_test.go`. The same findings reproduce on the
+  clean integration branch and are not attributable to an active task.
+  W06-T07 release hardening must either repair them or record a deliberate
+  repository lint policy; task-local lint checks remain required in the
+  meantime.
+
+  Vanta revision: `01M0TWKQKMGV9JJZ6P6C7CFEG8`.
+
 ## Follow-up candidates
 
 - W07-T09 intentionally leaves concrete Hadron service providers and the
