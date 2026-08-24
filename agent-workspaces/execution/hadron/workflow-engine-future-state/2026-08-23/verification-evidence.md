@@ -613,3 +613,29 @@ passthrough/derivation coverage and canonical URI identity were hardened.
 | integration `4648e0b` | `golangci-lint run --new --timeout 60s` | pass; zero issues |
 | integration `4648e0b` | `go test -count=1 ./...` | pass |
 | integration `4648e0b` | `git diff --check` | pass |
+
+## W03-T05
+
+Reviewed the generic wait model, atomic suspend/resume/timeout mutations,
+activation and materialization seams, SQLite migration and restart recovery,
+all six wake-source fixtures, credential handling, authorization ordering,
+idempotency, timeout races, and durable event/value outcomes. Source commit
+`53748d1` was integrated as `5d9fbfc` after URL credential containment,
+deterministic metadata-map validation, and authorization-before-schema
+hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `53748d1` | focused wait idempotency/timeout and SQLite atomic/race suites, repeated | pass |
+| source worktree `53748d1` | `go test -race ./workflow/wait/... ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/...` | pass |
+| source worktree `53748d1` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `53748d1` | `go test ./workflow/... ./internal/persistence/...` | pass |
+| source worktree `53748d1` | `go vet ./workflow/... ./internal/persistence/...` | pass |
+| source worktree `53748d1` | `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0` | pass; zero issues |
+| source worktree `53748d1` | `go test ./...` and `git diff --check` | pass |
+| integration `5d9fbfc` | `go test -count=1 ./workflow/wait/... ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/...` | pass |
+| integration `5d9fbfc` | `go test -race -count=1 ./workflow/wait/... ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/...` | pass |
+| integration `5d9fbfc` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `5d9fbfc` | `go vet ./workflow/... ./internal/persistence/...` | pass |
+| integration `5d9fbfc` | failed agent-substrate test rerun, `-count=5`, then serial `go test ./... -count=1` | pass; initial concurrent full/race run caused timing contention |
+| integration `5d9fbfc` | `git diff --check HEAD^..HEAD` | pass |

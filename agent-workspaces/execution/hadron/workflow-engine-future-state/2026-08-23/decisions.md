@@ -24,3 +24,17 @@
   activation scheduling, and concrete SQLite timeout adapter.
 
   Vanta revision: `01M0S9GZTKZGG5F1MS7WJJV3DY`.
+
+- W03-T05 places the canonical semantic `Record` in extraction-ready
+  `workflow/wait` and embeds it as one flat JSON envelope in the runtime
+  `WaitSnapshot`. Generic wait mutation is exposed only through atomic
+  suspend/resume/timeout operations; the former low-level wait CRUD surface is
+  removed so every wake source shares the same fenced state transition.
+
+- Resume idempotency is wait-centered: an exact caller-key replay returns the
+  accepted durable result, a different non-empty key after acceptance
+  conflicts, and a keyless duplicate returns the already-accepted result with
+  an `already_resumed` outcome. Host authorization is re-evaluated before any
+  replay result or payload-schema detail is returned.
+
+  Vanta revision for both W03-T05 decisions: `01M0SDEDRSK370D6NDFXHPXZJH`.

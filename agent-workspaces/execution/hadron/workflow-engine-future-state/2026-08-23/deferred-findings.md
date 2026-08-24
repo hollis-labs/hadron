@@ -36,3 +36,12 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0SBFTFVZW4FMK5JRSRJ1FEQ` (supersedes
   `01M0S9GZ6QCBXJ8402PD44C4S0`).
+
+- W03-T05 migration 0015 keeps migration-0014 wait rows readable, but any
+  legacy row still open at upgrade is deliberately marked
+  `legacy_unresumable`: the older schema never persisted the correlation,
+  authority, or raw resume credential needed to recreate a safe wake path.
+  Such rows remain observable and recoverable for timeout/history purposes but
+  require application-level reconciliation rather than synthesized authority.
+
+  Vanta revision: `01M0SDEDBDN3P39TT03W5A1XSZ`.
