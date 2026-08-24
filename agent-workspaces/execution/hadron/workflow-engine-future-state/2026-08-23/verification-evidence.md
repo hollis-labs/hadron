@@ -1198,3 +1198,21 @@ that partially bound pins cannot leave runnable or claimable work.
 | source worktree `6ae32b2` | overlapping full/race execution followed by exact agentsubstrate fixture at `-count=10` and an uncontended full rerun | only the recorded agentsubstrate explicit-outbox timing fixture failed during overlap; isolation and the uncontended complete rerun passed |
 | integration `93ab469` | focused packages at `-count=3`; focused CLI/appworkflow race suite; integration diff check | pass |
 | integration `93ab469` plus tracking/dispatch `1e02394` | `go test -count=1 ./...` | pass |
+
+## W06-T05
+
+Reviewed the graph-first desktop run view, bounded graph and edge diagnostic
+projection, redacted typed value flow, source/retry/start-policy facts,
+fan-out invocation selection, durable waits and controls, concurrency and
+control-decision presentation, and explicit unavailable/truncation states.
+Source commit `d4cbb35` was integrated as `0fbea80`. Both available agent
+contexts had no connected browser session after the required browser setup and
+troubleshooting checks, so rendered screenshot and interaction QA is not
+claimed.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `d4cbb35` | frontend unit tests (35/35), typecheck, Biome, ESLint, production build; `go test ./internal/rundiagnostics/... ./internal/api/...`; diff and pre-commit gates | pass; zero task-local issues |
+| source worktree `d4cbb35` | Vite preview plus direct index and transformed `RunDetailPage` HTTP requests | pass |
+| independent source review `d4cbb35` | `go test -count=3 ./internal/rundiagnostics/... ./internal/api/...`; `go test -race -count=1 ./internal/rundiagnostics/...`; frontend test/typecheck/lint/build; committed security, truncation, and endpoint-contract audit | pass |
+| integration `0fbea80` | cherry-pick and committed diff check | pass |

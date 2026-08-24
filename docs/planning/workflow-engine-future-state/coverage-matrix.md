@@ -110,7 +110,7 @@ or the detailed architecture made a later choice. In particular:
 | CLI and HTTP validate/explain/run/inspect/cancel/resume/rerun/signals | Implemented for CLI; HTTP/signals planned | W06-T01, W06-T02 |
 | MCP meta, pinned, discoverable/lazy, hidden tiers; namespaces/budgets/catalog/list-changed | Planned | W06-T03 |
 | A2A durable task correlation and schema/effect/provenance-derived cards | Planned | W06-T04 |
-| UI graph, edge values, waits, artifacts, source maps, exposure, blast radius, replay | Planned | W06-T05 |
+| UI graph, edge values, waits, artifacts, source maps, exposure, blast radius, replay | Implemented for graph-native diagnostics and desktop views; live daemon composition and remaining legacy-Wails cleanup planned | W06-T02, W06-T05, W06-T06, W06-T10 |
 | Legacy Wails workflow UI replaced while preserving the flow canvas | Planned | W06-T10 |
 | Compiled CLI and stdio MCP-server artifacts | Implemented | W07-T05 |
 | Global run-failure workflow | Planned later | W07-T08 |
