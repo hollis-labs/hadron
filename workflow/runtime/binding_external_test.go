@@ -316,6 +316,217 @@ func TestFinalizeRunOutputsPreservesPassthroughAndPublishesCompleteSet(t *testin
 	if err != nil || !reflect.DeepEqual(persisted, result.Outputs) || result.Run.Outputs == nil || *result.Run.Outputs != result.OutputsRef {
 		t.Fatalf("published outputs = %#v loaded=%#v err=%v", result.Run.Outputs, persisted, err)
 	}
+	if _, err := store.LoadTerminalIntent(t.Context(), bound.ID); !errors.Is(err, workflowruntime.ErrNotFound) {
+		t.Fatalf("no-finalizer output path created terminal intent: %v", err)
+	}
+}
+
+func TestFinalizeRunOutputsCompletesNestedFinalizerIntentAtomically(t *testing.T) {
+	base := bindingTime()
+	plan := bindingPlan(nil, []graph.OutputSpec{
+		bindingOutput("cleanup", graph.Schema{"type": "string"}, "steps.outer.outputs.result", 30),
+	}, []graph.Node{
+		{ID: "work", Kind: "test"},
+		{ID: "inner", Kind: "test", Finally: &graph.FinallySpec{Scope: []string{"work"}}},
+		{ID: "outer", Kind: "test", Finally: &graph.FinallySpec{}},
+	})
+	store := runtimetest.NewStore()
+	bound, _ := startedBindingRun(t, store, plan, "run-finalizer-outputs")
+	for _, node := range plan.Graph.Nodes {
+		createNode(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: node.ID}, workflowruntime.NodePending, 0, base.Add(time.Minute))
+	}
+	finishSucceededNodeWithOutput(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: "work"}, "done", base.Add(2*time.Minute))
+	coordinator := workflowruntime.NewControlFlowCoordinator(store, store, nil)
+	pendingRun, intent, err := coordinator.ReconcileRunCompletion(t.Context(), plan.Graph, bound.ID, "complete-finalizer-outputs", base.Add(3*time.Minute))
+	if !errors.Is(err, workflowruntime.ErrControlFlowPending) || intent == nil || !intent.SuccessOutputsRequired {
+		t.Fatalf("begin output-bearing terminal intent = %#v, %v", intent, err)
+	}
+	finishSucceededNodeWithOutput(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: "inner"}, "inner", base.Add(4*time.Minute))
+	observed := &observedStateStore{StateStore: store}
+	forgedEarly := values.ExpressionContext{Steps: map[string]values.StepContext{
+		"work": {Status: string(workflowruntime.NodeSucceeded)}, "inner": {Status: string(workflowruntime.NodeSucceeded)},
+		"outer": {Status: string(workflowruntime.NodeSucceeded), Outputs: values.ValueSet{"result": bindingInline(t, "forged", "outer", values.RedactionPrivate, values.RetentionRun)}},
+	}}
+	if _, finalizeErr := workflowruntime.FinalizeRunOutputs(t.Context(), observed, workflowruntime.FinalizeRunRequest{BoundRun: bound, Run: pendingRun, Plan: plan, Context: forgedEarly, Control: store, At: base.Add(5 * time.Minute)}); !errors.Is(finalizeErr, workflowruntime.ErrControlFlowPending) || observed.saveCalls != 0 {
+		t.Fatalf("early finalizer output binding = saves=%d err=%v", observed.saveCalls, finalizeErr)
+	}
+	finishSucceededNodeWithOutput(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: "outer"}, "outer", base.Add(5*time.Minute))
+	pendingRun, intent, err = coordinator.ReconcileRunCompletion(t.Context(), plan.Graph, bound.ID, "complete-finalizer-outputs", base.Add(6*time.Minute))
+	if !errors.Is(err, workflowruntime.ErrRunOutputsPending) || intent == nil || intent.Status != workflowruntime.TerminalIntentPending || pendingRun.Status == workflowruntime.RunSucceeded || pendingRun.Outputs != nil {
+		t.Fatalf("declared outputs completion boundary = run=%#v intent=%#v err=%v", pendingRun, intent, err)
+	}
+	expression, err := workflowruntime.BuildExpressionContext(t.Context(), store, store, plan.Graph, bound.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeRef, err := store.SaveValues(t.Context(), workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "run-outputs", RunID: bound.ID}, Values: values.ValueSet{"cleanup": bindingInline(t, "outer", "probe", values.RedactionPrivate, values.RetentionRun)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRef, err := store.SaveValues(t.Context(), workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "run-outputs", RunID: "other-run"}, Values: values.ValueSet{"cleanup": bindingInline(t, "outer", "other", values.RedactionPrivate, values.RetentionRun)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, ref := range map[string]values.ValueSetRef{
+		"other run":       otherRef,
+		"tampered digest": {ID: probeRef.ID, Digest: values.SHA256Digest([]byte("tampered"))},
+	} {
+		if _, completeErr := store.CompleteTerminalIntent(t.Context(), workflowruntime.CompleteTerminalIntentRequest{RunID: bound.ID, ExpectedRunGeneration: pendingRun.Generation, ExpectedIntentGeneration: intent.Generation, Outputs: &ref, At: base.Add(7 * time.Minute)}); completeErr == nil {
+			t.Fatalf("%s terminal output ref was accepted", name)
+		}
+	}
+	request := workflowruntime.FinalizeRunRequest{BoundRun: bound, Run: pendingRun, Plan: plan, Context: expression, Control: store, At: base.Add(7 * time.Minute)}
+	type outcome struct {
+		result workflowruntime.FinalizeRunResult
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan outcome, 2)
+	for range 2 {
+		go func() {
+			<-start
+			result, finalizeErr := workflowruntime.FinalizeRunOutputs(context.Background(), store, request)
+			results <- outcome{result: result, err: finalizeErr}
+		}()
+	}
+	close(start)
+	applied, replayed := 0, 0
+	var durable workflowruntime.FinalizeRunResult
+	for range 2 {
+		observed := <-results
+		if observed.err != nil || observed.result.Run.Status != workflowruntime.RunSucceeded || observed.result.Run.Outputs == nil || observed.result.Outputs["cleanup"].Inline != "outer" {
+			t.Fatalf("contended finalization = %#v, %v", observed.result, observed.err)
+		}
+		switch observed.result.Outcome {
+		case workflowruntime.OutputFinalizationApplied:
+			applied++
+		case workflowruntime.OutputFinalizationReplayed:
+			replayed++
+		}
+		durable = observed.result
+	}
+	if applied != 1 || replayed != 1 {
+		t.Fatalf("finalization outcomes applied=%d replayed=%d", applied, replayed)
+	}
+	loadedRun, err := store.LoadRun(t.Context(), bound.ID)
+	if err != nil || loadedRun.Status != workflowruntime.RunSucceeded || loadedRun.Outputs == nil || *loadedRun.Outputs != durable.OutputsRef {
+		t.Fatalf("durable successful outputs = %#v, %v", loadedRun, err)
+	}
+	loadedIntent, err := store.LoadTerminalIntent(t.Context(), bound.ID)
+	if err != nil || loadedIntent.Status != workflowruntime.TerminalIntentCompleted {
+		t.Fatalf("completed output intent = %#v, %v", loadedIntent, err)
+	}
+	events, err := store.ListEvents(t.Context(), workflowruntime.EventQuery{RunID: bound.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusEvents := 0
+	for _, event := range events {
+		if event.Type == workflowruntime.EventRunStatusChanged && event.Attributes["to_status"] == string(workflowruntime.RunSucceeded) {
+			statusEvents++
+			if event.Values == nil || *event.Values != *loadedRun.Outputs {
+				t.Fatalf("success event outputs = %#v, want %#v", event.Values, loadedRun.Outputs)
+			}
+		}
+	}
+	if statusEvents != 1 {
+		t.Fatalf("successful terminal events = %d", statusEvents)
+	}
+	hookCalls := 0
+	hook := workflowruntime.RetentionHookFuncs{
+		Before: func(context.Context, workflowruntime.RetentionPlan) error { hookCalls++; return nil },
+		After:  func(context.Context, workflowruntime.RetentionRecord) error { hookCalls++; return nil },
+	}
+	replayStore := &observedStateStore{StateStore: store}
+	replay, err := workflowruntime.FinalizeRunOutputs(t.Context(), replayStore, workflowruntime.FinalizeRunRequest{BoundRun: bound, Run: loadedRun, Plan: plan, Context: expression, Control: store, RetentionHook: hook, At: base.Add(8 * time.Minute)})
+	if err != nil || replay.Outcome != workflowruntime.OutputFinalizationReplayed || replayStore.saveCalls != 0 || hookCalls != 0 {
+		t.Fatalf("completed intent replay = %#v saves=%d hooks=%d err=%v", replay, replayStore.saveCalls, hookCalls, err)
+	}
+	changed := expression
+	changed.Steps = make(map[string]values.StepContext, len(expression.Steps))
+	for name, step := range expression.Steps {
+		changed.Steps[name] = step
+	}
+	outer := changed.Steps["outer"]
+	outer.Outputs = values.ValueSet{"result": bindingInline(t, "changed", "outer", values.RedactionPrivate, values.RetentionRun)}
+	changed.Steps["outer"] = outer
+	if _, err := workflowruntime.FinalizeRunOutputs(t.Context(), replayStore, workflowruntime.FinalizeRunRequest{BoundRun: bound, Run: loadedRun, Plan: plan, Context: changed, Control: store, RetentionHook: hook, At: base.Add(9 * time.Minute)}); !errors.Is(err, workflowruntime.ErrOutputConflict) || replayStore.saveCalls != 0 || hookCalls != 0 {
+		t.Fatalf("changed completed intent replay = saves=%d hooks=%d err=%v", replayStore.saveCalls, hookCalls, err)
+	}
+}
+
+func TestReconcileRunCompletionNeverPublishesOutputsForFailure(t *testing.T) {
+	base := bindingTime()
+	for _, test := range []struct {
+		name         string
+		ordinary     workflowruntime.NodeStatus
+		finalizer    workflowruntime.NodeStatus
+		wantedStatus workflowruntime.RunStatus
+	}{
+		{name: "ordinary failure", ordinary: workflowruntime.NodeFailed, finalizer: workflowruntime.NodeSucceeded, wantedStatus: workflowruntime.RunFailed},
+		{name: "cleanup failure wins", ordinary: workflowruntime.NodeSucceeded, finalizer: workflowruntime.NodeFailed, wantedStatus: workflowruntime.RunFailed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			plan := bindingPlan(nil, []graph.OutputSpec{bindingOutput("result", graph.Schema{"type": "string"}, "steps.work.outputs.result", 20)}, []graph.Node{{ID: "work", Kind: "test"}, {ID: "cleanup", Kind: "test", Finally: &graph.FinallySpec{}}})
+			store := runtimetest.NewStore()
+			bound, _ := startedBindingRun(t, store, plan, workflowruntime.RunID("run-output-failure-"+test.name))
+			for _, node := range plan.Graph.Nodes {
+				createNode(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: node.ID}, workflowruntime.NodePending, 0, base.Add(time.Minute))
+			}
+			if test.ordinary == workflowruntime.NodeSucceeded {
+				finishSucceededNodeWithOutput(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: "work"}, "done", base.Add(2*time.Minute))
+			} else {
+				makeTerminalNode(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: "work"}, test.ordinary, base.Add(2*time.Minute))
+			}
+			coordinator := workflowruntime.NewControlFlowCoordinator(store, store, nil)
+			if _, _, err := coordinator.ReconcileRunCompletion(t.Context(), plan.Graph, bound.ID, "failure-outputs", base.Add(3*time.Minute)); !errors.Is(err, workflowruntime.ErrControlFlowPending) {
+				t.Fatalf("begin failure intent = %v", err)
+			}
+			makeTerminalNode(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: "cleanup"}, test.finalizer, base.Add(4*time.Minute))
+			var staleActive workflowruntime.RunSnapshot
+			if test.finalizer == workflowruntime.NodeFailed {
+				current, _ := store.LoadRun(t.Context(), bound.ID)
+				staleActive = current
+				currentIntent, _ := store.LoadTerminalIntent(t.Context(), bound.ID)
+				forbiddenRef, saveErr := store.SaveValues(t.Context(), workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "run-outputs", RunID: bound.ID}, Values: values.ValueSet{"result": bindingInline(t, "done", "forbidden", values.RedactionPrivate, values.RetentionRun)}})
+				if saveErr != nil {
+					t.Fatal(saveErr)
+				}
+				if _, completeErr := store.CompleteTerminalIntent(t.Context(), workflowruntime.CompleteTerminalIntentRequest{RunID: bound.ID, ExpectedRunGeneration: current.Generation, ExpectedIntentGeneration: currentIntent.Generation, Outputs: &forbiddenRef, At: base.Add(5 * time.Minute)}); completeErr == nil {
+					t.Fatal("cleanup failure accepted successful output publication")
+				}
+				expression, contextErr := workflowruntime.BuildExpressionContext(t.Context(), store, store, plan.Graph, bound.ID)
+				if contextErr != nil {
+					t.Fatal(contextErr)
+				}
+				observed := &observedStateStore{StateStore: store}
+				current, _ = store.LoadRun(t.Context(), bound.ID)
+				if _, finalizeErr := workflowruntime.FinalizeRunOutputs(t.Context(), observed, workflowruntime.FinalizeRunRequest{BoundRun: bound, Run: current, Plan: plan, Context: expression, Control: store, At: base.Add(5 * time.Minute)}); !errors.Is(finalizeErr, workflowruntime.ErrOutputConflict) || observed.saveCalls != 0 {
+					t.Fatalf("failed cleanup output binding = saves=%d err=%v", observed.saveCalls, finalizeErr)
+				}
+			}
+			completed, intent, err := coordinator.ReconcileRunCompletion(t.Context(), plan.Graph, bound.ID, "failure-outputs", base.Add(5*time.Minute))
+			if err != nil || completed.Status != test.wantedStatus || completed.Outputs != nil || intent == nil || intent.Status != workflowruntime.TerminalIntentCompleted {
+				t.Fatalf("failed completion = run=%#v intent=%#v err=%v", completed, intent, err)
+			}
+			if test.finalizer == workflowruntime.NodeFailed {
+				expression, contextErr := workflowruntime.BuildExpressionContext(t.Context(), store, store, plan.Graph, bound.ID)
+				if contextErr != nil {
+					t.Fatal(contextErr)
+				}
+				hookCalls := 0
+				observed := &observedStateStore{StateStore: store}
+				_, finalizeErr := workflowruntime.FinalizeRunOutputs(t.Context(), observed, workflowruntime.FinalizeRunRequest{
+					BoundRun: bound, Run: staleActive, Plan: plan, Context: expression, Control: store,
+					RetentionHook: workflowruntime.RetentionHookFuncs{Before: func(context.Context, workflowruntime.RetentionPlan) error { hookCalls++; return nil }, After: func(context.Context, workflowruntime.RetentionRecord) error { hookCalls++; return nil }},
+					At:            base.Add(6 * time.Minute),
+				})
+				if !errors.Is(finalizeErr, workflowruntime.ErrOutputConflict) || observed.saveCalls != 0 || hookCalls != 0 {
+					t.Fatalf("completed cleanup failure output binding = saves=%d hooks=%d err=%v", observed.saveCalls, hookCalls, finalizeErr)
+				}
+			}
+		})
+	}
 }
 
 func TestFinalizeRunOutputsDiagnosticsDoNotPersistPartialOutputs(t *testing.T) {
@@ -578,6 +789,45 @@ func startedBindingRun(t *testing.T, store workflowruntime.StateStore, plan *wor
 		t.Fatalf("TransitionRun(running): %v", err)
 	}
 	return *boundResult.Run, transition.Snapshot
+}
+
+func finishSucceededNodeWithOutput(t *testing.T, store workflowruntime.StateStore, id workflowruntime.NodeInvocationID, output string, at time.Time) {
+	t.Helper()
+	node, err := store.LoadNodeInvocation(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.Status == workflowruntime.NodePending {
+		transition, transitionErr := store.TransitionNode(t.Context(), workflowruntime.NodeTransitionRequest{InvocationID: id, ExpectedGeneration: node.Generation, To: workflowruntime.NodeReady, At: at})
+		if transitionErr != nil {
+			t.Fatal(transitionErr)
+		}
+		node = transition.Snapshot
+	}
+	claim := claimNode(t, store, id, node.ClaimGeneration, "output-worker", "output-token-"+id.NodeID, "output-claim-"+id.NodeID, at, at.Add(time.Hour))
+	claimed, err := store.LoadNodeInvocation(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := store.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: id, ExpectedNodeGeneration: claimed.Generation, Claim: claim, Executor: testExecutor(), At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := store.SaveValues(t.Context(), workflowruntime.SaveValuesRequest{
+		Owner:  workflowruntime.ValueOwner{Kind: "node-attempt-outputs", RunID: id.RunID, Invocation: &id, Attempt: &started.Attempt.ID},
+		Values: values.ValueSet{"result": bindingInline(t, output, id.NodeID, values.RedactionPrivate, values.RetentionRun)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.FinishNodeAttempt(t.Context(), workflowruntime.FinishNodeAttemptRequest{
+		InvocationID: id, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation,
+		ExpectedAttemptGeneration: started.Attempt.Generation, Claim: claim, AttemptStatus: workflowruntime.NodeSucceeded,
+		NextNodeStatus: workflowruntime.NodeSucceeded, Outputs: &ref, At: at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func completedRenderContext(outputs values.ValueSet) values.ExpressionContext {

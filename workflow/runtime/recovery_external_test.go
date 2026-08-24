@@ -81,6 +81,42 @@ func TestRecoveryReconcilesExpiredCrashAndRebuildsControlBeforeReady(t *testing.
 	}
 }
 
+func TestRecoveryPublishesDeclaredOutputsAfterCompletedFinalizer(t *testing.T) {
+	base := bindingTime()
+	plan := bindingPlan(nil, []graph.OutputSpec{
+		bindingOutput("cleanup", graph.Schema{"type": "string"}, "steps.cleanup.outputs.result", 30),
+	}, []graph.Node{{ID: "work", Kind: "safe", KindVersion: "v1"}, {ID: "cleanup", Kind: "safe", KindVersion: "v1", Finally: &graph.FinallySpec{}}})
+	store := runtimetest.NewStore()
+	bound, _ := startedBindingRun(t, store, plan, "recover-finalizer-outputs")
+	for _, node := range plan.Graph.Nodes {
+		createNode(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: node.ID}, workflowruntime.NodePending, 0, base.Add(time.Minute))
+	}
+	finishSucceededNodeWithOutput(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: "work"}, "done", base.Add(2*time.Minute))
+	control := workflowruntime.NewControlFlowCoordinator(store, store, nil)
+	if _, _, err := control.ReconcileRunCompletion(t.Context(), plan.Graph, bound.ID, "recover-complete:"+string(bound.ID), base.Add(3*time.Minute)); !errors.Is(err, workflowruntime.ErrControlFlowPending) {
+		t.Fatalf("begin terminal intent = %v", err)
+	}
+	finishSucceededNodeWithOutput(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: "cleanup"}, "recovered", base.Add(4*time.Minute))
+	coordinator := workflowruntime.RecoveryCoordinator{
+		Store: store, Recovery: store, Inputs: store, Control: store,
+		Plans: exactRecoveryPlanSource{plan: *plan}, Registry: recoveryRegistry(t, graph.EffectSet{graph.EffectRead}, graph.IdempotencyIntrinsic, stepkind.RetrySafe),
+	}
+	if _, err := coordinator.Recover(t.Context(), workflowruntime.RecoveryRequest{Now: base.Add(5 * time.Minute)}); err != nil {
+		t.Fatalf("Recover output-bearing terminal intent: %v", err)
+	}
+	completed, err := store.LoadRun(t.Context(), bound.ID)
+	if err != nil || completed.Status != workflowruntime.RunSucceeded || completed.Outputs == nil {
+		t.Fatalf("recovered run outputs = %#v, %v", completed, err)
+	}
+	outputs, err := store.LoadValues(t.Context(), *completed.Outputs)
+	if err != nil || outputs["cleanup"].Inline != "recovered" {
+		t.Fatalf("recovered output values = %#v, %v", outputs, err)
+	}
+	if _, err := coordinator.Recover(t.Context(), workflowruntime.RecoveryRequest{Now: base.Add(6 * time.Minute)}); err != nil {
+		t.Fatalf("replayed recovery: %v", err)
+	}
+}
+
 func TestCrashRecoveryUsesPinnedKindAndEffectiveEffectUnion(t *testing.T) {
 	base := time.Date(2026, 8, 24, 11, 0, 0, 0, time.UTC)
 	store := runtimetest.NewStore()
@@ -565,6 +601,14 @@ type staticRecoveryPlans struct{ graph graph.Graph }
 
 func (s staticRecoveryPlans) LoadRecoveryPlan(_ context.Context, run workflowruntime.RunSnapshot) (workflowruntime.RecoveryPlan, error) {
 	plan := workflowcompile.ExecutionPlan{SchemaVersion: run.Plan.SchemaVersion, ID: run.Plan.ID, Digest: run.Plan.Digest, Graph: s.graph}
+	inferred := workflowcompile.InferValueDependencies(&plan, workflowcompile.DependencyOptions{})
+	return workflowruntime.RecoveryPlan{Ref: run.Plan, Plan: plan, Visibility: inferred.Visibility}, nil
+}
+
+type exactRecoveryPlanSource struct{ plan workflowcompile.ExecutionPlan }
+
+func (s exactRecoveryPlanSource) LoadRecoveryPlan(_ context.Context, run workflowruntime.RunSnapshot) (workflowruntime.RecoveryPlan, error) {
+	plan := s.plan
 	inferred := workflowcompile.InferValueDependencies(&plan, workflowcompile.DependencyOptions{})
 	return workflowruntime.RecoveryPlan{Ref: run.Plan, Plan: plan, Visibility: inferred.Visibility}, nil
 }

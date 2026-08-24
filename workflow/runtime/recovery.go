@@ -370,6 +370,38 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context, request RecoveryReque
 			return result, timeErr
 		}
 		completedRun, intent, completionErr := NewControlFlowCoordinator(c.Store, c.Control, c.Evaluator).ReconcileRunCompletion(ctx, plan.Plan.Graph, run.ID, "recover-complete:"+string(run.ID), completionAt)
+		if errors.Is(completionErr, ErrRunOutputsPending) {
+			expression, expressionErr := BuildExpressionContext(ctx, c.Store, c.Control, plan.Plan.Graph, run.ID)
+			if expressionErr != nil {
+				return result, fmt.Errorf("%w: rebuild workflow output context: %w", ErrInvalidRecovery, expressionErr)
+			}
+			currentRun, loadErr := c.Store.LoadRun(ctx, run.ID)
+			if loadErr != nil {
+				return result, loadErr
+			}
+			if currentRun.Inputs == nil {
+				return result, fmt.Errorf("%w: recovering run is missing bound inputs", ErrInvalidRecovery)
+			}
+			finalized, finalizeErr := FinalizeRunOutputs(ctx, c.Store, FinalizeRunRequest{
+				BoundRun: BoundRun{ID: run.ID, Plan: plan.Ref, InputsRef: *currentRun.Inputs, CreatedAt: currentRun.CreatedAt, Provenance: plan.Plan.Provenance},
+				Run:      currentRun, Plan: &plan.Plan, Context: expression, BaseOptions: request.ExpressionOptions,
+				Control: c.Control, At: completionAt,
+			})
+			if finalizeErr != nil {
+				return result, finalizeErr
+			}
+			if len(finalized.Diagnostics) != 0 {
+				return result, fmt.Errorf("%w: workflow output binding failed: %v", ErrInvalidRecovery, finalized.Diagnostics)
+			}
+			completedRun, completionErr = finalized.Run, nil
+			if intent != nil {
+				updatedIntent, loadIntentErr := c.Control.LoadTerminalIntent(ctx, run.ID)
+				if loadIntentErr != nil {
+					return result, loadIntentErr
+				}
+				intent = &updatedIntent
+			}
+		}
 		if completionErr != nil && !errors.Is(completionErr, ErrControlFlowPending) && !errors.Is(completionErr, ErrCASMismatch) && !errors.Is(completionErr, ErrTransitionConflict) {
 			return result, completionErr
 		}

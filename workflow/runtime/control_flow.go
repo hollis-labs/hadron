@@ -22,8 +22,11 @@ const (
 )
 
 var (
-	ErrInvalidControlFlow  = errors.New("invalid workflow control flow")
-	ErrControlFlowPending  = errors.New("workflow control flow is pending")
+	ErrInvalidControlFlow = errors.New("invalid workflow control flow")
+	ErrControlFlowPending = errors.New("workflow control flow is pending")
+	// ErrRunOutputsPending reports that cleanup is complete but declared run
+	// outputs must be bound before the successful terminal transition.
+	ErrRunOutputsPending   = errors.New("workflow run outputs are pending")
 	ErrControlFlowConflict = errors.New("workflow control flow conflict")
 )
 
@@ -213,17 +216,20 @@ const (
 // snapshot is reserved for the atomic fail-fast policy operation; the public
 // BeginTerminalIntent contract continues to require declared cleanup.
 type TerminalIntentSnapshot struct {
-	RunID          RunID                `json:"run_id"`
-	IntendedStatus RunStatus            `json:"intended_status"`
-	Reason         *Failure             `json:"reason,omitempty"`
-	Error          *values.ValueSetRef  `json:"error,omitempty"`
-	IdempotencyKey string               `json:"idempotency_key"`
-	Finalizers     []FinalizerScope     `json:"finalizers"`
-	Status         TerminalIntentStatus `json:"status"`
-	Generation     uint64               `json:"generation"`
-	CreatedAt      time.Time            `json:"created_at"`
-	UpdatedAt      time.Time            `json:"updated_at"`
-	CompletedAt    time.Time            `json:"completed_at,omitempty"`
+	RunID          RunID     `json:"run_id"`
+	IntendedStatus RunStatus `json:"intended_status"`
+	// SuccessOutputsRequired is derived from the exact graph when the intent
+	// is created and is immutable across cleanup, recovery, and replay.
+	SuccessOutputsRequired bool                 `json:"success_outputs_required,omitempty"`
+	Reason                 *Failure             `json:"reason,omitempty"`
+	Error                  *values.ValueSetRef  `json:"error,omitempty"`
+	IdempotencyKey         string               `json:"idempotency_key"`
+	Finalizers             []FinalizerScope     `json:"finalizers"`
+	Status                 TerminalIntentStatus `json:"status"`
+	Generation             uint64               `json:"generation"`
+	CreatedAt              time.Time            `json:"created_at"`
+	UpdatedAt              time.Time            `json:"updated_at"`
+	CompletedAt            time.Time            `json:"completed_at,omitempty"`
 }
 
 func (s TerminalIntentSnapshot) Validate() error {
@@ -235,6 +241,9 @@ func (s TerminalIntentSnapshot) Validate() error {
 	}
 	if s.IntendedStatus == RunSucceeded && s.Error != nil {
 		return fmt.Errorf("successful terminal intent cannot contain an error")
+	}
+	if s.SuccessOutputsRequired && s.IntendedStatus != RunSucceeded {
+		return fmt.Errorf("only a successful terminal intent may require outputs")
 	}
 	if s.IntendedStatus != RunSucceeded && (s.Reason == nil || s.Error == nil) {
 		return fmt.Errorf("unsuccessful terminal intent requires reason and typed error")
@@ -288,7 +297,10 @@ type BeginTerminalIntentRequest struct {
 	RunID                 RunID
 	ExpectedRunGeneration uint64
 	IntendedStatus        RunStatus
-	Reason                *Failure
+	// SuccessOutputsRequired must be derived from the exact graph and may be
+	// true only for a successful intent with declared workflow outputs.
+	SuccessOutputsRequired bool
+	Reason                 *Failure
 	// ErrorValues is atomically persisted and bound for unsuccessful intent.
 	ErrorValues    values.ValueSet
 	IdempotencyKey string
@@ -420,7 +432,10 @@ type CompleteTerminalIntentRequest struct {
 	RunID                    RunID
 	ExpectedRunGeneration    uint64
 	ExpectedIntentGeneration uint64
-	At                       time.Time
+	// Outputs names the complete, digest-bound run-outputs record to publish
+	// atomically with successful intent completion. Every other outcome forbids it.
+	Outputs *values.ValueSetRef
+	At      time.Time
 }
 
 type CompleteTerminalIntentResult struct {

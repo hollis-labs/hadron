@@ -23,6 +23,10 @@ func (s *WorkflowStateStore) LoadValueRecord(ctx context.Context, ref values.Val
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.ValueRecord{}, err
 	}
+	return loadWorkflowValueRecord(ctx, s.db, ref)
+}
+
+func loadWorkflowValueRecord(ctx context.Context, query workflowSQL, ref values.ValueSetRef) (workflowruntime.ValueRecord, error) {
 	if err := ref.Validate(); err != nil {
 		return workflowruntime.ValueRecord{}, workflowInvalid(err)
 	}
@@ -31,7 +35,7 @@ func (s *WorkflowStateStore) LoadValueRecord(ctx context.Context, ref values.Val
 		return workflowruntime.ValueRecord{}, parseErr
 	}
 	var storedDigest, ownerJSON, valuesJSON string
-	if queryErr := s.db.QueryRowContext(ctx, `SELECT digest, owner_json, values_json FROM workflow_value_sets WHERE sequence = ?`, sequence).Scan(&storedDigest, &ownerJSON, &valuesJSON); queryErr != nil {
+	if queryErr := query.QueryRowContext(ctx, `SELECT digest, owner_json, values_json FROM workflow_value_sets WHERE sequence = ?`, sequence).Scan(&storedDigest, &ownerJSON, &valuesJSON); queryErr != nil {
 		if errors.Is(queryErr, sql.ErrNoRows) {
 			return workflowruntime.ValueRecord{}, fmt.Errorf("%w: value set %q", workflowruntime.ErrNotFound, ref.ID)
 		}

@@ -747,6 +747,9 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 			return RunSnapshot{}, nil, accountErr
 		}
 		if len(scopes) == 0 {
+			if status == RunSucceeded && len(workflow.Outputs) != 0 {
+				return run, nil, ErrRunOutputsPending
+			}
 			transition, transitionErr := c.Store.TransitionRun(context.WithoutCancel(ctx), RunTransitionRequest{RunID: runID, ExpectedGeneration: run.Generation, To: status, At: at})
 			return transition.Snapshot, nil, transitionErr
 		}
@@ -764,7 +767,8 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 		}
 		begin, beginErr := c.Control.BeginTerminalIntent(context.WithoutCancel(ctx), BeginTerminalIntentRequest{
 			RunID: runID, ExpectedRunGeneration: run.Generation, IntendedStatus: status, Reason: reason,
-			ErrorValues: errorValues, IdempotencyKey: idempotencyKey, Finalizers: scopes, At: at,
+			SuccessOutputsRequired: status == RunSucceeded && len(workflow.Outputs) != 0,
+			ErrorValues:            errorValues, IdempotencyKey: idempotencyKey, Finalizers: scopes, At: at,
 		})
 		if beginErr != nil {
 			return RunSnapshot{}, nil, beginErr
@@ -772,6 +776,10 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 		intent, run = begin.Intent, begin.Run
 	} else if intentErr != nil {
 		return RunSnapshot{}, nil, intentErr
+	}
+	expectedOutputs := intent.IntendedStatus == RunSucceeded && len(workflow.Outputs) != 0
+	if intent.SuccessOutputsRequired != expectedOutputs {
+		return RunSnapshot{}, nil, fmt.Errorf("%w: terminal intent output requirement differs from the exact graph", ErrControlFlowConflict)
 	}
 	if intent.Status == TerminalIntentCompleted {
 		// The run and intent are independent reads. A concurrent recovery worker
@@ -787,6 +795,7 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 		}
 		return currentRun, &intent, nil
 	}
+	cleanupFailed := false
 	for _, finalizer := range intent.Finalizers {
 		node, loadErr := c.Store.LoadNodeInvocation(ctx, finalizer.Invocation)
 		if loadErr != nil {
@@ -795,6 +804,10 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 		if !node.Status.Terminal() {
 			return run, &intent, ErrControlFlowPending
 		}
+		cleanupFailed = cleanupFailed || hardFailure(node.Status)
+	}
+	if intent.SuccessOutputsRequired && !cleanupFailed {
+		return run, &intent, ErrRunOutputsPending
 	}
 	completed, err := c.Control.CompleteTerminalIntent(context.WithoutCancel(ctx), CompleteTerminalIntentRequest{
 		RunID: runID, ExpectedRunGeneration: run.Generation, ExpectedIntentGeneration: intent.Generation, At: at,
@@ -818,6 +831,12 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 func validateCompletedIntentRun(run RunSnapshot, intent TerminalIntentSnapshot) error {
 	if intent.RunID != run.ID || !run.Status.Terminal() || run.Status != intent.IntendedStatus && run.Status != RunFailed {
 		return fmt.Errorf("%w: completed terminal intent and run status are incoherent", ErrControlFlowConflict)
+	}
+	if run.Status == RunSucceeded && intent.SuccessOutputsRequired && run.Outputs == nil {
+		return fmt.Errorf("%w: completed successful intent is missing required outputs", ErrControlFlowConflict)
+	}
+	if (run.Status != RunSucceeded || !intent.SuccessOutputsRequired) && run.Outputs != nil {
+		return fmt.Errorf("%w: completed terminal intent contains unexpected outputs", ErrControlFlowConflict)
 	}
 	return nil
 }

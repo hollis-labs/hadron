@@ -38,12 +38,14 @@ func (s *WorkflowStateStore) SaveValues(ctx context.Context, request workflowrun
 				return workflowInvalid(errors.New("pending terminal intent fences non-finalizer value persistence"))
 			}
 		} else {
-			pending, err := workflowRunHasPendingTerminalIntent(ctx, query, request.Owner.RunID)
-			if err != nil {
-				return err
-			}
-			if pending {
-				return workflowInvalid(errors.New("pending terminal intent fences anonymous run-level value persistence"))
+			intent, intentErr := loadWorkflowTerminalIntent(ctx, query, request.Owner.RunID)
+			if intentErr == nil && intent.Status == workflowruntime.TerminalIntentPending {
+				allowedRunOutputs := request.Owner.Kind == "run-outputs" && request.Owner.Attempt == nil && intent.IntendedStatus == workflowruntime.RunSucceeded && intent.SuccessOutputsRequired
+				if !allowedRunOutputs {
+					return workflowInvalid(errors.New("pending terminal intent fences anonymous run-level value persistence"))
+				}
+			} else if intentErr != nil && !errors.Is(intentErr, workflowruntime.ErrNotFound) {
+				return intentErr
 			}
 		}
 		var err error

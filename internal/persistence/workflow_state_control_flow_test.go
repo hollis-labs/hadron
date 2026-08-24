@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -185,6 +186,166 @@ func TestWorkflowSQLiteControlFlowAtomicReplayFencingAndCorruption(t *testing.T)
 	}
 	if loaded, err := state.LoadControlDecision(ctx, decision.ID); err != nil || loaded.Outcome != workflowruntime.ControlSelected {
 		t.Fatalf("decision damaged by rejected mutation = %#v, %v", loaded, err)
+	}
+}
+
+func TestWorkflowSQLiteTerminalIntentPublishesRequiredOutputsAtomically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "terminal-outputs.db")
+	store, state := openWorkflowStateTest(t, path)
+	ctx, base := context.Background(), workflowTestTime()
+	run := createWorkflowTestRun(t, state, "terminal-outputs", base)
+	running, err := state.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunRunning, At: base.Add(time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup := createWorkflowTestNode(t, state, run.ID, "cleanup", base.Add(time.Second))
+	wrongOwner, err := state.SaveValues(ctx, workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "fixture", RunID: run.ID}, Values: workflowTestValues(t, "wrong")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	begin, err := state.BeginTerminalIntent(ctx, workflowruntime.BeginTerminalIntentRequest{
+		RunID: run.ID, ExpectedRunGeneration: running.Snapshot.Generation, IntendedStatus: workflowruntime.RunSucceeded,
+		SuccessOutputsRequired: true, IdempotencyKey: "terminal-outputs", Finalizers: []workflowruntime.FinalizerScope{{Invocation: cleanup.ID, Order: 0}}, At: base.Add(2 * time.Second),
+	})
+	if err != nil || !begin.Intent.SuccessOutputsRequired {
+		t.Fatalf("BeginTerminalIntent = %#v, %v", begin, err)
+	}
+	cleanupDone, err := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{InvocationID: cleanup.ID, ExpectedGeneration: cleanup.Generation, To: workflowruntime.NodeSkipped, At: base.Add(3 * time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, completeErr := state.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{RunID: run.ID, ExpectedRunGeneration: begin.Run.Generation, ExpectedIntentGeneration: begin.Intent.Generation, At: base.Add(4 * time.Second)}); !errors.Is(completeErr, workflowruntime.ErrInvalidRecord) {
+		t.Fatalf("missing terminal outputs = %v", completeErr)
+	}
+	if _, completeErr := state.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{RunID: run.ID, ExpectedRunGeneration: begin.Run.Generation, ExpectedIntentGeneration: begin.Intent.Generation, Outputs: &wrongOwner, At: base.Add(4 * time.Second)}); !errors.Is(completeErr, workflowruntime.ErrInvalidRecord) {
+		t.Fatalf("wrong terminal output owner = %v", completeErr)
+	}
+	outputRef, err := state.SaveValues(ctx, workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "run-outputs", RunID: run.ID}, Values: workflowTestValues(t, "published")})
+	if err != nil {
+		t.Fatalf("save terminal outputs while intent pending: %v", err)
+	}
+	otherRunRef, err := state.SaveValues(ctx, workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "run-outputs", RunID: "other-run"}, Values: workflowTestValues(t, "other")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, completeErr := state.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{RunID: run.ID, ExpectedRunGeneration: begin.Run.Generation, ExpectedIntentGeneration: begin.Intent.Generation, Outputs: &otherRunRef, At: base.Add(4 * time.Second)}); !errors.Is(completeErr, workflowruntime.ErrInvalidRecord) {
+		t.Fatalf("other-run terminal outputs = %v", completeErr)
+	}
+	tamperedRef := outputRef
+	tamperedRef.Digest = values.SHA256Digest([]byte("tampered"))
+	if _, completeErr := state.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{RunID: run.ID, ExpectedRunGeneration: begin.Run.Generation, ExpectedIntentGeneration: begin.Intent.Generation, Outputs: &tamperedRef, At: base.Add(4 * time.Second)}); !errors.Is(completeErr, workflowruntime.ErrCASMismatch) {
+		t.Fatalf("tampered terminal output digest = %v", completeErr)
+	}
+	completed, err := state.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{
+		RunID: run.ID, ExpectedRunGeneration: begin.Run.Generation, ExpectedIntentGeneration: begin.Intent.Generation,
+		Outputs: &outputRef, At: base.Add(4 * time.Second),
+	})
+	if err != nil || completed.Run.Status != workflowruntime.RunSucceeded || completed.Run.Outputs == nil || *completed.Run.Outputs != outputRef || completed.Event.Values == nil || *completed.Event.Values != outputRef || cleanupDone.Snapshot.Status != workflowruntime.NodeSkipped {
+		t.Fatalf("CompleteTerminalIntent = %#v, %v", completed, err)
+	}
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	reopenedStore, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopenedStore.Close() })
+	reopened, err := NewWorkflowStateStore(reopenedStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedRun, err := reopened.LoadRun(ctx, run.ID)
+	if err != nil || loadedRun.Outputs == nil || *loadedRun.Outputs != outputRef || loadedRun.Status != workflowruntime.RunSucceeded {
+		t.Fatalf("reopened successful outputs = %#v, %v", loadedRun, err)
+	}
+	loadedIntent, err := reopened.LoadTerminalIntent(ctx, run.ID)
+	if err != nil || loadedIntent.Status != workflowruntime.TerminalIntentCompleted || !loadedIntent.SuccessOutputsRequired {
+		t.Fatalf("reopened terminal intent = %#v, %v", loadedIntent, err)
+	}
+	loadedValues, err := reopened.LoadValues(ctx, outputRef)
+	if err != nil || loadedValues["message"].Inline != "published" {
+		t.Fatalf("reopened outputs = %#v, %v", loadedValues, err)
+	}
+}
+
+func TestWorkflowSQLiteReconcileFinalizeOutputsReopenReplay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "finalize-reopen.db")
+	store, state := openWorkflowStateTest(t, path)
+	ctx, base := context.Background(), workflowTestTime()
+	planRef := workflowTestPlan("finalize-reopen")
+	plan := &workflowcompile.ExecutionPlan{
+		SchemaVersion: planRef.SchemaVersion, ID: planRef.ID, Digest: planRef.Digest,
+		Provenance: graph.Provenance{Authority: "project", Origin: "fixture", Locator: "fixture.workflow.yaml", Digest: values.SHA256Digest([]byte("source"))},
+		Graph: graph.Graph{ID: planRef.ID, Version: planRef.Version, Digest: values.SHA256Digest([]byte("graph")), Nodes: []graph.Node{
+			{ID: "work", Kind: "test"}, {ID: "cleanup", Kind: "test", Finally: &graph.FinallySpec{}},
+		}, Outputs: []graph.OutputSpec{{Name: "result", Schema: graph.Schema{"type": "string"}, Value: &graph.Binding{Kind: graph.BindingLiteral, Literal: "published"}}}},
+	}
+	boundResult, err := workflowruntime.BindRun(ctx, state, workflowruntime.BindRunRequest{ID: "finalize-reopen", Plan: plan, CreatedAt: base})
+	if err != nil || boundResult.Run == nil || len(boundResult.Diagnostics) != 0 {
+		t.Fatalf("BindRun = %#v, %v", boundResult, err)
+	}
+	bound := *boundResult.Run
+	pending, _, err := workflowruntime.StartBoundRun(ctx, state, bound, "start-finalize-reopen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := state.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: pending.ID, ExpectedGeneration: pending.Generation, To: workflowruntime.RunRunning, At: base.Add(time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := createWorkflowTestNode(t, state, running.Snapshot.ID, "work", base.Add(time.Second))
+	cleanup := createWorkflowTestNode(t, state, running.Snapshot.ID, "cleanup", base.Add(time.Second))
+	if _, transitionErr := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{InvocationID: work.ID, ExpectedGeneration: work.Generation, To: workflowruntime.NodeSkipped, At: base.Add(2 * time.Second)}); transitionErr != nil {
+		t.Fatal(transitionErr)
+	}
+	coordinator := workflowruntime.NewControlFlowCoordinator(state, state, nil)
+	if _, intent, reconcileErr := coordinator.ReconcileRunCompletion(ctx, plan.Graph, running.Snapshot.ID, "complete-finalize-reopen", base.Add(3*time.Second)); !errors.Is(reconcileErr, workflowruntime.ErrControlFlowPending) || intent == nil || !intent.SuccessOutputsRequired {
+		t.Fatalf("begin output intent = %#v, %v", intent, reconcileErr)
+	}
+	if _, transitionErr := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{InvocationID: cleanup.ID, ExpectedGeneration: cleanup.Generation, To: workflowruntime.NodeSkipped, At: base.Add(4 * time.Second)}); transitionErr != nil {
+		t.Fatal(transitionErr)
+	}
+	ready, intent, err := coordinator.ReconcileRunCompletion(ctx, plan.Graph, running.Snapshot.ID, "complete-finalize-reopen", base.Add(5*time.Second))
+	if !errors.Is(err, workflowruntime.ErrRunOutputsPending) || intent == nil || ready.Outputs != nil || ready.Status == workflowruntime.RunSucceeded {
+		t.Fatalf("output boundary = run=%#v intent=%#v err=%v", ready, intent, err)
+	}
+	expression, err := workflowruntime.BuildExpressionContext(ctx, state, state, plan.Graph, ready.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalized, err := workflowruntime.FinalizeRunOutputs(ctx, state, workflowruntime.FinalizeRunRequest{BoundRun: bound, Run: ready, Plan: plan, Context: expression, Control: state, At: base.Add(6 * time.Second)})
+	if err != nil || len(finalized.Diagnostics) != 0 || finalized.Run.Status != workflowruntime.RunSucceeded || finalized.Run.Outputs == nil {
+		t.Fatalf("FinalizeRunOutputs = %#v, %v", finalized, err)
+	}
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	reopenedStore, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopenedStore.Close() })
+	reopened, err := NewWorkflowStateStore(reopenedStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedRun, err := reopened.LoadRun(ctx, ready.ID)
+	if err != nil || loadedRun.Outputs == nil || *loadedRun.Outputs != finalized.OutputsRef {
+		t.Fatalf("reopened run outputs = %#v, %v", loadedRun, err)
+	}
+	reopenedExpression, err := workflowruntime.BuildExpressionContext(ctx, reopened, reopened, plan.Graph, ready.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookCalls := 0
+	replayed, err := workflowruntime.FinalizeRunOutputs(ctx, reopened, workflowruntime.FinalizeRunRequest{
+		BoundRun: bound, Run: loadedRun, Plan: plan, Context: reopenedExpression, Control: reopened,
+		RetentionHook: workflowruntime.RetentionHookFuncs{Before: func(context.Context, workflowruntime.RetentionPlan) error { hookCalls++; return nil }, After: func(context.Context, workflowruntime.RetentionRecord) error { hookCalls++; return nil }},
+		At:            base.Add(7 * time.Second),
+	})
+	if err != nil || replayed.Outcome != workflowruntime.OutputFinalizationReplayed || replayed.OutputsRef != finalized.OutputsRef || hookCalls != 0 {
+		t.Fatalf("reopened finalization replay = %#v hooks=%d err=%v", replayed, hookCalls, err)
 	}
 }
 

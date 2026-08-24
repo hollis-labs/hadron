@@ -240,7 +240,8 @@ func beginWorkflowTerminalIntent(ctx context.Context, query workflowSQL, request
 	}
 	candidate := workflowruntime.TerminalIntentSnapshot{
 		RunID: request.RunID, IntendedStatus: request.IntendedStatus,
-		Reason: cloneWorkflowFailure(request.Reason), IdempotencyKey: request.IdempotencyKey,
+		SuccessOutputsRequired: request.SuccessOutputsRequired,
+		Reason:                 cloneWorkflowFailure(request.Reason), IdempotencyKey: request.IdempotencyKey,
 		Finalizers: cloneWorkflowFinalizerScopes(request.Finalizers), Status: workflowruntime.TerminalIntentPending,
 		Generation: 1, CreatedAt: request.At, UpdatedAt: request.At,
 	}
@@ -379,6 +380,12 @@ INSERT INTO workflow_terminal_intents(
 
 func (s *WorkflowStateStore) CompleteTerminalIntent(ctx context.Context, request workflowruntime.CompleteTerminalIntentRequest) (workflowruntime.CompleteTerminalIntentResult, error) {
 	request.At = request.At.UTC()
+	request.Outputs = cloneWorkflowValueRef(request.Outputs)
+	if request.Outputs != nil {
+		if err := request.Outputs.Validate(); err != nil {
+			return workflowruntime.CompleteTerminalIntentResult{}, workflowInvalid(err)
+		}
+	}
 	if request.RunID == "" || request.ExpectedRunGeneration == 0 || request.ExpectedIntentGeneration == 0 || request.At.IsZero() {
 		return workflowruntime.CompleteTerminalIntentResult{}, workflowInvalid(errors.New("terminal completion requires identity, generations, and timestamp"))
 	}
@@ -430,8 +437,27 @@ func (s *WorkflowStateStore) CompleteTerminalIntent(ctx context.Context, request
 		if err := workflowruntime.ValidateRunStatusTransition(run.Status, to); err != nil {
 			return err
 		}
+		var eventValues *values.ValueSetRef
+		if to == workflowruntime.RunSucceeded && intent.SuccessOutputsRequired {
+			if request.Outputs == nil {
+				return workflowInvalid(errors.New("successful terminal completion requires outputs"))
+			}
+			record, recordErr := loadWorkflowValueRecord(ctx, query, *request.Outputs)
+			if recordErr != nil {
+				return recordErr
+			}
+			if record.Owner != (workflowruntime.ValueOwner{Kind: "run-outputs", RunID: run.ID}) {
+				return workflowInvalid(errors.New("terminal outputs differ from the exact run-owned value record"))
+			}
+			eventValues = cloneWorkflowValueRef(request.Outputs)
+		} else if request.Outputs != nil {
+			return workflowInvalid(errors.New("non-successful terminal completion cannot publish outputs"))
+		} else if to != workflowruntime.RunSucceeded {
+			eventValues = cloneWorkflowValueRef(intent.Error)
+		}
 		nextRun := run
 		nextRun.Status = to
+		nextRun.Outputs = cloneWorkflowValueRef(request.Outputs)
 		nextRun.Generation++
 		nextRun.UpdatedAt = request.At
 		nextIntent := cloneWorkflowTerminalIntent(intent)
@@ -470,7 +496,7 @@ WHERE run_id = ? AND generation = ? AND status = ?`,
 		}
 		event, err := appendWorkflowEvent(ctx, query, workflowruntime.AppendEventRequest{
 			RunID: run.ID, Type: workflowruntime.EventRunStatusChanged, OccurredAt: request.At,
-			Attributes: attributes, Values: cloneWorkflowValueRef(intent.Error), Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
+			Attributes: attributes, Values: eventValues, Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
 		})
 		if err != nil {
 			return err
@@ -839,19 +865,21 @@ func loadWorkflowTerminalIntent(ctx context.Context, query workflowSQL, runID wo
 }
 
 type workflowTerminalImmutable struct {
-	RunID          workflowruntime.RunID
-	IntendedStatus workflowruntime.RunStatus
-	Reason         *workflowruntime.Failure
-	Error          *values.ValueSetRef
-	IdempotencyKey string
-	Finalizers     []workflowruntime.FinalizerScope
-	CreatedAt      time.Time
+	RunID                  workflowruntime.RunID
+	IntendedStatus         workflowruntime.RunStatus
+	SuccessOutputsRequired bool `json:"SuccessOutputsRequired,omitempty"`
+	Reason                 *workflowruntime.Failure
+	Error                  *values.ValueSetRef
+	IdempotencyKey         string
+	Finalizers             []workflowruntime.FinalizerScope
+	CreatedAt              time.Time
 }
 
 func encodeWorkflowTerminalImmutable(snapshot workflowruntime.TerminalIntentSnapshot) (string, error) {
 	return encodeWorkflowJSON(workflowTerminalImmutable{
 		RunID: snapshot.RunID, IntendedStatus: snapshot.IntendedStatus,
-		Reason: cloneWorkflowFailure(snapshot.Reason), Error: cloneWorkflowValueRef(snapshot.Error),
+		SuccessOutputsRequired: snapshot.SuccessOutputsRequired,
+		Reason:                 cloneWorkflowFailure(snapshot.Reason), Error: cloneWorkflowValueRef(snapshot.Error),
 		IdempotencyKey: snapshot.IdempotencyKey, Finalizers: cloneWorkflowFinalizerScopes(snapshot.Finalizers),
 		CreatedAt: snapshot.CreatedAt.UTC(),
 	})

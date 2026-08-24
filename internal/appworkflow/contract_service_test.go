@@ -1111,7 +1111,7 @@ finally:
 		assertCanonicalContractPass(t, plan, kinds, suite)
 	})
 
-	t.Run("finalizer with declared outputs exposes runtime conflict", func(t *testing.T) {
+	t.Run("finalizer with declared outputs publishes successful result", func(t *testing.T) {
 		plan := compileContractPlan(t, `workflow:
   name: finalizer-output-contract
   version: v1
@@ -1137,19 +1137,13 @@ outputs:
 		for index := range suite.Cases[0].Mocks {
 			mock := &suite.Cases[0].Mocks[index]
 			mock.ExpectedInputs = values.ValueSet{}
-			mock.Results = []ContractMockResult{{Outputs: values.ValueSet{"result": contractInline(t, "mock", mock.NodeID, map[string]string{"work": "done", "cleanup": "clean"}[mock.NodeID])}}}
+			result := output
+			if mock.NodeID == "cleanup" {
+				result = contractInline(t, "mock", mock.NodeID, "clean")
+			}
+			mock.Results = []ContractMockResult{{Outputs: values.ValueSet{"result": result}}}
 		}
-		canonical, _, err := canonicalContractSuite(suite)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if validationErr := validateContractSuiteForPlan(plan, kinds, canonical, false); validationErr != nil {
-			t.Fatal(validationErr)
-		}
-		report, err := newCanonicalContractRunner(compile.DependencyOptions{}, verification.NewDefaultRegistry()).Execute(t.Context(), plan, kinds, canonical, 1)
-		if err != nil || report.Passed || report.Cases[0].Failure == nil || report.Cases[0].Failure.Code != string(runtime.CodeInvalidRunBinding) {
-			t.Fatalf("finalizer/output runtime result = %#v, %v", report, err)
-		}
+		assertCanonicalContractPass(t, plan, kinds, suite)
 	})
 
 	t.Run("fan-out", func(t *testing.T) {

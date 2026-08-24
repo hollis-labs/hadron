@@ -442,7 +442,10 @@ func (s *Store) SaveValues(ctx context.Context, request workflowruntime.SaveValu
 	}
 	if ownerInvocation == nil {
 		if intent, exists := s.terminalIntents[request.Owner.RunID]; exists && intent.Status == workflowruntime.TerminalIntentPending {
-			return values.ValueSetRef{}, invalid(errors.New("pending terminal intent fences anonymous run-level value persistence"))
+			allowedRunOutputs := request.Owner.Kind == "run-outputs" && request.Owner.Attempt == nil && intent.IntendedStatus == workflowruntime.RunSucceeded && intent.SuccessOutputsRequired
+			if !allowedRunOutputs {
+				return values.ValueSetRef{}, invalid(errors.New("pending terminal intent fences anonymous run-level value persistence"))
+			}
 		}
 	}
 	s.nextValueSet++

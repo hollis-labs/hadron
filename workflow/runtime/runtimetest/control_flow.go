@@ -269,7 +269,7 @@ func (s *Store) BeginTerminalIntent(ctx context.Context, request workflowruntime
 }
 
 func (s *Store) beginTerminalIntentLocked(request workflowruntime.BeginTerminalIntentRequest) (workflowruntime.BeginTerminalIntentResult, error) {
-	candidate := workflowruntime.TerminalIntentSnapshot{RunID: request.RunID, IntendedStatus: request.IntendedStatus, Reason: cloneFailure(request.Reason), IdempotencyKey: request.IdempotencyKey, Finalizers: cloneFinalizerScopes(request.Finalizers), Status: workflowruntime.TerminalIntentPending, Generation: 1, CreatedAt: request.At, UpdatedAt: request.At}
+	candidate := workflowruntime.TerminalIntentSnapshot{RunID: request.RunID, IntendedStatus: request.IntendedStatus, SuccessOutputsRequired: request.SuccessOutputsRequired, Reason: cloneFailure(request.Reason), IdempotencyKey: request.IdempotencyKey, Finalizers: cloneFinalizerScopes(request.Finalizers), Status: workflowruntime.TerminalIntentPending, Generation: 1, CreatedAt: request.At, UpdatedAt: request.At}
 	if request.ExpectedRunGeneration == 0 || request.At.IsZero() {
 		return workflowruntime.BeginTerminalIntentResult{}, invalid(errors.New("terminal intent requires run generation and timestamp"))
 	}
@@ -496,6 +496,12 @@ func (s *Store) CompleteTerminalIntent(ctx context.Context, request workflowrunt
 		return workflowruntime.CompleteTerminalIntentResult{}, err
 	}
 	request.At = request.At.UTC()
+	request.Outputs = cloneValueSetRef(request.Outputs)
+	if request.Outputs != nil {
+		if err := request.Outputs.Validate(); err != nil {
+			return workflowruntime.CompleteTerminalIntentResult{}, invalid(err)
+		}
+	}
 	if request.ExpectedRunGeneration == 0 || request.ExpectedIntentGeneration == 0 || request.At.IsZero() {
 		return workflowruntime.CompleteTerminalIntentResult{}, invalid(errors.New("terminal completion requires generations and timestamp"))
 	}
@@ -540,8 +546,31 @@ func (s *Store) CompleteTerminalIntent(ctx context.Context, request workflowrunt
 	if err := workflowruntime.ValidateRunStatusTransition(run.Status, to); err != nil {
 		return workflowruntime.CompleteTerminalIntentResult{}, err
 	}
+	var eventValues *values.ValueSetRef
+	if to == workflowruntime.RunSucceeded && intent.SuccessOutputsRequired {
+		if request.Outputs == nil {
+			return workflowruntime.CompleteTerminalIntentResult{}, invalid(errors.New("successful terminal completion requires outputs"))
+		}
+		stored, exists := s.valueSets[request.Outputs.ID]
+		if !exists {
+			return workflowruntime.CompleteTerminalIntentResult{}, fmt.Errorf("%w: terminal output values", workflowruntime.ErrNotFound)
+		}
+		record := workflowruntime.ValueRecord{Ref: stored.ref, Owner: cloneValueOwner(stored.owner), Values: stored.values}
+		if stored.ref != *request.Outputs || record.Owner != (workflowruntime.ValueOwner{Kind: "run-outputs", RunID: run.ID}) {
+			return workflowruntime.CompleteTerminalIntentResult{}, invalid(errors.New("terminal outputs differ from the exact run-owned value record"))
+		}
+		if err := record.Validate(); err != nil {
+			return workflowruntime.CompleteTerminalIntentResult{}, invalid(fmt.Errorf("terminal output values: %w", err))
+		}
+		eventValues = cloneValueSetRef(request.Outputs)
+	} else if request.Outputs != nil {
+		return workflowruntime.CompleteTerminalIntentResult{}, invalid(errors.New("non-successful terminal completion cannot publish outputs"))
+	} else if to != workflowruntime.RunSucceeded {
+		eventValues = cloneValueSetRef(intent.Error)
+	}
 	nextRun := cloneRun(run)
 	nextRun.Status = to
+	nextRun.Outputs = cloneValueSetRef(request.Outputs)
 	nextRun.Generation++
 	nextRun.UpdatedAt = request.At
 	nextIntent := cloneTerminalIntent(intent)
@@ -558,7 +587,7 @@ func (s *Store) CompleteTerminalIntent(ctx context.Context, request workflowrunt
 	if cleanupFailure != "" {
 		attributes["cleanup_failure"] = cleanupFailure
 	}
-	event, err := s.appendEventLocked(workflowruntime.AppendEventRequest{RunID: run.ID, Type: workflowruntime.EventRunStatusChanged, OccurredAt: request.At, Attributes: attributes, Values: cloneValueSetRef(intent.Error), Redaction: values.RedactionPrivate, Retention: values.RetentionRun})
+	event, err := s.appendEventLocked(workflowruntime.AppendEventRequest{RunID: run.ID, Type: workflowruntime.EventRunStatusChanged, OccurredAt: request.At, Attributes: attributes, Values: eventValues, Redaction: values.RedactionPrivate, Retention: values.RetentionRun})
 	if err != nil {
 		return workflowruntime.CompleteTerminalIntentResult{}, err
 	}
@@ -663,7 +692,7 @@ func cloneTerminalIntent(input workflowruntime.TerminalIntentSnapshot) workflowr
 	return input
 }
 func equalTerminalIntentImmutable(left, right workflowruntime.TerminalIntentSnapshot) bool {
-	if left.RunID != right.RunID || left.IntendedStatus != right.IntendedStatus || left.IdempotencyKey != right.IdempotencyKey || !equalFailurePointers(left.Reason, right.Reason) || !equalValueSetRef(left.Error, right.Error) || len(left.Finalizers) != len(right.Finalizers) || !left.CreatedAt.Equal(right.CreatedAt) {
+	if left.RunID != right.RunID || left.IntendedStatus != right.IntendedStatus || left.SuccessOutputsRequired != right.SuccessOutputsRequired || left.IdempotencyKey != right.IdempotencyKey || !equalFailurePointers(left.Reason, right.Reason) || !equalValueSetRef(left.Error, right.Error) || len(left.Finalizers) != len(right.Finalizers) || !left.CreatedAt.Equal(right.CreatedAt) {
 		return false
 	}
 	for index := range left.Finalizers {

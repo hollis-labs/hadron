@@ -194,6 +194,8 @@ const (
 // Context may contain more steps than the plan, but output evaluation sees
 // only declared plan nodes. BaseOptions retains host policy such as AllowEnv.
 // RetentionHook is optional and is not consulted during replay without writes.
+// Control is required when a pending terminal intent owns finalizer completion;
+// when omitted, FinalizeRunOutputs uses store if it implements ControlFlowStore.
 type FinalizeRunRequest struct {
 	BoundRun      BoundRun
 	Run           RunSnapshot
@@ -201,6 +203,7 @@ type FinalizeRunRequest struct {
 	Context       values.ExpressionContext
 	BaseOptions   values.ExpressionOptions
 	RetentionHook RetentionHook
+	Control       ControlFlowStore
 	At            time.Time
 }
 
@@ -228,6 +231,45 @@ func FinalizeRunOutputs(ctx context.Context, store StateStore, request FinalizeR
 		sortBindingDiagnostics(findings)
 		return FinalizeRunResult{Diagnostics: findings}, nil
 	}
+	control := request.Control
+	if nilControlFlowStore(control) {
+		if implemented, ok := store.(ControlFlowStore); ok {
+			control = implemented
+		}
+	}
+	intent, hasIntent, err := finalizationIntent(ctx, store, control, request)
+	if err != nil {
+		return FinalizeRunResult{}, err
+	}
+	if hasIntent {
+		currentRun, loadErr := store.LoadRun(ctx, request.Run.ID)
+		if loadErr != nil {
+			return FinalizeRunResult{}, fmt.Errorf("load run for terminal output finalization: %w", loadErr)
+		}
+		request.Run = currentRun
+		if intent.Status == TerminalIntentPending && !currentRun.Status.Active() {
+			currentIntent, reloadErr := control.LoadTerminalIntent(ctx, request.Run.ID)
+			if reloadErr != nil {
+				return FinalizeRunResult{}, fmt.Errorf("reload terminal intent after terminal run observation: %w", reloadErr)
+			}
+			intent = currentIntent
+		}
+		switch intent.Status {
+		case TerminalIntentPending:
+			if !currentRun.Status.Active() || currentRun.Outputs != nil {
+				return FinalizeRunResult{}, fmt.Errorf("%w: pending terminal intent does not own an active output-free run", ErrOutputConflict)
+			}
+		case TerminalIntentCompleted:
+			if validationErr := validateCompletedIntentRun(currentRun, intent); validationErr != nil {
+				return FinalizeRunResult{}, validationErr
+			}
+			if currentRun.Status != RunSucceeded {
+				return FinalizeRunResult{}, fmt.Errorf("%w: failed terminal completion forbids successful output publication", ErrOutputConflict)
+			}
+		default:
+			return FinalizeRunResult{}, fmt.Errorf("%w: unsupported terminal intent status %q", ErrOutputConflict, intent.Status)
+		}
+	}
 	inputs, err := store.LoadValues(ctx, request.BoundRun.InputsRef)
 	if err != nil {
 		return FinalizeRunResult{}, fmt.Errorf("load bound run inputs: %w", err)
@@ -254,6 +296,23 @@ func FinalizeRunOutputs(ctx context.Context, store StateStore, request FinalizeR
 	if err != nil {
 		return FinalizeRunResult{}, fmt.Errorf("save bound run outputs: %w", err)
 	}
+	if hasIntent {
+		completed, completeErr := control.CompleteTerminalIntent(ctx, CompleteTerminalIntentRequest{
+			RunID: request.Run.ID, ExpectedRunGeneration: request.Run.Generation,
+			ExpectedIntentGeneration: intent.Generation, Outputs: &outputRef, At: request.At,
+		})
+		if completeErr != nil {
+			currentIntent, intentErr := control.LoadTerminalIntent(ctx, request.Run.ID)
+			currentRun, runErr := store.LoadRun(ctx, request.Run.ID)
+			if intentErr == nil && runErr == nil && currentIntent.Status == TerminalIntentCompleted {
+				if validationErr := validateCompletedIntentRun(currentRun, currentIntent); validationErr == nil {
+					return replayFinalizedOutputs(ctx, store, currentRun, outputs)
+				}
+			}
+			return FinalizeRunResult{}, fmt.Errorf("publish bound run outputs with terminal intent: %w", completeErr)
+		}
+		return FinalizeRunResult{Run: completed.Run, Outputs: outputs, OutputsRef: outputRef, Outcome: OutputFinalizationApplied}, nil
+	}
 	transition, err := store.TransitionRun(ctx, RunTransitionRequest{
 		RunID: request.Run.ID, ExpectedGeneration: request.Run.Generation,
 		To: RunSucceeded, Outputs: &outputRef, At: request.At,
@@ -265,6 +324,45 @@ func FinalizeRunOutputs(ctx context.Context, store StateStore, request FinalizeR
 		Run: transition.Snapshot, Outputs: outputs, OutputsRef: outputRef,
 		Outcome: OutputFinalizationApplied,
 	}, nil
+}
+
+func finalizationIntent(ctx context.Context, store StateStore, control ControlFlowStore, request FinalizeRunRequest) (TerminalIntentSnapshot, bool, error) {
+	if nilControlFlowStore(control) {
+		return TerminalIntentSnapshot{}, false, nil
+	}
+	intent, err := control.LoadTerminalIntent(ctx, request.Run.ID)
+	if errors.Is(err, ErrNotFound) {
+		return TerminalIntentSnapshot{}, false, nil
+	}
+	if err != nil {
+		return TerminalIntentSnapshot{}, false, fmt.Errorf("load terminal intent for output finalization: %w", err)
+	}
+	if intent.IntendedStatus != RunSucceeded || !intent.SuccessOutputsRequired || len(request.Plan.Graph.Outputs) == 0 {
+		return TerminalIntentSnapshot{}, false, fmt.Errorf("%w: terminal intent does not authorize successful output publication", ErrOutputConflict)
+	}
+	planned, err := PlanFinalizerScopes(request.Plan.Graph, request.Run.ID)
+	if err != nil {
+		return TerminalIntentSnapshot{}, false, err
+	}
+	if !reflect.DeepEqual(intent.Finalizers, planned) {
+		return TerminalIntentSnapshot{}, false, fmt.Errorf("%w: terminal intent finalizers differ from the exact execution plan", ErrOutputConflict)
+	}
+	if intent.Status == TerminalIntentCompleted {
+		return intent, true, nil
+	}
+	for _, finalizer := range intent.Finalizers {
+		node, loadErr := store.LoadNodeInvocation(ctx, finalizer.Invocation)
+		if loadErr != nil {
+			return TerminalIntentSnapshot{}, false, fmt.Errorf("load terminal finalizer before output binding: %w", loadErr)
+		}
+		if !node.Status.Terminal() {
+			return TerminalIntentSnapshot{}, false, ErrControlFlowPending
+		}
+		if hardFailure(node.Status) {
+			return TerminalIntentSnapshot{}, false, fmt.Errorf("%w: failed finalizer forbids successful output publication", ErrOutputConflict)
+		}
+	}
+	return intent, true, nil
 }
 
 func bindingPlanRef(request BindRunRequest) (PlanRef, []diagnostic.Diagnostic) {

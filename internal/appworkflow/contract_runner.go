@@ -461,17 +461,20 @@ func (e *contractExecution) completeRun(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if finalizers || !allSucceeded || len(e.plan.Graph.Outputs) == 0 {
-		_, _, reconcileErr := coordinator.ReconcileRunCompletion(ctx, e.plan.Graph, e.runID, "contract-complete:"+string(e.runID), e.tick())
+		reconciled, _, reconcileErr := coordinator.ReconcileRunCompletion(ctx, e.plan.Graph, e.runID, "contract-complete:"+string(e.runID), e.tick())
 		if errors.Is(reconcileErr, runtime.ErrControlFlowPending) {
 			return true, nil
 		}
-		return reconcileErr == nil, reconcileErr
+		if !errors.Is(reconcileErr, runtime.ErrRunOutputsPending) {
+			return reconcileErr == nil, reconcileErr
+		}
+		run = reconciled
 	}
 	expression, err := runtime.BuildExpressionContext(ctx, e.store, e.store, e.plan.Graph, e.runID)
 	if err != nil {
 		return false, err
 	}
-	finalized, err := runtime.FinalizeRunOutputs(ctx, e.store, runtime.FinalizeRunRequest{BoundRun: e.bound, Run: run, Plan: e.plan, Context: expression, At: e.tick()})
+	finalized, err := runtime.FinalizeRunOutputs(ctx, e.store, runtime.FinalizeRunRequest{BoundRun: e.bound, Run: run, Plan: e.plan, Context: expression, Control: e.store, At: e.tick()})
 	if err != nil {
 		return false, err
 	}

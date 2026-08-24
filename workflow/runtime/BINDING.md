@@ -76,11 +76,19 @@ defaults. Secret-classified Values and ArtifactRefs can only use exact
 passthrough; they cannot be unwrapped or derived by expressions.
 
 Only a complete output set is saved, and only its reference is published by the
-atomic transition to `succeeded`. Evaluation, visibility, type, or schema
-diagnostics save nothing. A storage failure publishes nothing. A later
-transition failure can leave the complete saved set unreferenced, but cannot
-publish partial outputs. Finalizing an already succeeded run loads and compares
-the existing complete value set before any write: identical content is a
-no-mutation replay and different content is `ErrOutputConflict`.
+atomic transition to `succeeded`. When finalizers exist, their immutable
+terminal intent records whether the exact graph requires successful outputs;
+reconciliation returns `ErrRunOutputsPending` after every finalizer is terminal,
+and `FinalizeRunOutputs` publishes the complete reference in the same atomic
+operation that completes the intent and succeeds the run. A hard finalizer
+failure completes the run as failed without evaluating or publishing success
+outputs. Workflows with declared outputs but no finalizers intentionally keep
+the direct atomic `TransitionRun` publication path and do not create a
+zero-finalizer terminal intent. Evaluation, visibility, type, or schema diagnostics save nothing. A
+storage failure publishes nothing. A later transition/CAS failure can leave the
+complete saved set unreferenced, but cannot publish partial outputs. Finalizing
+an already succeeded run loads and compares the existing complete value set
+before any write: identical content is a no-mutation replay and different
+content is `ErrOutputConflict`.
 
 Binding diagnostics reserve `HADR-VALUE-010` through `HADR-VALUE-018`.
