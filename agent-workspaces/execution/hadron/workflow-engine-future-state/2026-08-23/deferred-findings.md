@@ -159,3 +159,19 @@ No execution findings have been deferred.
   source is present without an injected materializer.
 
   Vanta revision for both W05-T01 limitations: `01M0SXD683VSN9V6HNDCK1SARF`.
+
+- W05-T03's compiled-plan/source caches and graph-native `WorkflowIndex` are
+  process-local. Durable source/plan snapshots and publishing remain W05-T05
+  and W05-T07 responsibilities; callers cannot treat these caches as restart
+  storage.
+
+- Child materialization saves root input values before creating the node
+  because `StateStore` has no atomic value-set-plus-node operation. A lost
+  `SaveValues` response can leave an immutable run-owned orphan, but recovery
+  remains digest-bound and normal run retention can sweep it.
+
+- Package `MaxSourceBytes` counts tar headers, metadata, padding, and end blocks
+  as well as the selected source. The usable workflow payload is therefore
+  necessarily smaller than that whole-stream bound.
+
+  Vanta revision for all W05-T03 limitations: `01M0T44SS8Z3G7JYR7YMV7R7EC`.

@@ -39,3 +39,4 @@
 | 35 | W04-T06 | `d7c312f` | `8ac8dbe` | Hadron | accepted after immutable call-site resolution pinning, exact replay/conflict fencing, typed partial/default/local input binding, authoritative lineage validation, and nested inline/run runtime coverage |
 | 36 | W05-T01 | `a5eb3bc` | `2d14c13` | Hadron | accepted after exact authenticated start replay, append-only policy facts, convergent lifecycle recovery, bounded cancellation CAS, and atomic call/child-run SQLite binding |
 | 37 | W03-T08 | `d771e44` | `61ea279` | Hadron | accepted after recursive cancellation-tree, semantic replay, pending-child recovery ordering, terminal-intent context, and admission-fence hardening |
+| 38 | W05-T03 | `c40bf7d` | `c950291` | Hadron | accepted after canonical exact-selector, whole-stream package bound, registry response bound, cancellation-aware child materialization, and overflow hardening |

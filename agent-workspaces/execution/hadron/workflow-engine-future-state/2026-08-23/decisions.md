@@ -251,3 +251,25 @@
   `failed`, then `canceled`) and graph order.
 
   Vanta revision for all W03-T08 decisions: `01M0T34JA05A46A75VDGJ4HX6W`.
+
+- W05-T03 makes one Hadron-owned resolver the source boundary for file,
+  registry, package, compiler, host-start, and child-call paths. Exact-source
+  cache identity is only the canonical kind, authority, id, locator, version,
+  and digest tuple; caller-supplied provenance is deliberately excluded from
+  identity but remains visible to requested and resolved authorization on
+  every access. Movable aliases are re-resolved, while version/digest pins
+  remain immutable for the resolver lifetime.
+
+- Host resolution replaces authored provenance rather than merging untrusted
+  claims. The selected source-byte digest remains distinct from the compiled
+  graph digest, and package `MaxSourceBytes` bounds the entire decompressed tar
+  stream—including metadata and padding—so compressed or hidden archive data
+  cannot bypass admission limits.
+
+- Child-run recovery materializes only the exact graph and inputs already
+  carried by the durable child request; it never re-resolves a movable alias.
+  Node creation converges with cancellation and terminal-intent fences, and
+  catch, switch, and finally targets remain pending until ordinary durable
+  control-flow progression admits them.
+
+  Vanta revision for all W05-T03 decisions: `01M0T44S9EZ9MSW3VVHVTWBCQH`.

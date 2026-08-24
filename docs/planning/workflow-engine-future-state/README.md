@@ -95,7 +95,7 @@ superseded requirements are not mistaken for omissions.
 | W04-T08 | Implement node verification modifier | 04 | W02-T02, W03-T08, W04-T01 | [ ] |
 | W05-T01 | Create Hadron workflow host binding | 05 | W02-T05, W02-T08, W03-T02, W04-T01, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | [ ] |
 | W05-T02 | Introduce `RunScope` and `ExecutionTarget` | 05 | W05-T01 | [ ] |
-| W05-T03 | Bind registry and definition resolution | 05 | W01-T04, W05-T01 | [ ] |
+| W05-T03 | Bind registry and definition resolution | 05 | W01-T04, W05-T01 | [x] |
 | W05-T04 | Bind schedules and triggers to activation registrations | 05 | W00-T07, W03-T05, W05-T03 | [ ] |
 | W05-T05 | Persist plan/source snapshots and provenance | 05 | W01-T04, W05-T03 | [ ] |
 | W05-T06 | Update run inspection and diagnostics | 05 | W03-T01, W05-T01 | [ ] |

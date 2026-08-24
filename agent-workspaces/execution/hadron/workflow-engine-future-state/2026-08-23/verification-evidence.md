@@ -895,3 +895,24 @@ recovery, and cancellation-tree hardening.
 | independent source review `d771e44` | focused runtime/host/SQLite replay and cancellation suites at repeated counts; focused race suite | pass |
 | independent source review `d771e44` | import guard, focused vet, targeted golangci, and commit diff check | pass; zero issues |
 | integration `61ea279` | `go test -count=1 ./...` | pass |
+
+## W05-T03
+
+Reviewed the Hadron-owned file, registry, and package definition resolver;
+canonical exact-source and semantic plan caches; per-request authorization;
+host-owned provenance; graph-native registry index; bounded tar selection; and
+pinned child-run materializer. Source commit `c40bf7d` was integrated as
+`c950291` after review-requested exact-selector, registry-provider bound,
+whole-decompressed-stream, child cancellation-fence, and saturating-bound
+hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `c40bf7d` | focused definition, registry, package, child-materializer, and persistence suites at repeated counts | pass |
+| source worktree `c40bf7d` | changed-scope and persistence race suites | pass |
+| source worktree `c40bf7d` | import guard, focused vet, targeted golangci, full `go test ./...`, hooks, and diff checks | pass; zero new issues |
+| independent source review `c40bf7d` | `go test -count=1 ./internal/appworkflow/... ./internal/registry/... ./internal/pack/... ./workflow/compile/... ./internal/persistence/...` | pass |
+| independent source review `c40bf7d` | exact-key, registry-bound, PAX-bomb, child-fence, and maximum-bound tests at `-count=20` | pass |
+| independent source review `c40bf7d` | focused race suite, import guard, focused vet, and commit diff check | pass |
+| integration `c950291` | `go test -count=1 ./...` | pass |
+| source | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/control_flow_external_test.go:498` and `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012 |
