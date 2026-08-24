@@ -79,3 +79,11 @@ No execution findings have been deferred.
   execution remains safe and functional.
 
   Vanta revision: `01M0SHQ180CB53GWHWCG4FAHPK`.
+
+- W04-T03 streams artifact captures directly into a run-owned sink so child
+  pipes remain bounded and drain safely. If the process later exits nonzero or
+  parsing fails, that completed artifact can be left unreferenced; the W02-T08
+  owner/retention cleanup path is responsible for sweeping it. The adapter
+  never exposes the partial artifact as a successful typed node output.
+
+  Vanta revision: `01M0SKA9AZ6Y6KZ93N7V1VN31F`.

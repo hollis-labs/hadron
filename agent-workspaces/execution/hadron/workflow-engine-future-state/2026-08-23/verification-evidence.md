@@ -739,3 +739,22 @@ Source commit `41a5057` was integrated as `5f0c1aa`.
 | integration `5f0c1aa` | `go test -count=1 ./workflow/adapters/mcp/... ./workflow/adapters/transform/... ./internal/mcpadapter/... ./workflow/stepkind/... ./workflow/runtime/...` | pass |
 | integration `5f0c1aa` | `go test -race -count=1 ./workflow/adapters/mcp/... ./internal/mcpadapter/...` | pass |
 | integration `5f0c1aa` | `go test -v ./workflow/internal/importguard/...`, focused vet, and commit diff check | pass |
+
+## W04-T03
+
+Reviewed the command kind's fail-closed configuration and conservative static
+metadata; structured policy-resolved executable, arguments, working directory,
+capabilities, effects, and sandbox; direct no-shell/no-ambient process runner;
+process-group cancellation; boundary-only secret environment; streaming
+redaction and raw byte bounds; output, artifact, and operational-event capture;
+exact JSON, lines, KV, and compatibility parsers; defensive copies; safe typed
+failures; and artifact-store bridge. Source commit `e508945` was integrated as
+`439fafe`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `e508945` | `go test -count=30 ./workflow/adapters/cmd/...` and `go test -race ./workflow/adapters/cmd/...` | pass |
+| source worktree `e508945` | adapter/value/workflow/full tests, import guard, vet, targeted golangci/staticcheck, pre-commit hooks, and diff check | pass; zero cmd issues |
+| integration `439fafe` | `go test -count=10 ./workflow/adapters/cmd/...` and `go test -race -count=1 ./workflow/adapters/cmd/...` | pass |
+| integration `439fafe` | `go test -count=1 ./workflow/adapters/... ./workflow/values/... ./workflow/runtime/...` | pass |
+| integration `439fafe` | `go test -count=1 ./workflow/internal/importguard/...`, focused vet, commit diff check, and clean-tree check | pass |

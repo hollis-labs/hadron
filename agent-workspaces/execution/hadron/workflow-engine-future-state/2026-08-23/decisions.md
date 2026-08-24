@@ -98,3 +98,18 @@
   `CallTool` retry behavior remains unchanged for compatibility.
 
   Vanta revision for both W04-T05 decisions: `01M0SHQ1FXVFMQTN6YQ8XHR2QB`.
+
+- W04-T03 keeps `cmd@v1` static metadata fail-closed: arbitrary command
+  execution is destructive, non-idempotent, retry-unsupported, and requires
+  `process.execute`. Configured effects, capabilities, paths, and sandbox are
+  author expectations only; the injected host policy returns the authoritative
+  clean executable, arguments, working directory, effective metadata, and
+  sandbox before any secret resolution or process launch.
+
+- The default OS process runner executes one argv vector without a shell,
+  ambient environment, or ambient working directory. It truthfully supports
+  only `direct`/`none`; stronger isolation and PTY behavior require an injected
+  runner that attests the exact policy-authorized sandbox and sends operational
+  bytes only through the adapter's bounded redacted writers.
+
+  Vanta revision for both W04-T03 decisions: `01M0SKA8ZHADZ9C97RG90GM6R1`.
