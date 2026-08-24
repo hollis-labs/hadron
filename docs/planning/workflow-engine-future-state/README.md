@@ -81,9 +81,9 @@ superseded requirements are not mistaken for omissions.
 | W03-T03 | Implement readiness rules, skip, failure, and timeout propagation | 03 | W02-T02, W03-T01 | [x] |
 | W03-T04 | Implement retry, backoff, cancellation, and fan-out | 03 | W02-T02, W02-T07, W03-T01, W03-T02, W03-T05 | [x] |
 | W03-T05 | Implement generic `WaitRecord` suspend/resume | 03 | W03-T01, W02-T05 | [x] |
-| W03-T06 | Implement crash recovery and replay | 03 | W03-T02, W03-T05 | [ ] |
+| W03-T06 | Implement crash recovery and replay | 03 | W03-T02, W03-T05, W03-T08 | [ ] |
 | W03-T07 | Enforce scheduler concurrency resources and run policies | 03 | W03-T02, W03-T04 | [ ] |
-| W03-T08 | Implement catch, finally, switch, and error-as-data semantics | 03 | W02-T07, W03-T03, W03-T04 | [ ] |
+| W03-T08 | Implement catch, finally, switch, and error-as-data semantics | 03 | W02-T07, W03-T03, W03-T04 | [x] |
 | W03-T09 | Implement memoization and pinned-value execution | 03 | W02-T04, W03-T06, W03-T08 | [ ] |
 | W04-T01 | Harden step-kind runtime integration | 04 | W00-T06, W03-T01 | [x] |
 | W04-T02 | Implement `transform` executor | 04 | W02-T02, W04-T01 | [x] |

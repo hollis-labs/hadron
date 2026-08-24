@@ -875,3 +875,23 @@ concurrent start convergence, definition drift, and startup/shutdown races.
 | integration `2d14c13` | `go test -count=1 ./internal/appworkflow/... ./internal/persistence/... ./workflow/adapters/call/... ./workflow/runtime/...` | pass |
 | integration `2d14c13` plus tracking | `go test -count=1 ./...` | pass |
 | source | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012 |
+
+## W03-T08
+
+Reviewed ordered switch/default and catch lowering, typed error expression
+context, immutable decisions and terminal intents, nested/disjoint finalizer
+progression, cleanup-failure terminal accounting, exact recursive
+`ParentCloseCancel` trees, pinned child definitions, cancellation admission
+fences, pending-child recovery ordering, and in-memory/SQLite parity. Source
+commit `d771e44` was integrated as `61ea279` after review-requested replay,
+recovery, and cancellation-tree hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `d771e44` | focused runtime/compiler/conformance/values/host/persistence suites and selected suites at `-count=10` or `-count=20` | pass |
+| source worktree `d771e44` | `go test -race -count=1 ./workflow/runtime/... ./workflow/compile/... ./workflow/conformance/... ./internal/appworkflow/... ./internal/persistence/...` | pass |
+| source worktree `d771e44` | import guard, focused vet, targeted golangci, full `go test ./...`, full `go test -race ./...`, hooks, and diff checks | pass; zero new issues |
+| independent source review `d771e44` | `go test -count=1 ./workflow/runtime/... ./workflow/compile/... ./workflow/conformance/... ./workflow/values/... ./internal/appworkflow/... ./internal/persistence/...` | pass |
+| independent source review `d771e44` | focused runtime/host/SQLite replay and cancellation suites at repeated counts; focused race suite | pass |
+| independent source review `d771e44` | import guard, focused vet, targeted golangci, and commit diff check | pass; zero issues |
+| integration `61ea279` | `go test -count=1 ./...` | pass |

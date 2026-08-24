@@ -54,7 +54,7 @@ or the detailed architecture made a later choice. In particular:
 | `expr-lang/expr` plus interpolation only in strings | Implemented | W02-T02 |
 | Fail-hard unresolved references and scoped visibility | Implemented | W01-T05, W02-T02, W02-T07 |
 | Inferred data edges plus explicit ordering-only `needs` | Implemented | W02-T07 |
-| Error and fan-out failure data available to expressions | Planned | W03-T04, W03-T08 |
+| Error and fan-out failure data available to expressions | Implemented | W03-T04, W03-T08 |
 | Explicit `cmd` capture (`json`, `lines`, `kv`) and scoped legacy shim | Planned | W04-T03, W06-T06 |
 | Redaction, retention, opaque secret refs, and stream masking | Planned | W02-T01, W02-T06, W04-T03 through W04-T05 |
 | Memoization by safe content key and pinned development data | Planned | W03-T09, W06-T01 |

@@ -230,3 +230,24 @@
   materializer advances the child.
 
   Vanta revision for all W05-T01 decisions: `01M0SXD68BJD9N18SPV307T6FM`.
+
+- W03-T08 records switch and catch selection as immutable control decisions and
+  records a terminal intent before admitting finalizers. Finalizers execute
+  inner-to-outer within a scope while disjoint cleanup chains may progress
+  independently. A cleanup failure determines the final failed run status, but
+  the original intended terminal status and typed error remain durable context.
+
+- `ParentCloseCancel` is one exact atomic cancellation operation over the
+  reachable locally owned descendant tree, including explicit descendants
+  with zero finalizers. The host resolves the root and every child from pinned
+  stored definitions, refreshes the whole tree on compare-and-swap contention,
+  and materializes pending child starts before cancellation recovery so child
+  cleanup cannot be stranded.
+
+- Pre-attempt catch/finalizer expression context exposes an error only from an
+  exact persisted catch decision or terminal intent. Runtime status alone does
+  not fabricate typed failure data. When several unhandled failures compete,
+  terminal selection is deterministic by severity (`crashed`, `timed_out`,
+  `failed`, then `canceled`) and graph order.
+
+  Vanta revision for all W03-T08 decisions: `01M0T34JA05A46A75VDGJ4HX6W`.

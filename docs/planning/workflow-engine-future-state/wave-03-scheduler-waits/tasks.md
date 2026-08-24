@@ -159,6 +159,8 @@ runs from persisted state.
 - Reconcile running nodes after process crash according to executor metadata
   and host policy.
 - Rebuild ready queue from persisted graph/run state.
+- Recover immutable control decisions, terminal intents, finalizer scopes, and
+  pending recursive cancellation trees before admitting ordinary work.
 - Add replay/explain helpers that reconstruct run progress from state and
   events.
 - Implement `rerun <run> --from <node>` semantics in the runtime service:
@@ -228,6 +230,10 @@ ordinary nodes, typed errors, and readiness rules.
 - Implement `finally` nodes that run according to declared scope after normal,
   failed, timed-out, crashed, or canceled graph completion and receive status
   context for the scope they clean up.
+- Make parent cancellation an atomic operation over the exact reachable
+  `ParentCloseCancel` tree, including descendants with no finalizers; resolve
+  every run against its pinned stored graph and preserve descendant cleanup
+  before terminal cancellation.
 - Preserve `continue_on_error` as explicit policy sugar over error-as-data and
   readiness behavior.
 - Give catch/finally nodes normal retry, output, event, effect, cancellation,
@@ -239,6 +245,8 @@ ordinary nodes, typed errors, and readiness rules.
 - A failed or timed-out node can be handled without losing its typed error.
 - Finally nodes execute once per declared scope and cannot be skipped by the
   default upstream-failure rule.
+- Recursive parent cancellation is restart-safe, does not strand child cleanup,
+  and cannot admit ordinary work after its terminal intent is recorded.
 - Run terminal status accounts for handled errors, unhandled errors, and failed
   cleanup according to documented policy.
 
