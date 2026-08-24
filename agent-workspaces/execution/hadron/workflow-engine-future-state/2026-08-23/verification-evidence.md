@@ -447,3 +447,32 @@ file activation paths. Source commit `eb6d4e9` was integrated as `1285639`.
 | integration `1285639` | `go vet ./workflow/...` | pass |
 | integration `1285639` | `go test ./...` | pass |
 | integration `1285639` | `git diff --check` | pass |
+
+## W03-T02
+
+Reviewed the stateless durable-ready coordinator, deterministic FIFO ordering,
+policy reordering and subsetting, claim-scoped idempotency, live replay,
+generation fencing, expired-lease reclamation, and recovery behavior. Review
+required claimed ready snapshots to remain visible to recovery so exact replay
+survives coordinator restart and policy changes. Source commit `f0a8abb` was
+integrated as `cb96ee1`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `f0a8abb` | focused FIFO, replay, restart, and lease tests, `-count=20` | pass |
+| source worktree `f0a8abb` | high-contention claim test with 64 workers, `-count=50` | pass; exactly one owner |
+| source worktree `f0a8abb` | `go test ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| source worktree `f0a8abb` | `go test -race ./workflow/runtime/...` | pass |
+| source worktree `f0a8abb` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `f0a8abb` | `go test ./workflow/...` | pass |
+| source worktree `f0a8abb` | `go vet ./workflow/...` | pass |
+| source worktree `f0a8abb` | `go test ./...` | pass |
+| integration `cb96ee1` | focused FIFO, replay, restart, and lease tests, `-count=20` | pass |
+| integration `cb96ee1` | high-contention claim test with 64 workers, `-count=50` | pass; exactly one owner |
+| integration `cb96ee1` | `go test ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| integration `cb96ee1` | `go test -race ./workflow/runtime/...` | pass |
+| integration `cb96ee1` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `cb96ee1` | `go test ./workflow/...` | pass |
+| integration `cb96ee1` | `go vet ./workflow/...` | pass |
+| integration `cb96ee1` | `go test ./...` | pass |
+| integration `cb96ee1` | `git diff --check` | pass |
