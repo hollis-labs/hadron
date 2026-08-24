@@ -149,3 +149,24 @@
   leases, so suspension cannot accidentally release a fan-out slot.
 
   Vanta revision for all W03-T04 decisions: `01M0SMKS6V2TETG1R8AMGSP7JH`.
+
+- W04-T07 models a successful durable timer with immutable `WakeAt`, distinct
+  from an optional failure `Deadline`. When both are due, an earlier wake wins
+  deterministically regardless of competing compare-and-swap order. Core
+  derives the timer activation and resume identity; generic callers cannot
+  forge a timer resume.
+
+- Wait timeout is a typed failed attempt that follows normal catch routing;
+  successful wait-adapter outputs always report `timed_out: false`. Event waits
+  lower to the canonical signal mechanism with durable authority attributes.
+  The shared gate vocabulary admits optional/nonblocking author intent, but
+  `human_gate@v1` rejects that mode until W07-T09 supplies graph lowering with
+  an explicit skip path.
+
+- Callback issuance uses an immutable, retry-stable idempotency key and must
+  reuse and extend the same live callback credential or fail. Human-gate
+  payload storage is likewise idempotent for the same immutable request;
+  presentation, approval policy, and payload authority remain application
+  responsibilities.
+
+  Vanta revision for all W04-T07 decisions: `01M0SPW0EQ04GBNVH5YXH0Q21E`.

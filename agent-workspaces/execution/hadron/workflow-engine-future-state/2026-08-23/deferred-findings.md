@@ -111,3 +111,21 @@ No execution findings have been deferred.
   responsible for sweeping unreferenced values.
 
   Vanta revision for both W03-T04 limitations: `01M0SMKSNPYZX8AG7Z4XDR2RWQ`.
+
+- W04-T07 callback credentials and human-gate payload references are created
+  before the runtime durably suspends the attempt. A later suspension failure
+  can therefore leave an orphan; host implementations own TTL and retention
+  cleanup, while the immutable idempotency contracts prevent retry-created
+  duplicates.
+
+- Optional nonblocking gate execution remains deferred to W07-T09. The shared
+  contract reserves the vocabulary, but `human_gate@v1` fails closed until the
+  graph compiler/runtime can lower a gate to explicit decision and skip paths.
+
+- SQLite wait recovery currently decodes every open wait row before ordering
+  the earliest `WakeAt` or `Deadline`, because `WakeAt` is carried in immutable
+  `record_json` and this task intentionally adds no migration or index. This is
+  acceptable for the current scale; a future store optimization can project
+  and index wake time without changing the public contract.
+
+  Vanta revision for all W04-T07 limitations: `01M0SPW0E19F8XQEN30DZVE80H`.

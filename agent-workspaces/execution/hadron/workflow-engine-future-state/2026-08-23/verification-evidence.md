@@ -802,3 +802,20 @@ migration 0017, in-memory parity, and atomic CAS/event mutations. Source commit
 | integration `f103b3d` | `go test -race ./workflow/runtime/... ./internal/persistence/...` | pass |
 | integration `f103b3d` | `go test -v ./workflow/internal/importguard/...` and `go vet ./workflow/...` | pass |
 | integration `f103b3d` | `go test -count=1 ./...` and commit diff check | pass |
+
+## W04-T07
+
+Reviewed the durable `sleep`, `wait_for`, `message_wait`, and `human_gate`
+executors; timer wake and timeout ordering; typed continuation and failure
+paths; callback and gate host contracts; canonical message bridging; restart
+recovery; scheduler cleanup; cancellation races; and in-memory/SQLite parity.
+Source commit `c680634` was integrated as `2229ed8`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `c680634` | focused wait, gate, runtime, message-substrate, and persistence suites with repeated counts | pass |
+| source worktree `c680634` | `go test -count=10 ./workflow/wait/... ./workflow/adapters/wait/... ./workflow/gate/... ./workflow/adapters/gate/... ./workflow/runtime/... ./internal/messagesubstrate/... ./internal/persistence/...` | pass |
+| source worktree `c680634` | `go test -race ./workflow/wait/... ./workflow/adapters/wait/... ./workflow/gate/... ./workflow/adapters/gate/... ./workflow/runtime/... ./internal/messagesubstrate/... ./internal/persistence/...` | pass |
+| source worktree `c680634` | import guard, focused vet, targeted golangci, hooks, `make test`, full `go test ./...`, and diff check | pass; zero new issues |
+| integration `2229ed8` | `go test -count=1 ./...` | pass |
+| source and integration | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |
