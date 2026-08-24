@@ -137,6 +137,37 @@ func TestValidateGraphReportsClosedShapeFailures(t *testing.T) {
 	}
 }
 
+func TestValidateGraphRejectsMismatchedCallNodeShape(t *testing.T) {
+	registry := validationRegistry(t,
+		stepkindtest.NewNoopKind("call", "v1"),
+		stepkindtest.NewNoopKind("transform", "v1"),
+	)
+	tests := []struct {
+		name string
+		node graph.Node
+	}{
+		{"call without declaration", validationNode("missing-call", "call", "v1", 8)},
+		{"non-call with declaration", func() graph.Node {
+			node := validationNode("misplaced-call", "transform", "v1", 12)
+			node.Call = &graph.CallSpec{Definition: graph.DefinitionRef{Locator: "child.workflow.yaml"}, Mode: graph.CallInline}
+			return node
+		}()},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			findings := workflowcompile.ValidateGraph(t.Context(), validationGraph(test.node), workflowcompile.ValidationOptions{
+				StepKinds: registry,
+				Definitions: workflowcompile.DefinitionResolverFunc(func(context.Context, graph.DefinitionRef) (workflowcompile.ResolvedDefinition, error) {
+					t.Fatal("malformed call shape reached definition resolution")
+					return workflowcompile.ResolvedDefinition{}, nil
+				}),
+			})
+			assertCodes(t, findings, workflowcompile.CodeInvalidCallShape)
+			assertDiagnosticContract(t, findings[0])
+		})
+	}
+}
+
 func TestValidateGraphChecksRegisteredConfigSchemaAndAdapterDiagnostics(t *testing.T) {
 	t.Run("schema", func(t *testing.T) {
 		kind := stepkindtest.NewNoopKind("configured", "v1")

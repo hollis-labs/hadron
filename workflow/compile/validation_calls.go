@@ -34,7 +34,7 @@ func (v *validator) validateCalls() {
 
 func (t *callTraversal) walk(value graph.Graph, depth int, active map[string]*graph.SourceRef) {
 	for _, node := range value.Nodes {
-		if node.Call == nil {
+		if node.Kind != "call" || node.Call == nil {
 			continue
 		}
 		callSource := node.Source

@@ -125,9 +125,20 @@ type Invocation struct {
 	Identity       InvocationIdentity `json:"identity"`
 	Config         graph.Config       `json:"config"`
 	Inputs         values.ValueSet    `json:"inputs"`
+	Call           *CallInvocation    `json:"call,omitempty"`
 	Continuation   *WaitContinuation  `json:"continuation,omitempty"`
 	IdempotencyKey string             `json:"idempotency_key,omitempty"`
 	Deadline       time.Time          `json:"deadline,omitempty"`
+}
+
+// CallInvocation carries the graph-native call declaration and the immutable
+// active definition path supplied by the runtime host. Lineage contains the
+// parent definition followed by every active inline/run ancestor; call
+// executors append the newly resolved child only after cycle/depth checks.
+// Hosts reconstruct this path from durable run/call state during recovery.
+type CallInvocation struct {
+	Spec    graph.CallSpec        `json:"spec"`
+	Lineage []graph.DefinitionRef `json:"lineage"`
 }
 
 // WaitContinuation is the durable resolved wait delivered when the runtime

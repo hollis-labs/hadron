@@ -164,6 +164,22 @@ func (v *validator) validateNodes() {
 
 func (v *validator) validateNodeShape(node graph.Node) {
 	source := v.nodeSource(node)
+	if node.Kind == "call" && node.Call == nil {
+		v.add(
+			CodeInvalidCallShape,
+			source,
+			fmt.Sprintf("call node %q is missing its call declaration", node.ID),
+			"Declare definition, mode, and optional parent-close policy under call.",
+		)
+	}
+	if node.Kind != "call" && node.Call != nil {
+		v.add(
+			CodeInvalidCallShape,
+			source,
+			fmt.Sprintf("non-call node %q carries a call declaration", node.ID),
+			"Remove the call declaration or change the node kind to call.",
+		)
+	}
 	if node.ReadyWhen != "" && !node.ReadyWhen.Valid() {
 		v.add(
 			CodeUnsupportedReadinessRule,

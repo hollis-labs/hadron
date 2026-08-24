@@ -112,6 +112,7 @@ type DispatchWarning struct {
 type DispatchRequest struct {
 	Claim              ReadyClaim
 	Node               graph.Node
+	CallLineage        []graph.DefinitionRef
 	IdempotencyKey     string
 	Target             string
 	ExecutorAttributes map[string]string
@@ -274,6 +275,13 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 			Iteration: started.Attempt.ID.Invocation.Iteration, Attempt: started.Attempt.ID.Number,
 		},
 		Config: config, Inputs: cloneValueSet(inputs), IdempotencyKey: request.IdempotencyKey,
+	}
+	if request.Node.Call != nil {
+		call, callErr := cloneCallInvocation(request.Node.Call, request.CallLineage)
+		if callErr != nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, stepkind.PreparedInvocation{Invocation: invocation}, stepkind.StepResult{}, DispatchPrepare, failurePrepare, callErr)
+		}
+		invocation.Call = call
 	}
 	if resumed {
 		if d.waits == nil {
@@ -769,6 +777,12 @@ func validateDispatchRequest(request DispatchRequest) error {
 	if request.Target != "" && request.Target != strings.TrimSpace(request.Target) {
 		return fmt.Errorf("executor target must not contain surrounding whitespace")
 	}
+	if request.Node.Call == nil && len(request.CallLineage) != 0 {
+		return fmt.Errorf("call lineage is valid only for a call node")
+	}
+	if request.Node.Call != nil && len(request.CallLineage) == 0 {
+		return fmt.Errorf("call node requires authoritative definition lineage")
+	}
 	return validateDispatchStringMap("executor attributes", request.ExecutorAttributes)
 }
 
@@ -879,6 +893,9 @@ func cloneStepInvocation(invocation stepkind.Invocation) stepkind.Invocation {
 		Identity: invocation.Identity, Config: config, Inputs: cloneValueSet(invocation.Inputs),
 		IdempotencyKey: invocation.IdempotencyKey, Deadline: invocation.Deadline,
 	}
+	if invocation.Call != nil {
+		cloned.Call, _ = cloneCallInvocation(&invocation.Call.Spec, invocation.Call.Lineage)
+	}
 	if invocation.Continuation != nil {
 		continuation := *invocation.Continuation
 		encoded, err := json.Marshal(invocation.Continuation.Record)
@@ -889,6 +906,24 @@ func cloneStepInvocation(invocation stepkind.Invocation) stepkind.Invocation {
 		cloned.Continuation = &continuation
 	}
 	return cloned
+}
+
+func cloneCallInvocation(spec *graph.CallSpec, lineage []graph.DefinitionRef) (*stepkind.CallInvocation, error) {
+	if spec == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(struct {
+		Spec    graph.CallSpec        `json:"spec"`
+		Lineage []graph.DefinitionRef `json:"lineage"`
+	}{Spec: *spec, Lineage: lineage})
+	if err != nil {
+		return nil, fmt.Errorf("clone call invocation: %w", err)
+	}
+	var cloned stepkind.CallInvocation
+	if err := decodeDispatchJSONUseNumber(encoded, &cloned); err != nil {
+		return nil, fmt.Errorf("clone call invocation: %w", err)
+	}
+	return &cloned, nil
 }
 
 func decodeDispatchJSONUseNumber(encoded []byte, target any) error {

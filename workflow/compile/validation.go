@@ -38,6 +38,9 @@ const (
 	CodeInvalidStepConfig diagnostic.Code = "HADR-SOURCE-026"
 	// CodeInvalidValidationInput identifies a nil plan passed to validation.
 	CodeInvalidValidationInput diagnostic.Code = "HADR-SOURCE-027"
+	// CodeInvalidCallShape identifies a call kind without a call declaration or
+	// a non-call kind carrying call-only semantics.
+	CodeInvalidCallShape diagnostic.Code = "HADR-SOURCE-029"
 
 	// CodeUnknownDependency identifies an explicit dependency endpoint absent
 	// from the graph.
@@ -91,10 +94,14 @@ func (f PolicyHookFunc) ValidateNode(ctx context.Context, input NodeValidation) 
 }
 
 // ResolvedDefinition is the immutable definition identity and graph returned
-// by a DefinitionResolver for opt-in call traversal.
+// by a DefinitionResolver for opt-in call traversal and execution. InputBindings
+// are resolver-owned partial-application defaults (for example, an imported
+// definition's with: bindings). Call sites overlay their node-local bindings
+// after these defaults are evaluated.
 type ResolvedDefinition struct {
-	Definition graph.DefinitionRef
-	Graph      graph.Graph
+	Definition    graph.DefinitionRef
+	Graph         graph.Graph
+	InputBindings map[string]graph.Binding
 }
 
 // DefinitionResolver resolves a child definition for call-cycle and depth

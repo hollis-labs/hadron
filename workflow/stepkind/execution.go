@@ -119,11 +119,22 @@ func (i Invocation) Validate() error {
 	if i.Config == nil {
 		return fmt.Errorf("invocation config must be an object, not null")
 	}
-	if _, err := cloneRuntimeJSON(i.Config); err != nil {
+	if err := validateRuntimeJSON(i.Config); err != nil {
 		return fmt.Errorf("invocation config must be JSON-compatible: %w", err)
 	}
 	if err := i.Inputs.Validate(); err != nil {
 		return fmt.Errorf("invocation inputs: %w", err)
+	}
+	if i.Call != nil {
+		if !i.Call.Spec.Mode.Valid() {
+			return fmt.Errorf("invocation call has unsupported mode %q", i.Call.Spec.Mode)
+		}
+		if i.Call.Spec.OnParentClose != "" && !i.Call.Spec.OnParentClose.Valid() {
+			return fmt.Errorf("invocation call has unsupported parent-close policy %q", i.Call.Spec.OnParentClose)
+		}
+		if err := validateRuntimeJSON(i.Call); err != nil {
+			return fmt.Errorf("invocation call must be JSON-compatible: %w", err)
+		}
 	}
 	if i.Continuation != nil {
 		if err := i.Continuation.Validate(); err != nil {
@@ -318,16 +329,16 @@ func validateRuntimeStringMap(name string, values map[string]string) error {
 	return nil
 }
 
-func cloneRuntimeJSON(value any) (any, error) {
+func validateRuntimeJSON(value any) error {
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
 	decoder.UseNumber()
 	var cloned any
 	if err := decoder.Decode(&cloned); err != nil {
-		return nil, err
+		return err
 	}
-	return cloned, nil
+	return nil
 }
