@@ -699,3 +699,23 @@ Source commit `c19faf7` was integrated as `f1ad5fa`.
 | integration `f1ad5fa` | `go vet ./workflow/... ./internal/persistence/...` and targeted golangci | pass; zero issues |
 | integration `f1ad5fa` | `go test -count=1 ./...` | pass |
 | source and integration | `make lint` | baseline-only failure: unchanged intentional nil-context regression calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |
+
+## W04-T02
+
+Reviewed the transform kind's flat named-expression contract, immutable
+compute-only metadata, inputs-only default context, deterministic injected
+steps/item/index context, environment and nondeterminism rejection, exact JSON
+number preservation, typed persistable outputs, defensive copies, source-map
+paths, cancellation, and concurrency behavior. Source commit `1f5b966` was
+integrated as `b8ee57d`. Dynamic per-output graph schemas remain enforced by
+the runtime-owned dispatcher path rather than an untruthfully closed static
+kind schema.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `1f5b966` | `go test ./workflow/adapters/transform/... ./workflow/values/...` and `go test -count=30 ./workflow/adapters/transform/...` | pass |
+| source worktree `1f5b966` | `go test -race ./workflow/adapters/transform/... ./workflow/values/...` | pass |
+| source worktree `1f5b966` | import guard, workflow vet, targeted staticcheck/golangci, `make test`, full `go test ./...`, and diff check | pass; zero adapter issues |
+| integration `b8ee57d` | `go test -count=1 ./workflow/adapters/transform/... ./workflow/values/... ./workflow/stepkind/... ./workflow/runtime/...` | pass |
+| integration `b8ee57d` | `go test -race -count=1 ./workflow/adapters/transform/...` | pass |
+| integration `b8ee57d` | `go test -v ./workflow/internal/importguard/...` and `go vet ./workflow/adapters/transform/...` | pass |

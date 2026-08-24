@@ -70,3 +70,17 @@
   terminal outcomes or irrecoverable contract mismatches close the attempt.
 
   Vanta revision for both W04-T01 decisions: `01M0SG27S7X00HFQ74ADDPP20X`.
+
+- W04-T02 keeps the transform contract as a flat normalized output-name to raw
+  expression map. The default context exposes only invocation inputs; a
+  concurrency-safe adapter-owned `ContextProvider` may supply already-scoped
+  steps, item, index, run, and target roots, but ambient environment access is
+  always denied and invocation inputs remain authoritative.
+
+- Transform output names are configuration-defined, so the immutable kind
+  metadata declares an honestly open object schema. The runtime validates each
+  returned name and typed value against the graph node's `OutputSpec`
+  declarations instead of freezing config-specific names into registry
+  metadata.
+
+  Vanta revision for both W04-T02 decisions: `01M0SH6C50DB0QPBQ13ZYD52DZ`.

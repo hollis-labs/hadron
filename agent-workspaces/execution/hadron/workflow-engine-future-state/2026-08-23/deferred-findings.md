@@ -62,3 +62,12 @@ No execution findings have been deferred.
   wait-backed executors require only one suspension stage.
 
   Vanta revision: `01M0SG27G6MHHC3Q89CV1E0JWE`.
+
+- W04-T02 evaluates named transform outputs independently against one immutable
+  invocation-scoped context. The current expression vocabulary has no local
+  transform-output root, so one named output cannot reference a sibling output;
+  workflows needing staged derivation use a second transform node. This avoids
+  order-dependent semantics until a first-class immutable local-bindings
+  contract is justified.
+
+  Vanta revision: `01M0SH6BPGHX161GR17XA43W5B`.

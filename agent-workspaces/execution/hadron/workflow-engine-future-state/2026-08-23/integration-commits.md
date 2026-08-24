@@ -29,3 +29,4 @@
 | 25 | W03-T05 | `53748d1` | `5d9fbfc` | Hadron | accepted after URL credential, deterministic metadata-validation, and authorization-order hardening |
 | 26 | W02-T08 | `ee94487` | `177e0e1` | Hadron | accepted after fail-closed authorization, bounded capture, filesystem identity, and cancellation hardening |
 | 27 | W04-T01 | `c19faf7` | `f1ad5fa` | Hadron | accepted after same-attempt wait binding, recoverable external-operation lifecycle, exact-number persistence, and transient hook-error hardening |
+| 28 | W04-T02 | `1f5b966` | `b8ee57d` | Hadron | accepted with deterministic scoped expression contexts, exact typed outputs, and runtime-owned dynamic output-schema enforcement |
