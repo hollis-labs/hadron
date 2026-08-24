@@ -1537,7 +1537,7 @@ func seedRunningCallParent(t *testing.T, fixture *hostFixture) workflowruntime.S
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phase := range []hoststate.StartPhase{hoststate.StartRunCreated, hoststate.StartNodesMaterialized, hoststate.StartRunning} {
+	for _, phase := range []hoststate.StartPhase{hoststate.StartRunCreated, hoststate.StartNodesMaterialized, hoststate.StartPinsBound, hoststate.StartRunning} {
 		start, err = fixture.journal.AdvanceStart(t.Context(), hoststate.AdvanceStartRequest{RunID: bound.Run.ID, ExpectedGeneration: start.Generation, From: start.Phase, To: phase, At: fixture.now})
 		if err != nil {
 			t.Fatal(err)
@@ -1904,6 +1904,10 @@ func (j *farAheadStartJournal) AdvanceStart(ctx context.Context, request hoststa
 		return hoststate.StartSnapshot{}, err
 	}
 	current, err = j.Journal.AdvanceStart(ctx, hoststate.AdvanceStartRequest{RunID: current.Record.Run.ID, ExpectedGeneration: current.Generation, From: current.Phase, To: hoststate.StartNodesMaterialized, At: current.UpdatedAt})
+	if err != nil {
+		return hoststate.StartSnapshot{}, err
+	}
+	current, err = j.Journal.AdvanceStart(ctx, hoststate.AdvanceStartRequest{RunID: current.Record.Run.ID, ExpectedGeneration: current.Generation, From: current.Phase, To: hoststate.StartPinsBound, At: current.UpdatedAt})
 	if err != nil {
 		return hoststate.StartSnapshot{}, err
 	}

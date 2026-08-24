@@ -39,6 +39,13 @@ func (h *Host) startRun(ctx context.Context, request StartRunRequest, expectedId
 	if err := validateIdentityRequest(request.Identity); err != nil {
 		return StartRunResult{}, err
 	}
+	request.Pins = canonicalStartPins(request.Pins)
+	if err := validateStartPins(request.Pins); err != nil {
+		return StartRunResult{}, err
+	}
+	if request.DryRun && len(request.Pins) != 0 {
+		return StartRunResult{}, errors.New("dry-run cannot bind pinned outputs")
+	}
 	inputHash, err := values.DigestInline(request.Inputs)
 	if err != nil {
 		return StartRunResult{}, fmt.Errorf("digest workflow inputs: %w", err)
@@ -160,7 +167,7 @@ func (h *Host) startRun(ctx context.Context, request StartRunRequest, expectedId
 		Run: *boundResult.Run, Plan: *plan, Requested: request.Definition,
 		StartKey: request.IdempotencyKey, RequestDigest: requestDigest, CallerInputHash: inputHash,
 		Identity: facts.Identity, Facts: facts, Decision: decision,
-		Activation: request.Activation, DryRun: request.DryRun, RecordedAt: h.now(),
+		Activation: request.Activation, Pins: request.Pins, DryRun: request.DryRun, RecordedAt: h.now(),
 	}
 	snapshot, outcome, err := h.journal.RecordStart(context.WithoutCancel(ctx), record)
 	if err != nil {
@@ -249,7 +256,8 @@ func (h *Host) bindIdentity(ctx context.Context, request IdentityRequest) (hosts
 }
 
 func (h *Host) startResult(ctx context.Context, snapshot hoststate.StartSnapshot, outcome runtime.IdempotencyOutcome, resultErr error) (StartRunResult, error) {
-	result := StartRunResult{Bound: snapshot.Record.Run, Decision: snapshot.Record.Decision, Facts: snapshot.Record.Facts, Outcome: outcome, Phase: snapshot.Phase, DryRun: snapshot.Record.DryRun}
+	bound := snapshot.Record.Run
+	result := StartRunResult{Bound: &bound, Decision: snapshot.Record.Decision, Facts: snapshot.Record.Facts, Outcome: outcome, Phase: snapshot.Phase, DryRun: snapshot.Record.DryRun}
 	if !snapshot.Record.DryRun && phaseHasRun(snapshot.Phase) {
 		run, err := h.state.LoadRun(context.WithoutCancel(ctx), snapshot.Record.Run.ID)
 		if err == nil {
@@ -267,6 +275,12 @@ func (h *Host) materializeStart(ctx context.Context, snapshot hoststate.StartSna
 	}
 	for {
 		if snapshot.Phase.Terminal() {
+			if snapshot.Phase == hoststate.StartPinsRejected {
+				if err := h.verifyRejectedPinnedStart(ctx, snapshot.Record); err != nil {
+					return snapshot, err
+				}
+				return snapshot, fmt.Errorf("%w: pinned workflow start was rejected", runtime.ErrReuseDenied)
+			}
 			if !snapshot.Record.DryRun {
 				run, err := h.state.LoadRun(ctx, snapshot.Record.Run.ID)
 				if err != nil {
@@ -324,6 +338,26 @@ func (h *Host) materializeStart(ctx context.Context, snapshot hoststate.StartSna
 			snapshot = advanced
 
 		case hoststate.StartNodesMaterialized:
+			if err := h.bindStartPins(context.WithoutCancel(ctx), snapshot.Record); err != nil {
+				if errors.Is(err, runtime.ErrReuseDenied) || errors.Is(err, runtime.ErrInvalidReuse) || errors.Is(err, runtime.ErrNotFound) {
+					if rejectErr := h.rejectPinnedStart(context.WithoutCancel(ctx), snapshot.Record); rejectErr != nil {
+						return snapshot, errors.Join(err, rejectErr)
+					}
+					advanced, advanceErr := h.advance(context.WithoutCancel(ctx), snapshot, hoststate.StartPinsRejected)
+					if advanceErr != nil {
+						return snapshot, errors.Join(err, advanceErr)
+					}
+					snapshot = advanced
+				}
+				return snapshot, err
+			}
+			advanced, err := h.advance(context.WithoutCancel(ctx), snapshot, hoststate.StartPinsBound)
+			if err != nil {
+				return snapshot, err
+			}
+			snapshot = advanced
+
+		case hoststate.StartPinsBound:
 			run, err := h.state.LoadRun(context.WithoutCancel(ctx), snapshot.Record.Run.ID)
 			if err != nil {
 				return snapshot, err
@@ -358,6 +392,151 @@ func (h *Host) materializeStart(ctx context.Context, snapshot hoststate.StartSna
 			return snapshot, fmt.Errorf("unsupported workflow start phase %q", snapshot.Phase)
 		}
 	}
+}
+
+func (h *Host) bindStartPins(ctx context.Context, record hoststate.StartRecord) error {
+	if len(record.Pins) == 0 {
+		return nil
+	}
+	if h.pins == nil {
+		return fmt.Errorf("%w: pinned outputs require a configured reuse authorizer", runtime.ErrReuseDenied)
+	}
+	authority, err := startReuseAuthority(record.Identity)
+	if err != nil {
+		return fmt.Errorf("%w: derive pin reuse authority: %w", runtime.ErrInvalidReuse, err)
+	}
+	for _, pin := range record.Pins {
+		_, err := h.pins.Bind(ctx, runtime.PinNodeRequest{
+			Target: runtime.NodeInvocationID{RunID: record.Run.ID, NodeID: pin.NodeID}, Outputs: pin.Outputs,
+			Authority: authority, IdempotencyKey: "start-pin:" + record.StartKey + ":" + pin.NodeID, At: record.RecordedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("bind start pin %s: %w", pin.NodeID, err)
+		}
+	}
+	return nil
+}
+
+func (h *Host) rejectPinnedStart(ctx context.Context, record hoststate.StartRecord) error {
+	run, err := h.state.LoadRun(ctx, record.Run.ID)
+	if err != nil {
+		return err
+	}
+	if run.Status == runtime.RunCanceled {
+		_, failures, recoverErr := h.cancellation.Recover(ctx, runtime.CancellationIntentQuery{RunID: record.Run.ID, Limit: h.batchLimit})
+		if recoverErr != nil {
+			return fmt.Errorf("recover rejected pinned start cancellation: %w", recoverErr)
+		}
+		if len(failures) != 0 {
+			return fmt.Errorf("recover rejected pinned start cancellation: %w", errors.Join(failures...))
+		}
+		return h.verifyRejectedPinnedStart(ctx, record)
+	}
+	if run.Status != runtime.RunPending {
+		return fmt.Errorf("reject pinned start: run is unexpectedly %s", run.Status)
+	}
+	result, failures, err := h.cancellation.Request(ctx, runtime.RequestRunCancellationRequest{
+		RunID: record.Run.ID, ExpectedGeneration: run.Generation,
+		IdempotencyKey: "pin-rejection:" + strings.TrimPrefix(values.SHA256Digest([]byte(record.StartKey)), "sha256:"),
+		Reason:         runtime.Failure{Code: "pin_rejected", Message: "pinned outputs were rejected before workflow admission"},
+		At:             maxTime(h.now(), run.UpdatedAt),
+	})
+	if err != nil {
+		return fmt.Errorf("cancel rejected pinned start: %w", err)
+	}
+	if result.Run.Status != runtime.RunCanceled {
+		return errors.New("cancel rejected pinned start: runtime run is not terminal")
+	}
+	if len(failures) != 0 {
+		return fmt.Errorf("cancel rejected pinned start: %w", errors.Join(failures...))
+	}
+	return h.verifyRejectedPinnedStart(ctx, record)
+}
+
+func (h *Host) verifyRejectedPinnedStart(ctx context.Context, record hoststate.StartRecord) error {
+	run, err := h.state.LoadRun(ctx, record.Run.ID)
+	if err != nil {
+		return err
+	}
+	if run.Status != runtime.RunCanceled {
+		return errors.New("rejected pins require a canceled runtime run")
+	}
+	for _, planNode := range record.Plan.Graph.Nodes {
+		node, loadErr := h.state.LoadNodeInvocation(ctx, runtime.NodeInvocationID{RunID: run.ID, NodeID: planNode.ID})
+		if loadErr != nil {
+			return fmt.Errorf("load rejected pinned start node %s: %w", planNode.ID, loadErr)
+		}
+		if !node.Status.Terminal() || node.Lease != nil {
+			return fmt.Errorf("rejected pinned start node %s remains %s or leased", planNode.ID, node.Status)
+		}
+	}
+	return nil
+}
+
+func startReuseAuthority(identity hoststate.IdentityBinding) (runtime.ReuseAuthority, error) {
+	identity = normalizeIdentity(identity)
+	encodedIdentity, err := json.Marshal(identity)
+	if err != nil {
+		return runtime.ReuseAuthority{}, err
+	}
+	encodedGrants, err := json.Marshal(identity.Grants)
+	if err != nil {
+		return runtime.ReuseAuthority{}, err
+	}
+	attributes := map[string]string{
+		"identity_digest":  values.SHA256Digest(encodedIdentity),
+		"source_authority": identity.SourceAuthority,
+		"trust":            identity.Trust,
+		"grants":           string(encodedGrants),
+		"scope_version":    identity.RunScope.Version,
+		"scope_kind":       string(identity.RunScope.Kind),
+		"scope_id":         identity.RunScope.ID,
+	}
+	for key, value := range identity.RunScope.Attributes {
+		attributes["scope.attribute."+key] = value
+	}
+	for key, value := range identity.Extension {
+		attributes["identity.extension."+key] = value
+	}
+	if target := identity.ExecutionTarget; target != nil {
+		encodedTarget, marshalErr := json.Marshal(target)
+		if marshalErr != nil {
+			return runtime.ReuseAuthority{}, marshalErr
+		}
+		encodedCapabilities, marshalErr := json.Marshal(target.Capabilities)
+		if marshalErr != nil {
+			return runtime.ReuseAuthority{}, marshalErr
+		}
+		attributes["target_digest"] = values.SHA256Digest(encodedTarget)
+		attributes["target_version"] = target.Version
+		attributes["target_id"] = target.ID
+		attributes["target_kind"] = string(target.Kind)
+		attributes["target_capabilities"] = string(encodedCapabilities)
+		attributes["target_sandbox_mode"] = string(target.Sandbox.Mode)
+		attributes["target_readiness"] = string(target.Readiness.State)
+		attributes["target_provenance_authority"] = target.Provenance.Authority
+		attributes["target_provenance_reference"] = target.Provenance.Reference
+		if target.CWD != "" {
+			attributes["target_cwd"] = target.CWD
+		}
+		if target.WorkspaceHandle != "" {
+			attributes["target_workspace_handle"] = target.WorkspaceHandle
+		}
+		if target.Sandbox.Profile != "" {
+			attributes["target_sandbox_profile"] = target.Sandbox.Profile
+		}
+		if target.Lease != nil {
+			attributes["target_lease_id"] = target.Lease.ID
+		}
+		for key, value := range target.Labels {
+			attributes["target.label."+key] = value
+		}
+	}
+	authority := runtime.ReuseAuthority{Principal: identity.Principal, Scope: string(identity.RunScope.Kind) + ":" + identity.RunScope.ID, Attributes: attributes}
+	if err := authority.Validate(); err != nil {
+		return runtime.ReuseAuthority{}, fmt.Errorf("immutable identity exceeds reuse policy metadata bounds: %w", err)
+	}
+	return authority, nil
 }
 
 func (h *Host) advance(ctx context.Context, snapshot hoststate.StartSnapshot, next hoststate.StartPhase) (hoststate.StartSnapshot, error) {
@@ -797,7 +976,8 @@ func digestStartIntent(request StartRunRequest, inputHash string) (string, error
 		Identity       IdentityRequest              `json:"identity"`
 		DryRun         bool                         `json:"dry_run"`
 		Activation     *hoststate.ActivationBinding `json:"activation,omitempty"`
-	}{request.RunID, request.Definition, inputHash, request.IdempotencyKey, request.Identity, request.DryRun, activation}
+		Pins           []hoststate.StartPin         `json:"pins,omitempty"`
+	}{request.RunID, request.Definition, inputHash, request.IdempotencyKey, request.Identity, request.DryRun, activation, request.Pins}
 	encoded, err := json.Marshal(intent)
 	if err != nil {
 		return "", fmt.Errorf("encode workflow start intent: %w", err)
@@ -828,5 +1008,26 @@ func policyDecisionID(key string) string {
 }
 
 func phaseHasRun(phase hoststate.StartPhase) bool {
-	return phase == hoststate.StartRunCreated || phase == hoststate.StartNodesMaterialized || phase == hoststate.StartRunning
+	return phase == hoststate.StartRunCreated || phase == hoststate.StartNodesMaterialized || phase == hoststate.StartPinsBound || phase == hoststate.StartPinsRejected || phase == hoststate.StartRunning
+}
+
+func canonicalStartPins(input []hoststate.StartPin) []hoststate.StartPin {
+	result := append([]hoststate.StartPin(nil), input...)
+	sort.Slice(result, func(i, j int) bool { return result[i].NodeID < result[j].NodeID })
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func validateStartPins(input []hoststate.StartPin) error {
+	for index, pin := range input {
+		if err := pin.Validate(); err != nil {
+			return fmt.Errorf("start pin[%d]: %w", index, err)
+		}
+		if index > 0 && input[index-1].NodeID == pin.NodeID {
+			return fmt.Errorf("start pin node %q is duplicated", pin.NodeID)
+		}
+	}
+	return nil
 }

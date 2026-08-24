@@ -1,0 +1,8 @@
+policy: confirm (destructive effect requires confirmation)
+effects: compute,destructive
+capabilities: filesystem.write,network
+preview-record: dry_run_complete
+work-admitted: false
+dry-run-supported: true
+blast-radius compute=2
+blast-radius destructive=1

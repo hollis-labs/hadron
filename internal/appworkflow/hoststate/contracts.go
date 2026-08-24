@@ -30,20 +30,24 @@ const (
 	StartRecorded          StartPhase = "recorded"
 	StartRunCreated        StartPhase = "run_created"
 	StartNodesMaterialized StartPhase = "nodes_materialized"
+	StartPinsBound         StartPhase = "pins_bound"
+	StartPinsRejected      StartPhase = "pins_rejected"
 	StartRunning           StartPhase = "running"
 	StartDryRunComplete    StartPhase = "dry_run_complete"
 )
 
 func (p StartPhase) Valid() bool {
 	switch p {
-	case StartRecorded, StartRunCreated, StartNodesMaterialized, StartRunning, StartDryRunComplete:
+	case StartRecorded, StartRunCreated, StartNodesMaterialized, StartPinsBound, StartPinsRejected, StartRunning, StartDryRunComplete:
 		return true
 	default:
 		return false
 	}
 }
 
-func (p StartPhase) Terminal() bool { return p == StartRunning || p == StartDryRunComplete }
+func (p StartPhase) Terminal() bool {
+	return p == StartRunning || p == StartDryRunComplete || p == StartPinsRejected
+}
 
 // IdentityBinding is Hadron's exact authenticated identity, logical scope, and
 // optional compute target binding. Runtime BoundRun remains application
@@ -207,6 +211,21 @@ type ActivationBinding struct {
 	OccurredAt     time.Time `json:"occurred_at"`
 }
 
+// StartPin is an immutable, caller-requested node output binding. The host
+// derives reuse authority and idempotency from the authenticated start record;
+// transported callers cannot assert either value themselves.
+type StartPin struct {
+	NodeID  string             `json:"node_id"`
+	Outputs values.ValueSetRef `json:"outputs"`
+}
+
+func (p StartPin) Validate() error {
+	if err := graph.ValidateID(p.NodeID); err != nil {
+		return fmt.Errorf("pin node: %w", err)
+	}
+	return p.Outputs.Validate()
+}
+
 func (a ActivationBinding) Validate() error {
 	if strings.TrimSpace(a.ActivationID) == "" || strings.TrimSpace(a.IdempotencyKey) == "" || a.OccurredAt.IsZero() {
 		return errors.New("activation binding requires ids and occurred_at")
@@ -227,6 +246,7 @@ type StartRecord struct {
 	Facts           PolicyFacts           `json:"facts"`
 	Decision        PolicyDecision        `json:"decision"`
 	Activation      *ActivationBinding    `json:"activation,omitempty"`
+	Pins            []StartPin            `json:"pins,omitempty"`
 	DryRun          bool                  `json:"dry_run,omitempty"`
 	RecordedAt      time.Time             `json:"recorded_at"`
 }
@@ -283,7 +303,17 @@ func (r StartRecord) Validate() error {
 		return errors.New("start record policy operation does not match facts")
 	}
 	if r.Activation != nil {
-		return r.Activation.Validate()
+		if err := r.Activation.Validate(); err != nil {
+			return err
+		}
+	}
+	for index, pin := range r.Pins {
+		if err := pin.Validate(); err != nil {
+			return fmt.Errorf("start pin[%d]: %w", index, err)
+		}
+		if index > 0 && r.Pins[index-1].NodeID >= pin.NodeID {
+			return errors.New("start pins must use canonical unique node order")
+		}
 	}
 	return nil
 }

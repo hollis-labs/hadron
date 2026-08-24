@@ -118,17 +118,25 @@ type StartRunRequest struct {
 	Confirmed      bool
 	DryRun         bool
 	Activation     *hoststate.ActivationBinding
+	Pins           []hoststate.StartPin
 }
 
 type StartRunResult struct {
-	Run         *runtime.RunSnapshot
-	Bound       runtime.BoundRun
-	Decision    hoststate.PolicyDecision
-	Facts       hoststate.PolicyFacts
-	Diagnostics []diagnostic.Diagnostic
-	Outcome     runtime.IdempotencyOutcome
-	Phase       hoststate.StartPhase
-	DryRun      bool
+	Run         *runtime.RunSnapshot       `json:"run,omitempty"`
+	Bound       *runtime.BoundRun          `json:"bound,omitempty"`
+	Decision    hoststate.PolicyDecision   `json:"decision"`
+	Facts       hoststate.PolicyFacts      `json:"facts"`
+	Diagnostics []diagnostic.Diagnostic    `json:"diagnostics,omitempty"`
+	Outcome     runtime.IdempotencyOutcome `json:"outcome,omitempty"`
+	Phase       hoststate.StartPhase       `json:"phase,omitempty"`
+	DryRun      bool                       `json:"dry_run"`
+}
+
+// RejectedBeforeAdmission reports the durable fail-closed outcome for a
+// permanently rejected pinned start. The host only seals this phase after the
+// runtime run and all materialized nodes are terminal and unclaimable.
+func (r StartRunResult) RejectedBeforeAdmission() bool {
+	return r.Phase == hoststate.StartPinsRejected && r.Bound != nil && r.Run != nil && r.Run.Status == runtime.RunCanceled
 }
 
 type InspectRunResult struct {
@@ -191,12 +199,15 @@ type Options struct {
 	// RecoveryRetryAuthorizer may grant graph retry for consequential effects;
 	// nil preserves RetryEvaluator's fail-closed default.
 	RecoveryRetryAuthorizer runtime.RetryAuthorizer
-	ChildRuns               ChildRunMaterializer
-	Telemetry               TelemetrySink
-	Artifacts               values.ArtifactStore
-	Clock                   Clock
-	RecoveryInterval        time.Duration
-	RecoveryBatchLimit      int
+	// ReuseAuthorizer is required only for starts carrying explicit pinned
+	// outputs. Absence keeps ordinary starts available and pin requests closed.
+	ReuseAuthorizer    runtime.ReuseAuthorizer
+	ChildRuns          ChildRunMaterializer
+	Telemetry          TelemetrySink
+	Artifacts          values.ArtifactStore
+	Clock              Clock
+	RecoveryInterval   time.Duration
+	RecoveryBatchLimit int
 }
 
 func normalizeIdentity(binding hoststate.IdentityBinding) hoststate.IdentityBinding {

@@ -55,6 +55,7 @@ type Host struct {
 	registry     *stepkind.MemoryRegistry
 	verifiers    *verification.MemoryRegistry
 	dispatcher   *runtime.StepDispatcher
+	pins         *runtime.PinCoordinator
 	interval     time.Duration
 	batchLimit   int
 
@@ -91,6 +92,9 @@ func New(options Options) (*Host, error) {
 	}
 	if options.RecoveryRetryAuthorizer != nil && nilInterface(options.RecoveryRetryAuthorizer) {
 		return nil, fmt.Errorf("%w: recovery retry authorizer must not be typed nil", ErrInvalidHost)
+	}
+	if options.ReuseAuthorizer != nil && nilInterface(options.ReuseAuthorizer) {
+		return nil, fmt.Errorf("%w: reuse authorizer must not be typed nil", ErrInvalidHost)
 	}
 	childSource, hasChildSource := options.Journal.(ChildRunRecoverySource)
 	childDefs, _ := options.Journal.(ChildRunDefinitionSource)
@@ -143,10 +147,20 @@ func New(options Options) (*Host, error) {
 		return nil, fmt.Errorf("%w: state must provide recovery, input-binding, control-flow, and run-policy stores", ErrInvalidHost)
 	}
 	dependencyOptions := compileDependencyOptions(options.Definitions)
+	planSource := PinnedRecoveryPlanSource{Roots: options.Journal, Children: childDefs, State: options.State,
+		Replays: recoveryStore, DependencyOptions: dependencyOptions}
+	var pinCoordinator *runtime.PinCoordinator
+	if options.ReuseAuthorizer != nil {
+		pinStore, pinsOK := options.State.(runtime.PinStore)
+		valueStore, valuesOK := options.State.(runtime.ValueRecordStore)
+		if !pinsOK || nilInterface(pinStore) || !valuesOK || nilInterface(valueStore) {
+			return nil, fmt.Errorf("%w: pin-enabled state must provide pin and value-record stores", ErrInvalidHost)
+		}
+		pinCoordinator = &runtime.PinCoordinator{Store: options.State, Pins: pinStore, Values: valueStore, Plans: planSource, Registry: registry, Authorizer: options.ReuseAuthorizer}
+	}
 	coreRecovery := CoreRecoveryHook{Coordinator: &runtime.RecoveryCoordinator{
 		Store: options.State, Recovery: recoveryStore, Inputs: inputStore, Control: controlStore,
-		Plans: PinnedRecoveryPlanSource{Roots: options.Journal, Children: childDefs, State: options.State,
-			Replays: recoveryStore, DependencyOptions: dependencyOptions},
+		Plans:    planSource,
 		Registry: registry, Policy: options.RecoveryRepeatPolicy, RetryAuthorizer: options.RecoveryRetryAuthorizer,
 		Policies: policyStore, Waits: waits,
 	}, Limit: options.RecoveryBatchLimit}
@@ -156,7 +170,7 @@ func New(options Options) (*Host, error) {
 		activations: options.Activations, waits: waits, cancellation: cancellation, coreRecovery: coreRecovery,
 		hooks: append([]RecoveryHook(nil), options.RecoveryHooks...), telemetry: options.Telemetry,
 		childSource: childSource, childDefs: childDefs, childRuns: options.ChildRuns,
-		artifacts: options.Artifacts, clock: clock, registry: registry, verifiers: verifiers, dispatcher: dispatcher,
+		artifacts: options.Artifacts, clock: clock, registry: registry, verifiers: verifiers, dispatcher: dispatcher, pins: pinCoordinator,
 		interval: interval, batchLimit: options.RecoveryBatchLimit,
 	}, nil
 }

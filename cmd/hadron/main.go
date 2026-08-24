@@ -47,6 +47,7 @@ func main() {
 
 	root.AddCommand(
 		buildOfflineCmd(),
+		buildWorkflowCmd(),
 		buildRunCmd(),
 		buildValidateCmd(),
 		buildBlueprintCmd(),

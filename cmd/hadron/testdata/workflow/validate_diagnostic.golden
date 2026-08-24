@@ -1,0 +1,2 @@
+error HADR-CLI-TEST invalid.workflow.yaml:9:5: node requires a declared dependency
+Error: workflow validation failed

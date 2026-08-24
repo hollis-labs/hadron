@@ -183,8 +183,8 @@ func (s *WorkflowHostStore) ListIncompleteStarts(ctx context.Context, limit int)
 	if limit < 0 {
 		return nil, fmt.Errorf("%w: negative host recovery limit", hoststate.ErrInvalidRecord)
 	}
-	statement := `SELECT s.request_json, p.phase, p.generation, p.updated_at FROM workflow_host_starts s JOIN workflow_host_start_progress p ON p.run_id = s.run_id WHERE p.phase NOT IN (?, ?) ORDER BY p.updated_at, s.run_id`
-	args := []any{hoststate.StartRunning, hoststate.StartDryRunComplete}
+	statement := `SELECT s.request_json, p.phase, p.generation, p.updated_at FROM workflow_host_starts s JOIN workflow_host_start_progress p ON p.run_id = s.run_id WHERE p.phase NOT IN (?, ?, ?) ORDER BY p.updated_at, s.run_id`
+	args := []any{hoststate.StartRunning, hoststate.StartDryRunComplete, hoststate.StartPinsRejected}
 	if limit > 0 {
 		statement += ` LIMIT ?`
 		args = append(args, limit)
@@ -263,7 +263,8 @@ func (s *WorkflowHostStore) AdvanceStart(ctx context.Context, request hoststate.
 func validStartEdge(from, to hoststate.StartPhase) bool {
 	return (from == hoststate.StartRecorded && (to == hoststate.StartRunCreated || to == hoststate.StartDryRunComplete)) ||
 		(from == hoststate.StartRunCreated && to == hoststate.StartNodesMaterialized) ||
-		(from == hoststate.StartNodesMaterialized && to == hoststate.StartRunning)
+		(from == hoststate.StartNodesMaterialized && (to == hoststate.StartPinsBound || to == hoststate.StartPinsRejected)) ||
+		(from == hoststate.StartPinsBound && to == hoststate.StartRunning)
 }
 
 func startPhaseRank(phase hoststate.StartPhase) int {
@@ -274,8 +275,10 @@ func startPhaseRank(phase hoststate.StartPhase) int {
 		return 2
 	case hoststate.StartNodesMaterialized:
 		return 3
-	case hoststate.StartRunning, hoststate.StartDryRunComplete:
+	case hoststate.StartPinsBound, hoststate.StartPinsRejected:
 		return 4
+	case hoststate.StartRunning, hoststate.StartDryRunComplete:
+		return 5
 	default:
 		return 0
 	}
