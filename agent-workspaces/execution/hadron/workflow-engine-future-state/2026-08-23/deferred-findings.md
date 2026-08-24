@@ -108,10 +108,6 @@ No execution findings have been deferred.
   cleanup, while the immutable idempotency contracts prevent retry-created
   duplicates.
 
-- Optional nonblocking gate execution remains deferred to W07-T09. The shared
-  contract reserves the vocabulary, but `human_gate@v1` fails closed until the
-  graph compiler/runtime can lower a gate to explicit decision and skip paths.
-
 - SQLite wait recovery currently decodes every open wait row before ordering
   the earliest `WakeAt` or `Deadline`, because `WakeAt` is carried in immutable
   `record_json` and this task intentionally adds no migration or index. This is
@@ -261,7 +257,25 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0TVDTR35JQ92KMGBRN6K841`.
 
+## Follow-up candidates
+
+- W07-T09 intentionally leaves concrete Hadron service providers and the
+  generated-definition registrar/resolver unbound. When a later host/exposure
+  task elects to make either capability operational, bind the extraction-safe
+  contracts through the shared step-kind and exact-digest host boundaries;
+  do not introduce transport-private execution or parent-plan mutation.
+
+  Vanta revision: `01M0TVX6Z8W2WJKX2C7XK9SMAQ`.
+
 ## Resolved follow-ups
+
+- W07-T09 resolves W04-T07's deferred optional/nonblocking gate execution gap
+  in `94f03bb`: compiler lowering uses a reserved legal trigger binding,
+  explicit `proceed|skip` policy, an honest not-triggered proceed envelope,
+  and the ordinary predicate path for skip. Triggered execution stays on the
+  canonical durable wait/resume path and timeout remains a typed failure.
+
+  Vanta resolution revision: `01M0TVX7E59NXJ83RJBBFV77RZ`.
 
 - W05-T02 resolved the temporary W05-T01 identity strings with durable,
   validated, defensively owned `RunScope` and `ExecutionTarget` models in

@@ -52,3 +52,4 @@
 | 48 | W07-T07 | `aa01d1d` | `9431754` | Hadron | accepted after shared-profile, authority/responder, receipt, observation, restart, and conformance hardening |
 | 49 | W07-T05 | `6348a06` | `4d9c2c7` | Hadron | accepted after manifest-integrity, exact node-profile, safe narrowing, reconstructible remote bridge, runtime-parity, and atomic reproducibility hardening |
 | 50 | W05-T04 | `bb2a55a` | `c68a38a` | Hadron | accepted after exact registration identity, stable-fire replay, leased-claim recovery, activation-local binding, overlap/reuse, callback idempotency, observer redaction, and two-handle CAS hardening |
+| 51 | W07-T09 | `fbc877d` | `94f03bb` | Hadron | accepted after deterministic lowering, fail-fast admission fencing, launch-before-provider durability, monotonic service recovery, exact generated-child authorization, and honest optional-gate hardening |

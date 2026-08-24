@@ -68,7 +68,7 @@ or the detailed architecture made a later choice. In particular:
 | Ready queue with no topological level barrier | Planned | W03-T02, W03-T03 |
 | Bounded pool, per-effect/capability limits, cross-run keys, fairness hooks | Implemented | W03-T02, W03-T07 |
 | Fail-fast/run-to-completion and tolerated fan-out failure | Implemented | W03-T04, W03-T07 |
-| `if`, named readiness, switch, catch, continue-on-error, finally, join | Planned | W03-T03, W03-T08, W07-T09 |
+| `if`, named readiness, switch, catch, continue-on-error, finally, join | Implemented | W03-T03, W03-T08, W07-T09 |
 | Runtime `for_each`, bounded fan-out, per-item attempts/output/error | Planned | W03-T04 |
 | Effect-aware retry, backoff, idempotency, cancellation, and timeout taxonomy | Planned | W01-T05, W03-T04, W04-T01 |
 | Crash recovery and replay from a selected node using journaled outputs | Implemented | W03-T06 |
@@ -81,7 +81,7 @@ or the detailed architecture made a later choice. In particular:
 | Generic `WaitRecord`, worker release, correlated/idempotent resume | Implemented | W03-T05 |
 | Gate, message, callback, signal, timer, event, and child-run wakes use one path | Planned | W03-T05, W04-T07, W07-T08 |
 | Shared gate/checkpoint vocabulary with product-owned authority/presentation | Implemented | W04-T07, W07-T07 |
-| Environment-bound and optional/non-blocking manual gates | Planned | W04-T07, W07-T09 |
+| Environment-bound and optional/non-blocking manual gates | Implemented | W04-T07, W07-T09 |
 | Stable scheduler fire identity, attempts, retry/exhaustion, observations, configurable clock/cadence/batch, CAS tests | Planned in the only secondary repository | W00-T07 |
 | Hadron activation registrations, overlap/missed-fire/catchup/reuse policy | Planned | W05-T04, W05-T08 |
 | Long-lived reactors, signals/queries/updates, continue-as-new, durability modes | Planned later | W07-T08 |
@@ -120,9 +120,9 @@ or the detailed architecture made a later choice. In particular:
 
 | Source requirement | Disposition | Owning tasks |
 | --- | --- | --- |
-| Static matrices lower to fan-out | Planned later | W07-T09 |
-| Daemon/service steps with readiness and teardown | Planned later | W07-T09 |
-| Dynamic graphs use validated generated child definitions, not live mutation | Planned later | W07-T09 |
+| Static matrices lower to fan-out | Implemented | W07-T09 |
+| Daemon/service steps with readiness and teardown | Implemented | W07-T09 |
+| Dynamic graphs use validated generated child definitions, not live mutation | Implemented | W07-T09 |
 | Fluent/Go/TypeScript/agent front ends remain views over IR | Planned later | W07-T11 |
 | No mutable single state document, implicit per-item execution, jq language, level barriers, live plan patching, or global log output scan | Enforced negative constraints | W01-T01, W02-T01, W02-T02, W03-T02, W03-T04, W04-T03, W06-T06 |
 

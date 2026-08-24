@@ -434,3 +434,16 @@
   payload digest before resuming the canonical core wait.
 
   Vanta revision: `01M0TTKAXCDH6HFCK3CEW3JDJ3`.
+
+- W07-T09 keeps advanced authoring as ordinary graph/runtime semantics. Static
+  matrices lower deterministically to bounded `for_each` rows; fail-fast fences
+  and cancels only unstarted items. Join and sequential groups lower to control
+  edges. Service success means durable readiness: launch intent precedes the
+  provider call, crash recovery reacquires with the immutable key, heartbeat
+  state remains observed, and a generated global `finally` node owns stop.
+  Optional gates lower to a reserved trigger binding plus explicit
+  `proceed|skip`; generated child material is validated, digested, authorized,
+  durably registered/resolved, and passed to ordinary `call` without mutating
+  the bound parent graph.
+
+  Vanta revision: `01M0TVX7V03B9YSV01SMCWG7WK`.
