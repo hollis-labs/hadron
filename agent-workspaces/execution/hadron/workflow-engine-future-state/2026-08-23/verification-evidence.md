@@ -1028,3 +1028,22 @@ admission, aggregate effect, and post-attestor output hardening.
 | independent source review `4a89c14` | `go test -race -count=2 ./internal/appworkflow ./internal/registry ./internal/pack`; import-boundary guard and committed diff check | pass |
 | integration `d717a58` | focused suites at `-count=10` and focused race suite | pass |
 | integration `d717a58` | `go test -count=1 ./...` | first run hit the existing timing-sensitive child-start cancellation contention test; isolated `-count=50` and immediate full repository rerun passed |
+
+## W07-T01
+
+Reviewed the provider-neutral `llm@v1` step contract, closed configuration and
+typed private output schemas, exact tool allowlists, policy/provider/tool
+boundaries, aggregate token/byte/cost/tool budgets, streaming redaction,
+schema repair/fail, literal activity evidence, safe failure taxonomy, and the
+Hadron-owned `go-providers` bridge. Source commit `93667ef` was integrated as
+`377490c` after exact provider-instance trust, audit/provenance bounds, output
+budget charging, ambiguous result, and atomic tool-batch hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `93667ef` | focused LLM adapter and provider bridge suites at repeated counts | pass |
+| source worktree `93667ef` | focused race suite, import guard, vet, targeted golangci, module-tidy diff, full repository suite, hooks, and diff checks | pass; zero new issues |
+| independent source review `93667ef` | `go test -count=10 ./workflow/adapters/llm/... ./internal/llmprovider/...` | pass |
+| independent source review `93667ef` | `go test -race -count=2 ./workflow/adapters/llm/... ./internal/llmprovider/... ./workflow/runtime/...`; `go mod tidy -diff`; focused vet and committed diff check | pass |
+| source worktree `93667ef` | `go test -count=1 ./...` | pass |
+| integration `377490c` | focused repeated and race suites, module-tidy diff, and full repository suite | pass |

@@ -111,7 +111,7 @@ superseded requirements are not mistaken for omissions.
 | W06-T08 | Add workflow authoring, registry, and tool-building surfaces | 06 | W05-T07, W06-T01, W06-T03, W06-T04 | [ ] |
 | W06-T09 | Prove the Torque bulk-create end-to-end acceptance case | 06 | W03-T04, W03-T07, W03-T08, W04-T02, W04-T05, W05-T01, W05-T03, W05-T07, W06-T03 | [ ] |
 | W06-T10 | Move the workflow UI off legacy Wails contracts | 06 | W06-T02, W06-T05 | [ ] |
-| W07-T01 | Add provider-agnostic `llm` step kind | 07 | W04-T08, W05-T01 | [ ] |
+| W07-T01 | Add provider-agnostic `llm` step kind | 07 | W04-T08, W05-T01 | [x] |
 | W07-T02 | Add goja-backed `script` step kind | 07 | W04-T01, W02-T02 | [x] |
 | W07-T03 | Reintroduce `agent_launch` as workflow sugar | 07 | W03-T05, W04-T06 | [x] |
 | W07-T04 | Add generated API client step families | 07 | W04-T01, W06-T02 | [ ] |

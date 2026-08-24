@@ -373,3 +373,17 @@
   file replacement.
 
   Vanta revision for both W05-T07 decisions: `01M0TKZPPPWSSW3PYK2GKEQ3GN`.
+
+- W07-T01 keeps `llm@v1` provider-neutral in `workflow/adapters/llm` behind
+  policy, provider, tool-host, stream, and redaction seams. The concrete
+  `go-providers`/`go-llm-contracts` bridge remains Hadron-owned under
+  `internal/llmprovider`; typed private outputs, literal activity evidence,
+  aggregate budgets, schema repair, and conservative effect metadata remain
+  invariant across bindings.
+
+- Tool use through the concrete bridge is denied unless the host explicitly
+  trusts one exact nonnil provider pointer as proposal-only. Registry
+  replacement, including an equal-value distinct pointer, revokes that trust
+  rather than allowing provider equality to stand in for instance identity.
+
+  Vanta revision for both W07-T01 decisions: `01M0TMBN9MSPGR06F8RMWXP3FS`.

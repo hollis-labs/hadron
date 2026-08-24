@@ -46,3 +46,4 @@
 | 42 | W03-T06 | `4110fd9` | `8fb3ab0` | Hadron | accepted after exact pinned-plan recovery, compiler-scoped input binding, deterministic crash policy, replay/fan-out provenance, and readiness-fixpoint hardening |
 | 43 | W03-T09 | `1ffda24` | `ca2a7d2` | Hadron | accepted after append-order memo parity and untrusted value-record integrity hardening |
 | 44 | W05-T07 | `4a89c14` | `d717a58` | Hadron | accepted after caller-ownership, bounded-report, post-attestation, and exact namespace-authorization hardening |
+| 45 | W07-T01 | `93667ef` | `377490c` | Hadron | accepted after exact provider-identity, provenance, audit-budget, response-shape, and tool-batch hardening |

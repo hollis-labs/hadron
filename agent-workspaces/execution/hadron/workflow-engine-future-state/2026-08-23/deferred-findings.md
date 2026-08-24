@@ -236,6 +236,15 @@ No execution findings have been deferred.
 
   Vanta revision for both W03-T06 limitations: `01M0TF0X79CJAD6S3VNNJ65P1V`.
 
+- W07-T01 intentionally rejects all query-bearing URI provenance, fragments,
+  userinfo, and credential-shaped markers or assignments, including benign
+  query-bearing endpoint metadata. The stock CLI provider bridges remain
+  tool-disabled because their internal tool behavior cannot prove the
+  proposal-only contract; the `go-llm-contracts` bridge also rejects a positive
+  cost cap because its upstream protocol does not report exact cost.
+
+  Vanta revision: `01M0TMBNX9G3GPV39W9SAPZJ5N`.
+
 ## Follow-up candidates
 
 - W05-T07's canonical runner exposed an ordinary-runtime completion gap for a
