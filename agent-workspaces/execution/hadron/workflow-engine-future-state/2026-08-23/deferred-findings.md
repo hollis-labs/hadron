@@ -235,3 +235,15 @@ No execution findings have been deferred.
   authoring/compiler task rather than weakening recovery identity.
 
   Vanta revision for both W03-T06 limitations: `01M0TF0X79CJAD6S3VNNJ65P1V`.
+
+## Follow-up candidates
+
+- W05-T07's canonical runner exposed an ordinary-runtime completion gap for a
+  workflow that has both declared outputs and finalizers. Terminal-intent
+  completion currently does not carry the finalized output reference, while
+  successful run validation rejects a missing output reference. Keep the
+  contract runner truthful and reproduce/fix this as W03-T08 runtime hardening
+  after W03-T09 releases the overlapping runtime files. Cover success,
+  failure, nested and failed cleanup, replay, and SQLite parity.
+
+  Vanta revision: `01M0TGGDCRE6Z6GQ9ZKFM1ZK5Y`.
