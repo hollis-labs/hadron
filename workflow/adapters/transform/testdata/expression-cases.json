@@ -1,0 +1,58 @@
+{
+  "success": [
+    {
+      "name": "maps-filters-aggregates",
+      "config": {
+        "count": "len(inputs.records)",
+        "high-ids": "map(filter(inputs.records, .score >= 2), .id)",
+        "ids": "map(inputs.records, .id)",
+        "total": "sum(map(inputs.records, .score))"
+      },
+      "inputs": {
+        "records": [
+          {"id": "a", "score": 1},
+          {"id": "b", "score": 3}
+        ]
+      },
+      "expected": {
+        "count": 2,
+        "high-ids": ["b"],
+        "ids": ["a", "b"],
+        "total": 4
+      }
+    },
+    {
+      "name": "reshape-and-exact-number",
+      "config": {
+        "large": "inputs.large",
+        "summary": "{name: inputs.name, tags: inputs.tags}"
+      },
+      "inputs": {
+        "large": 123456789012345678901234567890.0001,
+        "name": "release",
+        "tags": ["safe", "deterministic"]
+      },
+      "expected": {
+        "large": 123456789012345678901234567890.0001,
+        "summary": {
+          "name": "release",
+          "tags": ["safe", "deterministic"]
+        }
+      }
+    }
+  ],
+  "failure": [
+    {
+      "name": "missing-reference",
+      "config": {"result": "inputs.missing"},
+      "inputs": {},
+      "diagnostic": "HADR-VALUE-002"
+    },
+    {
+      "name": "type-error",
+      "config": {"result": "inputs.label + 1"},
+      "inputs": {"label": "not-a-number"},
+      "diagnostic": "HADR-VALUE-003"
+    }
+  ]
+}
