@@ -35,3 +35,4 @@
 | 31 | W04-T04 | `2e233ed` | `4ad4e14` | Hadron | accepted after all-answer destination authorization, pinned transport, percent-decoded redirect-secret rejection, full-operation deadlines, and expanded-secret bounds |
 | 32 | W03-T04 | `34f1ee3` | `f103b3d` | Hadron | accepted after cancellation-wins terminal fencing, trusted retry-policy enforcement, collision-free durable identities, restart-durable activations, and atomic fan-out persistence |
 | 33 | W04-T07 | `c680634` | `2229ed8` | Hadron | accepted after deterministic timer-wake ordering, typed timeout failure, retry-stable callback and gate payload contracts, authorized message bridging, restart recovery, and SQLite parity |
+| 34 | W07-T02 | `25dabcf` | `9e52e0a` | Hadron | accepted after fail-closed Goja sandbox hardening, deterministic structural limits, exact-number admission, typed private outputs, cancellation, and concurrent execution coverage |

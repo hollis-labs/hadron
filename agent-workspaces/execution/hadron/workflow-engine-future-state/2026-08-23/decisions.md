@@ -170,3 +170,18 @@
   responsibilities.
 
   Vanta revision for all W04-T07 decisions: `01M0SPW0EQ04GBNVH5YXH0Q21E`.
+
+- W07-T02 keeps `script@v1` as a synchronous, capability-free Goja data
+  transform with required input/output schemas. It admits only cloned inline
+  non-secret values, returns private run-retained typed outputs, rejects
+  numbers that JavaScript cannot represent exactly, and exposes no ambient
+  filesystem, network, module, secret, clock, random, async, or Hadron helper
+  surface.
+
+- Upstream Goja has no truthful per-runtime heap quota. The in-process adapter
+  therefore defines its deterministic memory boundary over source, canonical
+  input/output bytes, nesting, aggregate items, strings, and call stack, with
+  separate wall-time/context interruption. It does not expose a misleading
+  heap-limit setting or claim hostile-tenant process isolation.
+
+  Vanta revision for both W07-T02 decisions: `01M0SRTJX81SHA01FAG7E1C7G4`.

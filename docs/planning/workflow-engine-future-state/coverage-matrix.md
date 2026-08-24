@@ -94,7 +94,7 @@ or the detailed architecture made a later choice. In particular:
 | Initial `transform`, `cmd`, `http`, `mcp`, `call`, `sleep`, `wait_for`, `human_gate`, `message_wait` | Planned | W04-T02 through W04-T07 |
 | `verify` modifier and literal tool-activity evidence | Planned | W04-T08 |
 | Provider-agnostic typed `llm`, restricted tools, audit records, schema repair/fail | Planned later | W07-T01 |
-| Sandboxed goja `script`, capability surface, schema inference | Planned later | W07-T02 |
+| Sandboxed goja `script`, capability surface, schema inference | Implemented | W07-T02 |
 | Heavy `agent_launch` plus correlated wait sugar | Planned later | W07-T03 |
 | Generated OpenAPI/AsyncAPI/gRPC/GraphQL operation families | Planned later | W07-T04 |
 | `emit` and `checkpoint` | Planned later | W07-T07 |

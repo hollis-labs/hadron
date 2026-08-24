@@ -129,3 +129,13 @@ No execution findings have been deferred.
   and index wake time without changing the public contract.
 
   Vanta revision for all W04-T07 limitations: `01M0SPW0E19F8XQEN30DZVE80H`.
+
+- W07-T02 cannot provide a byte-accurate per-VM heap ceiling because upstream
+  Goja exposes interruption and call-stack limits but no runtime allocator
+  quota. Its deterministic structural bounds prevent oversized data from
+  crossing the adapter boundary and wall-time interruption stops ordinary
+  runaway code, but a host that exposes scripts to hostile multi-tenant input
+  still needs a future process-level isolation runner. The adapter makes no
+  stronger sandbox claim.
+
+  Vanta revision: `01M0SRTJXJ4Q1FKHD6CENSK6V0`.

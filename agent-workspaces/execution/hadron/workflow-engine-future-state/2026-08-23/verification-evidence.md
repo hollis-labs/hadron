@@ -819,3 +819,19 @@ Source commit `c680634` was integrated as `2229ed8`.
 | source worktree `c680634` | import guard, focused vet, targeted golangci, hooks, `make test`, full `go test ./...`, and diff check | pass; zero new issues |
 | integration `2229ed8` | `go test -count=1 ./...` | pass |
 | source and integration | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |
+
+## W07-T02
+
+Reviewed the `script@v1` Goja contract, explicit schemas, capability-free
+sandbox, static and runtime prototype hardening, source-safe diagnostics,
+exact-number admission, typed private outputs, deterministic structural limits,
+wall-time interruption, cancellation, and concurrent fresh-runtime behavior.
+Source commit `25dabcf` was integrated as `9e52e0a`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `25dabcf` | `go test -count=20 ./workflow/adapters/script/...` | pass |
+| source worktree `25dabcf` | `go test -race -count=1 ./workflow/adapters/script/... ./workflow/runtime/...` | pass |
+| source worktree `25dabcf` | import guard, workflow and adapter vet, targeted golangci, pre-commit hooks, and diff checks | pass; zero new issues |
+| source worktree `25dabcf` | `go test -count=1 ./...` | pass on clean rerun; one earlier concurrent run had an unrelated `internal/agentsubstrate` timeout, whose isolated rerun passed |
+| source and integration | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |
