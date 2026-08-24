@@ -27,6 +27,15 @@ const (
 	// CodeInvalidBindingSource identifies an ambiguous or malformed typed value
 	// binding.
 	CodeInvalidBindingSource diagnostic.Code = "HADR-SOURCE-013"
+	// CodeInvalidActivation identifies a source activation declaration whose
+	// shape or portable semantics cannot be represented faithfully.
+	CodeInvalidActivation diagnostic.Code = "HADR-SOURCE-014"
+	// CodeDuplicateActivationID identifies declarations whose authoring names
+	// normalize to the same immutable activation identity.
+	CodeDuplicateActivationID diagnostic.Code = "HADR-SOURCE-015"
+	// CodeUnsupportedActivationAuthority identifies an attempt by workflow
+	// source to claim host or operator ownership for an activation.
+	CodeUnsupportedActivationAuthority diagnostic.Code = "HADR-SOURCE-016"
 )
 
 // SourceDigest identifies immutable source content without embedding its
@@ -158,6 +167,7 @@ func stripGraphLocations(value *graph.Graph) {
 	}
 	for i := range value.Activations {
 		activation := &value.Activations[i]
+		activation.Provenance = graph.Provenance{}
 		activation.Source = nil
 		for name, binding := range activation.Inputs {
 			stripBinding(&binding)

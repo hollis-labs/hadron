@@ -1,0 +1,97 @@
+{
+  "graph": {
+    "format": "workflow",
+    "locator": "testdata/activations.workflow.yaml",
+    "start_line": 2,
+    "start_column": 3,
+    "path": [
+      "workflow"
+    ]
+  },
+  "inputs": {
+    "project-id": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 46,
+      "start_column": 5,
+      "path": [
+        "inputs",
+        "0"
+      ]
+    }
+  },
+  "nodes": {
+    "accept": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 49,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "0"
+      ]
+    }
+  },
+  "activations": {
+    "agent-message": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 29,
+      "start_column": 5,
+      "path": [
+        "on",
+        "message"
+      ]
+    },
+    "daily-schedule": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 24,
+      "start_column": 5,
+      "path": [
+        "on",
+        "schedule"
+      ]
+    },
+    "inbox-files": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 34,
+      "start_column": 5,
+      "path": [
+        "on",
+        "file"
+      ]
+    },
+    "incoming-hook": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 9,
+      "start_column": 5,
+      "path": [
+        "on",
+        "webhook"
+      ]
+    },
+    "project-event": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 38,
+      "start_column": 5,
+      "path": [
+        "on",
+        "event"
+      ]
+    },
+    "setup-callback": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 42,
+      "start_column": 5,
+      "path": [
+        "on",
+        "one_shot"
+      ]
+    }
+  }
+}

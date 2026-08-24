@@ -1,0 +1,548 @@
+{
+  "schema_version": "1",
+  "id": "activation-showcase",
+  "digest": "sha256:b4703e1bf617e9a18f320c4641415d5c6df09b1555d27e8ca78037388598ee4b",
+  "definition": {
+    "authority": "project",
+    "kind": "workflow",
+    "id": "activation-showcase",
+    "version": "1.2.0",
+    "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+  },
+  "provenance": {
+    "authority": "project",
+    "origin": "workflow-source",
+    "locator": "testdata/activations.workflow.yaml",
+    "revision": "source-rev-42",
+    "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+  },
+  "source_digests": [
+    {
+      "format": "workflow",
+      "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+    }
+  ],
+  "graph": {
+    "id": "activation-showcase",
+    "version": "1.2.0",
+    "digest": "sha256:52b37f0ccf3b5153afd505bb1854101a0faf78405c0a875540e34eedd8f5899c",
+    "provenance": {
+      "authority": "project",
+      "origin": "workflow-source",
+      "locator": "testdata/activations.workflow.yaml",
+      "revision": "source-rev-42",
+      "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+    },
+    "inputs": [
+      {
+        "name": "project-id",
+        "schema": {
+          "type": "string"
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 46,
+          "start_column": 5,
+          "path": [
+            "inputs",
+            "0"
+          ]
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "id": "accept",
+        "display_name": "Accept",
+        "kind": "transform",
+        "config": {
+          "expression": "inputs.project_id"
+        },
+        "execution_target": {},
+        "source": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 49,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "0"
+          ]
+        },
+        "provenance": {}
+      }
+    ],
+    "activations": [
+      {
+        "id": "agent-message",
+        "kind": "message",
+        "config": {
+          "to": "msg://agent/hadron/bulk-create"
+        },
+        "inputs": {
+          "project_id": {
+            "kind": "expression",
+            "expression": {
+              "text": "message.project_id",
+              "source": {
+                "format": "workflow",
+                "locator": "testdata/activations.workflow.yaml",
+                "start_line": 32,
+                "start_column": 19,
+                "path": [
+                  "on",
+                  "message",
+                  "extract",
+                  "project_id"
+                ]
+              }
+            },
+            "source": {
+              "format": "workflow",
+              "locator": "testdata/activations.workflow.yaml",
+              "start_line": 32,
+              "start_column": 19,
+              "path": [
+                "on",
+                "message",
+                "extract",
+                "project_id"
+              ]
+            }
+          }
+        },
+        "policy": {},
+        "provenance": {
+          "authority": "project",
+          "origin": "workflow-source",
+          "locator": "testdata/activations.workflow.yaml",
+          "revision": "source-rev-42",
+          "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 29,
+          "start_column": 5,
+          "path": [
+            "on",
+            "message"
+          ]
+        }
+      },
+      {
+        "id": "daily-schedule",
+        "kind": "schedule",
+        "config": {
+          "cron": "0 6 * * *"
+        },
+        "policy": {
+          "overlap": "allow",
+          "catchup": true
+        },
+        "provenance": {
+          "authority": "project",
+          "origin": "workflow-source",
+          "locator": "testdata/activations.workflow.yaml",
+          "revision": "source-rev-42",
+          "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 24,
+          "start_column": 5,
+          "path": [
+            "on",
+            "schedule"
+          ]
+        }
+      },
+      {
+        "id": "inbox-files",
+        "kind": "file",
+        "config": {
+          "events": [
+            "create",
+            "write",
+            "rename",
+            "remove"
+          ],
+          "path": "inbox/tasks.json"
+        },
+        "policy": {},
+        "provenance": {
+          "authority": "project",
+          "origin": "workflow-source",
+          "locator": "testdata/activations.workflow.yaml",
+          "revision": "source-rev-42",
+          "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 34,
+          "start_column": 5,
+          "path": [
+            "on",
+            "file"
+          ]
+        }
+      },
+      {
+        "id": "incoming-hook",
+        "kind": "webhook",
+        "config": {
+          "path": "/hooks/tasks"
+        },
+        "inputs": {
+          "request_id": {
+            "kind": "interpolation",
+            "interpolation": "request-{{ message.id }}",
+            "source": {
+              "format": "workflow",
+              "locator": "testdata/activations.workflow.yaml",
+              "start_line": 15,
+              "start_column": 9,
+              "path": [
+                "on",
+                "webhook",
+                "extract",
+                "request_id"
+              ]
+            }
+          },
+          "tasks": {
+            "kind": "expression",
+            "expression": {
+              "text": "body.tasks",
+              "source": {
+                "format": "workflow",
+                "locator": "testdata/activations.workflow.yaml",
+                "start_line": 13,
+                "start_column": 14,
+                "path": [
+                  "on",
+                  "webhook",
+                  "extract",
+                  "tasks"
+                ]
+              }
+            },
+            "source": {
+              "format": "workflow",
+              "locator": "testdata/activations.workflow.yaml",
+              "start_line": 13,
+              "start_column": 14,
+              "path": [
+                "on",
+                "webhook",
+                "extract",
+                "tasks"
+              ]
+            }
+          }
+        },
+        "policy": {
+          "overlap": "forbid",
+          "starting_deadline": "30s",
+          "deduplication_key": {
+            "text": "inputs.project_id",
+            "source": {
+              "format": "workflow",
+              "locator": "testdata/activations.workflow.yaml",
+              "start_line": 19,
+              "start_column": 24,
+              "path": [
+                "on",
+                "webhook",
+                "deduplication_key"
+              ]
+            }
+          },
+          "run_id_reuse": "terminate_existing"
+        },
+        "provenance": {
+          "authority": "project",
+          "origin": "workflow-source",
+          "locator": "testdata/activations.workflow.yaml",
+          "revision": "source-rev-42",
+          "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 9,
+          "start_column": 5,
+          "path": [
+            "on",
+            "webhook"
+          ]
+        },
+        "metadata": {
+          "purpose": "ingestion"
+        }
+      },
+      {
+        "id": "project-event",
+        "kind": "event",
+        "config": {
+          "source": "project://torque",
+          "type": "project.task.created"
+        },
+        "policy": {},
+        "provenance": {
+          "authority": "project",
+          "origin": "workflow-source",
+          "locator": "testdata/activations.workflow.yaml",
+          "revision": "source-rev-42",
+          "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 38,
+          "start_column": 5,
+          "path": [
+            "on",
+            "event"
+          ]
+        }
+      },
+      {
+        "id": "setup-callback",
+        "kind": "one_shot",
+        "config": {
+          "path": "/callbacks/setup",
+          "ttl": "15m"
+        },
+        "policy": {},
+        "provenance": {
+          "authority": "project",
+          "origin": "workflow-source",
+          "locator": "testdata/activations.workflow.yaml",
+          "revision": "source-rev-42",
+          "digest": "sha256:72873be8d31fa62f6bce8afb50689849eff9a29fa5582024a0aab88a95648d41"
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 42,
+          "start_column": 5,
+          "path": [
+            "on",
+            "one_shot"
+          ]
+        }
+      }
+    ],
+    "source": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 2,
+      "start_column": 3,
+      "path": [
+        "workflow"
+      ]
+    },
+    "source_map": {
+      "graph": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 2,
+        "start_column": 3,
+        "path": [
+          "workflow"
+        ]
+      },
+      "inputs": {
+        "project-id": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 46,
+          "start_column": 5,
+          "path": [
+            "inputs",
+            "0"
+          ]
+        }
+      },
+      "nodes": {
+        "accept": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 49,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "0"
+          ]
+        }
+      },
+      "activations": {
+        "agent-message": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 29,
+          "start_column": 5,
+          "path": [
+            "on",
+            "message"
+          ]
+        },
+        "daily-schedule": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 24,
+          "start_column": 5,
+          "path": [
+            "on",
+            "schedule"
+          ]
+        },
+        "inbox-files": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 34,
+          "start_column": 5,
+          "path": [
+            "on",
+            "file"
+          ]
+        },
+        "incoming-hook": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 9,
+          "start_column": 5,
+          "path": [
+            "on",
+            "webhook"
+          ]
+        },
+        "project-event": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 38,
+          "start_column": 5,
+          "path": [
+            "on",
+            "event"
+          ]
+        },
+        "setup-callback": {
+          "format": "workflow",
+          "locator": "testdata/activations.workflow.yaml",
+          "start_line": 42,
+          "start_column": 5,
+          "path": [
+            "on",
+            "one_shot"
+          ]
+        }
+      }
+    },
+    "concurrency": {
+      "extension": {}
+    },
+    "execution_target": {}
+  },
+  "source_map": {
+    "graph": {
+      "format": "workflow",
+      "locator": "testdata/activations.workflow.yaml",
+      "start_line": 2,
+      "start_column": 3,
+      "path": [
+        "workflow"
+      ]
+    },
+    "inputs": {
+      "project-id": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 46,
+        "start_column": 5,
+        "path": [
+          "inputs",
+          "0"
+        ]
+      }
+    },
+    "nodes": {
+      "accept": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 49,
+        "start_column": 5,
+        "path": [
+          "steps",
+          "0"
+        ]
+      }
+    },
+    "activations": {
+      "agent-message": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 29,
+        "start_column": 5,
+        "path": [
+          "on",
+          "message"
+        ]
+      },
+      "daily-schedule": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 24,
+        "start_column": 5,
+        "path": [
+          "on",
+          "schedule"
+        ]
+      },
+      "inbox-files": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 34,
+        "start_column": 5,
+        "path": [
+          "on",
+          "file"
+        ]
+      },
+      "incoming-hook": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 9,
+        "start_column": 5,
+        "path": [
+          "on",
+          "webhook"
+        ]
+      },
+      "project-event": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 38,
+        "start_column": 5,
+        "path": [
+          "on",
+          "event"
+        ]
+      },
+      "setup-callback": {
+        "format": "workflow",
+        "locator": "testdata/activations.workflow.yaml",
+        "start_line": 42,
+        "start_column": 5,
+        "path": [
+          "on",
+          "one_shot"
+        ]
+      }
+    }
+  }
+}

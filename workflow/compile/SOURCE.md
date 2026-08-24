@@ -1,7 +1,7 @@
 # Graph-Native Workflow Source
 
 The compiler accepts one `workflow` document from the source loader. The root
-contains `workflow`, `inputs`, `outputs`, `steps`, and optional `finally`.
+contains `workflow`, optional `on`, `inputs`, `outputs`, `steps`, and optional `finally`.
 Structural fields are closed: unsupported fields produce `HADR-SOURCE-012`
 instead of being discarded.
 
@@ -10,6 +10,41 @@ through `graph.NormalizeID`; a step's original `name` remains its display name.
 The default workflow version is `1.0.0`. Workflow provenance may declare
 authority, origin, revision, parents, and metadata; the compiler owns the
 current source locator and digest.
+
+## Source activation declarations
+
+Optional `on` declarations compile into immutable `Graph.Activations`; they do
+not create scheduler or trigger registrations. The accepted source keys and
+their adapter-opaque canonical config are:
+
+```yaml
+on:
+  webhook: {path: /hooks/tasks}
+  schedule: {cron: "0 6 * * *"}
+  message: {to: msg://agent/hadron/tasks}
+  file: {path: inbox/tasks.json, events: [create, write, remove, rename]}
+  event: {type: project.task.created, source: project://torque}
+  one_shot: {path: /callbacks/setup, ttl: 15m}
+```
+
+`schedule` also accepts a five-field cron string shorthand. A kind accepts a
+sequence of declarations when each item has a unique `name`; one mapping uses
+the kind as its default name. Names normalize into stable activation IDs.
+Webhook and one-shot paths are static root-relative routes. Cron validation is
+syntax-only: runtime scheduling semantics remain a host responsibility.
+
+All declarations are source-owned. `authority` may be omitted or set exactly
+to `project`; workflow source cannot claim host or operator authority. The
+compiler records immutable project/source provenance on every declaration.
+`extract` is a binding mapping. Portable policy fields are `overlap` using
+`Allow | Forbid | Replace`, positive `starting_deadline`, `catchup`,
+`deduplication_key`, and `run_id_reuse` using
+`reject | allow_duplicate | terminate_existing`.
+
+`one_shot.ttl` is positive relative intent for later host materialization. It
+is not an absolute expiry. Registration IDs, enabled state, expiry timestamps,
+fire history, callback credentials, host ownership, and all other mutable
+operational fields are rejected rather than serialized into the plan.
 
 Inputs use a sequence. A schema may be an explicit JSON Schema object or the
 `type`/`items_type` shorthand. Workflow and node outputs may use named mappings

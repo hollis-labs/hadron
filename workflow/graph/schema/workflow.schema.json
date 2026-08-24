@@ -24,6 +24,9 @@
         "policy": {
           "$ref": "#/$defs/ActivationPolicy"
         },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
         "source": {
           "$ref": "#/$defs/SourceRef"
         }

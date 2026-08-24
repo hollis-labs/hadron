@@ -1,0 +1,12 @@
+workflow:
+  name: Duplicate Activations
+on:
+  webhook:
+    name: Incoming Hook
+    path: /hooks/incoming
+  message:
+    name: incoming_hook
+    to: msg://agent/hadron/incoming
+steps:
+  - name: Done
+    transform: {expression: inputs.value}

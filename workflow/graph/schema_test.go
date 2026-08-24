@@ -51,6 +51,16 @@ func TestGeneratedSchemaCompilesAndValidatesGraph(t *testing.T) {
 				},
 			},
 		}},
+		Activations: []graph.ActivationDeclaration{{
+			ID:     "source-hook",
+			Kind:   "webhook",
+			Config: graph.Config{"path": "/hooks/source"},
+			Provenance: graph.Provenance{
+				Authority: "project",
+				Origin:    "workflow-source",
+				Digest:    "sha256:source",
+			},
+		}},
 	}
 	if err := compiledSchema(t).Validate(jsonValue(t, instance)); err != nil {
 		t.Fatalf("generated schema rejects graph with registered-kind extension points: %v", err)
@@ -151,6 +161,12 @@ func TestGeneratedSchemaMetadataAndExtensionPoints(t *testing.T) {
 	config := object(t, definitions, "Config")
 	if additional, exists := config["additionalProperties"]; !exists || additional == false {
 		t.Fatalf("Config must remain adapter-opaque and open: %#v", config)
+	}
+	activation := object(t, definitions, "ActivationDeclaration")
+	activationProperties := object(t, activation, "properties")
+	provenance := object(t, activationProperties, "provenance")
+	if provenance["$ref"] != "#/$defs/Provenance" {
+		t.Fatalf("ActivationDeclaration.provenance schema = %#v", provenance)
 	}
 }
 

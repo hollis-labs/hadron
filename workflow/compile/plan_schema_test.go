@@ -38,9 +38,20 @@ func TestGeneratedPlanSchemaIsCurrentAndDeterministic(t *testing.T) {
 }
 
 func TestGeneratedPlanSchemaCompilesAndValidatesPlan(t *testing.T) {
-	plan := representativePlan(t)
-	if err := compiledPlanSchema(t).Validate(jsonDocument(t, stableJSON(t, plan))); err != nil {
-		t.Fatalf("generated schema rejects compiled ExecutionPlan: %v", err)
+	tests := []struct {
+		name string
+		plan any
+	}{
+		{name: "representative", plan: representativePlan(t)},
+		{name: "activations", plan: activationPlan(t, activationLocator)},
+	}
+	compiled := compiledPlanSchema(t)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := compiled.Validate(jsonDocument(t, stableJSON(t, test.plan))); err != nil {
+				t.Fatalf("generated schema rejects compiled ExecutionPlan: %v", err)
+			}
+		})
 	}
 }
 

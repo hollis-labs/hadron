@@ -18,7 +18,7 @@ func Compile(source *Source) CompileResult {
 	}
 
 	root := source.Document.Content[0]
-	rootFields := l.mapping(root, nil, "workflow", "inputs", "outputs", "steps", "finally")
+	rootFields := l.mapping(root, nil, "workflow", "on", "inputs", "outputs", "steps", "finally")
 	headerField, ok := rootFields["workflow"]
 	if !ok {
 		l.invalidShape(root, nil, "required graph-native workflow marker is missing")
@@ -28,10 +28,11 @@ func Compile(source *Source) CompileResult {
 	rawDigest := sourceDigest(source.Bytes())
 	header := l.lowerHeader(headerField.value, headerField.path, rawDigest)
 	sourceMap := graph.SourceMap{
-		Inputs:  make(map[string]graph.SourceRef),
-		Outputs: make(map[string]graph.SourceRef),
-		Nodes:   make(map[string]graph.SourceRef),
-		Edges:   make(map[string]graph.SourceRef),
+		Inputs:      make(map[string]graph.SourceRef),
+		Outputs:     make(map[string]graph.SourceRef),
+		Nodes:       make(map[string]graph.SourceRef),
+		Edges:       make(map[string]graph.SourceRef),
+		Activations: make(map[string]graph.SourceRef),
 	}
 	graphRef := l.location(headerField.value, headerField.path)
 	sourceMap.Graph = &graphRef
@@ -49,6 +50,9 @@ func Compile(source *Source) CompileResult {
 	}
 	if field, exists := rootFields["outputs"]; exists {
 		compiledGraph.Outputs = l.lowerOutputs(field.value, field.path, sourceMap.Outputs, true)
+	}
+	if field, exists := rootFields["on"]; exists {
+		compiledGraph.Activations = l.lowerActivations(field.value, field.path, sourceMap.Activations, header.provenance)
 	}
 	if field, exists := rootFields["steps"]; exists {
 		compiledGraph.Nodes, compiledGraph.Edges = l.lowerNodes(field.value, field.path, &sourceMap, false)

@@ -247,16 +247,18 @@ type ProvenanceRef struct {
 	Digest    string `json:"digest,omitempty" yaml:"digest,omitempty"`
 }
 
-// ActivationDeclaration is a source-declared request for a host to materialize
-// an operational activation registration. Config remains host-adapter opaque.
+// ActivationDeclaration is an immutable, source-declared request for a host to
+// materialize an operational activation registration. Provenance records the
+// source authority; Config remains host-adapter opaque.
 type ActivationDeclaration struct {
-	ID       string             `json:"id" yaml:"id"`
-	Kind     string             `json:"kind" yaml:"kind"`
-	Config   Config             `json:"config,omitempty" yaml:"config,omitempty"`
-	Inputs   map[string]Binding `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Policy   ActivationPolicy   `json:"policy,omitempty" yaml:"policy,omitempty"`
-	Source   *SourceRef         `json:"source,omitempty" yaml:"source,omitempty"`
-	Metadata Metadata           `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	ID         string             `json:"id" yaml:"id"`
+	Kind       string             `json:"kind" yaml:"kind"`
+	Config     Config             `json:"config,omitempty" yaml:"config,omitempty"`
+	Inputs     map[string]Binding `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Policy     ActivationPolicy   `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Provenance Provenance         `json:"provenance,omitempty" yaml:"provenance,omitempty"`
+	Source     *SourceRef         `json:"source,omitempty" yaml:"source,omitempty"`
+	Metadata   Metadata           `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // ActivationPolicy carries portable overlap, deduplication, and missed-fire
