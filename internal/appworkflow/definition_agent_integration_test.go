@@ -71,12 +71,10 @@ steps:
 
 	recordedAt := time.Date(2026, 8, 24, 17, 0, 0, 0, time.UTC)
 	planRef := workflowruntime.PlanRef{ID: plan.ID, Version: plan.Graph.Version, Digest: plan.Digest, SchemaVersion: plan.SchemaVersion}
-	identity := hoststate.IdentityBinding{
-		Principal: "user:agent", SourceAuthority: "project", Trust: "project",
-		Grants: []string{"workflow.run"}, RunScope: "project:test", ExecutionTarget: "local",
-	}
+	identity := testIdentityBinding("user:agent", "project")
 	facts := hoststate.PolicyFacts{
 		Operation: "start", RunID: "agent-parent-run", Plan: planRef, Identity: identity,
+		RunScope: identity.RunScope, ExecutionTarget: identity.ExecutionTarget,
 		NodeCount: len(plan.Graph.Nodes), BlastRadius: map[string]int{},
 	}
 	decision := hoststate.PolicyDecision{

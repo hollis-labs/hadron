@@ -31,6 +31,7 @@ func (h *Host) StartRun(ctx context.Context, request StartRunRequest) (StartRunR
 	if strings.TrimSpace(string(request.RunID)) == "" || strings.TrimSpace(request.IdempotencyKey) == "" {
 		return StartRunResult{}, fmt.Errorf("start workflow requires run id and idempotency key")
 	}
+	request.Identity = normalizeIdentityRequest(request.Identity)
 	if err := validateIdentityRequest(request.Identity); err != nil {
 		return StartRunResult{}, err
 	}
@@ -97,7 +98,11 @@ func (h *Host) StartRun(ctx context.Context, request StartRunRequest) (StartRunR
 		if err != nil {
 			return StartRunResult{}, err
 		}
-		decision, err = h.policy.EvaluatePolicy(ctx, facts)
+		policyInput, cloneErr := clonePolicyFacts(facts)
+		if cloneErr != nil {
+			return StartRunResult{}, fmt.Errorf("clone workflow policy facts: %w", cloneErr)
+		}
+		decision, err = h.policy.EvaluatePolicy(ctx, policyInput)
 		if err != nil {
 			return StartRunResult{}, fmt.Errorf("evaluate workflow start policy: %w", err)
 		}
@@ -213,6 +218,7 @@ func sameIdentity(left, right hoststate.IdentityBinding) bool {
 }
 
 func (h *Host) bindIdentity(ctx context.Context, request IdentityRequest) (hoststate.IdentityBinding, error) {
+	request = normalizeIdentityRequest(request)
 	identity, err := h.identity.BindIdentity(ctx, request)
 	if err != nil {
 		return hoststate.IdentityBinding{}, fmt.Errorf("bind workflow identity: %w", err)
@@ -220,6 +226,14 @@ func (h *Host) bindIdentity(ctx context.Context, request IdentityRequest) (hosts
 	identity = normalizeIdentity(identity)
 	if err := identity.Validate(); err != nil {
 		return hoststate.IdentityBinding{}, fmt.Errorf("invalid workflow identity binding: %w", err)
+	}
+	if request.RunScope != nil && !request.RunScope.Matches(identity.RunScope) {
+		return hoststate.IdentityBinding{}, fmt.Errorf("%w: identity provider returned a different run scope", ErrPolicyDenied)
+	}
+	if request.ExecutionTarget != nil {
+		if identity.ExecutionTarget == nil || !request.ExecutionTarget.Matches(*identity.ExecutionTarget) {
+			return hoststate.IdentityBinding{}, fmt.Errorf("%w: identity provider returned an execution target outside the selector", ErrPolicyDenied)
+		}
 	}
 	return identity, nil
 }
@@ -744,11 +758,21 @@ func (h *Host) policyFacts(ctx context.Context, runID runtime.RunID, plan *compi
 	sort.Strings(unresolvedCalls)
 	_, mutate := effects[graph.EffectMutate]
 	_, destructive := effects[graph.EffectDestructive]
-	facts := hoststate.PolicyFacts{Operation: "start", RunID: runID, Plan: ref, Identity: identity, Effects: effectList, RequiredCapabilities: capabilityList, TargetRequirements: targets, UnresolvedCallNodes: unresolvedCalls, NodeCount: len(plan.Graph.Nodes), BlastRadius: blast, DryRunAvailable: dryAvailable, ConfirmationAdvised: mutate || destructive || len(unresolvedCalls) != 0}
+	scope := identity.RunScope.Clone()
+	var target *hoststate.ExecutionTarget
+	if identity.ExecutionTarget != nil {
+		cloned := identity.ExecutionTarget.Clone()
+		target = &cloned
+	}
+	if err := hoststate.ValidateExecutionTargetBinding(target, capabilityList, targets); err != nil {
+		return hoststate.PolicyFacts{}, fmt.Errorf("%w: %w", ErrExecutionTarget, err)
+	}
+	facts := hoststate.PolicyFacts{Operation: "start", RunID: runID, Plan: ref, Identity: identity, RunScope: scope, ExecutionTarget: target, Effects: effectList, RequiredCapabilities: capabilityList, TargetRequirements: targets, UnresolvedCallNodes: unresolvedCalls, NodeCount: len(plan.Graph.Nodes), BlastRadius: blast, DryRunAvailable: dryAvailable, ConfirmationAdvised: mutate || destructive || len(unresolvedCalls) != 0}
 	return facts, facts.Validate()
 }
 
 func digestStartIntent(request StartRunRequest, inputHash string) (string, error) {
+	request.Identity = normalizeIdentityRequest(request.Identity)
 	activation := request.Activation
 	if activation != nil {
 		copyActivation := *activation
@@ -769,6 +793,23 @@ func digestStartIntent(request StartRunRequest, inputHash string) (string, error
 		return "", fmt.Errorf("encode workflow start intent: %w", err)
 	}
 	return values.SHA256Digest(encoded), nil
+}
+
+func clonePolicyFacts(input hoststate.PolicyFacts) (hoststate.PolicyFacts, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return hoststate.PolicyFacts{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var result hoststate.PolicyFacts
+	if err := decoder.Decode(&result); err != nil {
+		return hoststate.PolicyFacts{}, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return hoststate.PolicyFacts{}, errors.New("policy facts contain trailing JSON")
+	}
+	return result, nil
 }
 
 func policyDecisionID(key string) string {

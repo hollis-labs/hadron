@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,16 @@ func TestWorkflowHostJournalExactReplayCASAndReopen(t *testing.T) {
 	if err != nil || outcome != workflowruntime.IdempotencyReplayed || !reflect.DeepEqual(replayed, created) {
 		t.Fatalf("RecordStart replay = %#v, %q, %v", replayed, outcome, err)
 	}
+	created.Record.Identity.RunScope.Attributes["cost_center"] = "mutated-result"
+	created.Record.Identity.ExecutionTarget.Labels["region"] = "mutated-result"
+	record.Identity.RunScope.Attributes["cost_center"] = "mutated-caller"
+	record.Identity.ExecutionTarget.Labels["region"] = "mutated-caller"
+	immutable := workflowHostStartFixture(t, "root")
+	loadedImmutable, loadErr := host.LoadStart(t.Context(), record.Run.ID)
+	if loadErr != nil || !reflect.DeepEqual(loadedImmutable.Record.Identity, immutable.Identity) {
+		t.Fatalf("start defensive persistence = %#v, %v", loadedImmutable.Record.Identity, loadErr)
+	}
+	record = immutable
 	changed := record
 	contradictory := record
 	contradictory.Identity.Principal = "contradictory"
@@ -43,6 +54,26 @@ func TestWorkflowHostJournalExactReplayCASAndReopen(t *testing.T) {
 	changed.Facts.Identity.Principal = "different"
 	if _, _, recordErr := host.RecordStart(t.Context(), changed); !errors.Is(recordErr, workflowruntime.ErrIdempotencyConflict) {
 		t.Fatalf("changed start error = %v", recordErr)
+	}
+	for name, mutate := range map[string]func(*hoststate.StartRecord){
+		"scope": func(candidate *hoststate.StartRecord) {
+			candidate.Identity.RunScope.ID = "different-scope"
+			candidate.Facts.Identity.RunScope.ID = "different-scope"
+			candidate.Facts.RunScope.ID = "different-scope"
+		},
+		"target": func(candidate *hoststate.StartRecord) {
+			candidate.Identity.ExecutionTarget.ID = "different-target"
+			candidate.Facts.Identity.ExecutionTarget.ID = "different-target"
+			candidate.Facts.ExecutionTarget.ID = "different-target"
+		},
+	} {
+		t.Run("changed "+name, func(t *testing.T) {
+			candidate := workflowHostStartFixture(t, "root")
+			mutate(&candidate)
+			if _, _, conflictErr := host.RecordStart(t.Context(), candidate); !errors.Is(conflictErr, workflowruntime.ErrIdempotencyConflict) {
+				t.Fatalf("RecordStart conflict = %v", conflictErr)
+			}
+		})
 	}
 
 	advanced, err := host.AdvanceStart(t.Context(), hoststate.AdvanceStartRequest{RunID: record.Run.ID, ExpectedGeneration: created.Generation, From: created.Phase, To: hoststate.StartRunCreated, At: created.UpdatedAt.Add(time.Second)})
@@ -75,12 +106,43 @@ func TestWorkflowHostJournalExactReplayCASAndReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded, err := reopened.LoadStart(t.Context(), record.Run.ID)
-	if err != nil || loaded.Phase != hoststate.StartRunCreated || loaded.Generation != 2 {
+	if err != nil || loaded.Phase != hoststate.StartRunCreated || loaded.Generation != 2 || !reflect.DeepEqual(loaded.Record.Identity, immutable.Identity) || !reflect.DeepEqual(loaded.Record.Facts.RunScope, immutable.Facts.RunScope) || !reflect.DeepEqual(loaded.Record.Facts.ExecutionTarget, immutable.Facts.ExecutionTarget) {
 		t.Fatalf("reopened LoadStart = %#v, %v", loaded, err)
+	}
+	var persistedJSON string
+	if err := reopenedStore.DB().QueryRow(`SELECT request_json FROM workflow_host_starts WHERE run_id = ?`, record.Run.ID).Scan(&persistedJSON); err != nil || strings.Contains(persistedJSON, "workspace_id") || !strings.Contains(persistedJSON, `"run_scope"`) || !strings.Contains(persistedJSON, `"execution_target"`) {
+		t.Fatalf("persisted graph-native start JSON = %q, %v", persistedJSON, err)
 	}
 	var version int
 	if err := reopenedStore.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 18`).Scan(&version); err != nil || version != 1 {
 		t.Fatalf("migration 18 = %d, %v", version, err)
+	}
+}
+
+func TestWorkflowHostPolicyEvaluationDefensiveScopeTargetPersistence(t *testing.T) {
+	store, _ := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "policy-clone.db"))
+	host, err := NewWorkflowHostStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := workflowHostStartFixture(t, "policy-clone")
+	evaluation := hoststate.PolicyEvaluation{StartKey: record.StartKey, RequestDigest: record.RequestDigest, Facts: record.Facts, Decision: record.Decision}
+	applied, outcome, err := host.RecordPolicyEvaluation(t.Context(), evaluation)
+	if err != nil || outcome != workflowruntime.IdempotencyApplied {
+		t.Fatalf("RecordPolicyEvaluation = %#v, %q, %v", applied, outcome, err)
+	}
+	evaluation.Facts.Identity.RunScope.Attributes["cost_center"] = "mutated-caller"
+	evaluation.Facts.Identity.ExecutionTarget.Labels["region"] = "mutated-caller"
+	applied.Facts.RunScope.Attributes["cost_center"] = "mutated-result"
+	applied.Facts.ExecutionTarget.Labels["region"] = "mutated-result"
+	original := workflowHostStartFixture(t, "policy-clone")
+	replayed, outcome, err := host.RecordPolicyEvaluation(t.Context(), hoststate.PolicyEvaluation{StartKey: original.StartKey, RequestDigest: original.RequestDigest, Facts: original.Facts, Decision: original.Decision})
+	if err != nil || outcome != workflowruntime.IdempotencyReplayed || replayed.Facts.RunScope.Attributes["cost_center"] != "research" || replayed.Facts.ExecutionTarget.Labels["region"] != "local" || replayed.Facts.Identity.RunScope.Attributes["cost_center"] != "research" {
+		t.Fatalf("RecordPolicyEvaluation replay = %#v, %q, %v", replayed, outcome, err)
+	}
+	loaded, err := host.LoadPolicyEvaluation(t.Context(), original.Decision.ID)
+	if err != nil || !reflect.DeepEqual(loaded, replayed) {
+		t.Fatalf("LoadPolicyEvaluation = %#v, %v", loaded, err)
 	}
 }
 
@@ -339,10 +401,26 @@ func workflowHostStartFixture(t *testing.T, suffix string) hoststate.StartRecord
 	planRef := workflowTestPlan(suffix)
 	inputRef := values.ValueSetRef{ID: "values-000000000001", Digest: values.SHA256Digest([]byte("inputs"))}
 	bound := workflowruntime.BoundRun{ID: workflowruntime.RunID("run-" + suffix), Plan: planRef, InputsRef: inputRef, CreatedAt: at, Provenance: graph.Provenance{Authority: "test", Locator: suffix + ".yaml", Digest: planRef.Digest}}
-	identity := hoststate.IdentityBinding{Principal: "user:test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}
-	facts := hoststate.PolicyFacts{Operation: "start", RunID: bound.ID, Plan: planRef, Identity: identity, Effects: graph.EffectSet{graph.EffectCompute}, NodeCount: 1, BlastRadius: map[string]int{"compute": 1}}
+	identity := workflowHostIdentity()
+	facts := hoststate.PolicyFacts{Operation: "start", RunID: bound.ID, Plan: planRef, Identity: identity, RunScope: identity.RunScope, ExecutionTarget: identity.ExecutionTarget, Effects: graph.EffectSet{graph.EffectCompute}, NodeCount: 1, BlastRadius: map[string]int{"compute": 1}}
 	decision := hoststate.PolicyDecision{ID: "decision-" + suffix, RunID: bound.ID, Operation: "start", Outcome: hoststate.PolicyAllow, Reason: "test allow", DecidedAt: at}
 	return hoststate.StartRecord{Run: bound, Plan: workflowcompile.ExecutionPlan{SchemaVersion: planRef.SchemaVersion, ID: planRef.ID, Digest: planRef.Digest, Definition: graph.DefinitionRef{Kind: "workflow", ID: planRef.ID, Version: planRef.Version, Digest: planRef.Digest}, Provenance: bound.Provenance, Graph: graph.Graph{ID: planRef.ID, Version: planRef.Version, Digest: planRef.Digest}}, Requested: graph.DefinitionRef{Kind: "workflow", ID: planRef.ID}, StartKey: "host-start-" + suffix, RequestDigest: values.SHA256Digest([]byte("request-" + suffix)), CallerInputHash: values.SHA256Digest([]byte("inputs-" + suffix)), Identity: identity, Facts: facts, Decision: decision, RecordedAt: at}
+}
+
+func workflowHostIdentity() hoststate.IdentityBinding {
+	checkedAt := workflowTestTime()
+	target := hoststate.ExecutionTarget{
+		Version: hoststate.ScopeTargetVersionV1, ID: "local-default", Kind: hoststate.ExecutionTargetLocal,
+		EnvironmentRefs: map[string]hoststate.TargetConfigReference{"locale": {Authority: "host-config", Name: "locale"}},
+		Capabilities:    []string{"compute"}, Labels: map[string]string{"region": "local"},
+		Sandbox:    hoststate.SandboxPolicy{Mode: hoststate.SandboxHostDefault},
+		Readiness:  hoststate.TargetReadiness{State: hoststate.TargetReady, CheckedAt: checkedAt},
+		Provenance: hoststate.TargetProvenance{Authority: "hadron", Reference: "local-default", Attributes: map[string]string{"pool": "default"}},
+	}
+	return hoststate.IdentityBinding{
+		Principal: "user:test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"},
+		RunScope: hoststate.RunScope{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "test", Attributes: map[string]string{"cost_center": "research"}}, ExecutionTarget: &target,
+	}
 }
 
 func workflowCallResolutionFixture(t *testing.T, parent workflowruntime.NodeInvocationID) calladapter.ResolutionRecord {

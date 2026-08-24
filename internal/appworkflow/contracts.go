@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
@@ -26,6 +25,7 @@ var (
 	ErrPolicyDenied         = errors.New("workflow policy denied operation")
 	ErrConfirmationRequired = errors.New("workflow operation requires confirmation")
 	ErrDryRunUnsupported    = errors.New("workflow dry-run is not supported by every step kind")
+	ErrExecutionTarget      = errors.New("workflow execution target does not satisfy the plan")
 )
 
 type DefinitionProvider interface {
@@ -34,11 +34,11 @@ type DefinitionProvider interface {
 }
 
 type IdentityRequest struct {
-	PrincipalHint       string            `json:"principal_hint,omitempty"`
-	SourceAuthority     string            `json:"source_authority"`
-	RunScopeHint        string            `json:"run_scope_hint,omitempty"`
-	ExecutionTargetHint string            `json:"execution_target_hint,omitempty"`
-	Attributes          map[string]string `json:"attributes,omitempty"`
+	PrincipalHint   string                             `json:"principal_hint,omitempty"`
+	SourceAuthority string                             `json:"source_authority"`
+	RunScope        *hoststate.RunScopeSelector        `json:"run_scope,omitempty"`
+	ExecutionTarget *hoststate.ExecutionTargetSelector `json:"execution_target,omitempty"`
+	Attributes      map[string]string                  `json:"attributes,omitempty"`
 }
 
 type IdentityProvider interface {
@@ -207,10 +207,68 @@ func normalizeIdentity(binding hoststate.IdentityBinding) hoststate.IdentityBind
 	if len(binding.Extension) == 0 {
 		binding.Extension = nil
 	}
+	binding.RunScope = binding.RunScope.Clone()
+	if binding.ExecutionTarget != nil {
+		target := binding.ExecutionTarget.Clone()
+		sort.Strings(target.Capabilities)
+		target.Capabilities = uniqueStrings(target.Capabilities)
+		binding.ExecutionTarget = &target
+	}
 	return binding
 }
 
+func normalizeIdentityRequest(request IdentityRequest) IdentityRequest {
+	request.Attributes = cloneStringMap(request.Attributes)
+	if len(request.Attributes) == 0 {
+		request.Attributes = nil
+	}
+	if request.RunScope != nil {
+		scope := request.RunScope.Clone()
+		request.RunScope = &scope
+	}
+	if request.ExecutionTarget != nil {
+		target := request.ExecutionTarget.Clone()
+		sort.Slice(target.Kinds, func(i, j int) bool { return target.Kinds[i] < target.Kinds[j] })
+		target.Kinds = uniqueTargetKinds(target.Kinds)
+		target.RequiredCapabilities = append([]string(nil), target.RequiredCapabilities...)
+		sort.Strings(target.RequiredCapabilities)
+		target.RequiredCapabilities = uniqueStrings(target.RequiredCapabilities)
+		target.RequiredLabels = cloneStringMap(target.RequiredLabels)
+		target.SandboxModes = append([]hoststate.SandboxMode(nil), target.SandboxModes...)
+		sort.Slice(target.SandboxModes, func(i, j int) bool { return target.SandboxModes[i] < target.SandboxModes[j] })
+		target.SandboxModes = uniqueSandboxModes(target.SandboxModes)
+		request.ExecutionTarget = &target
+	}
+	return request
+}
+
 func uniqueStrings(input []string) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	result := input[:0]
+	for _, value := range input {
+		if len(result) == 0 || result[len(result)-1] != value {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func uniqueTargetKinds(input []hoststate.ExecutionTargetKind) []hoststate.ExecutionTargetKind {
+	if len(input) == 0 {
+		return nil
+	}
+	result := input[:0]
+	for _, value := range input {
+		if len(result) == 0 || result[len(result)-1] != value {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func uniqueSandboxModes(input []hoststate.SandboxMode) []hoststate.SandboxMode {
 	if len(input) == 0 {
 		return nil
 	}
@@ -235,13 +293,24 @@ func cloneStringMap(input map[string]string) map[string]string {
 }
 
 func validateIdentityRequest(request IdentityRequest) error {
-	if strings.TrimSpace(request.SourceAuthority) == "" {
-		return errors.New("source authority is required")
+	if err := hoststate.ValidatePublicText(request.PrincipalHint, 256, false); err != nil {
+		return errors.New("identity principal hint is invalid")
 	}
-	for key, value := range request.Attributes {
-		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
-			return fmt.Errorf("identity attributes require non-empty keys and values")
+	if err := hoststate.ValidatePublicText(request.SourceAuthority, 128, true); err != nil {
+		return errors.New("identity source authority is invalid")
+	}
+	if request.RunScope != nil {
+		if err := request.RunScope.Validate(); err != nil {
+			return fmt.Errorf("run scope selector: %w", err)
 		}
+	}
+	if request.ExecutionTarget != nil {
+		if err := request.ExecutionTarget.Validate(); err != nil {
+			return fmt.Errorf("execution target selector: %w", err)
+		}
+	}
+	if err := hoststate.ValidatePublicAttributes(request.Attributes); err != nil {
+		return errors.New("identity attributes are invalid")
 	}
 	return nil
 }

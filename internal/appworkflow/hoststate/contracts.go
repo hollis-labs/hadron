@@ -45,37 +45,52 @@ func (p StartPhase) Valid() bool {
 
 func (p StartPhase) Terminal() bool { return p == StartRunning || p == StartDryRunComplete }
 
-// IdentityBinding is the narrow W05-T01 identity envelope. Extension carries
-// JSON-safe, non-secret facts until W05-T02 introduces the public product
-// RunScope and ExecutionTarget model.
+// IdentityBinding is Hadron's exact authenticated identity, logical scope, and
+// optional compute target binding. Runtime BoundRun remains application
+// neutral; this product-owned envelope is persisted beside it.
 type IdentityBinding struct {
 	Principal       string            `json:"principal"`
 	SourceAuthority string            `json:"source_authority"`
 	Trust           string            `json:"trust"`
 	Grants          []string          `json:"grants,omitempty"`
-	RunScope        string            `json:"run_scope"`
-	ExecutionTarget string            `json:"execution_target"`
+	RunScope        RunScope          `json:"run_scope"`
+	ExecutionTarget *ExecutionTarget  `json:"execution_target,omitempty"`
 	Extension       map[string]string `json:"extension,omitempty"`
 }
 
 func (b IdentityBinding) Validate() error {
 	for _, field := range []struct{ name, value string }{
 		{"principal", b.Principal}, {"source_authority", b.SourceAuthority},
-		{"trust", b.Trust}, {"run_scope", b.RunScope}, {"execution_target", b.ExecutionTarget},
+		{"trust", b.Trust},
 	} {
-		if strings.TrimSpace(field.value) == "" {
-			return fmt.Errorf("%s is required", field.name)
+		if err := ValidatePublicText(field.value, 256, true); err != nil {
+			return fmt.Errorf("%s is invalid", field.name)
 		}
 	}
-	if !sort.StringsAreSorted(b.Grants) {
-		return errors.New("grants must be sorted")
+	if err := b.RunScope.Validate(); err != nil {
+		return err
 	}
-	for i, grant := range b.Grants {
-		if strings.TrimSpace(grant) == "" || (i > 0 && grant == b.Grants[i-1]) {
-			return errors.New("grants must be non-empty and unique")
+	if b.ExecutionTarget != nil {
+		if err := b.ExecutionTarget.Validate(); err != nil {
+			return err
 		}
 	}
-	return validateMap(b.Extension)
+	if err := validateSortedUnique(b.Grants, MaximumIdentityGrants, "identity grants"); err != nil {
+		return err
+	}
+	return ValidatePublicAttributes(b.Extension)
+}
+
+// Clone returns a defensive copy with canonical UTC target timestamps.
+func (b IdentityBinding) Clone() IdentityBinding {
+	b.Grants = append([]string(nil), b.Grants...)
+	b.Extension = cloneStringMap(b.Extension)
+	b.RunScope = b.RunScope.Clone()
+	if b.ExecutionTarget != nil {
+		target := b.ExecutionTarget.Clone()
+		b.ExecutionTarget = &target
+	}
+	return b
 }
 
 // PolicyFacts is the normalized pre-execution policy input.
@@ -84,6 +99,8 @@ type PolicyFacts struct {
 	RunID                runtime.RunID                                `json:"run_id"`
 	Plan                 runtime.PlanRef                              `json:"plan"`
 	Identity             IdentityBinding                              `json:"identity"`
+	RunScope             RunScope                                     `json:"run_scope"`
+	ExecutionTarget      *ExecutionTarget                             `json:"execution_target,omitempty"`
 	Effects              graph.EffectSet                              `json:"effects"`
 	RequiredCapabilities []string                                     `json:"required_capabilities,omitempty"`
 	TargetRequirements   map[string]graph.ExecutionTargetRequirements `json:"target_requirements,omitempty"`
@@ -104,6 +121,9 @@ func (f PolicyFacts) Validate() error {
 	if err := f.Identity.Validate(); err != nil {
 		return err
 	}
+	if !reflect.DeepEqual(f.RunScope, f.Identity.RunScope) || !reflect.DeepEqual(f.ExecutionTarget, f.Identity.ExecutionTarget) {
+		return errors.New("policy scope and target must match the authenticated identity binding")
+	}
 	if !sort.StringsAreSorted(f.RequiredCapabilities) {
 		return errors.New("required capabilities must be sorted")
 	}
@@ -114,6 +134,9 @@ func (f PolicyFacts) Validate() error {
 		if strings.TrimSpace(key) == "" || count < 0 {
 			return errors.New("blast radius requires named non-negative counts")
 		}
+	}
+	if err := ValidateExecutionTargetBinding(f.ExecutionTarget, f.RequiredCapabilities, f.TargetRequirements); err != nil {
+		return err
 	}
 	return nil
 }

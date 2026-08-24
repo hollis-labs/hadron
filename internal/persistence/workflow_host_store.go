@@ -30,6 +30,13 @@ func NewWorkflowHostStore(store *Store) (*WorkflowHostStore, error) {
 }
 
 func canonicalHostStart(record hoststate.StartRecord) (hoststate.StartRecord, string, error) {
+	record.Identity = record.Identity.Clone()
+	record.Facts.Identity = record.Facts.Identity.Clone()
+	record.Facts.RunScope = record.Facts.RunScope.Clone()
+	if record.Facts.ExecutionTarget != nil {
+		target := record.Facts.ExecutionTarget.Clone()
+		record.Facts.ExecutionTarget = &target
+	}
 	record.Run.CreatedAt = record.Run.CreatedAt.UTC()
 	record.RecordedAt = record.RecordedAt.UTC()
 	record.Decision.DecidedAt = record.Decision.DecidedAt.UTC()
@@ -39,7 +46,33 @@ func canonicalHostStart(record hoststate.StartRecord) (hoststate.StartRecord, st
 		record.Activation = &copyActivation
 	}
 	encoded, err := encodeWorkflowJSON(record)
-	return record, encoded, err
+	if err != nil {
+		return hoststate.StartRecord{}, "", err
+	}
+	var cloned hoststate.StartRecord
+	if err := decodeWorkflowJSON("workflow host start", encoded, &cloned); err != nil {
+		return hoststate.StartRecord{}, "", err
+	}
+	return cloned, encoded, nil
+}
+
+func canonicalPolicyEvaluation(evaluation hoststate.PolicyEvaluation) (hoststate.PolicyEvaluation, string, error) {
+	evaluation.Facts.Identity = evaluation.Facts.Identity.Clone()
+	evaluation.Facts.RunScope = evaluation.Facts.RunScope.Clone()
+	if evaluation.Facts.ExecutionTarget != nil {
+		target := evaluation.Facts.ExecutionTarget.Clone()
+		evaluation.Facts.ExecutionTarget = &target
+	}
+	evaluation.Decision.DecidedAt = evaluation.Decision.DecidedAt.UTC()
+	encoded, err := encodeWorkflowJSON(evaluation)
+	if err != nil {
+		return hoststate.PolicyEvaluation{}, "", err
+	}
+	var cloned hoststate.PolicyEvaluation
+	if err := decodeWorkflowJSON("workflow host policy evaluation", encoded, &cloned); err != nil {
+		return hoststate.PolicyEvaluation{}, "", err
+	}
+	return cloned, encoded, nil
 }
 
 func (s *WorkflowHostStore) RecordStart(ctx context.Context, input hoststate.StartRecord) (hoststate.StartSnapshot, workflowruntime.IdempotencyOutcome, error) {
@@ -249,13 +282,12 @@ func startPhaseRank(phase hoststate.StartPhase) int {
 }
 
 func (s *WorkflowHostStore) RecordPolicyEvaluation(ctx context.Context, evaluation hoststate.PolicyEvaluation) (hoststate.PolicyEvaluation, workflowruntime.IdempotencyOutcome, error) {
-	evaluation.Decision.DecidedAt = evaluation.Decision.DecidedAt.UTC()
-	if err := evaluation.Validate(); err != nil {
-		return hoststate.PolicyEvaluation{}, "", fmt.Errorf("%w: %w", hoststate.ErrInvalidRecord, err)
-	}
-	encoded, err := encodeWorkflowJSON(evaluation)
+	evaluation, encoded, err := canonicalPolicyEvaluation(evaluation)
 	if err != nil {
 		return hoststate.PolicyEvaluation{}, "", err
+	}
+	if validationErr := evaluation.Validate(); validationErr != nil {
+		return hoststate.PolicyEvaluation{}, "", fmt.Errorf("%w: %w", hoststate.ErrInvalidRecord, validationErr)
 	}
 	result := evaluation
 	outcome := workflowruntime.IdempotencyApplied

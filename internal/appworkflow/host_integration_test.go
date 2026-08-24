@@ -2,10 +2,12 @@ package appworkflow_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -194,6 +196,171 @@ func TestHostAuthenticatesBeforeResolvingFirstStart(t *testing.T) {
 	}
 }
 
+func TestHostRejectsMalformedIdentityRequestBeforeCollaborators(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+	tests := map[string]func(*appworkflow.IdentityRequest){
+		"principal credential": func(request *appworkflow.IdentityRequest) { request.PrincipalHint = "Bearer rejected-value" },
+		"authority query": func(request *appworkflow.IdentityRequest) {
+			request.SourceAuthority = "https://identity.invalid/source?mode=public"
+		},
+		"attribute credential": func(request *appworkflow.IdentityRequest) {
+			request.Attributes = map[string]string{"api-key": "rejected-value"}
+		},
+		"attribute userinfo": func(request *appworkflow.IdentityRequest) {
+			request.Attributes = map[string]string{"source": "https://user@example.invalid/path"}
+		},
+		"workspace alias": func(request *appworkflow.IdentityRequest) {
+			request.Attributes = map[string]string{"workspace.id": "rejected-value"}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			suffix := strings.ReplaceAll(name, " ", "-")
+			request := fixture.startRequest("invalid-"+suffix, "key-"+suffix, "user:valid")
+			mutate(&request.Identity)
+			_, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:valid"), request)
+			if err == nil || strings.Contains(err.Error(), "rejected-value") {
+				t.Fatalf("StartRun error = %v", err)
+			}
+		})
+	}
+	if fixture.identityCalls.Load() != 0 || fixture.definitionCalls.Load() != 0 || fixture.policyCalls.Load() != 0 {
+		t.Fatalf("malformed requests reached collaborators: identity=%d definition=%d policy=%d", fixture.identityCalls.Load(), fixture.definitionCalls.Load(), fixture.policyCalls.Load())
+	}
+}
+
+func TestHostScopeTargetSelectorsAndPolicyFactsAreDistinct(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+	request := fixture.startRequest("scope-target", "scope-target-key", "user:scope-target")
+	fixture.mutatePolicyInput.Store(true)
+	request.Identity.RunScope = &hoststate.RunScopeSelector{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "test"}
+	request.Identity.ExecutionTarget = &hoststate.ExecutionTargetSelector{
+		Version:      hoststate.ScopeTargetVersionV1,
+		ID:           "local-default",
+		Kinds:        []hoststate.ExecutionTargetKind{hoststate.ExecutionTargetLocal},
+		SandboxModes: []hoststate.SandboxMode{hoststate.SandboxHostDefault},
+	}
+	started, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:scope-target"), request)
+	if err != nil || started.Run == nil || started.Facts.RunScope.ID != "test" || started.Facts.ExecutionTarget == nil || started.Facts.ExecutionTarget.ID != "local-default" {
+		t.Fatalf("StartRun = %#v, %v", started, err)
+	}
+	fixture.policyMu.Lock()
+	observed := fixture.observedFacts
+	fixture.policyMu.Unlock()
+	if observed.RunScope.ID != "test" || observed.ExecutionTarget == nil || observed.ExecutionTarget.ID != "local-default" || observed.RunScope.ID == observed.ExecutionTarget.ID {
+		t.Fatalf("policy facts did not preserve distinct scope/target: %#v", observed)
+	}
+	observed.RunScope.Attributes["cost_center"] = "mutated-policy-input"
+	observed.ExecutionTarget.Labels["region"] = "mutated-policy-input"
+	persisted, err := fixture.journal.LoadStart(t.Context(), started.Run.ID)
+	if err != nil || persisted.Record.Facts.RunScope.Attributes["cost_center"] != "research" || persisted.Record.Facts.ExecutionTarget.Labels["region"] != "local" {
+		t.Fatalf("policy input alias changed durable facts: %#v, %v", persisted.Record.Facts, err)
+	}
+	replayed, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:scope-target"), request)
+	if err != nil || replayed.Outcome != workflowruntime.IdempotencyReplayed || replayed.Facts.RunScope.Attributes["cost_center"] != "research" || replayed.Facts.ExecutionTarget.Labels["region"] != "local" {
+		t.Fatalf("policy facts replay = %#v, %v", replayed, err)
+	}
+	encoded, err := json.Marshal(request.Identity)
+	if err != nil || !strings.Contains(string(encoded), `"run_scope"`) || !strings.Contains(string(encoded), `"execution_target"`) || strings.Contains(string(encoded), "workspace_id") {
+		t.Fatalf("identity request JSON = %s, %v", encoded, err)
+	}
+
+	mismatch := fixture.startRequest("scope-target-mismatch", "scope-target-mismatch-key", "user:scope-target")
+	mismatch.Identity.RunScope = &hoststate.RunScopeSelector{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "other"}
+	if _, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:scope-target"), mismatch); !errors.Is(err, appworkflow.ErrPolicyDenied) {
+		t.Fatalf("scope selector mismatch = %v", err)
+	}
+	mismatch = fixture.startRequest("target-mismatch", "target-mismatch-key", "user:scope-target")
+	mismatch.Identity.ExecutionTarget = &hoststate.ExecutionTargetSelector{Version: hoststate.ScopeTargetVersionV1, ID: "other"}
+	if _, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:scope-target"), mismatch); !errors.Is(err, appworkflow.ErrPolicyDenied) {
+		t.Fatalf("target selector mismatch = %v", err)
+	}
+}
+
+func TestHostRejectsMalformedExecutionRequirementsBeforePolicy(t *testing.T) {
+	tests := map[string]graph.ExecutionTargetRequirements{
+		"duplicate capabilities": {Capabilities: []string{"compute", "compute"}},
+		"unsorted capabilities":  {Capabilities: []string{"network", "compute"}},
+		"unknown kind":           {Kinds: []string{"container"}},
+		"credential label":       {Labels: map[string]string{"authorization": "masked"}},
+		"unknown constraint":     {Constraints: graph.Config{"region": "central"}},
+	}
+	for name, requirement := range tests {
+		t.Run(name, func(t *testing.T) {
+			plan := compileHostPlan(t)
+			plan.Graph.Target = requirement
+			fixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, plan)
+			if err := fixture.host.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+			request := fixture.startRequest("invalid-target", "invalid-target-"+strings.ReplaceAll(name, " ", "-"), "user:target")
+			_, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:target"), request)
+			if !errors.Is(err, appworkflow.ErrExecutionTarget) {
+				t.Fatalf("StartRun error = %v", err)
+			}
+			if fixture.policyCalls.Load() != 0 {
+				t.Fatalf("malformed target requirements reached policy: %d", fixture.policyCalls.Load())
+			}
+		})
+	}
+}
+
+func TestHostExecutionTargetIsOptionalUntilPlanRequiresComputeBinding(t *testing.T) {
+	optionalFixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	withoutTarget := testIdentityBinding("user:optional", "test")
+	withoutTarget.ExecutionTarget = nil
+	optionalHost := hostWithFixedIdentity(t, optionalFixture, withoutTarget)
+	if err := optionalHost.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = optionalHost.Shutdown(context.Background()) })
+	optionalRequest := optionalFixture.startRequest("optional-target", "optional-target-key", "user:optional")
+	optional, err := optionalHost.StartRun(authenticatedContext(t.Context(), "user:optional"), optionalRequest)
+	if err != nil || optional.Run == nil || optional.Facts.ExecutionTarget != nil {
+		t.Fatalf("optional target start = %#v, %v", optional, err)
+	}
+
+	requiredPlan := compileHostPlan(t)
+	requiredPlan.Graph.Target.Capabilities = []string{"compute"}
+	requiredFixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, requiredPlan)
+	requiredHost := hostWithFixedIdentity(t, requiredFixture, withoutTarget)
+	if startErr := requiredHost.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
+	}
+	t.Cleanup(func() { _ = requiredHost.Shutdown(context.Background()) })
+	requiredRequest := requiredFixture.startRequest("required-target", "required-target-key", "user:optional")
+	if _, startErr := requiredHost.StartRun(authenticatedContext(t.Context(), "user:optional"), requiredRequest); !errors.Is(startErr, appworkflow.ErrExecutionTarget) || requiredFixture.policyCalls.Load() != 0 {
+		t.Fatalf("required target start = %v policy_calls=%d", startErr, requiredFixture.policyCalls.Load())
+	}
+
+	boundFixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, requiredPlan)
+	bound := testIdentityBinding("user:bound", "test")
+	bound.ExecutionTarget.Readiness.CheckedAt = bound.ExecutionTarget.Readiness.CheckedAt.In(time.FixedZone("provider-offset", 3600))
+	boundHost := hostWithFixedIdentity(t, boundFixture, bound)
+	if startErr := boundHost.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
+	}
+	t.Cleanup(func() { _ = boundHost.Shutdown(context.Background()) })
+	boundRequest := boundFixture.startRequest("bound-target", "bound-target-key", "user:bound")
+	started, err := boundHost.StartRun(authenticatedContext(t.Context(), "user:bound"), boundRequest)
+	if err != nil || started.Run == nil || started.Facts.ExecutionTarget == nil || started.Facts.ExecutionTarget.ID != "local-default" {
+		t.Fatalf("bound target start = %#v, %v", started, err)
+	}
+	persisted, err := boundFixture.journal.LoadStart(t.Context(), started.Run.ID)
+	if err != nil || persisted.Record.Identity.ExecutionTarget == nil || persisted.Record.Identity.ExecutionTarget.ID != "local-default" || persisted.Record.Identity.ExecutionTarget.Readiness.CheckedAt.Location() != time.UTC || persisted.Record.Facts.RunScope.ID != "test" {
+		t.Fatalf("persisted target binding = %#v, %v", persisted, err)
+	}
+}
+
 func TestHostUsesDefinitionResolverFrozenVerifierCatalogForStartAndDispatch(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := filepath.Join(root, "verified-host.workflow.yaml")
@@ -270,10 +437,7 @@ steps:
 		if principal == "" {
 			return hoststate.IdentityBinding{}, errors.New("missing authenticated principal")
 		}
-		return hoststate.IdentityBinding{
-			Principal: principal, SourceAuthority: request.SourceAuthority, Trust: "trusted",
-			Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local",
-		}, nil
+		return testIdentityBinding(principal, request.SourceAuthority), nil
 	})
 	options := appworkflow.Options{
 		State: fixture.state, Journal: fixture.journal, Definitions: resolver, Identity: identity,
@@ -402,7 +566,7 @@ func TestHostStartConvergesWhenCheckpointWinnerIsFarAhead(t *testing.T) {
 		Definitions: definitionProvider{plan: fixture.plan},
 		Identity: identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
 			principal, _ := ctx.Value(authenticatedPrincipalKey{}).(string)
-			return hoststate.IdentityBinding{Principal: principal, SourceAuthority: request.SourceAuthority, Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+			return testIdentityBinding(principal, request.SourceAuthority), nil
 		}),
 		Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
 			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "fixture policy"}, nil
@@ -433,7 +597,7 @@ func TestHostStartRejectsConcurrentPolicyForDifferentResolvedPlan(t *testing.T) 
 		Definitions: definitionProvider{plan: fixture.plan},
 		Identity: identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
 			principal, _ := ctx.Value(authenticatedPrincipalKey{}).(string)
-			return hoststate.IdentityBinding{Principal: principal, SourceAuthority: request.SourceAuthority, Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+			return testIdentityBinding(principal, request.SourceAuthority), nil
 		}),
 		Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
 			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "fixture policy"}, nil
@@ -578,7 +742,7 @@ func TestHostFinalizerCancellationReconcilesRunningAttemptBeforeCleanup(t *testi
 	fixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, plan)
 	var canceled atomic.Int32
 	identity := identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
-		return hoststate.IdentityBinding{Principal: "test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+		return testIdentityBinding("test", "test"), nil
 	})
 	host, hostErr := appworkflow.New(appworkflow.Options{
 		State: fixture.state, Journal: fixture.journal, Definitions: definitionProvider{plan: plan}, Identity: identity,
@@ -655,7 +819,7 @@ func TestHostFinalizerCancellationFailsClosedWithoutControlFlowStore(t *testing.
 	*fixture.plan = *plan
 	stateOnly := &stateStoreOnly{StateStore: fixture.state}
 	identity := identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
-		return hoststate.IdentityBinding{Principal: "test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+		return testIdentityBinding("test", "test"), nil
 	})
 	host, err := appworkflow.New(appworkflow.Options{
 		State: stateOnly, Journal: fixture.journal, Definitions: definitionProvider{plan: plan}, Identity: identity,
@@ -746,7 +910,7 @@ func TestHostCancellationRefreshesEntireTreeAfterCASReachabilityChange(t *testin
 	host, hostErr := appworkflow.New(appworkflow.Options{
 		State: state, Journal: fixture.journal, Definitions: definitionProvider{plan: fixture.plan},
 		Identity: identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
-			return hoststate.IdentityBinding{Principal: "test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+			return testIdentityBinding("test", "test"), nil
 		}),
 		Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
 			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "allow"}, nil
@@ -927,7 +1091,7 @@ func TestHostRestartMaterializesPendingChildBeforeCancellationTree(t *testing.T)
 
 	var materialized atomic.Int32
 	identity := identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
-		return hoststate.IdentityBinding{Principal: "test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+		return testIdentityBinding("test", "test"), nil
 	})
 	restarted, hostErr := appworkflow.New(appworkflow.Options{
 		State: fixture.state, Journal: fixture.journal, Definitions: definitionProvider{plan: fixture.plan}, Identity: identity,
@@ -989,7 +1153,7 @@ func TestHostCancellationBoundsCASChurnAndLeavesRecoveryWork(t *testing.T) {
 	churning := &alwaysCASStateStore{StateStore: fixture.state, ControlFlowStore: fixture.state, RecoveryStore: fixture.state, NodeInputStore: fixture.state, RunPolicyStore: fixture.state}
 	identity := identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
 		principal, _ := ctx.Value(authenticatedPrincipalKey{}).(string)
-		return hoststate.IdentityBinding{Principal: principal, SourceAuthority: request.SourceAuthority, Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+		return testIdentityBinding(principal, request.SourceAuthority), nil
 	})
 	host, newErr := appworkflow.New(appworkflow.Options{
 		State: churning, Journal: fixture.journal, Definitions: definitionProvider{plan: fixture.plan}, Identity: identity,
@@ -1234,18 +1398,21 @@ func TestHostDoesNotReadyCatchSwitchOrFinallyTargetsAsRoots(t *testing.T) {
 }
 
 type hostFixture struct {
-	host            *appworkflow.Host
-	store           *persistence.Store
-	state           *persistence.WorkflowStateStore
-	journal         *persistence.WorkflowHostStore
-	plan            *workflowcompile.ExecutionPlan
-	now             time.Time
-	scheduler       *activationRecorder
-	policyCalls     atomic.Int32
-	identityCalls   atomic.Int32
-	childCalls      atomic.Int32
-	definitionCalls atomic.Int32
-	artifacts       values.ArtifactStore
+	host              *appworkflow.Host
+	store             *persistence.Store
+	state             *persistence.WorkflowStateStore
+	journal           *persistence.WorkflowHostStore
+	plan              *workflowcompile.ExecutionPlan
+	now               time.Time
+	scheduler         *activationRecorder
+	policyCalls       atomic.Int32
+	mutatePolicyInput atomic.Bool
+	identityCalls     atomic.Int32
+	childCalls        atomic.Int32
+	definitionCalls   atomic.Int32
+	artifacts         values.ArtifactStore
+	policyMu          sync.Mutex
+	observedFacts     hoststate.PolicyFacts
 }
 
 func newHostFixture(t *testing.T, outcome hoststate.PolicyOutcome, interval time.Duration, hook appworkflow.RecoveryHook) *hostFixture {
@@ -1278,10 +1445,19 @@ func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, inter
 		if !ok || principal == "" {
 			return hoststate.IdentityBinding{}, errors.New("missing authenticated principal")
 		}
-		return hoststate.IdentityBinding{Principal: principal, SourceAuthority: request.SourceAuthority, Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+		return testIdentityBinding(principal, request.SourceAuthority), nil
 	})
 	policy := appworkflow.PolicyEvaluatorFunc(func(_ context.Context, facts hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
 		fixture.policyCalls.Add(1)
+		fixture.policyMu.Lock()
+		fixture.observedFacts = facts
+		fixture.policyMu.Unlock()
+		if fixture.mutatePolicyInput.Load() {
+			facts.Identity.RunScope.Attributes["cost_center"] = "mutated-in-policy"
+			facts.RunScope.Attributes["cost_center"] = "mutated-in-policy"
+			facts.Identity.ExecutionTarget.Labels["region"] = "mutated-in-policy"
+			facts.ExecutionTarget.Labels["region"] = "mutated-in-policy"
+		}
 		return hoststate.PolicyDecision{Outcome: outcome, Reason: "fixture policy"}, nil
 	})
 	hooks := []appworkflow.RecoveryHook(nil)
@@ -1308,6 +1484,40 @@ func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, inter
 	return fixture
 }
 
+func hostWithFixedIdentity(t *testing.T, fixture *hostFixture, binding hoststate.IdentityBinding) *appworkflow.Host {
+	t.Helper()
+	identity := identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+		fixture.identityCalls.Add(1)
+		principal, ok := ctx.Value(authenticatedPrincipalKey{}).(string)
+		if !ok || principal == "" {
+			return hoststate.IdentityBinding{}, errors.New("missing authenticated principal")
+		}
+		result := binding.Clone()
+		result.Principal = principal
+		result.SourceAuthority = request.SourceAuthority
+		return result, nil
+	})
+	policy := appworkflow.PolicyEvaluatorFunc(func(_ context.Context, facts hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+		fixture.policyCalls.Add(1)
+		fixture.policyMu.Lock()
+		fixture.observedFacts = facts
+		fixture.policyMu.Unlock()
+		return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "fixture policy"}, nil
+	})
+	host, err := appworkflow.New(appworkflow.Options{
+		State: fixture.state, Journal: fixture.journal,
+		Definitions: definitionProvider{plan: fixture.plan, calls: &fixture.definitionCalls}, Identity: identity, Policy: policy,
+		Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}},
+		Activations: fixture.scheduler, Artifacts: fixture.artifacts, Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now }),
+		RecoveryInterval: time.Hour, RecoveryBatchLimit: 1,
+		ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return host
+}
+
 func seedRunningCallParent(t *testing.T, fixture *hostFixture) workflowruntime.StartNodeAttemptResult {
 	t.Helper()
 	bound, bindErr := workflowruntime.BindRun(t.Context(), fixture.state, workflowruntime.BindRunRequest{ID: "call-parent", Plan: fixture.plan, Inputs: map[string]any{"message": "parent"}, CreatedAt: fixture.now})
@@ -1317,7 +1527,7 @@ func seedRunningCallParent(t *testing.T, fixture *hostFixture) workflowruntime.S
 	if _, _, err := workflowruntime.StartBoundRun(t.Context(), fixture.state, *bound.Run, "call-parent-start"); err != nil {
 		t.Fatal(err)
 	}
-	identity := hoststate.IdentityBinding{Principal: "seed", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}
+	identity := testIdentityBinding("seed", "test")
 	facts, err := policyFactsForSeed(bound.Run.Plan, bound.Run.ID, identity)
 	if err != nil {
 		t.Fatal(err)
@@ -1559,7 +1769,7 @@ func seedIncompleteStart(t *testing.T, fixture *hostFixture, index int) {
 	}
 	planRef := workflowruntime.PlanRef{ID: fixture.plan.ID, Version: fixture.plan.Graph.Version, Digest: fixture.plan.Digest, SchemaVersion: fixture.plan.SchemaVersion}
 	bound := workflowruntime.BoundRun{ID: runID, Plan: planRef, InputsRef: ref, CreatedAt: fixture.now, Provenance: fixture.plan.Provenance}
-	identity := hoststate.IdentityBinding{Principal: "seed", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}
+	identity := testIdentityBinding("seed", "test")
 	facts, err := policyFactsForSeed(planRef, runID, identity)
 	if err != nil {
 		t.Fatal(err)
@@ -1573,7 +1783,7 @@ func seedIncompleteStart(t *testing.T, fixture *hostFixture, index int) {
 }
 
 func policyFactsForSeed(plan workflowruntime.PlanRef, runID workflowruntime.RunID, identity hoststate.IdentityBinding) (hoststate.PolicyFacts, error) {
-	facts := hoststate.PolicyFacts{Operation: "start", RunID: runID, Plan: plan, Identity: identity, Effects: graph.EffectSet{graph.EffectCompute}, NodeCount: 1, BlastRadius: map[string]int{"compute": 1}}
+	facts := hoststate.PolicyFacts{Operation: "start", RunID: runID, Plan: plan, Identity: identity, RunScope: identity.RunScope, ExecutionTarget: identity.ExecutionTarget, Effects: graph.EffectSet{graph.EffectCompute}, NodeCount: 1, BlastRadius: map[string]int{"compute": 1}}
 	return facts, facts.Validate()
 }
 func mustInline(t *testing.T, input any) values.Value {
@@ -1717,6 +1927,21 @@ func (s *alwaysCASStateStore) RequestRunCancellation(_ context.Context, request 
 func (s *alwaysCASStateStore) RequestRunCancellationWithFinalizers(_ context.Context, request workflowruntime.RequestRunCancellationWithFinalizersRequest) (workflowruntime.RequestRunCancellationWithFinalizersResult, error) {
 	s.calls.Add(1)
 	return workflowruntime.RequestRunCancellationWithFinalizersResult{}, &workflowruntime.CASMismatchError{Resource: "test cancellation-tree churn", Expected: request.Cancellation.ExpectedGeneration, Actual: request.Cancellation.ExpectedGeneration + 1}
+}
+
+func testIdentityBinding(principal, authority string) hoststate.IdentityBinding {
+	checkedAt := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	target := hoststate.ExecutionTarget{
+		Version: hoststate.ScopeTargetVersionV1, ID: "local-default", Kind: hoststate.ExecutionTargetLocal,
+		Capabilities: []string{"compute"}, Labels: map[string]string{"region": "local"}, Sandbox: hoststate.SandboxPolicy{Mode: hoststate.SandboxHostDefault},
+		Readiness:  hoststate.TargetReadiness{State: hoststate.TargetReady, CheckedAt: checkedAt},
+		Provenance: hoststate.TargetProvenance{Authority: "hadron", Reference: "local-default", Attributes: map[string]string{"pool": "default"}},
+	}
+	return hoststate.IdentityBinding{
+		Principal: principal, SourceAuthority: authority, Trust: "trusted", Grants: []string{"workflow.run"},
+		RunScope:        hoststate.RunScope{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "test", Attributes: map[string]string{"cost_center": "research"}},
+		ExecutionTarget: &target,
+	}
 }
 
 type childMaterializerFunc func(context.Context, calladapter.ChildRunRequest) error
