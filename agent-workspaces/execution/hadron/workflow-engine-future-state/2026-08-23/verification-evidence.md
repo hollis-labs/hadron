@@ -369,3 +369,27 @@ as `2caeb82`.
 | integration `2caeb82` | `go test -race ./workflow/runtime/...` | pass |
 | integration `2caeb82` | `go vet ./workflow/...` | pass |
 | integration `2caeb82` | `go test ./...` | pass |
+
+## W02-T07
+
+Reviewed dependency inference across every typed expression carrier, direct
+visibility scoping, deferred runtime references, source maps, relocation-safe
+digests, and production conformance fixtures. Review corrected root-only
+`steps` access to remain safely scoped instead of inventing a whole-map ban,
+and added explicit proof that control and data edges can share endpoints.
+Amended source commit `b579713` was integrated as `f990807`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `b579713` | `git diff --check 25c92aa..b579713` | pass |
+| source worktree `b579713` | `go test -count=1 ./workflow/compile/... ./workflow/values/... ./workflow/conformance/...` | pass |
+| source worktree `b579713` | `go test -race ./workflow/compile/... ./workflow/values/... ./workflow/conformance/...` | pass |
+| source worktree `b579713` | focused compile and values tests, `-count=50` | pass |
+| source worktree `b579713` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `b579713` | `go vet ./workflow/...` | pass |
+| integration `f990807` | `go test -count=1 ./workflow/compile/... ./workflow/values/... ./workflow/conformance/...` | pass |
+| integration `f990807` | `go test -race ./workflow/compile/... ./workflow/values/... ./workflow/conformance/...` | pass |
+| integration `f990807` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `f990807` | `go test ./workflow/...` | pass |
+| integration `f990807` | `go vet ./workflow/...` | pass |
+| integration `f990807` | `go test ./...` | pass |
