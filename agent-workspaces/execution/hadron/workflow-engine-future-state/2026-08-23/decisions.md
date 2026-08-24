@@ -129,3 +129,23 @@
   their storage boundary.
 
   Vanta revision for both W04-T04 decisions: `01M0SM4422SRHQ8AM84WXWFKMX`.
+
+- W03-T04 admits another attempt only after a retry activation is persisted.
+  Retry policy uses the union of trusted executor and graph-declared effects;
+  graph declarations may constrain but cannot upgrade executor idempotency or
+  narrow trusted effects. Mutating and destructive retries therefore require
+  the exact keyed/explicit policy guarantees defined by the executor contract.
+
+- Run cancellation commits the terminal run state before any adapter or host
+  cleanup. Every later attempt, retry, claim, external-operation, and fan-out
+  mutation is fenced by that durable terminal state; only the exact canceled
+  external-operation resolution may finish its already-recorded cancellation
+  intent. Child runs use their declared `cancel`, `request_cancel`, or
+  `abandon` policy, and already-terminal children remain unchanged.
+
+- Fan-out item identities use stable, delimiter-safe attempt encoding and
+  zero-padded iteration indexes. `max_concurrency` counts started nonterminal
+  logical items, including durable waits and retry delays, rather than worker
+  leases, so suspension cannot accidentally release a fan-out slot.
+
+  Vanta revision for all W03-T04 decisions: `01M0SMKS6V2TETG1R8AMGSP7JH`.

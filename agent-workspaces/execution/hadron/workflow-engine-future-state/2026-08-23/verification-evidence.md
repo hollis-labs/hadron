@@ -779,3 +779,26 @@ cancellation classification. Source commit `2e233ed` was integrated as
 | integration `4ad4e14` | `go test -count=20 ./workflow/adapters/http/...` and `go test -race ./workflow/adapters/http/...` | pass |
 | integration `4ad4e14` | `go test ./workflow/adapters/... ./workflow/compile/... ./workflow/values/...` | pass |
 | integration `4ad4e14` | `go test -v ./workflow/internal/importguard/...`, focused vet, commit diff check, and clean-tree check | pass |
+
+## W03-T04
+
+Reviewed effect-, error-class-, timeout-, and idempotency-aware retry admission;
+checked backoff arithmetic and durable timed activation; verified cancellation
+commit ordering, child-run policies, wait/external/retry/fan-out propagation,
+and terminal-run write fences; reviewed runtime fan-out expansion, stable item
+identity, per-item typed result recovery, tolerance, concurrency slots, SQLite
+migration 0017, in-memory parity, and atomic CAS/event mutations. Source commit
+`34f1ee3` was integrated as `f103b3d`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `34f1ee3` | focused retry, cancellation, fan-out, terminal-fence, identity, SQLite, and contention suites with repeated counts | pass |
+| source worktree `34f1ee3` | `go test -count=10 ./workflow/runtime/... ./internal/persistence/...` | pass |
+| source worktree `34f1ee3` | `go test -race ./workflow/runtime/... ./internal/persistence/...` | pass |
+| source worktree `34f1ee3` | `go test -v ./workflow/internal/importguard/...` and `go vet ./workflow/...` | pass |
+| source worktree `34f1ee3` | `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0`, pre-commit hooks, and diff checks | pass; zero issues |
+| source worktree `34f1ee3` | `make lint` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012 |
+| integration `f103b3d` | `go test -count=10 ./workflow/runtime/... ./internal/persistence/...` | pass |
+| integration `f103b3d` | `go test -race ./workflow/runtime/... ./internal/persistence/...` | pass |
+| integration `f103b3d` | `go test -v ./workflow/internal/importguard/...` and `go vet ./workflow/...` | pass |
+| integration `f103b3d` | `go test -count=1 ./...` and commit diff check | pass |

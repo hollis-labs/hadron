@@ -33,3 +33,4 @@
 | 29 | W04-T05 | `41a5057` | `5f0c1aa` | Hadron | accepted after fail-closed annotation mapping, complete result redaction, bounded artifact capture, and idempotency-gated workflow reconnect |
 | 30 | W04-T03 | `e508945` | `439fafe` | Hadron | accepted after structured launch policy, raw-byte-bounded redaction, truthful sandbox attestation, and typed stream capture |
 | 31 | W04-T04 | `2e233ed` | `4ad4e14` | Hadron | accepted after all-answer destination authorization, pinned transport, percent-decoded redirect-secret rejection, full-operation deadlines, and expanded-secret bounds |
+| 32 | W03-T04 | `34f1ee3` | `f103b3d` | Hadron | accepted after cancellation-wins terminal fencing, trusted retry-policy enforcement, collision-free durable identities, restart-durable activations, and atomic fan-out persistence |

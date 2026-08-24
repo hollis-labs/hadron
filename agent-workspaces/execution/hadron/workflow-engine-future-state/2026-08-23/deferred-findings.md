@@ -97,3 +97,17 @@ No execution findings have been deferred.
   outcome remains the host retention layer's responsibility.
 
   Vanta revision: `01M0SM44GF1ASJZKC8TVX2CXZ9`.
+
+- W03-T04 stores the aggregate fan-out `items` value with stable item status,
+  structured error, and immutable output references. Lossless typed child
+  values are recovered through `LoadFanOutItemResults`; the current `ValueSet`
+  model does not provide a nested typed-envelope container for embedding them
+  directly in the aggregate JSON value.
+
+- Fan-out input and aggregate output value sets are persisted before the final
+  atomic expansion/completion CAS. A losing concurrent coordinator can
+  therefore leave an unreferenced immutable value set, but cannot create
+  partial children or alter the winning aggregate; normal retention cleanup is
+  responsible for sweeping unreferenced values.
+
+  Vanta revision for both W03-T04 limitations: `01M0SMKSNPYZX8AG7Z4XDR2RWQ`.
