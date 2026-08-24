@@ -993,3 +993,20 @@ canonicalization, semantic graph-integrity, and direct driver hardening.
 | independent source review `4110fd9` | import guard, `go vet ./...`, committed diff check, and complete public-contract/migration audit | pass |
 | integration `8fb3ab0` | new-diff golangci and selected recovery/replay/driver tests at `-count=5` | pass; zero issues |
 | integration `8fb3ab0` | `go test -count=1 ./...` | first run hit the known timing-sensitive legacy agent-launch outbox test; isolated `-count=10` and immediate full repository rerun passed |
+
+## W03-T09
+
+Reviewed compiler-scoped memo keys, append-only durable cache entries, safe
+effect defaults and explicit materialization approval, exact plan/schema/source
+provenance, authority-checked pinned outputs, attempt-free atomic reuse,
+fan-out/replay behavior, inspection origins, and SQLite migration 0022. Source
+commit `1ffda24` was integrated as `ca2a7d2` after cross-store ordering and
+untrusted value-record integrity hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `1ffda24` | focused runtime, persistence, compiler, conformance, and step-kind suites at repeated counts | pass |
+| source worktree `1ffda24` | focused race suite, import guard, vet, targeted golangci, full repository suite, hooks, and diff checks | pass; zero new issues |
+| independent source review `1ffda24` | `go test -count=10 ./workflow/runtime/... ./internal/persistence/... ./workflow/compile/... ./workflow/conformance/... ./workflow/stepkind/...` | pass |
+| independent source review `1ffda24` | `go test -race -count=2 ./workflow/runtime/... ./internal/persistence/... ./workflow/compile/... ./workflow/conformance/...`; focused vet and committed diff check | pass |
+| integration `ca2a7d2` | full repository suite, focused race suite, and import-boundary guard | pass |
