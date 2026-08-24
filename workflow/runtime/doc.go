@@ -1,8 +1,10 @@
 // Package runtime owns application-neutral workflow execution mechanics,
 // including node state, readiness, retries, cancellation, and replay.
 //
-// It is extraction-ready engine core. Imports are limited to the standard
-// library and explicitly adopted extraction-safe dependencies; Hadron internal
-// packages are forbidden. Its public API is unstable until the runtime
-// contracts are defined.
+// The StateStore contract persists workflow facts and compare-and-swap claims
+// without exposing SQL or host records. Legal state transitions, scheduling,
+// binding, and concrete storage remain separate concerns.
+//
+// It is extraction-ready engine core. Hadron internal packages and concrete
+// persistence implementations are forbidden.
 package runtime
