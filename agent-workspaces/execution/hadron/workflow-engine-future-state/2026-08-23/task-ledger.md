@@ -6,13 +6,13 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | Task | Dependencies | Status | Integrated commit |
 | --- | --- | --- | --- |
 | W00-T01 | none | dispatched | |
-| W00-T02 | none | dispatched | |
-| W00-T03 | W00-T02 | blocked | |
-| W00-T04 | W00-T02 | blocked | |
-| W00-T05 | W00-T02 | blocked | |
+| W00-T02 | none | integrated | `2b9f287` |
+| W00-T03 | W00-T02 | eligible | |
+| W00-T04 | W00-T02 | eligible | |
+| W00-T05 | W00-T02 | eligible | |
 | W00-T06 | W00-T02, W00-T05 | blocked | |
 | W00-T07 | none | dispatched | |
-| W01-T01 | W00-T02 | blocked | |
+| W01-T01 | W00-T02 | eligible | |
 | W01-T02 | W01-T01 | blocked | |
 | W01-T03 | W01-T01 | blocked | |
 | W01-T04 | W01-T01, W01-T03 | blocked | |
