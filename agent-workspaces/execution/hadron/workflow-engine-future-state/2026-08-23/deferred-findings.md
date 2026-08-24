@@ -245,14 +245,16 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0TMBNX9G3GPV39W9SAPZJ5N`.
 
-## Follow-up candidates
+## Resolved follow-ups
 
 - W05-T07's canonical runner exposed an ordinary-runtime completion gap for a
-  workflow that has both declared outputs and finalizers. Terminal-intent
-  completion currently does not carry the finalized output reference, while
-  successful run validation rejects a missing output reference. Keep the
-  contract runner truthful and reproduce/fix this as W03-T08 runtime hardening
-  after W03-T09 releases the overlapping runtime files. Cover success,
-  failure, nested and failed cleanup, replay, and SQLite parity.
+  workflow that has both declared outputs and finalizers. W03-T08-H1 resolved
+  it in `77b65c0`: terminal intent records whether success requires outputs,
+  finalizer reconciliation hands off through `ErrRunOutputsPending`, and the
+  exact durable output reference is published atomically with successful
+  intent completion. Cleanup failure publishes no success outputs. Nested
+  finalizers, failure, replay/contention, recovery, SQLite reopen, exact-ref
+  validation, and the canonical contract runner are covered.
 
-  Vanta revision: `01M0TGGDCRE6Z6GQ9ZKFM1ZK5Y`.
+  Vanta resolution revision: `01M0TN9MVXSZAK11EV833S8MP0` (supersedes
+  `01M0TGGDCRE6Z6GQ9ZKFM1ZK5Y`).

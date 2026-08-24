@@ -1047,3 +1047,20 @@ budget charging, ambiguous result, and atomic tool-batch hardening.
 | independent source review `93667ef` | `go test -race -count=2 ./workflow/adapters/llm/... ./internal/llmprovider/... ./workflow/runtime/...`; `go mod tidy -diff`; focused vet and committed diff check | pass |
 | source worktree `93667ef` | `go test -count=1 ./...` | pass |
 | integration `377490c` | focused repeated and race suites, module-tidy diff, and full repository suite | pass |
+
+## W03-T08-H1
+
+Reviewed the finalizer/output completion boundary exposed by W05-T07. Source
+commit `04ba64b` was integrated as `77b65c0` with an explicit durable output
+requirement on successful terminal intents, exact run-owned output-reference
+validation, atomic success/output publication, failure-wins cleanup fencing,
+pinned-plan recovery, replay/contention convergence, SQLite parity, and a
+truthful canonical contract-runner regression.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `04ba64b` | focused finalizer/output, failure-fence, SQLite reopen, recovery, and contract-runner tests at repeated counts up to `-count=100` | pass |
+| source worktree `04ba64b` | `go test -race ./workflow/runtime/... ./internal/persistence/... ./internal/appworkflow/...`; `go test -count=1 ./...`; import guard; vet; pre-commit lint; module-tidy and diff checks | pass; zero issues |
+| independent source review `04ba64b` | `go test -count=5 ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/... ./internal/appworkflow/...` | pass |
+| independent source review `04ba64b` | `go test -race -count=1 ./workflow/runtime/... ./internal/persistence/... ./internal/appworkflow/...`; import guard; committed diff check | pass |
+| integration `77b65c0` | focused suites at `-count=3` followed by `go test -count=1 ./...` | pass |
