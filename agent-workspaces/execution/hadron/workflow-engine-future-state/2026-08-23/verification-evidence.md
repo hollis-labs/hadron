@@ -322,3 +322,31 @@ commit `785121b` was integrated as `ee38867`.
 | integration `ee38867` | `go vet ./workflow/...` | pass |
 | integration `ee38867` | `make test` | pass |
 | integration `ee38867` | `go test ./...` | pass |
+
+## W01-T05
+
+Reviewed the validation API, structural topology checks, step-kind schema and
+policy seams, definition traversal, diagnostics ordering, and real graph
+conformance fixtures. Production schema validation exposed the adopted JSON
+Schema library's `golang.org/x/text` closure; the import guard now permits that
+prefix only in the resolved dependency graph while continuing to reject direct
+workflow imports. Source commit `29121b6` was integrated as `7eea197`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `29121b6` | `git diff --check fd75e5c..29121b6` | pass |
+| source worktree `29121b6` | `go test -count=1 ./workflow/compile/... ./workflow/stepkind/... ./workflow/conformance/...` | pass |
+| source worktree `29121b6` | `go test -race ./workflow/compile/...` | pass |
+| source worktree `29121b6` | `go test -count=50 ./workflow/compile` | pass |
+| source worktree `29121b6` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `29121b6` | `go test ./workflow/...` | pass |
+| source worktree `29121b6` | `go vet ./workflow/...` | pass |
+| source worktree `29121b6` | `make test` | pass |
+| source worktree `29121b6` | `go test ./...` | pass |
+| integration `7eea197` | `git diff --check HEAD^..HEAD` | pass |
+| integration `7eea197` | `go test -count=1 ./workflow/compile/... ./workflow/stepkind/... ./workflow/conformance/...` | pass |
+| integration `7eea197` | `go test -race ./workflow/compile/...` | pass |
+| integration `7eea197` | `go test -count=10 ./workflow/compile` | pass |
+| integration `7eea197` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `7eea197` | `go test -count=1 ./workflow/...` | pass |
+| integration `7eea197` | `go vet ./workflow/...` | pass |
