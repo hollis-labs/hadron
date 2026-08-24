@@ -71,7 +71,7 @@ or the detailed architecture made a later choice. In particular:
 | `if`, named readiness, switch, catch, continue-on-error, finally, join | Planned | W03-T03, W03-T08, W07-T09 |
 | Runtime `for_each`, bounded fan-out, per-item attempts/output/error | Planned | W03-T04 |
 | Effect-aware retry, backoff, idempotency, cancellation, and timeout taxonomy | Planned | W01-T05, W03-T04, W04-T01 |
-| Crash recovery and replay from a selected node using journaled outputs | Planned | W03-T06 |
+| Crash recovery and replay from a selected node using journaled outputs | Implemented | W03-T06 |
 | Compensation/rollback as an application-neutral design input | Planned later with approval gate | W07-T10 |
 
 ## Waits And Timed Activation

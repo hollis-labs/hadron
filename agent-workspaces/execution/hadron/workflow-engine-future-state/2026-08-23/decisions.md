@@ -337,3 +337,24 @@
   additional source-mapped check rather than the only enforcement boundary.
 
   Vanta revision for all W04-T08 decisions: `01M0T99NG58DA4XBMGN5NFNPQV`.
+
+- W03-T06 keeps recovery, replay, and node-input binding behind explicit
+  extension interfaces instead of widening the foundational `StateStore`.
+  Recovery resolves the exact immutable root, child, or replay plan together
+  with the compiler's value-visibility plan; movable definitions and inferred
+  wider expression contexts are never recovery authorities.
+
+- Recovery restores durable control decisions, terminal intents,
+  cancellation/finalizer fences, crashed attempts, waits/timers, and retries
+  before it rebuilds ordinary readiness to a deterministic fixpoint. Crash
+  repetition is evaluated from the frozen kind metadata, effective effect
+  union, exact compiler-scoped idempotency key, retry policy, and a durable
+  host policy fact.
+
+- Replay atomically records immutable provenance and reuses complete terminal
+  upstream histories, including control decisions and dynamic fan-out facts.
+  The selected node and its downstream receive fresh invocation histories;
+  attempt one remains owned by normal claim/dispatch, and every consequential
+  fresh node passes the same non-overridable repetition-safety floor.
+
+  Vanta revision for all W03-T06 decisions: `01M0TF0WH5TY4BVT6HHNZ20XA5`.

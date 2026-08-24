@@ -973,3 +973,23 @@ terminal verification hardening.
 | independent source review `1d670de` | `go test -v ./workflow/internal/importguard/...`; `go vet ./...`; `git diff --check 2953b3e..1d670de` | pass |
 | integration `92147ad` | `go test -count=1 ./...` | pass |
 | source | `make lint-go` | baseline-only failure: five unchanged `shadow` findings in `internal/persistence/workflow_state_control_flow.go:430,441,444,447,464` |
+
+## W03-T06
+
+Reviewed deterministic crash reconciliation and repeat policy, exact pinned
+root/child/replay plan recovery, compiler-owned value visibility and atomic
+input binding, control/finalizer/wait/retry restoration ordering, readiness
+fixpoint convergence, atomic replay provenance and history reuse, dynamic
+fan-out rebinding, restart-stable explain projections, and SQLite migration
+0021. Source commit `4110fd9` was integrated as `8fb3ab0` after error-path,
+canonicalization, semantic graph-integrity, and direct driver hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `4110fd9` | focused runtime, persistence, and appworkflow suites at `-count=10`; selected recovery/replay/driver/SQLite/host cases at higher repeated counts | pass |
+| source worktree `4110fd9` | `go test -race -count=1 ./workflow/runtime/... ./internal/persistence/... ./internal/appworkflow/...` | pass |
+| source worktree `4110fd9` | import guard, focused and full vet, new-diff golangci, full repository tests, hooks, formatting, and diff checks | pass; zero new issues |
+| independent source review `4110fd9` | focused runtime, persistence, and appworkflow tests; repeated recovery/replay/driver/SQLite/host cases; focused race suite | pass |
+| independent source review `4110fd9` | import guard, `go vet ./...`, committed diff check, and complete public-contract/migration audit | pass |
+| integration `8fb3ab0` | new-diff golangci and selected recovery/replay/driver tests at `-count=5` | pass; zero issues |
+| integration `8fb3ab0` | `go test -count=1 ./...` | first run hit the known timing-sensitive legacy agent-launch outbox test; isolated `-count=10` and immediate full repository rerun passed |

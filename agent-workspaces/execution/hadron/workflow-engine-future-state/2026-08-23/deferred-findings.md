@@ -224,3 +224,14 @@ No execution findings have been deferred.
   executor integration.
 
   Vanta revision for all W04-T08 limitations: `01M0T99MRAE1RFFEYBZZK2FEEJ`.
+
+- W03-T06 does not fabricate exact pre-attempt error payloads from aggregate
+  node status. Recovery and explain surfaces expose structured error context
+  only when an immutable catch decision or terminal-intent error fact exists.
+
+- Pinned recovery requires every node to carry the exact `KindVersion` needed
+  to resolve frozen executor metadata. Older shorthand-authored persisted
+  plans without that version fail closed; compatibility belongs in the owning
+  authoring/compiler task rather than weakening recovery identity.
+
+  Vanta revision for both W03-T06 limitations: `01M0TF0X79CJAD6S3VNNJ65P1V`.
