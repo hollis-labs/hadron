@@ -41,7 +41,7 @@ or the detailed architecture made a later choice. In particular:
 | Blueprint/pipeline compatibility loaders and public sugar | Superseded | W00-T01, W01-T03, W06-T06 |
 | Stable IDs, version, digest, provenance, schemas, source refs/maps | Planned | W01-T01 through W01-T05, W05-T05 |
 | `call.mode: inline | run`, child outputs, target and parent-close policy | Implemented | W01-T01, W04-T06 |
-| Source `on:` declarations lowered to operational activations | Planned | W01-T07, W05-T04, W05-T08 |
+| Source `on:` declarations lowered to operational activations | Implemented | W01-T07, W05-T04, W05-T08 |
 | Go structs as IR authority plus deterministic JSON Schema | Planned | W01-T01, W01-T02 |
 | SDK, UI, and agent-emitted inputs remain views over the IR | Planned later | W07-T11 |
 

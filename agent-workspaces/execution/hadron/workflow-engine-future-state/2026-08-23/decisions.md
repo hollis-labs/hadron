@@ -459,3 +459,21 @@
   reuse these DTOs rather than creating private workflow semantics.
 
   Vanta revision: `01M0TW33W9B520BX7HS93CGCJW`.
+
+- W05-T08 makes the W05-T07 `ContractRegistrationService` the sole workflow
+  qualification boundary for source activation materialization. The
+  coordinator validates the complete activation projection before invoking
+  that registrar, resolves the exact qualified record afterward, and then
+  reconciles deterministic source-owned registrations through the W05-T04
+  activation service. Direct raw catalog registration was rejected because it
+  would bypass namespace authorization and contract-test admission.
+
+- Workflow removal uses an exact version-and-digest CAS on only the mutable
+  current alias, retaining immutable registry versions and activation/fire
+  history. Alias removal precedes activation retirement so a stale version
+  cannot retire a newer current source; exact replay converges after a crash.
+  Reconciliation reuses migration 0023 JSON projections and requires exact
+  schedule-row cardinality transactionally rather than adding a second source
+  lifecycle schema.
+
+  Vanta revision for both W05-T08 decisions: `01M0TZ5G7Z8AR6K71XA8FRQAVZ`.

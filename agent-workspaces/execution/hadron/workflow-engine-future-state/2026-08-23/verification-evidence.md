@@ -1166,3 +1166,17 @@ after credential-shaped lease owners were masked and proven absent from JSON.
 | Revision | Command | Result |
 | --- | --- | --- |
 | integration `1ef7d40` | `make lint` | `go vet`, `golangci-lint`, and `staticcheck` pass; `errcheck` fails on two ignored standard-library results and nine ignored `requireExpressionError` test-helper results, all present on the clean integration baseline; assigned to W06-T07 release hardening |
+
+## W05-T08
+
+Reviewed deterministic materialization of all compiled activation declaration
+kinds, source-versus-operator authority, exact source/template/materialization
+digests, atomic reconciliation and retirement, shared Host start dispatch,
+qualified registration ingress, current-alias removal, and retained operational
+history. Source commit `dcfb868` was integrated as `0a37129` without a migration.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `dcfb868` | focused activation lifecycle/reconciliation suites at `-count=10`; relevant packages at `-count=3`; focused race, vet, golangci, full repository, hooks, and diff checks | pass; zero task-local issues |
+| independent source review `dcfb868` | `go test -count=3 ./internal/appworkflow/... ./internal/registry/... ./internal/persistence/... ./internal/scheduler/... ./internal/trigger/...` | pass |
+| integration `0a37129` | `go test -count=1 ./...`; `go test -count=3 ./internal/agentsubstrate`; immediate `go test -count=1 ./...` rerun | first full run reached only the recorded agentsubstrate outbox timing fixture; the isolated package passed three consecutive times and the immediate complete rerun passed |
