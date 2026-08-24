@@ -64,7 +64,7 @@ superseded requirements are not mistaken for omissions.
 | W01-T01 | Define graph IR Go types | 01 | W00-T02 | [ ] |
 | W01-T02 | Generate graph IR JSON Schema | 01 | W01-T01 | [ ] |
 | W01-T03 | Implement workflow source loader | 01 | W01-T01, W00-T05 | [ ] |
-| W01-T04 | Compile source to execution plan with source maps | 01 | W01-T01, W01-T03 | [ ] |
+| W01-T04 | Compile source to execution plan with source maps | 01 | W01-T01, W01-T02, W01-T03 | [ ] |
 | W01-T05 | Implement validation passes | 01 | W01-T04, W00-T06 | [ ] |
 | W01-T06 | Add greenfield acceptance fixtures | 01 | W01-T04 | [ ] |
 | W01-T07 | Compile workflow activation declarations | 01 | W01-T03, W01-T04 | [ ] |
