@@ -11,3 +11,5 @@ No execution findings have been deferred.
   fire identity or per-attempt CAS guarantees. This does not block W00-T07's
   accepted contract, but must be reconciled before W05-T04/W03-T06 integration
   is considered durable.
+
+  Vanta revision: `01M0RY570D54BHGAMK62VXGMW4`.

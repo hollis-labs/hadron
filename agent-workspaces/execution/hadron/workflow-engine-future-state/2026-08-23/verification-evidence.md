@@ -78,3 +78,21 @@ then fast-forwarded go-scheduler local `main` from `962e415` to `51ebe8a`.
 | go-scheduler integration `51ebe8a` | focused CAS/exhaustion/transition tests, `-count=100` | pass |
 | go-scheduler integration `51ebe8a` | `go vet ./...` | pass |
 | go-scheduler integration `51ebe8a` | `go list -deps ./...` | pass; only stdlib, robfig/cron, and go-scheduler |
+
+## W00-T04
+
+Reviewed the complete conformance harness source commit `a2e02ca` and
+integrated it as `8a2ec65`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `a2e02ca` | `git diff --check b9ca2c6..a2e02ca` | pass |
+| source worktree `a2e02ca` | `go test -v ./workflow/conformance/...` | pass; all external-host suites and 12 fixtures exercised |
+| source worktree `a2e02ca` | `go test ./workflow/...` | pass |
+| source worktree `a2e02ca` | `make test` | pass |
+| source worktree `a2e02ca` | `go test ./...` | pass |
+| integration `8a2ec65` | `git diff --check HEAD^..HEAD` | pass |
+| integration `8a2ec65` | `go test -v ./workflow/conformance/...` | pass |
+| integration `8a2ec65` | `go test ./workflow/...` | pass |
+| integration `8a2ec65` | `make test` | pass |
+| integration `8a2ec65` | `go test ./...` | pass |
