@@ -505,3 +505,36 @@ support. Source commit `e5d3c38` was integrated as `88fb4cf`.
 | integration `88fb4cf` | `go vet ./workflow/...` | pass |
 | integration `88fb4cf` | `go test ./...` | pass |
 | integration `88fb4cf` | `git diff --check HEAD^..HEAD` | pass |
+
+## W02-T05
+
+Reviewed migration 0014 and the complete Hadron-owned SQLite StateStore
+adapter: workflow-specific tables, BEGIN IMMEDIATE transaction boundaries,
+typed errors, lifecycle/attempt/wait fidelity, idempotency, append-only events,
+recovery, values, cache/pins, and repeatable activations. Review added explicit
+manual-parent-integrity proof while legacy foreign-key enforcement remains off,
+plan-metadata collision protection, event immutability assertions, waiting-run
+reopen fidelity, and 16-way contention across two independent handles. Source
+commit `c9497ae` was integrated as `b811d23`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `c9497ae` | focused workflow-state tests, `-count=30` | pass |
+| source worktree `c9497ae` | focused workflow-state tests, `-race -shuffle=on -count=5` | pass |
+| source worktree `c9497ae` | `go test -count=1 ./internal/persistence/... ./workflow/conformance/...` | pass |
+| source worktree `c9497ae` | `go test -race ./internal/persistence/... ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| source worktree `c9497ae` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `c9497ae` | `go test -count=1 ./workflow/...` | pass |
+| source worktree `c9497ae` | `go vet ./workflow/... ./internal/persistence/...` | pass |
+| source worktree `c9497ae` | `golangci-lint run --new --timeout 30s` | pass; zero issues |
+| source worktree `c9497ae` | `go test ./...` | pass |
+| source worktree `c9497ae` | `git diff --check 67f97c8..c9497ae` | pass |
+| integration `b811d23` | focused workflow-state tests, `-count=20` | pass |
+| integration `b811d23` | focused workflow-state tests, `-race -shuffle=on -count=3` | pass |
+| integration `b811d23` | `go test -count=1 ./internal/persistence/... ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| integration `b811d23` | `go test -race ./internal/persistence/... ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| integration `b811d23` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `b811d23` | `go vet ./workflow/... ./internal/persistence/...` | pass |
+| integration `b811d23` | `golangci-lint run --new --timeout 30s` | pass; zero issues |
+| integration `b811d23` | `go test ./...` | pass |
+| integration `b811d23` | `git diff --check HEAD^..HEAD` | pass |

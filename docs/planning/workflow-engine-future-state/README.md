@@ -72,7 +72,7 @@ superseded requirements are not mistaken for omissions.
 | W02-T02 | Add expression and interpolation engine | 02 | W02-T01, W00-T05 | [x] |
 | W02-T03 | Bind workflow inputs and outputs | 02 | W02-T01, W02-T02, W02-T04 | [ ] |
 | W02-T04 | Define runtime state-store interface | 02 | W01-T04, W02-T01 | [x] |
-| W02-T05 | Implement Hadron SQLite state adapter schema | 02 | W02-T04 | [ ] |
+| W02-T05 | Implement Hadron SQLite state adapter schema | 02 | W02-T04 | [x] |
 | W02-T06 | Enforce redaction, retention, and secret-ref metadata | 02 | W02-T01, W02-T04 | [ ] |
 | W02-T07 | Infer data dependencies and enforce value visibility | 02 | W01-T04, W01-T05, W02-T02 | [x] |
 | W02-T08 | Implement artifact-store contract and Hadron adapter | 02 | W02-T01, W02-T04, W02-T06 | [ ] |

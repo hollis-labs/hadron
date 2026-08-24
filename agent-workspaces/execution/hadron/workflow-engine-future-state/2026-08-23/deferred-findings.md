@@ -13,3 +13,15 @@ No execution findings have been deferred.
   is considered durable.
 
   Vanta revision: `01M0RY570D54BHGAMK62VXGMW4`.
+
+- W02-T05 keeps `PRAGMA foreign_keys=OFF` on Hadron's shared SQLite store
+  because enabling it breaks supported legacy pipeline-stage CRUD. The
+  graph-native adapter enforces its owned parent relationships inside the same
+  `BEGIN IMMEDIATE` transaction; opaque value/event/cache/pin/future-run
+  references intentionally retain the application-neutral StateStore
+  semantics. Independent handles can surface SQLite busy or context errors
+  when a writer holds the lock beyond the five-second busy timeout. Reassess
+  this boundary before globally enabling foreign keys or changing legacy
+  persistence relationships.
+
+  Vanta revision: `01M0S892FPWHRP5CC3ZS6CFTWB`.
