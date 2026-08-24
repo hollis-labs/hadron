@@ -14,8 +14,8 @@ import (
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
-// Store is a concurrency-safe in-memory StateStore. It deliberately implements
-// persistence semantics, not scheduling or lifecycle transition policy.
+// Store is a concurrency-safe in-memory StateStore. It implements the core
+// lifecycle contract and persistence semantics, but no scheduling policy.
 type Store struct {
 	mu sync.RWMutex
 
@@ -146,6 +146,12 @@ func (s *Store) SaveRun(ctx context.Context, request workflowruntime.SaveRunRequ
 	if current.Generation != request.ExpectedGeneration {
 		return workflowruntime.RunSnapshot{}, casMismatch("run", request.ExpectedGeneration, current.Generation)
 	}
+	if request.Snapshot.Status != current.Status {
+		return workflowruntime.RunSnapshot{}, invalid(errors.New("run status changes require TransitionRun"))
+	}
+	if !equalValueSetRef(request.Snapshot.Outputs, current.Outputs) {
+		return workflowruntime.RunSnapshot{}, invalid(errors.New("run outputs are lifecycle-managed"))
+	}
 	if request.Snapshot.Plan != current.Plan {
 		return workflowruntime.RunSnapshot{}, invalid(errors.New("run plan reference is immutable"))
 	}
@@ -170,6 +176,9 @@ func (s *Store) CreateNodeInvocation(ctx context.Context, request workflowruntim
 	next := cloneNode(request.Snapshot)
 	if next.Generation != 0 || next.ClaimGeneration != 0 || next.Lease != nil {
 		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("new node must have zero generations and no lease"))
+	}
+	if next.Status != workflowruntime.NodePending || next.Blocked != nil || next.LatestAttempt != 0 {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("new node must enter lifecycle as pending without attempts"))
 	}
 	next.Generation = 1
 	if err := next.Validate(); err != nil {
@@ -212,6 +221,16 @@ func (s *Store) SaveNodeInvocation(ctx context.Context, request workflowruntime.
 	if current.Generation != request.ExpectedGeneration {
 		return workflowruntime.NodeInvocationSnapshot{}, casMismatch("node invocation", request.ExpectedGeneration, current.Generation)
 	}
+	if request.Snapshot.Status != current.Status || !equalBlockedReason(request.Snapshot.Blocked, current.Blocked) {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("node lifecycle changes require TransitionNode"))
+	}
+	if request.Snapshot.LatestAttempt != current.LatestAttempt {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("latest attempt is lifecycle-managed"))
+	}
+	if !equalValueSetRef(request.Snapshot.Inputs, current.Inputs) ||
+		!equalValueSetRef(request.Snapshot.Outputs, current.Outputs) {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("node input and output references are lifecycle-managed"))
+	}
 	if request.Snapshot.ClaimGeneration != current.ClaimGeneration || !equalLease(request.Snapshot.Lease, current.Lease) {
 		return workflowruntime.NodeInvocationSnapshot{}, fmt.Errorf("%w: claim fields may only change through claim methods", workflowruntime.ErrClaimMismatch)
 	}
@@ -228,28 +247,6 @@ func (s *Store) SaveNodeInvocation(ctx context.Context, request workflowruntime.
 	return cloneNode(next), nil
 }
 
-// CreateAttempt implements runtime.StateStore.
-func (s *Store) CreateAttempt(ctx context.Context, request workflowruntime.CreateAttemptRequest) (workflowruntime.AttemptSnapshot, error) {
-	if err := checkContext(ctx); err != nil {
-		return workflowruntime.AttemptSnapshot{}, err
-	}
-	next := cloneAttempt(request.Snapshot)
-	if next.Generation != 0 {
-		return workflowruntime.AttemptSnapshot{}, invalid(errors.New("new attempt must have zero generation"))
-	}
-	next.Generation = 1
-	if err := next.Validate(); err != nil {
-		return workflowruntime.AttemptSnapshot{}, invalid(err)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.attempts[next.ID]; ok {
-		return workflowruntime.AttemptSnapshot{}, fmt.Errorf("%w: attempt", workflowruntime.ErrAlreadyExists)
-	}
-	s.attempts[next.ID] = next
-	return cloneAttempt(next), nil
-}
-
 // LoadAttempt implements runtime.StateStore.
 func (s *Store) LoadAttempt(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.AttemptSnapshot, error) {
 	if err := checkContext(ctx); err != nil {
@@ -262,33 +259,6 @@ func (s *Store) LoadAttempt(ctx context.Context, id workflowruntime.AttemptID) (
 		return workflowruntime.AttemptSnapshot{}, fmt.Errorf("%w: attempt", workflowruntime.ErrNotFound)
 	}
 	return cloneAttempt(snapshot), nil
-}
-
-// SaveAttempt implements runtime.StateStore.
-func (s *Store) SaveAttempt(ctx context.Context, request workflowruntime.SaveAttemptRequest) (workflowruntime.AttemptSnapshot, error) {
-	if err := checkContext(ctx); err != nil {
-		return workflowruntime.AttemptSnapshot{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current, ok := s.attempts[request.Snapshot.ID]
-	if !ok {
-		return workflowruntime.AttemptSnapshot{}, fmt.Errorf("%w: attempt", workflowruntime.ErrNotFound)
-	}
-	if current.Generation != request.ExpectedGeneration {
-		return workflowruntime.AttemptSnapshot{}, casMismatch("attempt", request.ExpectedGeneration, current.Generation)
-	}
-	next := cloneAttempt(request.Snapshot)
-	next.Generation = current.Generation + 1
-	next.CreatedAt = current.CreatedAt
-	if next.UpdatedAt.Before(current.UpdatedAt) {
-		return workflowruntime.AttemptSnapshot{}, invalid(errors.New("attempt updated_at must not regress"))
-	}
-	if err := next.Validate(); err != nil {
-		return workflowruntime.AttemptSnapshot{}, invalid(err)
-	}
-	s.attempts[next.ID] = next
-	return cloneAttempt(next), nil
 }
 
 // ListAttempts implements runtime.StateStore in attempt-number order.
@@ -502,6 +472,10 @@ func (s *Store) AppendEvent(ctx context.Context, request workflowruntime.AppendE
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.appendEventLocked(request)
+}
+
+func (s *Store) appendEventLocked(request workflowruntime.AppendEventRequest) (workflowruntime.Event, error) {
 	sequence := uint64(len(s.events[request.RunID]) + 1)
 	event := workflowruntime.Event{
 		Sequence: sequence, RunID: request.RunID, Invocation: cloneInvocationID(request.Invocation),
@@ -812,8 +786,8 @@ func validateCreateRun(request workflowruntime.CreateRunRequest) error {
 	if err := request.Plan.Validate(); err != nil {
 		return err
 	}
-	if !request.Status.Valid() {
-		return fmt.Errorf("unsupported run status %q", request.Status)
+	if request.Status != workflowruntime.RunPending {
+		return errors.New("new run must enter lifecycle as pending")
 	}
 	if request.Inputs != nil {
 		return request.Inputs.Validate()
@@ -926,6 +900,27 @@ func equalLease(left, right *workflowruntime.ClaimLease) bool {
 		left.Generation == right.Generation && left.ExpiresAt.Equal(right.ExpiresAt)
 }
 
+func equalBlockedReason(left, right *workflowruntime.BlockedReason) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.Code != right.Code || left.Message != right.Message ||
+		len(left.Dependencies) != len(right.Dependencies) || len(left.Details) != len(right.Details) {
+		return false
+	}
+	for i := range left.Dependencies {
+		if left.Dependencies[i] != right.Dependencies[i] {
+			return false
+		}
+	}
+	for key, value := range left.Details {
+		if right.Details[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
 func equalValueSetRef(left, right *values.ValueSetRef) bool {
 	if left == nil || right == nil {
 		return left == right
@@ -957,14 +952,25 @@ func cloneNode(snapshot workflowruntime.NodeInvocationSnapshot) workflowruntime.
 }
 
 func cloneAttempt(snapshot workflowruntime.AttemptSnapshot) workflowruntime.AttemptSnapshot {
+	snapshot.Executor = cloneExecutor(snapshot.Executor)
 	snapshot.Inputs = cloneValueSetRef(snapshot.Inputs)
 	snapshot.Outputs = cloneValueSetRef(snapshot.Outputs)
-	if snapshot.Failure != nil {
-		failure := *snapshot.Failure
-		failure.Details = cloneStringMap(failure.Details)
-		snapshot.Failure = &failure
-	}
+	snapshot.Failure = cloneFailure(snapshot.Failure)
 	return snapshot
+}
+
+func cloneExecutor(executor workflowruntime.ExecutorMetadata) workflowruntime.ExecutorMetadata {
+	executor.Attributes = cloneStringMap(executor.Attributes)
+	return executor
+}
+
+func cloneFailure(failure *workflowruntime.Failure) *workflowruntime.Failure {
+	if failure == nil {
+		return nil
+	}
+	copyFailure := *failure
+	copyFailure.Details = cloneStringMap(failure.Details)
+	return &copyFailure
 }
 
 func cloneWait(snapshot workflowruntime.WaitSnapshot) workflowruntime.WaitSnapshot {

@@ -55,7 +55,7 @@ const (
 	IdempotencyReplayed IdempotencyOutcome = "replayed"
 )
 
-// CreateRunRequest starts persistence for one already validated run request.
+// CreateRunRequest starts persistence for one already validated pending run.
 // It deliberately does not embed the W02-T03 BoundRun contract.
 type CreateRunRequest struct {
 	ID                  RunID
@@ -66,33 +66,23 @@ type CreateRunRequest struct {
 	CreatedAt           time.Time
 }
 
-// SaveRunRequest stores a new run snapshot when ExpectedGeneration matches.
+// SaveRunRequest stores non-lifecycle run fields when ExpectedGeneration
+// matches. Status changes must use TransitionRun.
 type SaveRunRequest struct {
 	Snapshot           RunSnapshot
 	ExpectedGeneration uint64
 }
 
-// CreateNodeInvocationRequest persists a new invocation snapshot. The store
-// assigns generation one; claim generation and lease must initially be empty.
+// CreateNodeInvocationRequest persists a new pending invocation snapshot. The
+// store assigns generation one; attempt and claim state must initially be empty.
 type CreateNodeInvocationRequest struct {
 	Snapshot NodeInvocationSnapshot
 }
 
-// SaveNodeInvocationRequest stores a new invocation snapshot under record CAS.
-// Claim fields are changed only through claim methods.
+// SaveNodeInvocationRequest stores non-lifecycle invocation fields under record
+// CAS. Status, attempt, and claim fields have dedicated atomic methods.
 type SaveNodeInvocationRequest struct {
 	Snapshot           NodeInvocationSnapshot
-	ExpectedGeneration uint64
-}
-
-// CreateAttemptRequest persists a new attempt snapshot.
-type CreateAttemptRequest struct {
-	Snapshot AttemptSnapshot
-}
-
-// SaveAttemptRequest stores an attempt snapshot under record CAS.
-type SaveAttemptRequest struct {
-	Snapshot           AttemptSnapshot
 	ExpectedGeneration uint64
 }
 
@@ -229,14 +219,16 @@ type StateStore interface {
 	CreateRun(context.Context, CreateRunRequest) (RunSnapshot, IdempotencyOutcome, error)
 	LoadRun(context.Context, RunID) (RunSnapshot, error)
 	SaveRun(context.Context, SaveRunRequest) (RunSnapshot, error)
+	TransitionRun(context.Context, RunTransitionRequest) (RunTransitionResult, error)
 
 	CreateNodeInvocation(context.Context, CreateNodeInvocationRequest) (NodeInvocationSnapshot, error)
 	LoadNodeInvocation(context.Context, NodeInvocationID) (NodeInvocationSnapshot, error)
 	SaveNodeInvocation(context.Context, SaveNodeInvocationRequest) (NodeInvocationSnapshot, error)
+	TransitionNode(context.Context, NodeTransitionRequest) (NodeTransitionResult, error)
 
-	CreateAttempt(context.Context, CreateAttemptRequest) (AttemptSnapshot, error)
+	StartNodeAttempt(context.Context, StartNodeAttemptRequest) (StartNodeAttemptResult, error)
+	FinishNodeAttempt(context.Context, FinishNodeAttemptRequest) (FinishNodeAttemptResult, error)
 	LoadAttempt(context.Context, AttemptID) (AttemptSnapshot, error)
-	SaveAttempt(context.Context, SaveAttemptRequest) (AttemptSnapshot, error)
 	ListAttempts(context.Context, NodeInvocationID) ([]AttemptSnapshot, error)
 
 	CreateWait(context.Context, CreateWaitRequest) (WaitSnapshot, error)

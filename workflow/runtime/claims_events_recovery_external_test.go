@@ -142,7 +142,7 @@ func TestClaimRejectsNodeTimestampRegression(t *testing.T) {
 		t.Fatalf("expected regressing claim time rejection, got %v", err)
 	}
 	loaded, loadErr := store.LoadNodeInvocation(context.Background(), id)
-	if loadErr != nil || loaded.Lease != nil || loaded.Generation != 1 {
+	if loadErr != nil || loaded.Lease != nil || loaded.Generation != 2 {
 		t.Fatalf("rejected claim mutated snapshot: %#v, %v", loaded, loadErr)
 	}
 }
@@ -238,18 +238,36 @@ func TestRecoveryFiltersAndOrdering(t *testing.T) {
 		{"run-done", workflowruntime.RunSucceeded},
 	} {
 		_, _, err := store.CreateRun(ctx, workflowruntime.CreateRunRequest{
-			ID: item.id, Plan: testPlan(), Status: item.status, StartIdempotencyKey: "start-" + string(item.id), CreatedAt: now,
+			ID: item.id, Plan: testPlan(), Status: workflowruntime.RunPending, StartIdempotencyKey: "start-" + string(item.id), CreatedAt: now,
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if item.status != workflowruntime.RunPending {
+			running, transitionErr := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{
+				RunID: item.id, ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: now,
+			})
+			if transitionErr != nil {
+				t.Fatal(transitionErr)
+			}
+			if item.status != workflowruntime.RunRunning {
+				if _, transitionErr = store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{
+					RunID: item.id, ExpectedGeneration: running.Snapshot.Generation, To: item.status, At: now.Add(time.Second),
+				}); transitionErr != nil {
+					t.Fatal(transitionErr)
+				}
+			}
 		}
 	}
 	readyLow := invocationID("run-a", "low")
 	readyHigh := invocationID("run-a", "high")
 	waiting := invocationID("run-b", "waiting")
+	expired := invocationID("run-b", "expired")
 	createNode(t, store, readyLow, workflowruntime.NodeReady, 1, now)
 	createNode(t, store, readyHigh, workflowruntime.NodeReady, 10, now)
-	createNode(t, store, waiting, workflowruntime.NodeWaiting, 0, now.Add(-3*time.Minute))
+	waitingCreatedAt := now.Add(-3 * time.Minute)
+	createNode(t, store, waiting, workflowruntime.NodeReady, 0, waitingCreatedAt)
+	createNode(t, store, expired, workflowruntime.NodeReady, 0, waitingCreatedAt)
 	_, err := store.ClaimNode(ctx, workflowruntime.ClaimNodeRequest{
 		InvocationID: readyLow, Owner: "live", Token: "live-token", IdempotencyKey: "live-claim",
 		Now: now, LeaseUntil: now.Add(time.Minute),
@@ -257,9 +275,32 @@ func TestRecoveryFiltersAndOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.ClaimNode(ctx, workflowruntime.ClaimNodeRequest{
+	expiredClaim, err := store.ClaimNode(ctx, workflowruntime.ClaimNodeRequest{
 		InvocationID: waiting, Owner: "expired", Token: "expired-token", IdempotencyKey: "expired-claim",
 		Now: now.Add(-2 * time.Minute), LeaseUntil: now.Add(-time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.ClaimNode(ctx, workflowruntime.ClaimNodeRequest{
+		InvocationID: expired, Owner: "expired-worker", Token: "expired-work-token", IdempotencyKey: "expired-work-claim",
+		Now: now.Add(-2 * time.Minute), LeaseUntil: now.Add(-time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := store.StartNodeAttempt(ctx, workflowruntime.StartNodeAttemptRequest{
+		InvocationID: waiting, ExpectedNodeGeneration: 3,
+		Claim:    workflowruntime.ClaimProof{Owner: expiredClaim.Lease.Owner, Token: expiredClaim.Lease.Token, Generation: expiredClaim.Lease.Generation},
+		Executor: testExecutor(), At: now.Add(-2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: waiting, ExpectedGeneration: started.Node.Generation, To: workflowruntime.NodeWaiting,
+		Claim: &workflowruntime.ClaimProof{Owner: expiredClaim.Lease.Owner, Token: expiredClaim.Lease.Token, Generation: expiredClaim.Lease.Generation},
+		At:    now.Add(-2 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -272,11 +313,16 @@ func TestRecoveryFiltersAndOrdering(t *testing.T) {
 	if len(recovery.ActiveRuns) != 2 || recovery.ActiveRuns[0].ID != "run-a" || recovery.ActiveRuns[1].ID != "run-b" {
 		t.Fatalf("active runs = %#v", recovery.ActiveRuns)
 	}
-	if len(recovery.Ready) != 2 || recovery.Ready[0].ID != readyHigh || recovery.Ready[1].ID != readyLow {
+	if len(recovery.Ready) != 3 || recovery.Ready[0].ID != readyHigh ||
+		recovery.Ready[1].ID != readyLow || recovery.Ready[2].ID != expired {
 		t.Fatalf("ready order = %#v", recovery.Ready)
 	}
 	if len(recovery.Waiting) != 1 || len(recovery.Leased) != 1 || len(recovery.ExpiredLeases) != 1 {
 		t.Fatalf("recovery categories = %#v", recovery)
+	}
+	if recovery.Waiting[0].ID != waiting || recovery.Waiting[0].Lease != nil ||
+		recovery.ExpiredLeases[0].ID == waiting || recovery.Leased[0].ID == waiting {
+		t.Fatalf("waiting work must not retain or recover as a lease: %#v", recovery)
 	}
 	filtered, err := store.Recovery(ctx, workflowruntime.RecoveryQuery{RunID: "run-a", Now: now, Limit: 1})
 	if err != nil || len(filtered.ActiveRuns) != 1 || len(filtered.Ready) != 1 || filtered.Ready[0].ID != readyHigh || len(filtered.ExpiredLeases) != 0 {
@@ -292,9 +338,19 @@ func TestRecoveryFiltersAndOrdering(t *testing.T) {
 func createNode(t *testing.T, store workflowruntime.StateStore, id workflowruntime.NodeInvocationID, status workflowruntime.NodeStatus, priority int, now time.Time) {
 	t.Helper()
 	_, err := store.CreateNodeInvocation(context.Background(), workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
-		ID: id, Status: status, Priority: priority, CreatedAt: now, UpdatedAt: now,
+		ID: id, Status: workflowruntime.NodePending, Priority: priority, CreatedAt: now, UpdatedAt: now,
 	}})
 	if err != nil {
 		t.Fatalf("CreateNodeInvocation(%v): %v", id, err)
+	}
+	if status != workflowruntime.NodePending {
+		if status != workflowruntime.NodeReady {
+			t.Fatalf("createNode helper only supports pending or ready, got %q", status)
+		}
+		if _, err = store.TransitionNode(context.Background(), workflowruntime.NodeTransitionRequest{
+			InvocationID: id, ExpectedGeneration: 1, To: status, At: now,
+		}); err != nil {
+			t.Fatalf("TransitionNode(%v): %v", id, err)
+		}
 	}
 }

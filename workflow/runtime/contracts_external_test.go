@@ -156,6 +156,12 @@ func testPlan() workflowruntime.PlanRef {
 	}
 }
 
+func testExecutor() workflowruntime.ExecutorMetadata {
+	return workflowruntime.ExecutorMetadata{
+		Kind: "test", Version: "v1", Target: "local", Attributes: map[string]string{"mode": "fake"},
+	}
+}
+
 func invocationID(runID workflowruntime.RunID, nodeID string) workflowruntime.NodeInvocationID {
 	return workflowruntime.NodeInvocationID{RunID: runID, NodeID: nodeID}
 }

@@ -37,7 +37,7 @@ func TestRunCASIdempotencyAndDefensiveCopies(t *testing.T) {
 		t.Fatalf("replayed CreateRun = %#v, %q, %v", replayed, outcome, err)
 	}
 	conflicting := request
-	conflicting.Status = workflowruntime.RunRunning
+	conflicting.ID = "different-run"
 	if _, _, conflictErr := store.CreateRun(ctx, conflicting); !errors.Is(conflictErr, workflowruntime.ErrIdempotencyConflict) {
 		t.Fatalf("expected idempotency conflict, got %v", conflictErr)
 	}
@@ -47,7 +47,6 @@ func TestRunCASIdempotencyAndDefensiveCopies(t *testing.T) {
 	if err != nil || loaded.Inputs.ID != inputRef.ID {
 		t.Fatalf("stored run was aliased: %#v, %v", loaded, err)
 	}
-	loaded.Status = workflowruntime.RunRunning
 	loaded.UpdatedAt = now.Add(time.Minute)
 	updated, err := store.SaveRun(ctx, workflowruntime.SaveRunRequest{Snapshot: loaded, ExpectedGeneration: 1})
 	if err != nil || updated.Generation != 2 {
@@ -85,36 +84,24 @@ func TestNodeAttemptAndWaitPersistence(t *testing.T) {
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-1", "execute")
 	blocked := &workflowruntime.BlockedReason{Code: "dependency", Message: "waiting", Details: map[string]string{"node": "prepare"}}
-	node, err := store.CreateNodeInvocation(ctx, workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
-		ID: id, Status: workflowruntime.NodeBlocked, Blocked: blocked, CreatedAt: now, UpdatedAt: now,
+	_, err := store.CreateNodeInvocation(ctx, workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
+		ID: id, Status: workflowruntime.NodePending, CreatedAt: now, UpdatedAt: now,
 	}})
 	if err != nil {
 		t.Fatalf("CreateNodeInvocation: %v", err)
 	}
+	transitioned, err := store.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: id, ExpectedGeneration: 1, To: workflowruntime.NodeBlocked, Blocked: blocked, At: now,
+	})
+	if err != nil {
+		t.Fatalf("TransitionNode(blocked): %v", err)
+	}
+	node := transitioned.Snapshot
 	blocked.Details["node"] = "mutated"
 	node.Blocked.Details["node"] = "also-mutated"
 	loadedNode, err := store.LoadNodeInvocation(ctx, id)
 	if err != nil || loadedNode.Blocked.Details["node"] != "prepare" {
 		t.Fatalf("node snapshot was aliased: %#v, %v", loadedNode, err)
-	}
-
-	attemptID := workflowruntime.AttemptID{Invocation: id, Number: 1}
-	failure := &workflowruntime.Failure{Code: "temporary", Message: "try again", Retryable: true, Details: map[string]string{"source": "adapter"}}
-	attempt, err := store.CreateAttempt(ctx, workflowruntime.CreateAttemptRequest{Snapshot: workflowruntime.AttemptSnapshot{
-		ID: attemptID, Status: workflowruntime.NodeFailed, Failure: failure, CreatedAt: now, UpdatedAt: now,
-	}})
-	if err != nil {
-		t.Fatalf("CreateAttempt: %v", err)
-	}
-	failure.Details["source"] = "mutated"
-	attempt.Failure.Details["source"] = "also-mutated"
-	loadedAttempt, err := store.LoadAttempt(ctx, attemptID)
-	if err != nil || loadedAttempt.Failure.Details["source"] != "adapter" {
-		t.Fatalf("attempt snapshot was aliased: %#v, %v", loadedAttempt, err)
-	}
-	attempts, err := store.ListAttempts(ctx, id)
-	if err != nil || len(attempts) != 1 {
-		t.Fatalf("ListAttempts = %#v, %v", attempts, err)
 	}
 
 	wait, err := store.CreateWait(ctx, workflowruntime.CreateWaitRequest{Snapshot: workflowruntime.WaitSnapshot{

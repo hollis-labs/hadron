@@ -126,6 +126,31 @@ type Failure struct {
 	Details   map[string]string `json:"details,omitempty"`
 }
 
+// ExecutorMetadata identifies the application-neutral executor contract used
+// by one attempt. It is immutable for the lifetime of that attempt.
+type ExecutorMetadata struct {
+	Kind       string            `json:"kind"`
+	Version    string            `json:"version"`
+	Target     string            `json:"target,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
+// Validate reports malformed persisted executor identity.
+func (m ExecutorMetadata) Validate() error {
+	if err := validateRequiredText("executor kind", m.Kind); err != nil {
+		return err
+	}
+	if err := validateRequiredText("executor version", m.Version); err != nil {
+		return err
+	}
+	if m.Target != "" {
+		if err := validateRequiredText("executor target", m.Target); err != nil {
+			return err
+		}
+	}
+	return validateStringMap("executor attributes", m.Attributes)
+}
+
 // Validate reports malformed failure metadata.
 func (f Failure) Validate() error {
 	if err := validateRequiredText("failure code", f.Code); err != nil {
@@ -263,9 +288,12 @@ func (s NodeInvocationSnapshot) Validate() error {
 type AttemptSnapshot struct {
 	ID         AttemptID           `json:"id"`
 	Status     NodeStatus          `json:"status"`
+	Executor   ExecutorMetadata    `json:"executor"`
 	Inputs     *values.ValueSetRef `json:"inputs,omitempty"`
 	Outputs    *values.ValueSetRef `json:"outputs,omitempty"`
 	Failure    *Failure            `json:"failure,omitempty"`
+	StartedAt  time.Time           `json:"started_at"`
+	FinishedAt time.Time           `json:"finished_at,omitempty"`
 	Generation uint64              `json:"generation"`
 	CreatedAt  time.Time           `json:"created_at"`
 	UpdatedAt  time.Time           `json:"updated_at"`
@@ -276,8 +304,11 @@ func (s AttemptSnapshot) Validate() error {
 	if err := s.ID.Validate(); err != nil {
 		return err
 	}
-	if !s.Status.Valid() {
+	if !attemptStatusValid(s.Status) {
 		return fmt.Errorf("unsupported attempt status %q", s.Status)
+	}
+	if err := s.Executor.Validate(); err != nil {
+		return err
 	}
 	if err := validateOptionalValueSetRef(s.Inputs); err != nil {
 		return fmt.Errorf("attempt inputs: %w", err)
@@ -290,7 +321,34 @@ func (s AttemptSnapshot) Validate() error {
 			return err
 		}
 	}
+	if s.StartedAt.IsZero() || !s.StartedAt.Equal(s.CreatedAt) {
+		return fmt.Errorf("attempt started_at must equal created_at")
+	}
+	if s.Status == NodeRunning {
+		if !s.FinishedAt.IsZero() || s.Failure != nil || s.Outputs != nil {
+			return fmt.Errorf("running attempt must not contain a finish outcome")
+		}
+	} else {
+		if s.FinishedAt.IsZero() || !s.FinishedAt.Equal(s.UpdatedAt) || s.FinishedAt.Before(s.StartedAt) {
+			return fmt.Errorf("finished attempt requires an ordered finished_at equal to updated_at")
+		}
+		if s.Status == NodeSucceeded && s.Failure != nil {
+			return fmt.Errorf("succeeded attempt must not contain failure")
+		}
+		if s.Status != NodeSucceeded && s.Failure == nil {
+			return fmt.Errorf("unsuccessful attempt requires failure")
+		}
+	}
 	return validateSnapshotTimes(s.Generation, s.CreatedAt, s.UpdatedAt)
+}
+
+func attemptStatusValid(status NodeStatus) bool {
+	switch status {
+	case NodeRunning, NodeSucceeded, NodeFailed, NodeCanceled, NodeTimedOut, NodeCrashed:
+		return true
+	default:
+		return false
+	}
 }
 
 // WaitRef is the compact wait identity stored on a node invocation.
