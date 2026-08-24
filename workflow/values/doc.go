@@ -7,7 +7,8 @@
 // remain outside this package. Expressions evaluate only from explicitly
 // supplied typed contexts; ambient environment and log streams are never roots.
 //
-// The package is extraction-ready engine core. It imports only the standard
-// library plus expr-lang/expr and does not depend on Hadron application or
-// persistence types.
+// Inline schemas are validated locally without resolving network or file
+// references. The package is extraction-ready engine core. It imports only the
+// standard library plus the adopted expression and JSON Schema dependencies
+// and does not depend on Hadron application or persistence types.
 package values

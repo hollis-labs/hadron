@@ -52,6 +52,27 @@ func ParseReferences(expression graph.Expression) ([]Reference, error) {
 	return stableReferences(references), nil
 }
 
+// exactReference returns a reference only when the complete expression is one
+// static member chain such as inputs.payload or steps.fetch.outputs.body.
+// Computed members and expressions that merely contain a reference are not
+// passthrough bindings.
+func exactReference(expression graph.Expression) (Reference, bool, error) {
+	text := strings.TrimSpace(expression.Text)
+	if text == "" || strings.Contains(text, "{{") {
+		return Reference{}, false, nil
+	}
+	tree, err := parser.Parse(text)
+	if err != nil {
+		return Reference{}, false, err
+	}
+	reference, ok := referenceFromNode(tree.Node)
+	if !ok || reference.Dynamic {
+		return Reference{}, false, nil
+	}
+	reference.Path = append([]string(nil), reference.Path...)
+	return reference, true, nil
+}
+
 // ParseInterpolationReferences reports structural references from every raw
 // expression segment in an interpolation template. Literal segments are not
 // parsed and no expression is evaluated.
