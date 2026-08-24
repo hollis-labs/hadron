@@ -56,6 +56,13 @@ func (s *WorkflowHostStore) RecordCallResolution(ctx context.Context, request ca
 		if _, loadNodeErr := loadWorkflowNode(ctx, query, invocation); loadNodeErr != nil {
 			return loadNodeErr
 		}
+		allowed, admissionErr := workflowControlAdmissionAllowed(ctx, query, invocation)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences call resolution"))
+		}
 		now := s.now().UTC()
 		event, eventErr := appendWorkflowEvent(ctx, query, workflowruntime.AppendEventRequest{
 			RunID: invocation.RunID, Invocation: &invocation, Type: workflowCallResolvedEvent,
@@ -117,6 +124,13 @@ func (s *WorkflowHostStore) StartChildRun(ctx context.Context, request calladapt
 		parentNode, loadNodeErr := loadWorkflowNode(ctx, query, parent)
 		if loadNodeErr != nil {
 			return loadNodeErr
+		}
+		allowed, admissionErr := workflowControlAdmissionAllowed(ctx, query, parent)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences child run start"))
 		}
 		parentRun, loadRunErr := loadWorkflowRun(ctx, query, parent.RunID)
 		if loadRunErr != nil {
@@ -351,6 +365,36 @@ func (s *WorkflowHostStore) RecoverPendingChildRuns(ctx context.Context, limit i
 		result = append(result, request)
 	}
 	return result, rows.Err()
+}
+
+// LoadChildRunRequest returns the immutable pinned request that atomically
+// created childRunID. It is the authoritative graph source for cancellation
+// planning and never re-resolves the child definition.
+func (s *WorkflowHostStore) LoadChildRunRequest(ctx context.Context, childRunID workflowruntime.RunID) (calladapter.ChildRunRequest, error) {
+	if err := checkWorkflowContext(ctx); err != nil {
+		return calladapter.ChildRunRequest{}, err
+	}
+	if childRunID == "" {
+		return calladapter.ChildRunRequest{}, workflowInvalid(errors.New("child run id is required"))
+	}
+	var encoded string
+	if err := s.state.db.QueryRowContext(ctx, `SELECT request_json FROM workflow_child_run_start_idempotency WHERE child_run_id = ?`, childRunID).Scan(&encoded); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return calladapter.ChildRunRequest{}, fmt.Errorf("%w: child run request", workflowruntime.ErrNotFound)
+		}
+		return calladapter.ChildRunRequest{}, err
+	}
+	var request calladapter.ChildRunRequest
+	if err := decodeWorkflowJSON("child run request", encoded, &request); err != nil {
+		return calladapter.ChildRunRequest{}, err
+	}
+	if err := validateChildStartRequest(request); err != nil || request.ChildRunID != childRunID {
+		if err == nil {
+			err = errors.New("stored child run request belongs to another run")
+		}
+		return calladapter.ChildRunRequest{}, workflowInvalid(err)
+	}
+	return cloneCallJSON(request)
 }
 
 func cloneCallJSON[T any](input T) (T, error) {

@@ -8,6 +8,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
+	"github.com/hollis-labs/hadron/workflow/values"
 )
 
 type structuralArc struct {
@@ -32,6 +33,12 @@ func (v *validator) validateStructure() {
 			continue
 		}
 		known[identity] = i
+	}
+	finalizers := make(map[string]struct{})
+	for _, node := range v.graph.Nodes {
+		if node.Finally != nil {
+			finalizers[graph.NormalizeID(node.ID)] = struct{}{}
+		}
 	}
 
 	declaredNeeds := make(map[string]struct{})
@@ -88,7 +95,94 @@ func (v *validator) validateStructure() {
 		}
 		addArc(edge.From, edge.To, source, fmt.Sprintf("edge depends on unknown node %q", edge.From))
 	}
+	for _, node := range v.graph.Nodes {
+		for _, rule := range node.Catch {
+			for _, target := range rule.Targets {
+				source := firstSource(rule.Source, v.nodeSource(node))
+				if _, cleanup := finalizers[graph.NormalizeID(target)]; cleanup {
+					v.add(CodeInvalidFinally, source, fmt.Sprintf("catch on node %q targets finalizer %q", node.ID, target), "Route failures to an ordinary handler; finalizers execute only through terminal cleanup progression.")
+				}
+				addArc(node.ID, target, source, fmt.Sprintf("catch on node %q targets unknown node %q", node.ID, target))
+			}
+		}
+		if node.Switch != nil {
+			for _, arm := range node.Switch.Arms {
+				for _, target := range arm.Targets {
+					source := firstSource(arm.Source, v.nodeSource(node))
+					if _, cleanup := finalizers[graph.NormalizeID(target)]; cleanup {
+						v.add(CodeInvalidFinally, source, fmt.Sprintf("switch on node %q targets finalizer %q", node.ID, target), "Route branches to an ordinary node; finalizers execute only through terminal cleanup progression.")
+					}
+					addArc(node.ID, target, source, fmt.Sprintf("switch on node %q targets unknown node %q", node.ID, target))
+				}
+			}
+			for _, target := range node.Switch.Default {
+				if _, cleanup := finalizers[graph.NormalizeID(target)]; cleanup {
+					v.add(CodeInvalidFinally, v.nodeSource(node), fmt.Sprintf("switch on node %q defaults to finalizer %q", node.ID, target), "Route defaults to an ordinary node; finalizers execute only through terminal cleanup progression.")
+				}
+				addArc(node.ID, target, v.nodeSource(node), fmt.Sprintf("switch on node %q defaults to unknown node %q", node.ID, target))
+			}
+		}
+		if node.Finally != nil {
+			scope := node.Finally.Scope
+			if len(scope) == 0 {
+				for _, member := range v.graph.Nodes {
+					if member.Finally == nil {
+						scope = append(scope, member.ID)
+					}
+				}
+			}
+			for _, member := range scope {
+				addArc(member, node.ID, v.nodeSource(node), fmt.Sprintf("finally node %q scopes unknown node %q", node.ID, member))
+			}
+		}
+	}
+	type finalizerScope struct {
+		node   graph.Node
+		global bool
+		set    map[string]struct{}
+	}
+	finalizerScopes := make([]finalizerScope, 0)
+	for _, node := range v.graph.Nodes {
+		if node.Finally == nil {
+			continue
+		}
+		item := finalizerScope{node: node, global: len(node.Finally.Scope) == 0, set: make(map[string]struct{})}
+		if item.global {
+			for _, member := range v.graph.Nodes {
+				if member.Finally == nil {
+					item.set[graph.NormalizeID(member.ID)] = struct{}{}
+				}
+			}
+		} else {
+			for _, member := range node.Finally.Scope {
+				item.set[graph.NormalizeID(member)] = struct{}{}
+			}
+		}
+		finalizerScopes = append(finalizerScopes, item)
+	}
+	for outerIndex, outer := range finalizerScopes {
+		for innerIndex, inner := range finalizerScopes {
+			if outerIndex == innerIndex {
+				continue
+			}
+			if outer.global && !inner.global || strictControlSubset(inner.set, outer.set) {
+				addArc(inner.node.ID, outer.node.ID, v.nodeSource(outer.node), fmt.Sprintf("finally node %q contains nested cleanup %q", outer.node.ID, inner.node.ID))
+			}
+		}
+	}
 	v.validateCycles(known, arcs)
+}
+
+func strictControlSubset(inner, outer map[string]struct{}) bool {
+	if len(inner) >= len(outer) {
+		return false
+	}
+	for member := range inner {
+		if _, exists := outer[member]; !exists {
+			return false
+		}
+	}
+	return true
 }
 
 func (v *validator) validateCycles(known map[string]int, arcs []structuralArc) {
@@ -198,6 +292,116 @@ func (v *validator) validateNodeShape(node graph.Node) {
 	}
 	if node.ForEach != nil {
 		v.validateForEach(node, source)
+	}
+	v.validateCatch(node, source)
+	v.validateSwitch(node, source)
+	v.validateFinally(node, source)
+}
+
+func (v *validator) validateCatch(node graph.Node, fallback *graph.SourceRef) {
+	seenContinue := false
+	unconditional := -1
+	seenBindings := make(map[string]int, len(node.Catch))
+	for index, rule := range node.Catch {
+		source := firstSource(rule.Source, fallback)
+		if unconditional >= 0 {
+			v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q catch rule %d is unreachable after unconditional rule %d", node.ID, index, unconditional), "Move narrowed catch rules before the unconditional catch-all route.")
+		}
+		if rule.ContinueOnError() {
+			if seenContinue || index != len(node.Catch)-1 {
+				v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q continue_on_error route must be unique and last", node.ID), "Keep one continue_on_error policy after all explicit catch routes.")
+			}
+			seenContinue = true
+			continue
+		}
+		if len(rule.Targets) == 0 {
+			v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q catch rule %d has no targets", node.ID, index), "Declare at least one handler target, or use continue_on_error explicitly.")
+		}
+		if rule.When != nil && strings.TrimSpace(rule.When.Text) == "" {
+			v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q catch rule %d has an empty predicate", node.ID, index), "Provide a non-empty catch.when expression or remove the predicate.")
+		}
+		if rule.BindAs != "" {
+			if err := values.ValidateExpressionLocalName(rule.BindAs); err != nil {
+				v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q catch binding %q is invalid", node.ID, rule.BindAs), "Use a lower-snake expression identifier that does not shadow a standard root.")
+			}
+			if prior, duplicate := seenBindings[rule.BindAs]; duplicate {
+				v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q catch binding %q repeats rule %d", node.ID, rule.BindAs, prior), "Use a distinct lexical binding for each catch route.")
+			} else {
+				seenBindings[rule.BindAs] = index
+			}
+		}
+		seenErrors := make(map[string]struct{}, len(rule.Errors))
+		matchesAll := len(rule.Errors) == 0
+		for _, code := range rule.Errors {
+			if strings.TrimSpace(code) == "" || code != strings.TrimSpace(code) {
+				v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q catch rule %d has an invalid error selector", node.ID, index), "Use non-empty error codes without surrounding whitespace, or * for every error.")
+				continue
+			}
+			if _, duplicate := seenErrors[code]; duplicate {
+				v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q catch rule %d repeats error selector %q", node.ID, index, code), "Remove duplicate error selectors from the catch rule.")
+			}
+			if code == graph.CatchAllErrors {
+				matchesAll = true
+				if len(rule.Errors) != 1 {
+					v.add(CodeInvalidCatch, source, fmt.Sprintf("node %q catch rule %d combines * with narrower selectors", node.ID, index), "Use * alone for an unconditional selector, or remove it and keep the named selectors.")
+				}
+			}
+			seenErrors[code] = struct{}{}
+		}
+		v.validateControlTargets(CodeInvalidCatch, node.ID, "catch", rule.Targets, source)
+		if matchesAll && rule.When == nil && unconditional < 0 {
+			unconditional = index
+		}
+	}
+}
+
+func (v *validator) validateSwitch(node graph.Node, fallback *graph.SourceRef) {
+	if node.Switch == nil {
+		return
+	}
+	if len(node.Switch.Arms) == 0 {
+		v.add(CodeInvalidSwitch, fallback, fmt.Sprintf("node %q switch has no arms", node.ID), "Declare at least one ordered switch arm.")
+	}
+	for index, arm := range node.Switch.Arms {
+		source := firstSource(arm.Source, fallback)
+		if strings.TrimSpace(arm.When.Text) == "" {
+			v.add(CodeInvalidSwitch, source, fmt.Sprintf("node %q switch arm %d has an empty predicate", node.ID, index), "Provide a non-empty boolean switch predicate.")
+		}
+		if len(arm.Targets) == 0 {
+			v.add(CodeInvalidSwitch, source, fmt.Sprintf("node %q switch arm %d has no targets", node.ID, index), "Declare at least one target for every switch arm.")
+		}
+		v.validateControlTargets(CodeInvalidSwitch, node.ID, "switch arm", arm.Targets, source)
+	}
+	v.validateControlTargets(CodeInvalidSwitch, node.ID, "switch default", node.Switch.Default, fallback)
+}
+
+func (v *validator) validateFinally(node graph.Node, fallback *graph.SourceRef) {
+	if node.Finally == nil {
+		return
+	}
+	if node.ReadyWhen != "" && node.ReadyWhen != graph.ReadyAllDone {
+		v.add(CodeInvalidFinally, fallback, fmt.Sprintf("finally node %q uses readiness %q", node.ID, node.ReadyWhen), "Use all_done readiness; cleanup must observe every scoped terminal outcome.")
+	}
+	if node.ForEach != nil || node.Switch != nil {
+		v.add(CodeInvalidFinally, fallback, fmt.Sprintf("finally node %q has fan-out or switch control semantics", node.ID), "Keep one cleanup invocation per declared scope; put fan-out or branch selection in ordinary handler nodes.")
+	}
+	if len(node.Catch) != 0 {
+		v.add(CodeInvalidFinally, fallback, fmt.Sprintf("finally node %q declares catch or continue_on_error semantics", node.ID), "Cleanup failure determines the run outcome; move catch handling to ordinary nodes before finalization.")
+	}
+	v.validateControlTargets(CodeInvalidFinally, node.ID, "finally scope", node.Finally.Scope, fallback)
+}
+
+func (v *validator) validateControlTargets(code diagnostic.Code, owner, surface string, targets []string, source *graph.SourceRef) {
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		normalized := graph.NormalizeID(target)
+		if target == owner {
+			v.add(code, source, fmt.Sprintf("node %q %s contains itself", owner, surface), "Remove the self-reference from the control-flow declaration.")
+		}
+		if _, duplicate := seen[normalized]; duplicate {
+			v.add(code, source, fmt.Sprintf("node %q %s repeats target %q", owner, surface, target), "List each control-flow target once.")
+		}
+		seen[normalized] = struct{}{}
 	}
 }
 

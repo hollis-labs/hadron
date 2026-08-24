@@ -178,6 +178,34 @@ BEGIN SELECT RAISE(ABORT, 'reject external observation'); END`); execErr != nil 
 }
 
 func TestWorkflowSQLiteTerminalRunFencesExternalMutation(t *testing.T) {
+	t.Run("canceled observation requires exact durable intent", func(t *testing.T) {
+		_, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "external-canceled-no-intent.db"))
+		fixture := prepareWorkflowSQLiteExternal(t, state, "canceled-no-intent", workflowTestTime())
+		run, _ := state.LoadRun(context.Background(), fixture.attempt.ID.Invocation.RunID)
+		if _, err := state.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunCanceled, At: fixture.base.Add(4 * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+		operation, _ := state.LoadExternalOperation(context.Background(), fixture.attempt.ID)
+		node, _ := state.LoadNodeInvocation(context.Background(), fixture.node.ID)
+		attempt, _ := state.LoadAttempt(context.Background(), fixture.attempt.ID)
+		beforeEvents, _ := state.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: run.ID})
+		failure := workflowruntime.Failure{Code: "remote_canceled", Message: "remote operation canceled"}
+		_, applyErr := state.ApplyExternalOperation(context.Background(), workflowruntime.ApplyExternalOperationRequest{
+			Attempt: fixture.attempt.ID, ExpectedOperationGeneration: operation.Generation,
+			ExpectedNodeGeneration: node.Generation, ExpectedAttemptGeneration: attempt.Generation,
+			Status: stepkind.ObservationCanceled, Failure: &failure, NextNodeStatus: workflowruntime.NodeCanceled,
+			ObservedAt: fixture.base.Add(5 * time.Second), At: fixture.base.Add(5 * time.Second),
+		})
+		if !errors.Is(applyErr, workflowruntime.ErrInvalidRecord) {
+			t.Fatalf("canceled observation without exact intent = %v", applyErr)
+		}
+		after, _ := state.LoadExternalOperation(context.Background(), fixture.attempt.ID)
+		afterEvents, _ := state.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: run.ID})
+		if after.Generation != operation.Generation || len(afterEvents) != len(beforeEvents) {
+			t.Fatalf("rejected intentless observation changed operation=%#v/%#v events=%d/%d", operation, after, len(beforeEvents), len(afterEvents))
+		}
+	})
+
 	t.Run("pending after canceled", func(t *testing.T) {
 		_, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "external-canceled-run.db"))
 		fixture := prepareWorkflowSQLiteExternal(t, state, "canceled-run", workflowTestTime())

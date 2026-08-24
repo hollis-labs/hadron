@@ -1,0 +1,11 @@
+{
+  "name": "cleanup-failure",
+  "expect": "pass",
+  "input": {
+    "scenario": "completion",
+    "status": "succeeded",
+    "cleanup_status": "failed",
+    "want_intended_status": "succeeded",
+    "want_run_status": "failed"
+  }
+}

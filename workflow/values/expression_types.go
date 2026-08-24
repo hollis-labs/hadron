@@ -2,10 +2,31 @@ package values
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 )
+
+var expressionLocalName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+var reservedExpressionRoots = map[string]struct{}{
+	"inputs": {}, "steps": {}, "item": {}, "index": {}, "run": {},
+	"run_scope": {}, "execution_target": {}, "env": {},
+}
+
+// ValidateExpressionLocalName validates lexical aliases such as catch.bind_as.
+// Locals use lower snake form so every accepted name is a directly addressable
+// expression root and cannot shadow a standard workflow root.
+func ValidateExpressionLocalName(name string) error {
+	if !expressionLocalName.MatchString(name) {
+		return fmt.Errorf("expression local %q must match [a-z_][a-z0-9_]*", name)
+	}
+	if _, reserved := reservedExpressionRoots[name]; reserved {
+		return fmt.Errorf("expression local %q shadows a standard root", name)
+	}
+	return nil
+}
 
 const (
 	// CodeExpressionSyntax identifies malformed expression-language source.
@@ -29,11 +50,13 @@ const (
 
 // StepContext is the expression-visible state of one completed or observable
 // node. Outputs remain typed Value envelopes until the engine unwraps a private
-// evaluation copy. Error must be nil or a JSON-compatible structured value.
+// evaluation copy. Error remains a typed Value until the engine unwraps a
+// private evaluation copy, preserving classification for catch/finally and
+// fan-out item errors.
 type StepContext struct {
 	Outputs ValueSet
 	Status  string
-	Error   any
+	Error   *Value
 	Items   []StepContext
 }
 
@@ -50,6 +73,9 @@ type ExpressionContext struct {
 	RunScope        map[string]any
 	ExecutionTarget map[string]any
 	Env             ValueSet
+	// Locals supplies explicitly declared lexical bindings such as catch.bind_as.
+	// Names become top-level expression roots and must not shadow standard roots.
+	Locals ValueSet `json:",omitempty"`
 }
 
 // ExpressionOptions carries caller policy that must be enforced for every

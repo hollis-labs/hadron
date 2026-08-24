@@ -54,6 +54,9 @@ func (s *Store) SuspendExternalOperation(ctx context.Context, request workflowru
 	if !ok {
 		return workflowruntime.SuspendExternalOperationResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
 	}
+	if !s.controlAdmissionAllowedLocked(currentNode.ID) {
+		return workflowruntime.SuspendExternalOperationResult{}, invalid(errors.New("pending terminal intent fences external suspension"))
+	}
 	if currentNode.Generation != request.ExpectedNodeGeneration {
 		return workflowruntime.SuspendExternalOperationResult{}, casMismatch("external operation node", request.ExpectedNodeGeneration, currentNode.Generation)
 	}
@@ -125,6 +128,9 @@ func (s *Store) RequestExternalOperationCancel(ctx context.Context, request work
 	if current.Generation != request.ExpectedOperationGeneration {
 		return workflowruntime.RequestExternalOperationCancelResult{}, casMismatch("external operation", request.ExpectedOperationGeneration, current.Generation)
 	}
+	if !s.controlAdmissionAllowedLocked(request.Attempt.Invocation) && !s.pendingExternalCancellationLocked(request.Attempt) {
+		return workflowruntime.RequestExternalOperationCancelResult{}, invalid(errors.New("pending terminal intent fences external cancellation request"))
+	}
 	if current.Status != stepkind.ObservationPending {
 		return workflowruntime.RequestExternalOperationCancelResult{}, &workflowruntime.TransitionConflictError{Entity: "external operation", ID: externalAttemptIdentity(current.Attempt), Status: string(current.Status), Reason: "terminal operation cannot accept cancellation intent"}
 	}
@@ -194,10 +200,16 @@ func (s *Store) ApplyExternalOperation(ctx context.Context, request workflowrunt
 	if currentAttempt.Generation != request.ExpectedAttemptGeneration {
 		return workflowruntime.ApplyExternalOperationResult{}, casMismatch("external operation attempt", request.ExpectedAttemptGeneration, currentAttempt.Generation)
 	}
+	allowedCanceledResolution := request.Status == stepkind.ObservationCanceled && request.NextNodeStatus == workflowruntime.NodeCanceled && s.pendingExternalCancellationLocked(request.Attempt)
 	if run, ok := s.runs[request.Attempt.Invocation.RunID]; ok && !run.Status.Active() {
-		allowedCanceledResolution := run.Status == workflowruntime.RunCanceled && request.Status == stepkind.ObservationCanceled && request.NextNodeStatus == workflowruntime.NodeCanceled
-		if !allowedCanceledResolution {
+		if run.Status != workflowruntime.RunCanceled || !allowedCanceledResolution {
 			return workflowruntime.ApplyExternalOperationResult{}, invalid(errors.New("terminal run fences external mutation"))
+		}
+	}
+	if !s.controlAdmissionAllowedLocked(request.Attempt.Invocation) {
+		intent := s.terminalIntents[request.Attempt.Invocation.RunID]
+		if intent.IntendedStatus != workflowruntime.RunCanceled || !allowedCanceledResolution {
+			return workflowruntime.ApplyExternalOperationResult{}, invalid(errors.New("pending terminal intent fences external mutation"))
 		}
 	}
 	if currentOperation.Status != stepkind.ObservationPending || currentNode.Status != workflowruntime.NodeWaiting || currentNode.Wait != nil || currentNode.Lease != nil ||
@@ -279,6 +291,15 @@ func (s *Store) ApplyExternalOperation(ctx context.Context, request workflowrunt
 		s.attempts[nextAttempt.ID] = cloneAttempt(nextAttempt)
 	}
 	return workflowruntime.ApplyExternalOperationResult{Operation: cloneExternalOperation(nextOperation), Node: cloneNode(nextNode), Attempt: cloneAttempt(nextAttempt), Events: cloneEvents(events)}, nil
+}
+
+func (s *Store) pendingExternalCancellationLocked(attempt workflowruntime.AttemptID) bool {
+	id, err := cancellationIntentID(workflowruntime.CancellationExternalOperation, &attempt, "")
+	if err != nil {
+		return false
+	}
+	intent, exists := s.cancellationIntents[id]
+	return exists && intent.Status == workflowruntime.CancellationPending && intent.RunID == attempt.Invocation.RunID && intent.Kind == workflowruntime.CancellationExternalOperation && intent.Attempt != nil && *intent.Attempt == attempt
 }
 
 // RecoverExternalOperations returns pending work in deterministic storage

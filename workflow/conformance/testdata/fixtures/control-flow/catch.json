@@ -1,0 +1,12 @@
+{
+  "name": "catch",
+  "expect": "pass",
+  "input": {
+    "scenario": "catch",
+    "status": "failed",
+    "failure_code": "deploy_failed",
+    "catch": [{"errors": ["deploy_failed"], "targets": ["handler"], "bind_as": "deploy_error"}],
+    "want_outcome": "selected",
+    "want_targets": ["handler"]
+  }
+}

@@ -83,6 +83,7 @@ func TestNodePersistenceDefensiveCopies(t *testing.T) {
 	store := runtimetest.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-1", "execute")
+	createRun(t, store, id.RunID, now)
 	blocked := &workflowruntime.BlockedReason{Code: "dependency", Message: "waiting", Details: map[string]string{"node": "prepare"}}
 	_, err := store.CreateNodeInvocation(ctx, workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
 		ID: id, Status: workflowruntime.NodePending, CreatedAt: now, UpdatedAt: now,

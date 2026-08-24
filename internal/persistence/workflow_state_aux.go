@@ -22,33 +22,33 @@ func (s *WorkflowStateStore) SaveValues(ctx context.Context, request workflowrun
 	if err := values.ValidatePersistableSet(request.Values); err != nil {
 		return values.ValueSetRef{}, workflowInvalid(err)
 	}
-	ownerJSON, ownerEncodeErr := encodeWorkflowJSON(request.Owner)
-	if ownerEncodeErr != nil {
-		return values.ValueSetRef{}, ownerEncodeErr
-	}
-	valuesJSON, valuesEncodeErr := encodeWorkflowJSON(request.Values)
-	if valuesEncodeErr != nil {
-		return values.ValueSetRef{}, valuesEncodeErr
-	}
-	digest, digestErr := values.DigestValueSet(request.Values)
-	if digestErr != nil {
-		return values.ValueSetRef{}, workflowInvalid(digestErr)
-	}
-
 	var ref values.ValueSetRef
 	writeErr := s.write(ctx, "save workflow values", func(query workflowSQL) error {
-		result, err := query.ExecContext(ctx, `
-INSERT INTO workflow_value_sets(digest, owner_json, values_json)
-VALUES (?, ?, ?)`, digest, ownerJSON, valuesJSON)
-		if err != nil {
-			return fmt.Errorf("insert workflow value set: %w", err)
+		ownerInvocation := request.Owner.Invocation
+		if ownerInvocation == nil && request.Owner.Attempt != nil {
+			id := request.Owner.Attempt.Invocation
+			ownerInvocation = &id
 		}
-		sequence, err := result.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("read workflow value-set sequence: %w", err)
+		if ownerInvocation != nil {
+			allowed, err := workflowControlAdmissionAllowed(ctx, query, *ownerInvocation)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return workflowInvalid(errors.New("pending terminal intent fences non-finalizer value persistence"))
+			}
+		} else {
+			pending, err := workflowRunHasPendingTerminalIntent(ctx, query, request.Owner.RunID)
+			if err != nil {
+				return err
+			}
+			if pending {
+				return workflowInvalid(errors.New("pending terminal intent fences anonymous run-level value persistence"))
+			}
 		}
-		ref = values.ValueSetRef{ID: workflowValueID(sequence), Digest: digest}
-		return ref.Validate()
+		var err error
+		ref, err = insertWorkflowValues(ctx, query, request.Owner, request.Values)
+		return err
 	})
 	if writeErr != nil {
 		return values.ValueSetRef{}, writeErr
@@ -62,6 +62,43 @@ func (s *WorkflowStateStore) LoadValues(ctx context.Context, ref values.ValueSet
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}
+	return loadWorkflowValues(ctx, s.db, ref)
+}
+
+func insertWorkflowValues(ctx context.Context, query workflowSQL, owner workflowruntime.ValueOwner, set values.ValueSet) (values.ValueSetRef, error) {
+	if err := owner.Validate(); err != nil {
+		return values.ValueSetRef{}, workflowInvalid(err)
+	}
+	if err := values.ValidatePersistableSet(set); err != nil {
+		return values.ValueSetRef{}, workflowInvalid(err)
+	}
+	ownerJSON, err := encodeWorkflowJSON(owner)
+	if err != nil {
+		return values.ValueSetRef{}, err
+	}
+	valuesJSON, err := encodeWorkflowJSON(set)
+	if err != nil {
+		return values.ValueSetRef{}, err
+	}
+	digest, err := values.DigestValueSet(set)
+	if err != nil {
+		return values.ValueSetRef{}, workflowInvalid(err)
+	}
+	result, err := query.ExecContext(ctx, `
+INSERT INTO workflow_value_sets(digest, owner_json, values_json)
+VALUES (?, ?, ?)`, digest, ownerJSON, valuesJSON)
+	if err != nil {
+		return values.ValueSetRef{}, fmt.Errorf("insert workflow value set: %w", err)
+	}
+	sequence, err := result.LastInsertId()
+	if err != nil {
+		return values.ValueSetRef{}, fmt.Errorf("read workflow value-set sequence: %w", err)
+	}
+	ref := values.ValueSetRef{ID: workflowValueID(sequence), Digest: digest}
+	return ref, ref.Validate()
+}
+
+func loadWorkflowValues(ctx context.Context, query workflowSQL, ref values.ValueSetRef) (values.ValueSet, error) {
 	if err := ref.Validate(); err != nil {
 		return nil, workflowInvalid(err)
 	}
@@ -70,7 +107,7 @@ func (s *WorkflowStateStore) LoadValues(ctx context.Context, ref values.ValueSet
 		return nil, parseErr
 	}
 	var storedDigest, valuesJSON string
-	if err := s.db.QueryRowContext(ctx, `
+	if err := query.QueryRowContext(ctx, `
 SELECT digest, values_json FROM workflow_value_sets WHERE sequence = ?`, sequence).Scan(
 		&storedDigest, &valuesJSON,
 	); err != nil {

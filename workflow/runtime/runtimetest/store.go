@@ -37,6 +37,10 @@ type Store struct {
 	childRuns           map[workflowruntime.RunID][]workflowruntime.ChildRunLink
 	cancellationIntents map[string]workflowruntime.CancellationIntentSnapshot
 	cancellationKeys    map[string]cancellationRecord
+	controlDecisions    map[workflowruntime.ControlDecisionID]workflowruntime.ControlDecisionSnapshot
+	terminalIntents     map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot
+	terminalKeys        map[string]workflowruntime.RunID
+	controlCancelTrees  map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest
 
 	valueSets    map[string]storedValues
 	nextValueSet uint64
@@ -118,6 +122,10 @@ func NewStore() *Store {
 		childRuns:           make(map[workflowruntime.RunID][]workflowruntime.ChildRunLink),
 		cancellationIntents: make(map[string]workflowruntime.CancellationIntentSnapshot),
 		cancellationKeys:    make(map[string]cancellationRecord),
+		controlDecisions:    make(map[workflowruntime.ControlDecisionID]workflowruntime.ControlDecisionSnapshot),
+		terminalIntents:     make(map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot),
+		terminalKeys:        make(map[string]workflowruntime.RunID),
+		controlCancelTrees:  make(map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest),
 		valueSets:           make(map[string]storedValues),
 		plans:               make(map[string]workflowruntime.PlanRef),
 		events:              make(map[workflowruntime.RunID][]workflowruntime.Event),
@@ -189,6 +197,9 @@ func (s *Store) SaveRun(ctx context.Context, request workflowruntime.SaveRunRequ
 	if current.Generation != request.ExpectedGeneration {
 		return workflowruntime.RunSnapshot{}, casMismatch("run", request.ExpectedGeneration, current.Generation)
 	}
+	if intent, exists := s.terminalIntents[current.ID]; exists && intent.Status == workflowruntime.TerminalIntentPending {
+		return workflowruntime.RunSnapshot{}, invalid(errors.New("pending terminal intent owns run mutation"))
+	}
 	if request.Snapshot.Status != current.Status {
 		return workflowruntime.RunSnapshot{}, invalid(errors.New("run status changes require TransitionRun"))
 	}
@@ -197,6 +208,9 @@ func (s *Store) SaveRun(ctx context.Context, request workflowruntime.SaveRunRequ
 	}
 	if request.Snapshot.Plan != current.Plan {
 		return workflowruntime.RunSnapshot{}, invalid(errors.New("run plan reference is immutable"))
+	}
+	if !equalValueSetRef(request.Snapshot.Inputs, current.Inputs) {
+		return workflowruntime.RunSnapshot{}, invalid(errors.New("run inputs are immutable after creation"))
 	}
 	next := cloneRun(request.Snapshot)
 	next.Generation = current.Generation + 1
@@ -229,6 +243,16 @@ func (s *Store) CreateNodeInvocation(ctx context.Context, request workflowruntim
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	parent, exists := s.runs[next.ID.RunID]
+	if !exists {
+		return workflowruntime.NodeInvocationSnapshot{}, fmt.Errorf("%w: parent run", workflowruntime.ErrNotFound)
+	}
+	if !parent.Status.Active() {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("terminal run fences node creation"))
+	}
+	if intent, exists := s.terminalIntents[next.ID.RunID]; exists && intent.Status == workflowruntime.TerminalIntentPending {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("pending terminal intent fences node creation"))
+	}
 	if _, ok := s.nodes[next.ID]; ok {
 		return workflowruntime.NodeInvocationSnapshot{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrAlreadyExists)
 	}
@@ -263,6 +287,9 @@ func (s *Store) SaveNodeInvocation(ctx context.Context, request workflowruntime.
 	}
 	if current.Generation != request.ExpectedGeneration {
 		return workflowruntime.NodeInvocationSnapshot{}, casMismatch("node invocation", request.ExpectedGeneration, current.Generation)
+	}
+	if !s.controlAdmissionAllowedLocked(current.ID) {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("pending terminal intent fences non-finalizer node save"))
 	}
 	if request.Snapshot.Status != current.Status || !equalBlockedReason(request.Snapshot.Blocked, current.Blocked) {
 		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("node lifecycle changes require TransitionNode"))
@@ -352,6 +379,19 @@ func (s *Store) SaveValues(ctx context.Context, request workflowruntime.SaveValu
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	ownerInvocation := request.Owner.Invocation
+	if ownerInvocation == nil && request.Owner.Attempt != nil {
+		id := request.Owner.Attempt.Invocation
+		ownerInvocation = &id
+	}
+	if ownerInvocation != nil && !s.controlAdmissionAllowedLocked(*ownerInvocation) {
+		return values.ValueSetRef{}, invalid(errors.New("pending terminal intent fences non-finalizer value persistence"))
+	}
+	if ownerInvocation == nil {
+		if intent, exists := s.terminalIntents[request.Owner.RunID]; exists && intent.Status == workflowruntime.TerminalIntentPending {
+			return values.ValueSetRef{}, invalid(errors.New("pending terminal intent fences anonymous run-level value persistence"))
+		}
+	}
 	s.nextValueSet++
 	id := fmt.Sprintf("values-%012d", s.nextValueSet)
 	ref, err := values.NewValueSetRef(id, copySet)
@@ -423,6 +463,26 @@ func (s *Store) AppendEvent(ctx context.Context, request workflowruntime.AppendE
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	candidate := workflowruntime.Event{
+		Sequence: 1, RunID: request.RunID, Invocation: cloneInvocationID(request.Invocation), Attempt: cloneAttemptID(request.Attempt),
+		Type: request.Type, OccurredAt: request.OccurredAt, Attributes: cloneStringMap(request.Attributes), Values: cloneValueSetRef(request.Values),
+		Redaction: request.Redaction, Retention: request.Retention,
+	}
+	if err := candidate.Validate(); err != nil {
+		return workflowruntime.Event{}, invalid(err)
+	}
+	owner := candidate.Invocation
+	if owner == nil && candidate.Attempt != nil {
+		id := candidate.Attempt.Invocation
+		owner = &id
+	}
+	if owner != nil {
+		if !s.controlAdmissionAllowedLocked(*owner) {
+			return workflowruntime.Event{}, invalid(errors.New("pending terminal intent fences non-finalizer event persistence"))
+		}
+	} else if intent, exists := s.terminalIntents[candidate.RunID]; exists && intent.Status == workflowruntime.TerminalIntentPending {
+		return workflowruntime.Event{}, invalid(errors.New("pending terminal intent fences anonymous run-level event persistence"))
+	}
 	return s.appendEventLocked(request)
 }
 
@@ -478,6 +538,9 @@ func (s *Store) ClaimNode(ctx context.Context, request workflowruntime.ClaimNode
 	defer s.mu.Unlock()
 	if prior, ok := s.claims[request.IdempotencyKey]; ok {
 		if equalClaimNodeRequest(prior.request, request) {
+			if current, exists := s.nodes[request.InvocationID]; exists && !s.controlAdmissionAllowedLocked(current.ID) {
+				return workflowruntime.ClaimResult{Acquired: false, Replayed: true}, nil
+			}
 			result := cloneClaimResult(prior.result)
 			result.Replayed = true
 			return result, nil
@@ -497,6 +560,11 @@ func (s *Store) ClaimNode(ctx context.Context, request workflowruntime.ClaimNode
 		return result, nil
 	}
 	if run, exists := s.runs[current.ID.RunID]; exists && !run.Status.Active() {
+		result := workflowruntime.ClaimResult{Acquired: false}
+		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
+		return result, nil
+	}
+	if !s.controlAdmissionAllowedLocked(current.ID) {
 		result := workflowruntime.ClaimResult{Acquired: false}
 		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
 		return result, nil
@@ -542,6 +610,9 @@ func (s *Store) RenewNodeLease(ctx context.Context, request workflowruntime.Rene
 	current, ok := s.nodes[request.InvocationID]
 	if !ok {
 		return workflowruntime.ClaimLease{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
+	}
+	if !s.controlAdmissionAllowedLocked(current.ID) {
+		return workflowruntime.ClaimLease{}, invalid(errors.New("pending terminal intent fences lease renewal"))
 	}
 	if !matchesLease(current.Lease, request.Owner, request.Token, request.Generation) {
 		return workflowruntime.ClaimLease{}, workflowruntime.ErrClaimMismatch

@@ -50,6 +50,33 @@ func TestExpressionEngineEvaluatesPredicatesBindingsAndFanOut(t *testing.T) {
 	}
 }
 
+func TestExpressionEngineConservativelyRejectsSecretLocals(t *testing.T) {
+	ref, err := ParseSecretRef("secret://project/control#token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecretRef(ref, Metadata{
+		Producer:  Producer{Kind: "test", Reference: "secret-local", Output: "value"},
+		MediaType: "application/json", Redaction: RedactionSecret, Retention: RetentionRun,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary := expressionValue(t, "ok")
+	engine := NewExpressionEngine()
+	for name, expression := range map[string]string{
+		"used":      `secret_local == "redacted"`,
+		"unrelated": `ordinary_local == "ok"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := engine.EvaluateBool(graph.Expression{Text: expression}, ExpressionContext{Locals: ValueSet{"secret_local": secret, "ordinary_local": ordinary}}, ExpressionOptions{})
+			if !errors.Is(err, ErrSecretDerivation) {
+				t.Fatalf("secret local evaluation error = %v", err)
+			}
+		})
+	}
+}
+
 func TestExpressionEngineTransformMapFilterAndAggregate(t *testing.T) {
 	t.Parallel()
 
@@ -123,6 +150,29 @@ func TestExpressionEngineStepItemsAndArtifactReferences(t *testing.T) {
 	want := map[string]any{"failed": "second", "uri": "artifact://reports/run-1/report.pdf"}
 	if !reflect.DeepEqual(result, want) {
 		t.Fatalf("step-item/artifact result = %#v, want %#v", result, want)
+	}
+}
+
+func TestExpressionEngineTypedErrorsAndValidatedLocals(t *testing.T) {
+	t.Parallel()
+	errorValue := expressionValue(t, map[string]any{"code": "deadline", "attempt": "1"})
+	context := ExpressionContext{
+		Steps:  map[string]StepContext{"deploy": {Status: "timed_out", Error: &errorValue}},
+		Locals: ValueSet{"create_error": errorValue},
+	}
+	result, err := NewExpressionEngine().EvaluateRaw(graph.Expression{Text: `{step: steps.deploy.error.code, local: create_error.code}`}, context, ExpressionOptions{})
+	if err != nil || !reflect.DeepEqual(result, map[string]any{"step": "deadline", "local": "deadline"}) {
+		t.Fatalf("typed error expression = %#v, %v", result, err)
+	}
+	for _, name := range []string{"inputs", "create-error", "Create_error", ""} {
+		if err := ValidateExpressionLocalName(name); err == nil {
+			t.Errorf("ValidateExpressionLocalName(%q) accepted", name)
+		}
+	}
+	shadow := context
+	shadow.Locals = ValueSet{"run": errorValue}
+	if _, err := NewExpressionEngine().EvaluateRaw(graph.Expression{Text: "run.code"}, shadow, ExpressionOptions{}); err == nil {
+		t.Fatal("reserved local shadow was accepted")
 	}
 }
 

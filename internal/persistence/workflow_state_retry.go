@@ -52,6 +52,13 @@ func (s *WorkflowStateStore) ScheduleNodeRetry(ctx context.Context, request work
 		if !run.Status.Active() {
 			return workflowInvalid(errors.New("terminal run cannot schedule retry"))
 		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, request.Activation.Attempt.Invocation)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences retry scheduling"))
+		}
 		node, nodeErr := loadWorkflowNode(ctx, query, request.Activation.Attempt.Invocation)
 		if nodeErr != nil {
 			return nodeErr
@@ -179,6 +186,17 @@ func (s *WorkflowStateStore) ActivateNodeRetry(ctx context.Context, request work
 			if decodeErr := decodeWorkflowJSON("retry activation result", priorResult, &result); decodeErr != nil {
 				return decodeErr
 			}
+			activation, err := loadWorkflowRetryActivation(ctx, query, request.ActivationID)
+			if err != nil {
+				return err
+			}
+			allowed, err := workflowControlAdmissionAllowed(ctx, query, activation.Attempt.Invocation)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return workflowInvalid(errors.New("pending terminal intent fences retry activation replay"))
+			}
 			result.Outcome = workflowruntime.IdempotencyReplayed
 			return nil
 		}
@@ -202,6 +220,13 @@ func (s *WorkflowStateStore) ActivateNodeRetry(ctx context.Context, request work
 		}
 		if !run.Status.Active() {
 			return workflowInvalid(errors.New("terminal run fences retry activation"))
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, activation.Attempt.Invocation)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences retry activation"))
 		}
 		node, nodeErr := loadWorkflowNode(ctx, query, activation.Attempt.Invocation)
 		if nodeErr != nil {

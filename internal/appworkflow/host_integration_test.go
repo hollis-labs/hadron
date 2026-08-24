@@ -3,6 +3,7 @@ package appworkflow_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -254,6 +255,338 @@ func TestHostCancellationReplaysOmittedTimeExactly(t *testing.T) {
 	}
 }
 
+func TestHostCancellationWithFinalizersFencesProgressesAndReplays(t *testing.T) {
+	plan := compileFinalizerHostPlan(t)
+	fixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, plan)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+	start := fixture.startRequest("run-finalizer-cancel", "start-finalizer-cancel", "user:cancel")
+	if _, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:cancel"), start); err != nil {
+		t.Fatal(err)
+	}
+	command := appworkflow.CancelRunRequest{RunID: start.RunID, IdempotencyKey: "cancel-with-finalizer", Reason: "operator request"}
+	first, failures, err := fixture.host.CancelRun(t.Context(), command)
+	if err != nil || len(failures) != 0 || first.Outcome != workflowruntime.IdempotencyApplied || !first.Run.Status.Active() {
+		t.Fatalf("CancelRun with finalizer = %#v failures=%v, %v", first, failures, err)
+	}
+	work, _ := fixture.state.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: start.RunID, NodeID: "echo"})
+	cleanupID := workflowruntime.NodeInvocationID{RunID: start.RunID, NodeID: "cleanup"}
+	cleanup, _ := fixture.state.LoadNodeInvocation(t.Context(), cleanupID)
+	if work.Status != workflowruntime.NodeCanceled || cleanup.Status != workflowruntime.NodePending {
+		t.Fatalf("cancellation fence = work %#v cleanup %#v", work, cleanup)
+	}
+	replayed, failures, err := fixture.host.CancelRun(t.Context(), command)
+	if err != nil || len(failures) != 0 || replayed.Outcome != workflowruntime.IdempotencyReplayed || replayed.Run.Generation != first.Run.Generation {
+		t.Fatalf("finalizer cancellation replay = %#v failures=%v, %v", replayed, failures, err)
+	}
+	coordinator := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil)
+	progress, err := coordinator.ProgressFinally(t.Context(), plan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, fixture.now.Add(time.Second))
+	if err != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
+		t.Fatalf("ProgressFinally = %#v, %v", progress, err)
+	}
+	skipped, err := fixture.state.TransitionNode(t.Context(), workflowruntime.NodeTransitionRequest{InvocationID: cleanupID, ExpectedGeneration: progress.Snapshot.Generation, To: workflowruntime.NodeSkipped, At: fixture.now.Add(2 * time.Second)})
+	if err != nil || skipped.Snapshot.Status != workflowruntime.NodeSkipped {
+		t.Fatalf("skip cleanup = %#v, %v", skipped, err)
+	}
+	completed, intent, err := coordinator.ReconcileRunCompletion(t.Context(), plan.Graph, start.RunID, "cancel-with-finalizer", fixture.now.Add(3*time.Second))
+	if err != nil || completed.Status != workflowruntime.RunCanceled || intent == nil || intent.Status != workflowruntime.TerminalIntentCompleted {
+		t.Fatalf("complete canceled cleanup = run %#v intent %#v, %v", completed, intent, err)
+	}
+}
+
+func TestHostFinalizerCancellationReconcilesRunningAttemptBeforeCleanup(t *testing.T) {
+	plan := compileFinalizerHostPlan(t)
+	fixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, plan)
+	var canceled atomic.Int32
+	identity := identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+		return hoststate.IdentityBinding{Principal: "test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+	})
+	host, hostErr := appworkflow.New(appworkflow.Options{
+		State: fixture.state, Journal: fixture.journal, Definitions: definitionProvider{plan: plan}, Identity: identity,
+		Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "allow"}, nil
+		}),
+		Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: fixture.scheduler, Artifacts: fixture.artifacts,
+		Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now }), RecoveryInterval: time.Hour,
+		Cancellation: &workflowruntime.CancellationCoordinator{Attempts: hostAttemptCancelerFunc(func(_ context.Context, attempt workflowruntime.AttemptSnapshot) error {
+			if attempt.ID.Invocation.NodeID != "echo" {
+				t.Fatalf("CancelAttempt attempt = %#v", attempt.ID)
+			}
+			canceled.Add(1)
+			return nil
+		})},
+		ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }),
+	})
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
+	if err := host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
+	start := fixture.startRequest("run-finalizer-running-cancel", "start-finalizer-running-cancel", "test")
+	if _, err := host.StartRun(t.Context(), start); err != nil {
+		t.Fatal(err)
+	}
+	workID := workflowruntime.NodeInvocationID{RunID: start.RunID, NodeID: "echo"}
+	work, err := fixture.state.LoadNodeInvocation(t.Context(), workID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := fixture.state.ClaimNode(t.Context(), workflowruntime.ClaimNodeRequest{InvocationID: workID, ExpectedClaimGeneration: work.ClaimGeneration, Owner: "host-cancel", Token: "host-cancel-token", IdempotencyKey: "host-cancel-claim", Now: fixture.now, LeaseUntil: fixture.now.Add(time.Minute)})
+	if err != nil || !claim.Acquired || claim.Lease == nil {
+		t.Fatalf("ClaimNode = %#v, %v", claim, err)
+	}
+	work, err = fixture.state.LoadNodeInvocation(t.Context(), workID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := workflowruntime.ClaimProof{Owner: claim.Lease.Owner, Token: claim.Lease.Token, Generation: claim.Lease.Generation}
+	started, err := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: workID, ExpectedNodeGeneration: work.Generation, Claim: proof, Executor: workflowruntime.ExecutorMetadata{Kind: transform.Name, Version: transform.Version, Target: "local"}, At: fixture.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, failures, err := host.CancelRun(t.Context(), appworkflow.CancelRunRequest{RunID: start.RunID, IdempotencyKey: "cancel-running-with-finalizer", Reason: "operator request", At: fixture.now.Add(time.Second)})
+	if err != nil || len(failures) != 0 || result.Run.Status != workflowruntime.RunRunning || canceled.Load() != 1 {
+		t.Fatalf("CancelRun = %#v failures=%v canceled=%d, %v", result, failures, canceled.Load(), err)
+	}
+	resolvedAttempt, err := fixture.state.LoadAttempt(t.Context(), started.Attempt.ID)
+	if err != nil || resolvedAttempt.Status != workflowruntime.NodeCanceled || resolvedAttempt.FinishedAt.IsZero() {
+		t.Fatalf("resolved attempt = %#v, %v", resolvedAttempt, err)
+	}
+	resolvedNode, err := fixture.state.LoadNodeInvocation(t.Context(), workID)
+	if err != nil || resolvedNode.Status != workflowruntime.NodeCanceled {
+		t.Fatalf("resolved node = %#v, %v", resolvedNode, err)
+	}
+	pending, err := fixture.state.RecoverCancellationIntents(t.Context(), workflowruntime.CancellationIntentQuery{RunID: start.RunID})
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending cancellation intents = %#v, %v", pending, err)
+	}
+	cleanupID := workflowruntime.NodeInvocationID{RunID: start.RunID, NodeID: "cleanup"}
+	progress, err := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil).ProgressFinally(t.Context(), plan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, fixture.now.Add(2*time.Second))
+	if err != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
+		t.Fatalf("ProgressFinally after reconciled attempt = %#v, %v", progress, err)
+	}
+}
+
+func TestHostFinalizerCancellationFailsClosedWithoutControlFlowStore(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	plan := compileFinalizerHostPlan(t)
+	*fixture.plan = *plan
+	stateOnly := &stateStoreOnly{StateStore: fixture.state}
+	identity := identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+		return hoststate.IdentityBinding{Principal: "test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+	})
+	host, err := appworkflow.New(appworkflow.Options{
+		State: stateOnly, Journal: fixture.journal, Definitions: definitionProvider{plan: plan}, Identity: identity,
+		Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "allow"}, nil
+		}),
+		Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: fixture.scheduler, Artifacts: fixture.artifacts,
+		Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now }), RecoveryInterval: time.Hour,
+		ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
+	request := fixture.startRequest("run-missing-control", "start-missing-control", "test")
+	if _, err := host.StartRun(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := host.CancelRun(t.Context(), appworkflow.CancelRunRequest{RunID: request.RunID, IdempotencyKey: "cancel-missing-control"}); !errors.Is(err, appworkflow.ErrInvalidHost) {
+		t.Fatalf("missing ControlFlowStore cancellation = %v", err)
+	}
+	run, _ := fixture.state.LoadRun(t.Context(), request.RunID)
+	if run.Status != workflowruntime.RunRunning {
+		t.Fatalf("missing-control cancellation mutated run = %#v", run)
+	}
+}
+
+func TestHostCancellationLoadsPinnedChildStartGraphAndPreservesChildCleanup(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+	rootRequest := fixture.startRequest("run-parent-cancel", "start-parent-cancel", "user:parent")
+	if _, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:parent"), rootRequest); err != nil {
+		t.Fatal(err)
+	}
+	parent := workflowruntime.NodeInvocationID{RunID: rootRequest.RunID, NodeID: "echo"}
+	parentNode, _ := fixture.state.LoadNodeInvocation(t.Context(), parent)
+	claimed, claimErr := fixture.state.ClaimNode(t.Context(), workflowruntime.ClaimNodeRequest{InvocationID: parent, ExpectedClaimGeneration: parentNode.ClaimGeneration, Owner: "host-tree-test", Token: "host-tree-token", IdempotencyKey: "host-tree-claim", Now: fixture.now, LeaseUntil: fixture.now.Add(time.Minute)})
+	if claimErr != nil || !claimed.Acquired || claimed.Lease == nil {
+		t.Fatalf("claim parent call = %#v, %v", claimed, claimErr)
+	}
+	parentNode, _ = fixture.state.LoadNodeInvocation(t.Context(), parent)
+	proof := workflowruntime.ClaimProof{Owner: claimed.Lease.Owner, Token: claimed.Lease.Token, Generation: claimed.Lease.Generation}
+	started, startErr := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: parent, ExpectedNodeGeneration: parentNode.Generation, Claim: proof, Executor: workflowruntime.ExecutorMetadata{Kind: transform.Name, Version: transform.Version, Target: "local"}, At: fixture.now})
+	if startErr != nil {
+		t.Fatal(startErr)
+	}
+	childPlan := compileFinalizerHostPlan(t)
+	childRequest := childRecoveryRequest(t, childPlan, parent)
+	childRequest.ChildRunID = "cancel-child-with-cleanup"
+	childRequest.IdempotencyKey = "cancel-child-with-cleanup-start"
+	child, childErr := fixture.journal.StartChildRun(t.Context(), childRequest)
+	if childErr != nil || child.Run.Status != workflowruntime.RunPending {
+		t.Fatalf("StartChildRun = %#v, %v", child, childErr)
+	}
+	if _, err := fixture.state.FinishNodeAttempt(t.Context(), workflowruntime.FinishNodeAttemptRequest{InvocationID: parent, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: workflowruntime.NodeSucceeded, NextNodeStatus: workflowruntime.NodeSucceeded, At: fixture.now.Add(time.Nanosecond)}); err != nil {
+		t.Fatal(err)
+	}
+	childBase := child.Run.UpdatedAt
+	running, transitionErr := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: child.Run.ID, ExpectedGeneration: child.Run.Generation, To: workflowruntime.RunRunning, At: childBase.Add(time.Nanosecond)})
+	if transitionErr != nil {
+		t.Fatal(transitionErr)
+	}
+	for _, node := range childPlan.Graph.Nodes {
+		if _, err := fixture.state.CreateNodeInvocation(t.Context(), workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{ID: workflowruntime.NodeInvocationID{RunID: child.Run.ID, NodeID: node.ID}, Status: workflowruntime.NodePending, CreatedAt: childBase.Add(time.Nanosecond), UpdatedAt: childBase.Add(time.Nanosecond)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, failures, cancelErr := fixture.host.CancelRun(t.Context(), appworkflow.CancelRunRequest{RunID: rootRequest.RunID, IdempotencyKey: "cancel-parent-tree", Reason: "parent canceled", At: childBase.Add(time.Second)})
+	if cancelErr != nil || len(failures) != 0 || result.Run.Status != workflowruntime.RunCanceled {
+		t.Fatalf("CancelRun tree = %#v failures=%v, %v", result, failures, cancelErr)
+	}
+	childAfter, _ := fixture.state.LoadRun(t.Context(), child.Run.ID)
+	workID := workflowruntime.NodeInvocationID{RunID: child.Run.ID, NodeID: "echo"}
+	cleanupID := workflowruntime.NodeInvocationID{RunID: child.Run.ID, NodeID: "cleanup"}
+	work, _ := fixture.state.LoadNodeInvocation(t.Context(), workID)
+	cleanup, _ := fixture.state.LoadNodeInvocation(t.Context(), cleanupID)
+	if childAfter.Generation != running.Snapshot.Generation+1 || !childAfter.Status.Active() || work.Status != workflowruntime.NodeCanceled || cleanup.Status != workflowruntime.NodePending {
+		t.Fatalf("child cleanup fence = run %#v work %#v cleanup %#v", childAfter, work, cleanup)
+	}
+	coordinator := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil)
+	progress, progressErr := coordinator.ProgressFinally(t.Context(), childPlan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, childBase.Add(2*time.Second))
+	if progressErr != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
+		t.Fatalf("child ProgressFinally = %#v, %v", progress, progressErr)
+	}
+	if _, err := fixture.state.TransitionNode(t.Context(), workflowruntime.NodeTransitionRequest{InvocationID: cleanupID, ExpectedGeneration: progress.Snapshot.Generation, To: workflowruntime.NodeSkipped, At: childBase.Add(3 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	completed, intent, completionErr := coordinator.ReconcileRunCompletion(t.Context(), childPlan.Graph, child.Run.ID, "cancel-tree:"+string(child.Run.ID), childBase.Add(4*time.Second))
+	if completionErr != nil || completed.Status != workflowruntime.RunCanceled || intent == nil || intent.Status != workflowruntime.TerminalIntentCompleted {
+		t.Fatalf("child cleanup completion = run %#v intent %#v, %v", completed, intent, completionErr)
+	}
+}
+
+func TestHostCancellationRefreshesEntireTreeAfterCASReachabilityChange(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	state := &injectTreeCASStore{StateStore: fixture.state, ControlFlowStore: fixture.state}
+	host, hostErr := appworkflow.New(appworkflow.Options{
+		State: state, Journal: fixture.journal, Definitions: definitionProvider{plan: fixture.plan},
+		Identity: identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+			return hoststate.IdentityBinding{Principal: "test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+		}),
+		Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "allow"}, nil
+		}),
+		Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: fixture.scheduler, Artifacts: fixture.artifacts,
+		Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now }), RecoveryInterval: time.Hour,
+		ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }),
+	})
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
+	if err := host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
+	root := fixture.startRequest("run-tree-refresh", "start-tree-refresh", "test")
+	if _, err := host.StartRun(t.Context(), root); err != nil {
+		t.Fatal(err)
+	}
+	parent := workflowruntime.NodeInvocationID{RunID: root.RunID, NodeID: "echo"}
+	parentNode, _ := fixture.state.LoadNodeInvocation(t.Context(), parent)
+	claim, err := fixture.state.ClaimNode(t.Context(), workflowruntime.ClaimNodeRequest{InvocationID: parent, ExpectedClaimGeneration: parentNode.ClaimGeneration, Owner: "tree-refresh", Token: "tree-refresh-token", IdempotencyKey: "tree-refresh-claim", Now: fixture.now, LeaseUntil: fixture.now.Add(time.Minute)})
+	if err != nil || !claim.Acquired || claim.Lease == nil {
+		t.Fatalf("claim refresh parent = %#v, %v", claim, err)
+	}
+	parentNode, _ = fixture.state.LoadNodeInvocation(t.Context(), parent)
+	proof := workflowruntime.ClaimProof{Owner: claim.Lease.Owner, Token: claim.Lease.Token, Generation: claim.Lease.Generation}
+	started, err := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: parent, ExpectedNodeGeneration: parentNode.Generation, Claim: proof, Executor: workflowruntime.ExecutorMetadata{Kind: transform.Name, Version: transform.Version, Target: "local"}, At: fixture.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childPlan := compileFinalizerHostPlan(t)
+	childRequest := childRecoveryRequest(t, childPlan, parent)
+	childRequest.ChildRunID = "refresh-child"
+	childRequest.IdempotencyKey = "refresh-child-start"
+	var externalAttempt workflowruntime.AttemptID
+	state.inject = func() error {
+		child, startErr := fixture.journal.StartChildRun(context.Background(), childRequest)
+		if startErr != nil {
+			return startErr
+		}
+		if _, finishErr := fixture.state.FinishNodeAttempt(context.Background(), workflowruntime.FinishNodeAttemptRequest{InvocationID: parent, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: workflowruntime.NodeSucceeded, NextNodeStatus: workflowruntime.NodeSucceeded, At: fixture.now.Add(time.Nanosecond)}); finishErr != nil {
+			return finishErr
+		}
+		at := child.Run.UpdatedAt.Add(time.Nanosecond)
+		if _, transitionErr := fixture.state.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: child.Run.ID, ExpectedGeneration: child.Run.Generation, To: workflowruntime.RunRunning, At: at}); transitionErr != nil {
+			return transitionErr
+		}
+		for _, node := range childPlan.Graph.Nodes {
+			if _, createErr := fixture.state.CreateNodeInvocation(context.Background(), workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{ID: workflowruntime.NodeInvocationID{RunID: child.Run.ID, NodeID: node.ID}, Status: workflowruntime.NodePending, CreatedAt: at, UpdatedAt: at}}); createErr != nil {
+				return createErr
+			}
+		}
+		workID := workflowruntime.NodeInvocationID{RunID: child.Run.ID, NodeID: "echo"}
+		work, loadErr := fixture.state.LoadNodeInvocation(context.Background(), workID)
+		if loadErr != nil {
+			return loadErr
+		}
+		ready, readyErr := fixture.state.TransitionNode(context.Background(), workflowruntime.NodeTransitionRequest{InvocationID: workID, ExpectedGeneration: work.Generation, To: workflowruntime.NodeReady, At: at.Add(time.Nanosecond)})
+		if readyErr != nil {
+			return readyErr
+		}
+		childClaim, claimErr := fixture.state.ClaimNode(context.Background(), workflowruntime.ClaimNodeRequest{InvocationID: workID, ExpectedClaimGeneration: ready.Snapshot.ClaimGeneration, Owner: "child-external", Token: "child-external-token", IdempotencyKey: "child-external-claim", Now: at.Add(2 * time.Nanosecond), LeaseUntil: at.Add(time.Minute)})
+		if claimErr != nil || !childClaim.Acquired || childClaim.Lease == nil {
+			return fmt.Errorf("claim child external: %#v: %w", childClaim, claimErr)
+		}
+		work, loadErr = fixture.state.LoadNodeInvocation(context.Background(), workID)
+		if loadErr != nil {
+			return loadErr
+		}
+		childProof := workflowruntime.ClaimProof{Owner: childClaim.Lease.Owner, Token: childClaim.Lease.Token, Generation: childClaim.Lease.Generation}
+		childStarted, startErr := fixture.state.StartNodeAttempt(context.Background(), workflowruntime.StartNodeAttemptRequest{InvocationID: workID, ExpectedNodeGeneration: work.Generation, Claim: childProof, Executor: workflowruntime.ExecutorMetadata{Kind: transform.Name, Version: transform.Version, Target: "local"}, At: at.Add(2 * time.Nanosecond)})
+		if startErr != nil {
+			return startErr
+		}
+		externalAttempt = childStarted.Attempt.ID
+		_, suspendErr := fixture.state.SuspendExternalOperation(context.Background(), workflowruntime.SuspendExternalOperationRequest{
+			Operation:              workflowruntime.ExternalOperationSnapshot{Attempt: externalAttempt, Ref: stepkind.ExternalOperationRef{Kind: "test-job", ID: "refresh-job"}, Invocation: stepkind.Invocation{Identity: stepkind.InvocationIdentity{RunID: string(child.Run.ID), NodeID: workID.NodeID, Attempt: externalAttempt.Number}, Config: graph.Config{}, Inputs: values.ValueSet{}, IdempotencyKey: "refresh-job-execute"}, Status: stepkind.ObservationPending},
+			ExpectedNodeGeneration: childStarted.Node.Generation, ExpectedAttemptGeneration: childStarted.Attempt.Generation, Claim: childProof, At: at.Add(3 * time.Nanosecond),
+		})
+		if suspendErr != nil {
+			return suspendErr
+		}
+		return nil
+	}
+	result, failures, err := host.CancelRun(t.Context(), appworkflow.CancelRunRequest{RunID: root.RunID, IdempotencyKey: "tree-refresh-cancel", Reason: "cancel", At: time.Now().UTC().Add(time.Hour)})
+	if err != nil || len(failures) != 1 || !errors.Is(failures[0], workflowruntime.ErrCancellationUnsupported) || result.Run.Status != workflowruntime.RunCanceled || state.calls.Load() != 2 {
+		t.Fatalf("refreshed cancellation = %#v failures=%v calls=%d, %v", result, failures, state.calls.Load(), err)
+	}
+	intent, err := fixture.state.LoadTerminalIntent(t.Context(), childRequest.ChildRunID)
+	if err != nil || intent.Status != workflowruntime.TerminalIntentPending || len(intent.Finalizers) != 1 {
+		t.Fatalf("refreshed child intent = %#v, %v", intent, err)
+	}
+	operation, err := fixture.state.LoadExternalOperation(t.Context(), externalAttempt)
+	if err != nil || operation.Status != stepkind.ObservationPending || operation.CancelRequestedAt.IsZero() {
+		t.Fatalf("recoverable child external cancellation = %#v, %v", operation, err)
+	}
+	if _, err := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil).ProgressFinally(t.Context(), childPlan.Graph, workflowruntime.NodeInvocationID{RunID: childRequest.ChildRunID, NodeID: "cleanup"}, values.ExpressionContext{}, values.ExpressionOptions{}, time.Now().UTC().Add(2*time.Hour)); !errors.Is(err, workflowruntime.ErrControlFlowPending) {
+		t.Fatalf("child cleanup ignored pending external cancellation = %v", err)
+	}
+}
+
 func TestHostRestartRecoversJournaledCancellation(t *testing.T) {
 	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
 	if err := fixture.host.Start(t.Context()); err != nil {
@@ -281,6 +614,111 @@ func TestHostRestartRecoversJournaledCancellation(t *testing.T) {
 	pending, err := fixture.journal.ListPendingCancellations(t.Context(), 0)
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("pending cancellations = %#v, %v", pending, err)
+	}
+}
+
+func TestHostRestartMaterializesPendingChildBeforeCancellationTree(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	root := fixture.startRequest("run-recover-child-tree", "start-recover-child-tree", "test")
+	if _, err := fixture.host.StartRun(authenticatedContext(t.Context(), "test"), root); err != nil {
+		t.Fatal(err)
+	}
+	parentID := workflowruntime.NodeInvocationID{RunID: root.RunID, NodeID: "echo"}
+	parent, loadErr := fixture.state.LoadNodeInvocation(t.Context(), parentID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	claim, claimErr := fixture.state.ClaimNode(t.Context(), workflowruntime.ClaimNodeRequest{InvocationID: parentID, ExpectedClaimGeneration: parent.ClaimGeneration, Owner: "child-recovery", Token: "child-recovery-token", IdempotencyKey: "child-recovery-claim", Now: fixture.now, LeaseUntil: fixture.now.Add(time.Minute)})
+	if claimErr != nil || !claim.Acquired || claim.Lease == nil {
+		t.Fatalf("ClaimNode = %#v, %v", claim, claimErr)
+	}
+	parent, loadErr = fixture.state.LoadNodeInvocation(t.Context(), parentID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	proof := workflowruntime.ClaimProof{Owner: claim.Lease.Owner, Token: claim.Lease.Token, Generation: claim.Lease.Generation}
+	started, startErr := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: parentID, ExpectedNodeGeneration: parent.Generation, Claim: proof, Executor: workflowruntime.ExecutorMetadata{Kind: transform.Name, Version: transform.Version, Target: "local"}, At: fixture.now})
+	if startErr != nil {
+		t.Fatal(startErr)
+	}
+	childPlan := compileFinalizerHostPlan(t)
+	childRequest := childRecoveryRequest(t, childPlan, parentID)
+	childRequest.ChildRunID = "unmaterialized-child-with-cleanup"
+	childRequest.IdempotencyKey = "unmaterialized-child-start"
+	child, childErr := fixture.journal.StartChildRun(t.Context(), childRequest)
+	if childErr != nil || child.Run.Status != workflowruntime.RunPending {
+		t.Fatalf("StartChildRun = %#v, %v", child, childErr)
+	}
+	if _, err := fixture.state.FinishNodeAttempt(t.Context(), workflowruntime.FinishNodeAttemptRequest{InvocationID: parentID, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: workflowruntime.NodeSucceeded, NextNodeStatus: workflowruntime.NodeSucceeded, At: fixture.now.Add(time.Nanosecond)}); err != nil {
+		t.Fatal(err)
+	}
+	cancellationAt := child.Run.UpdatedAt.Add(time.Second)
+	if _, _, err := fixture.journal.BindCancellation(t.Context(), hoststate.BindCancellationRequest{Intent: hoststate.CancellationIntent{RunID: root.RunID, IdempotencyKey: "recover-child-tree-cancel", Reason: "restart cancellation", RequestedAt: cancellationAt}, DefaultAt: cancellationAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.host.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	var materialized atomic.Int32
+	identity := identityProviderFunc(func(context.Context, appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+		return hoststate.IdentityBinding{Principal: "test", SourceAuthority: "test", Trust: "trusted", Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local"}, nil
+	})
+	restarted, hostErr := appworkflow.New(appworkflow.Options{
+		State: fixture.state, Journal: fixture.journal, Definitions: definitionProvider{plan: fixture.plan}, Identity: identity,
+		Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "allow"}, nil
+		}),
+		Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: fixture.scheduler, Artifacts: fixture.artifacts,
+		Clock: appworkflow.ClockFunc(func() time.Time { return cancellationAt.Add(time.Second) }), RecoveryInterval: time.Hour,
+		ChildRuns: childMaterializerFunc(func(ctx context.Context, request calladapter.ChildRunRequest) error {
+			materialized.Add(1)
+			run, loadErr := fixture.state.LoadRun(ctx, request.ChildRunID)
+			if loadErr != nil {
+				return loadErr
+			}
+			at := run.UpdatedAt.Add(time.Nanosecond)
+			for _, node := range request.Definition.Graph.Nodes {
+				if _, createErr := fixture.state.CreateNodeInvocation(ctx, workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{ID: workflowruntime.NodeInvocationID{RunID: run.ID, NodeID: node.ID}, Status: workflowruntime.NodePending, CreatedAt: at, UpdatedAt: at}}); createErr != nil {
+					return createErr
+				}
+			}
+			_, transitionErr := fixture.state.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunRunning, At: at})
+			return transitionErr
+		}),
+	})
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
+	if err := restarted.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Shutdown(context.Background()) })
+	if materialized.Load() != 1 {
+		t.Fatalf("child materialization calls = %d", materialized.Load())
+	}
+	rootAfter, err := fixture.state.LoadRun(t.Context(), root.RunID)
+	if err != nil || rootAfter.Status != workflowruntime.RunCanceled {
+		t.Fatalf("recovered root = %#v, %v", rootAfter, err)
+	}
+	childAfter, err := fixture.state.LoadRun(t.Context(), childRequest.ChildRunID)
+	if err != nil || !childAfter.Status.Active() {
+		t.Fatalf("recovered child = %#v, %v", childAfter, err)
+	}
+	intent, err := fixture.state.LoadTerminalIntent(t.Context(), childRequest.ChildRunID)
+	if err != nil || intent.Status != workflowruntime.TerminalIntentPending || len(intent.Finalizers) != 1 {
+		t.Fatalf("recovered child intent = %#v, %v", intent, err)
+	}
+	cleanup, err := fixture.state.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: childRequest.ChildRunID, NodeID: "cleanup"})
+	if err != nil || cleanup.Status != workflowruntime.NodePending {
+		t.Fatalf("preserved child cleanup = %#v, %v", cleanup, err)
+	}
+	pending, err := fixture.journal.ListPendingCancellations(t.Context(), 0)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending host cancellations = %#v, %v", pending, err)
 	}
 }
 
@@ -549,6 +987,10 @@ type hostFixture struct {
 }
 
 func newHostFixture(t *testing.T, outcome hoststate.PolicyOutcome, interval time.Duration, hook appworkflow.RecoveryHook) *hostFixture {
+	return newHostFixtureWithPlan(t, outcome, interval, hook, compileHostPlan(t))
+}
+
+func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, interval time.Duration, hook appworkflow.RecoveryHook, plan *workflowcompile.ExecutionPlan) *hostFixture {
 	t.Helper()
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 	store, openErr := persistence.Open(filepath.Join(t.TempDir(), "host.db"))
@@ -558,7 +1000,6 @@ func newHostFixture(t *testing.T, outcome hoststate.PolicyOutcome, interval time
 	t.Cleanup(func() { _ = store.Close() })
 	state, _ := persistence.NewWorkflowStateStore(store)
 	journal, _ := persistence.NewWorkflowHostStore(store)
-	plan := compileHostPlan(t)
 	scheduler := &activationRecorder{}
 	artifactRoot, pathErr := filepath.EvalSymlinks(t.TempDir())
 	if pathErr != nil {
@@ -670,6 +1111,12 @@ func (f *hostFixture) startRequest(runID, key, principal string) appworkflow.Sta
 
 type authenticatedPrincipalKey struct{}
 
+type hostAttemptCancelerFunc func(context.Context, workflowruntime.AttemptSnapshot) error
+
+func (f hostAttemptCancelerFunc) CancelAttempt(ctx context.Context, attempt workflowruntime.AttemptSnapshot) error {
+	return f(ctx, attempt)
+}
+
 func authenticatedContext(ctx context.Context, principal string) context.Context {
 	return context.WithValue(ctx, authenticatedPrincipalKey{}, principal)
 }
@@ -697,6 +1144,36 @@ steps:
 	result := workflowcompile.Compile(source.Source)
 	if result.Plan == nil || len(result.Diagnostics) != 0 {
 		t.Fatalf("Compile = %#v", result)
+	}
+	return result.Plan
+}
+
+func compileFinalizerHostPlan(t *testing.T) *workflowcompile.ExecutionPlan {
+	t.Helper()
+	source := workflowcompile.LoadBytes("host-finalizer.workflow.yaml", []byte(`workflow:
+  name: Host Finalizer Fixture
+  version: v1
+inputs:
+  - name: message
+    type: string
+    required: true
+steps:
+  - name: Echo
+    transform:
+      result: inputs.message
+    with:
+      message: inputs.message
+finally:
+  - name: Cleanup
+    transform:
+      result: cleaned
+`))
+	if source.Source == nil || len(source.Diagnostics) != 0 {
+		t.Fatalf("LoadBytes finalizer = %#v", source)
+	}
+	result := workflowcompile.Compile(source.Source)
+	if result.Plan == nil || len(result.Diagnostics) != 0 {
+		t.Fatalf("Compile finalizer = %#v", result)
 	}
 	return result.Plan
 }
@@ -809,6 +1286,27 @@ func (f identityProviderFunc) BindIdentity(ctx context.Context, request appworkf
 type alwaysCASStateStore struct {
 	workflowruntime.StateStore
 	calls atomic.Int32
+}
+
+type stateStoreOnly struct{ workflowruntime.StateStore }
+
+type injectTreeCASStore struct {
+	workflowruntime.StateStore
+	workflowruntime.ControlFlowStore
+	inject func() error
+	calls  atomic.Int32
+}
+
+func (s *injectTreeCASStore) RequestRunCancellationWithFinalizers(ctx context.Context, request workflowruntime.RequestRunCancellationWithFinalizersRequest) (workflowruntime.RequestRunCancellationWithFinalizersResult, error) {
+	if s.calls.Add(1) == 1 {
+		if s.inject != nil {
+			if err := s.inject(); err != nil {
+				return workflowruntime.RequestRunCancellationWithFinalizersResult{}, err
+			}
+		}
+		return workflowruntime.RequestRunCancellationWithFinalizersResult{}, workflowruntime.ErrCASMismatch
+	}
+	return s.ControlFlowStore.RequestRunCancellationWithFinalizers(ctx, request)
 }
 
 type farAheadStartJournal struct {

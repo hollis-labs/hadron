@@ -517,6 +517,11 @@ func (h *Host) CancelRun(ctx context.Context, request CancelRunRequest) (runtime
 }
 
 func (h *Host) applyCancellation(ctx context.Context, binding hoststate.CancellationBinding) (runtime.RequestRunCancellationResult, []error, error) {
+	start, err := h.journal.LoadStart(ctx, binding.Intent.RunID)
+	if err != nil {
+		return runtime.RequestRunCancellationResult{}, nil, err
+	}
+	workflow := start.Record.Plan.Graph
 	var lastCAS error
 	for attempt := 0; attempt < cancellationCASLimit; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -526,7 +531,49 @@ func (h *Host) applyCancellation(ctx context.Context, binding hoststate.Cancella
 		if err != nil {
 			return runtime.RequestRunCancellationResult{}, nil, err
 		}
-		result, failures, err := h.cancellation.Request(ctx, request)
+		descendants, err := h.cancellationDescendants(ctx, binding.Intent.RunID)
+		if err != nil {
+			return runtime.RequestRunCancellationResult{}, nil, err
+		}
+		finalizers, err := runtime.PlanFinalizerScopes(workflow, binding.Intent.RunID)
+		if err != nil {
+			return runtime.RequestRunCancellationResult{}, nil, err
+		}
+		hasFinalizers := len(finalizers) != 0
+		for _, descendant := range descendants {
+			scopes, planErr := runtime.PlanFinalizerScopes(descendant.Graph, descendant.Run.ID)
+			if planErr != nil {
+				return runtime.RequestRunCancellationResult{}, nil, planErr
+			}
+			hasFinalizers = hasFinalizers || len(scopes) != 0
+		}
+		control, hasControl := h.state.(runtime.ControlFlowStore)
+		var result runtime.RequestRunCancellationResult
+		var failures []error
+		if !hasControl || nilInterface(control) {
+			if hasFinalizers {
+				return runtime.RequestRunCancellationResult{}, nil, fmt.Errorf("%w: finalizer-aware cancellation requires a control-flow state store", ErrInvalidHost)
+			}
+			result, failures, err = h.cancellation.Request(ctx, request)
+		} else {
+			controlled, controlErr := runtime.NewControlFlowCoordinator(h.state, control, nil).RequestRunCancellationTree(ctx, workflow, request, descendants)
+			if controlErr == nil {
+				result = controlled.Cancellation
+				runIDs := make([]runtime.RunID, 0, len(descendants)+1)
+				runIDs = append(runIDs, request.RunID)
+				for _, descendant := range descendants {
+					runIDs = append(runIDs, descendant.Run.ID)
+				}
+				for _, runID := range runIDs {
+					_, recoveredFailures, recoverErr := h.cancellation.Recover(ctx, runtime.CancellationIntentQuery{RunID: runID})
+					failures = append(failures, recoveredFailures...)
+					if recoverErr != nil {
+						controlErr = errors.Join(controlErr, recoverErr)
+					}
+				}
+			}
+			err = controlErr
+		}
 		if errors.Is(err, runtime.ErrCASMismatch) || errors.Is(err, runtime.ErrIdempotencyConflict) {
 			lastCAS = err
 			if contextErr := ctx.Err(); contextErr != nil {
@@ -537,6 +584,51 @@ func (h *Host) applyCancellation(ctx context.Context, binding hoststate.Cancella
 		return result, failures, err
 	}
 	return runtime.RequestRunCancellationResult{}, nil, fmt.Errorf("host cancellation CAS retry limit reached; durable intent remains pending: %w", lastCAS)
+}
+
+func (h *Host) cancellationDescendants(ctx context.Context, root runtime.RunID) ([]runtime.CancellationDescendantGraph, error) {
+	seen := map[runtime.RunID]bool{root: true}
+	result := make([]runtime.CancellationDescendantGraph, 0)
+	var visit func(runtime.RunID) error
+	visit = func(parent runtime.RunID) error {
+		links, err := h.state.ListChildRuns(ctx, parent)
+		if err != nil {
+			return err
+		}
+		for _, link := range links {
+			if link.Policy != graph.ParentCloseCancel {
+				continue
+			}
+			if seen[link.ChildRunID] {
+				return fmt.Errorf("%w: direct-cancel child graph contains a cycle or duplicate descendant", ErrInvalidHost)
+			}
+			seen[link.ChildRunID] = true
+			if nilInterface(h.childDefs) {
+				return fmt.Errorf("%w: child cancellation requires the durable child-definition source", ErrInvalidHost)
+			}
+			child, err := h.childDefs.LoadChildRunRequest(ctx, link.ChildRunID)
+			if err != nil {
+				return fmt.Errorf("load child workflow %s for cancellation: %w", link.ChildRunID, err)
+			}
+			if child.ChildRunID != link.ChildRunID {
+				return fmt.Errorf("%w: child cancellation start record belongs to another run", ErrInvalidHost)
+			}
+			run, err := h.state.LoadRun(ctx, link.ChildRunID)
+			if err != nil {
+				return err
+			}
+			result = append(result, runtime.CancellationDescendantGraph{Run: run, Graph: child.Definition.Graph})
+			if err := visit(link.ChildRunID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := visit(root); err != nil {
+		return nil, err
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Run.ID < result[j].Run.ID })
+	return result, nil
 }
 
 func (h *Host) ResumeWait(ctx context.Context, command runtime.ResumeCommand) (runtime.ResumeWaitResult, error) {

@@ -43,6 +43,21 @@ func (h fakeHost) StepKindRegistryFactory() conformance.Factory {
 func (h fakeHost) factory() conformance.Factory {
 	return func() (conformance.Runner, error) {
 		return conformance.RunnerFunc(func(_ context.Context, fixture conformance.Fixture) error {
+			if fixture.Set == conformance.ControlFlowFixtures {
+				var input struct {
+					Scenario string `json:"scenario"`
+				}
+				if err := json.Unmarshal(fixture.Input, &input); err != nil {
+					return fmt.Errorf("decode control-flow input: %w", err)
+				}
+				(*h.calls)++
+				switch input.Scenario {
+				case "switch", "catch", "finally", "completion":
+					return nil
+				default:
+					return fmt.Errorf("unsupported control-flow scenario %q", input.Scenario)
+				}
+			}
 			if fixture.Set == conformance.WaitFixtures {
 				var input struct {
 					Kind        workflowwait.Kind       `json:"kind"`
@@ -178,7 +193,7 @@ func TestExternalHostRunsAllSuites(t *testing.T) {
 	calls := 0
 	conformance.RunAll(t, conformance.EmbeddedFixtures(), fakeHost{calls: &calls})
 
-	const wantCalls = 32
+	const wantCalls = 38
 	if calls != wantCalls {
 		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
 	}
@@ -190,6 +205,7 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 		conformance.SourceMapFixtures,
 		conformance.ValueFixtures,
 		conformance.SchedulerFixtures,
+		conformance.ControlFlowFixtures,
 		conformance.WaitFixtures,
 		conformance.ExecutorMetadataFixtures,
 	}
@@ -213,6 +229,9 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 			}
 			if set == conformance.ExecutorMetadataFixtures {
 				wantCount = 7
+			}
+			if set == conformance.ControlFlowFixtures {
+				wantCount = 6
 			}
 			if len(fixtures) != wantCount {
 				t.Fatalf("fixture count = %d, want %d", len(fixtures), wantCount)
@@ -243,6 +262,14 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				}
 				if fixture := byName["wait-unsupported-source"]; fixture.Expectation != conformance.ExpectFail {
 					t.Fatalf("unsupported wait fixture = %#v", fixture)
+				}
+				return
+			}
+			if set == conformance.ControlFlowFixtures {
+				for _, name := range []string{"switch-default", "catch", "continue-on-error", "timeout-catch", "nested-finally", "cleanup-failure"} {
+					if fixture := byName[name]; fixture.Expectation != conformance.ExpectPass {
+						t.Fatalf("%s fixture = %#v", name, fixture)
+					}
 				}
 				return
 			}

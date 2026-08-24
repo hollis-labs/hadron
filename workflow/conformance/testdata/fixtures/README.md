@@ -9,6 +9,9 @@ registered-kind inputs, and deterministic inference expectations. The
 `scheduler` set contains semantic fixtures for all six readiness rules plus an
 unsupported-rule rejection. The `waits` set contains semantic records for all
 six generic wake sources plus an unsupported-source rejection. The
+`control-flow` set covers switch defaulting, catch selection,
+continue-on-error, timeout catch, nested-finally ordering, and cleanup-failure
+terminal accounting. The
 `executor-metadata` set covers valid and
 missing metadata, duplicate registration, unknown exact resolution, adapter
 config rejection, optional lifecycle/interface agreement, and immutable

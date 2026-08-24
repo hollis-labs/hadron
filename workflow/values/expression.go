@@ -273,6 +273,21 @@ func prepareEnvironment(
 		"item": nil, "index": nil,
 		"run": run, "run_scope": runScope, "execution_target": executionTarget,
 	}
+	localNames := make([]string, 0, len(context.Locals))
+	for name := range context.Locals {
+		localNames = append(localNames, name)
+	}
+	sort.Strings(localNames)
+	for _, name := range localNames {
+		if err := ValidateExpressionLocalName(name); err != nil {
+			return nil, fmt.Errorf("locals[%q]: %w", name, err)
+		}
+		value, unwrapErr := unwrapValue(context.Locals[name])
+		if unwrapErr != nil {
+			return nil, fmt.Errorf("locals[%q]: %w", name, unwrapErr)
+		}
+		environment[name] = value
+	}
 	if context.Item != nil {
 		item, err := unwrapValue(*context.Item)
 		if err != nil {
@@ -302,9 +317,12 @@ func prepareStep(step StepContext) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("status: %w", err)
 	}
-	errorValue, _, err := normalizeInline(step.Error)
-	if err != nil {
-		return nil, fmt.Errorf("error: %w", err)
+	var errorValue any
+	if step.Error != nil {
+		errorValue, err = unwrapValue(*step.Error)
+		if err != nil {
+			return nil, fmt.Errorf("error: %w", err)
+		}
 	}
 	errorValue = prepareExpressionValue(errorValue)
 	items := make([]any, len(step.Items))
@@ -388,6 +406,13 @@ func unwrapValue(value Value) (any, error) {
 }
 
 func rejectSecretReferenceUse(references []Reference, context ExpressionContext) error {
+	// Locals are expression roots but intentionally are not returned by
+	// ParseReferences, whose public contract is limited to standard graph roots.
+	// Reject any secret local conservatively so a catch alias cannot be unwrapped
+	// into a redacted marker and then used for derivation.
+	if valueSetContainsSecret(context.Locals) {
+		return ErrSecretDerivation
+	}
 	for _, reference := range references {
 		switch reference.Root {
 		case "inputs":
@@ -434,6 +459,10 @@ func rejectSecretReferenceUse(references []Reference, context ExpressionContext)
 						return ErrSecretDerivation
 					}
 				}
+			case "error":
+				if step.Error != nil && step.Error.Redaction == RedactionSecret {
+					return ErrSecretDerivation
+				}
 			}
 		case "item":
 			if context.Item != nil && context.Item.Redaction == RedactionSecret {
@@ -474,6 +503,9 @@ func stepsContainSecret(steps map[string]StepContext) bool {
 
 func stepContainsSecret(step StepContext) bool {
 	if valueSetContainsSecret(step.Outputs) {
+		return true
+	}
+	if step.Error != nil && step.Error.Redaction == RedactionSecret {
 		return true
 	}
 	for _, item := range step.Items {

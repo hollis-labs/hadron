@@ -18,10 +18,25 @@ import (
 var _ workflowruntime.CancellationStore = (*WorkflowStateStore)(nil)
 
 func (s *WorkflowStateStore) RecordChildRun(ctx context.Context, link workflowruntime.ChildRunLink) error {
-	if err := link.Validate(); err != nil {
-		return workflowInvalid(err)
+	if validationErr := link.Validate(); validationErr != nil {
+		return workflowInvalid(validationErr)
 	}
 	return s.write(ctx, "record workflow child run", func(query workflowSQL) error {
+		encoded, encodeErr := encodeWorkflowJSON(link)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		var prior string
+		priorErr := query.QueryRowContext(ctx, `SELECT link_json FROM workflow_child_runs WHERE (parent_run_id = ? AND node_id = ? AND iteration = ?) OR child_run_id = ?`, link.ParentRunID, link.Invocation.NodeID, link.Invocation.Iteration, link.ChildRunID).Scan(&prior)
+		if priorErr == nil {
+			if prior == encoded {
+				return nil
+			}
+			return fmt.Errorf("%w: child run link", workflowruntime.ErrAlreadyExists)
+		}
+		if !errors.Is(priorErr, sql.ErrNoRows) {
+			return priorErr
+		}
 		if _, err := loadWorkflowRun(ctx, query, link.ParentRunID); err != nil {
 			return err
 		}
@@ -31,15 +46,17 @@ func (s *WorkflowStateStore) RecordChildRun(ctx context.Context, link workflowru
 		if _, err := loadWorkflowNode(ctx, query, link.Invocation); err != nil {
 			return err
 		}
-		encoded, err := encodeWorkflowJSON(link)
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, link.Invocation)
 		if err != nil {
 			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences child run link"))
 		}
 		if _, err := query.ExecContext(ctx, `INSERT INTO workflow_child_runs(parent_run_id, node_id, iteration, child_run_id, policy, created_at, link_json) VALUES (?, ?, ?, ?, ?, ?, ?)`, link.ParentRunID, link.Invocation.NodeID, link.Invocation.Iteration, link.ChildRunID, link.Policy, workflowTime(link.CreatedAt), encoded); err != nil {
 			if !isSQLiteConstraint(err) {
 				return fmt.Errorf("record workflow child run: %w", err)
 			}
-			var prior string
 			if loadErr := query.QueryRowContext(ctx, `SELECT link_json FROM workflow_child_runs WHERE (parent_run_id = ? AND node_id = ? AND iteration = ?) OR child_run_id = ?`, link.ParentRunID, link.Invocation.NodeID, link.Invocation.Iteration, link.ChildRunID).Scan(&prior); loadErr == nil && prior == encoded {
 				return nil
 			}
@@ -105,6 +122,13 @@ func (s *WorkflowStateStore) RequestRunCancellation(ctx context.Context, request
 			result.Outcome = workflowruntime.IdempotencyReplayed
 			return nil
 		}
+		pending, err := workflowRunHasPendingTerminalIntent(ctx, query, request.RunID)
+		if err != nil {
+			return err
+		}
+		if pending {
+			return workflowInvalid(errors.New("pending terminal intent owns run cancellation"))
+		}
 		run, runErr := loadWorkflowRun(ctx, query, request.RunID)
 		if runErr != nil {
 			return runErr
@@ -152,6 +176,10 @@ type workflowCancellationCollector struct {
 }
 
 func cancelWorkflowRun(ctx context.Context, query workflowSQL, runID workflowruntime.RunID, at time.Time, reason workflowruntime.Failure, key string, visited map[workflowruntime.RunID]bool, collector *workflowCancellationCollector) error {
+	return cancelWorkflowRunWithOptions(ctx, query, runID, at, reason, key, visited, collector, nil, true, true)
+}
+
+func cancelWorkflowRunWithOptions(ctx context.Context, query workflowSQL, runID workflowruntime.RunID, at time.Time, reason workflowruntime.Failure, key string, visited map[workflowruntime.RunID]bool, collector *workflowCancellationCollector, excluded map[workflowruntime.NodeInvocationID]struct{}, terminalize, recurseDirect bool) error {
 	if visited[runID] {
 		return workflowInvalid(errors.New("child run cancellation cycle"))
 	}
@@ -170,28 +198,30 @@ func cancelWorkflowRun(ctx context.Context, query workflowSQL, runID workflowrun
 	if !run.Status.Active() || at.Before(run.UpdatedAt) {
 		return workflowInvalid(fmt.Errorf("run %q cannot be canceled at requested time", runID))
 	}
-	nextRun := run
-	nextRun.Status = workflowruntime.RunCanceled
-	nextRun.Generation++
-	nextRun.UpdatedAt = at
-	if validationErr := nextRun.Validate(); validationErr != nil {
-		return workflowInvalid(validationErr)
+	if terminalize {
+		nextRun := run
+		nextRun.Status = workflowruntime.RunCanceled
+		nextRun.Generation++
+		nextRun.UpdatedAt = at
+		if validationErr := nextRun.Validate(); validationErr != nil {
+			return workflowInvalid(validationErr)
+		}
+		if updateErr := updateWorkflowRunCAS(ctx, query, nextRun, run.Generation); updateErr != nil {
+			return updateErr
+		}
+		event, eventErr := appendWorkflowEvent(ctx, query, workflowruntime.AppendEventRequest{
+			RunID: runID, Type: workflowruntime.EventRunCancellationRequested, OccurredAt: at,
+			Attributes: map[string]string{"from_status": string(run.Status), "to_status": string(nextRun.Status), "reason_code": reason.Code},
+			Redaction:  values.RedactionPrivate, Retention: values.RetentionRun,
+		})
+		if eventErr != nil {
+			return eventErr
+		}
+		if collector.root.ID == "" {
+			collector.root = nextRun
+		}
+		collector.events = append(collector.events, event)
 	}
-	if updateErr := updateWorkflowRunCAS(ctx, query, nextRun, run.Generation); updateErr != nil {
-		return updateErr
-	}
-	event, eventErr := appendWorkflowEvent(ctx, query, workflowruntime.AppendEventRequest{
-		RunID: runID, Type: workflowruntime.EventRunCancellationRequested, OccurredAt: at,
-		Attributes: map[string]string{"from_status": string(run.Status), "to_status": string(nextRun.Status), "reason_code": reason.Code},
-		Redaction:  values.RedactionPrivate, Retention: values.RetentionRun,
-	})
-	if eventErr != nil {
-		return eventErr
-	}
-	if collector.root.ID == "" {
-		collector.root = nextRun
-	}
-	collector.events = append(collector.events, event)
 
 	rows, err := query.QueryContext(ctx, workflowNodeSelect+` WHERE n.run_id = ? ORDER BY n.node_id, n.iteration`, runID)
 	if err != nil {
@@ -208,6 +238,9 @@ func cancelWorkflowRun(ctx context.Context, query workflowSQL, runID workflowrun
 	}
 	closeRows(rows)
 	for _, node := range nodes {
+		if _, skip := excluded[node.ID]; skip {
+			continue
+		}
 		if node.Status.Terminal() {
 			continue
 		}
@@ -249,8 +282,10 @@ func cancelWorkflowRun(ctx context.Context, query workflowSQL, runID workflowrun
 	for _, link := range links {
 		switch link.Policy {
 		case graph.ParentCloseCancel:
-			if cancelErr := cancelWorkflowRun(ctx, query, link.ChildRunID, at, reason, key, visited, collector); cancelErr != nil {
-				return cancelErr
+			if recurseDirect {
+				if cancelErr := cancelWorkflowRun(ctx, query, link.ChildRunID, at, reason, key, visited, collector); cancelErr != nil {
+					return cancelErr
+				}
 			}
 		case graph.ParentCloseRequestCancel:
 			intent, intentErr := ensureWorkflowCancellationIntent(ctx, query, runID, workflowruntime.CancellationChildRun, nil, link.ChildRunID, at)

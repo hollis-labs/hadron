@@ -87,6 +87,33 @@ func TestRunCancellationCommitFencesLateAttemptCompletion(t *testing.T) {
 }
 
 func TestCancellationCoordinatorExplicitExternalAndUnsupportedRecovery(t *testing.T) {
+	t.Run("canceled observation requires exact durable intent", func(t *testing.T) {
+		fixture := dispatchExternalOperation(t, "cancel-external-no-intent")
+		run, _ := fixture.store.LoadRun(context.Background(), fixture.attempt.Invocation.RunID)
+		if _, err := fixture.store.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunCanceled, At: fixture.now}); err != nil {
+			t.Fatal(err)
+		}
+		operation, _ := fixture.store.LoadExternalOperation(context.Background(), fixture.attempt)
+		node, _ := fixture.store.LoadNodeInvocation(context.Background(), fixture.attempt.Invocation)
+		attempt, _ := fixture.store.LoadAttempt(context.Background(), fixture.attempt)
+		beforeEvents, _ := fixture.store.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: run.ID})
+		failure := workflowruntime.Failure{Code: "remote_canceled", Message: "remote operation canceled"}
+		_, applyErr := fixture.store.ApplyExternalOperation(context.Background(), workflowruntime.ApplyExternalOperationRequest{
+			Attempt: fixture.attempt, ExpectedOperationGeneration: operation.Generation,
+			ExpectedNodeGeneration: node.Generation, ExpectedAttemptGeneration: attempt.Generation,
+			Status: stepkind.ObservationCanceled, Failure: &failure, NextNodeStatus: workflowruntime.NodeCanceled,
+			ObservedAt: fixture.now.Add(time.Second), At: fixture.now.Add(time.Second),
+		})
+		if !errors.Is(applyErr, workflowruntime.ErrInvalidRecord) {
+			t.Fatalf("canceled observation without exact intent = %v", applyErr)
+		}
+		afterOperation, _ := fixture.store.LoadExternalOperation(context.Background(), fixture.attempt)
+		afterEvents, _ := fixture.store.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: run.ID})
+		if afterOperation.Generation != operation.Generation || len(afterEvents) != len(beforeEvents) {
+			t.Fatalf("rejected intentless observation mutated state = %#v/%#v events=%d/%d", operation, afterOperation, len(beforeEvents), len(afterEvents))
+		}
+	})
+
 	t.Run("explicit", func(t *testing.T) {
 		fixture := dispatchExternalOperation(t, "cancel-external-explicit")
 		cancels := 0

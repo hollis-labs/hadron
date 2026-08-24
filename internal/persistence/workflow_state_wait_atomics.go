@@ -50,6 +50,13 @@ func (s *WorkflowStateStore) SuspendNodeWait(ctx context.Context, request workfl
 			if decodeErr := decodeWorkflowJSON("wait suspend result", priorResult, &result); decodeErr != nil {
 				return decodeErr
 			}
+			allowed, err := workflowControlAdmissionAllowed(ctx, query, nextWait.Invocation)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return workflowInvalid(errors.New("pending terminal intent fences wait suspension replay"))
+			}
 			result.Outcome = workflowruntime.IdempotencyReplayed
 			return nil
 		}
@@ -62,6 +69,13 @@ func (s *WorkflowStateStore) SuspendNodeWait(ctx context.Context, request workfl
 		}
 		if currentNode.Generation != request.ExpectedNodeGeneration {
 			return workflowCAS("suspend wait node", request.ExpectedNodeGeneration, currentNode.Generation)
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, currentNode.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences wait suspension"))
 		}
 		if currentNode.Status != workflowruntime.NodeRunning || currentNode.Wait != nil {
 			return workflowInvalid(errors.New("suspension requires a running node without a wait"))
@@ -148,6 +162,17 @@ func (s *WorkflowStateStore) ResumeNodeWait(ctx context.Context, request workflo
 				if err := decodeWorkflowJSON("atomic wait resume result", priorResult, &result); err != nil {
 					return err
 				}
+				wait, err := loadWorkflowWait(ctx, query, request.WaitID)
+				if err != nil {
+					return err
+				}
+				allowed, err := workflowControlAdmissionAllowed(ctx, query, wait.Invocation)
+				if err != nil {
+					return err
+				}
+				if !allowed {
+					return workflowInvalid(errors.New("pending terminal intent fences wait resume replay"))
+				}
 				result.Outcome = workflowruntime.ResumeReplayed
 				return nil
 			}
@@ -193,6 +218,13 @@ func (s *WorkflowStateStore) ResumeNodeWait(ctx context.Context, request workflo
 		}
 		if currentNode.Generation != request.ExpectedNodeGeneration {
 			return workflowCAS("resume wait node", request.ExpectedNodeGeneration, currentNode.Generation)
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, currentNode.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences wait resume"))
 		}
 		if currentNode.Status != workflowruntime.NodeWaiting || currentNode.Wait == nil || currentNode.Wait.ID != currentWait.Ref.ID {
 			return workflowInvalid(errors.New("open wait resume requires its matching waiting node"))

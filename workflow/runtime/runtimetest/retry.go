@@ -42,6 +42,9 @@ func (s *Store) ScheduleNodeRetry(ctx context.Context, request workflowruntime.S
 	if !run.Status.Active() {
 		return workflowruntime.ScheduleNodeRetryResult{}, invalid(errors.New("terminal run cannot schedule retry"))
 	}
+	if !s.controlAdmissionAllowedLocked(request.Activation.Attempt.Invocation) {
+		return workflowruntime.ScheduleNodeRetryResult{}, invalid(errors.New("pending terminal intent fences retry scheduling"))
+	}
 	currentNode, ok := s.nodes[request.Activation.Attempt.Invocation]
 	if !ok {
 		return workflowruntime.ScheduleNodeRetryResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
@@ -146,6 +149,9 @@ func (s *Store) ActivateNodeRetry(ctx context.Context, request workflowruntime.A
 	defer s.mu.Unlock()
 	if prior, ok := s.retryActivationKeys[request.IdempotencyKey]; ok {
 		if equalActivateRetryRequest(prior.request, request) {
+			if activation, exists := s.retryActivations[request.ActivationID]; exists && !s.controlAdmissionAllowedLocked(activation.Attempt.Invocation) {
+				return workflowruntime.ActivateNodeRetryResult{}, invalid(errors.New("pending terminal intent fences retry activation replay"))
+			}
 			result := cloneActivateRetryResult(prior.result)
 			result.Outcome = workflowruntime.IdempotencyReplayed
 			return result, nil
@@ -168,6 +174,9 @@ func (s *Store) ActivateNodeRetry(ctx context.Context, request workflowruntime.A
 	run := s.runs[activation.Attempt.Invocation.RunID]
 	if !run.Status.Active() {
 		return workflowruntime.ActivateNodeRetryResult{}, invalid(errors.New("terminal run fences retry activation"))
+	}
+	if !s.controlAdmissionAllowedLocked(activation.Attempt.Invocation) {
+		return workflowruntime.ActivateNodeRetryResult{}, invalid(errors.New("pending terminal intent fences retry activation"))
 	}
 	node, ok := s.nodes[activation.Attempt.Invocation]
 	if !ok {

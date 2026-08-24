@@ -28,6 +28,13 @@ func (s *WorkflowStateStore) TransitionNode(ctx context.Context, request workflo
 		if current.Generation != request.ExpectedGeneration {
 			return workflowCAS("node invocation", request.ExpectedGeneration, current.Generation)
 		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, current.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences non-finalizer transition"))
+		}
 		at := request.At.UTC()
 		if err := validateWorkflowLifecycleClaim(current, request.Claim, at); err != nil {
 			return err
@@ -154,6 +161,13 @@ func (s *WorkflowStateStore) StartNodeAttempt(ctx context.Context, request workf
 		if current.Generation != request.ExpectedNodeGeneration {
 			return workflowCAS("node invocation", request.ExpectedNodeGeneration, current.Generation)
 		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, current.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences non-finalizer attempt start"))
+		}
 		at := request.At.UTC()
 		if err := validateWorkflowLifecycleClaim(current, &request.Claim, at); err != nil {
 			return err
@@ -244,6 +258,13 @@ func (s *WorkflowStateStore) FinishNodeAttempt(ctx context.Context, request work
 		}
 		if !run.Status.Active() {
 			return workflowInvalid(errors.New("terminal run fences attempt completion"))
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, currentNode.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences non-finalizer attempt completion"))
 		}
 		if currentNode.Status != workflowruntime.NodeRunning {
 			return workflowNodeTransitionError(currentNode, request.NextNodeStatus, "finishing requires running node")

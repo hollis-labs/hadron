@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -220,12 +221,12 @@ func TestFanOutClaimSlotsPersistAcrossWaitAndTypedItemsRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failure := workflowruntime.Failure{Code: "item_failed", Message: "item failed"}
-	finished2, err := store.FinishNodeAttempt(ctx, workflowruntime.FinishNodeAttemptRequest{InvocationID: second.ID, AttemptNumber: 1, ExpectedNodeGeneration: started2.Node.Generation, ExpectedAttemptGeneration: started2.Attempt.Generation, Claim: claim2, AttemptStatus: workflowruntime.NodeFailed, NextNodeStatus: workflowruntime.NodeFailed, Failure: &failure, At: base.Add(12 * time.Second)})
+	failure := workflowruntime.Failure{Code: "item_timed_out", Message: "item timed out", Details: map[string]string{"timeout_kind": string(workflowruntime.TimeoutExecution)}}
+	finished2, err := store.FinishNodeAttempt(ctx, workflowruntime.FinishNodeAttemptRequest{InvocationID: second.ID, AttemptNumber: 1, ExpectedNodeGeneration: started2.Node.Generation, ExpectedAttemptGeneration: started2.Attempt.Generation, Claim: claim2, AttemptStatus: workflowruntime.NodeTimedOut, NextNodeStatus: workflowruntime.NodeTimedOut, Failure: &failure, At: base.Add(12 * time.Second)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished1.Node.Status != workflowruntime.NodeSucceeded || finished2.Node.Status != workflowruntime.NodeFailed {
+	if finished1.Node.Status != workflowruntime.NodeSucceeded || finished2.Node.Status != workflowruntime.NodeTimedOut {
 		t.Fatalf("item statuses = %s, %s", finished1.Node.Status, finished2.Node.Status)
 	}
 	completed, aggregate, items, err := coordinator.Collect(ctx, parent, base.Add(13*time.Second))
@@ -235,6 +236,16 @@ func TestFanOutClaimSlotsPersistAcrossWaitAndTypedItemsRecover(t *testing.T) {
 	loadedItems, err := store.LoadFanOutItemResults(ctx, parent)
 	if err != nil || len(loadedItems) != 2 || loadedItems[0].OutputValues["token"].Type != values.TypeSecretRef || loadedItems[0].Outputs == nil {
 		t.Fatalf("LoadFanOutItemResults = %#v, %v", loadedItems, err)
+	}
+	expressionContext, err := workflowruntime.BuildExpressionContext(ctx, store, nil, graph.Graph{Nodes: []graph.Node{{ID: parent.NodeID, ForEach: &graph.ForEachSpec{Items: graph.Expression{Text: `["a", "b"]`}}}}}, runID)
+	itemsContext := expressionContext.Steps[parent.NodeID].Items
+	if err != nil || len(itemsContext) != 2 || itemsContext[0].Outputs["token"].Type != values.TypeSecretRef || itemsContext[1].Error == nil {
+		t.Fatalf("fan-out expression context = %#v, %v", expressionContext, err)
+	}
+	errorPayload, ok := itemsContext[1].Error.Inline.(map[string]any)
+	attemptNumber, numberOK := errorPayload["attempt"].(json.Number)
+	if !ok || !numberOK || attemptNumber.String() != "1" || errorPayload["code"] != "item_timed_out" || errorPayload["timeout_kind"] != string(workflowruntime.TimeoutExecution) {
+		t.Fatalf("fan-out typed item error = %#v", itemsContext[1].Error)
 	}
 	if rendered := fmt.Sprint(aggregate["items"].Inline); strings.Contains(rendered, string(secretRef)) {
 		t.Fatalf("aggregate metadata leaked secret reference: %s", rendered)

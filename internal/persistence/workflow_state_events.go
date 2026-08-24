@@ -13,6 +13,36 @@ import (
 func (s *WorkflowStateStore) AppendEvent(ctx context.Context, request workflowruntime.AppendEventRequest) (workflowruntime.Event, error) {
 	var result workflowruntime.Event
 	err := s.write(ctx, "append workflow event", func(query workflowSQL) error {
+		candidate := workflowruntime.Event{
+			Sequence: 1, RunID: request.RunID, Invocation: cloneWorkflowInvocation(request.Invocation), Attempt: cloneWorkflowAttemptID(request.Attempt),
+			Type: request.Type, OccurredAt: request.OccurredAt.UTC(), Attributes: cloneWorkflowStringMap(request.Attributes), Values: cloneWorkflowValueRef(request.Values),
+			Redaction: request.Redaction, Retention: request.Retention,
+		}
+		if err := candidate.Validate(); err != nil {
+			return workflowInvalid(err)
+		}
+		owner := candidate.Invocation
+		if owner == nil && candidate.Attempt != nil {
+			id := candidate.Attempt.Invocation
+			owner = &id
+		}
+		if owner != nil {
+			allowed, err := workflowControlAdmissionAllowed(ctx, query, *owner)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return workflowInvalid(errors.New("pending terminal intent fences non-finalizer event persistence"))
+			}
+		} else {
+			pending, err := workflowRunHasPendingTerminalIntent(ctx, query, candidate.RunID)
+			if err != nil {
+				return err
+			}
+			if pending {
+				return workflowInvalid(errors.New("pending terminal intent fences anonymous run-level event persistence"))
+			}
+		}
 		var err error
 		result, err = appendWorkflowEvent(ctx, query, request)
 		return err

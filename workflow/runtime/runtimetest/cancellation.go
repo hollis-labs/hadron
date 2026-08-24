@@ -40,6 +40,9 @@ func (s *Store) RecordChildRun(ctx context.Context, link workflowruntime.ChildRu
 			return fmt.Errorf("%w: child run link", workflowruntime.ErrAlreadyExists)
 		}
 	}
+	if !s.controlAdmissionAllowedLocked(link.Invocation) {
+		return invalid(errors.New("pending terminal intent fences child run link"))
+	}
 	s.childRuns[link.ParentRunID] = append(s.childRuns[link.ParentRunID], link)
 	sortChildRunLinks(s.childRuns[link.ParentRunID])
 	return nil
@@ -77,6 +80,9 @@ func (s *Store) RequestRunCancellation(ctx context.Context, request workflowrunt
 		}
 		return workflowruntime.RequestRunCancellationResult{}, idempotencyConflict("cancel run", request.IdempotencyKey)
 	}
+	if intent, exists := s.terminalIntents[request.RunID]; exists && intent.Status == workflowruntime.TerminalIntentPending {
+		return workflowruntime.RequestRunCancellationResult{}, invalid(errors.New("pending terminal intent owns run cancellation"))
+	}
 	run, ok := s.runs[request.RunID]
 	if !ok {
 		return workflowruntime.RequestRunCancellationResult{}, fmt.Errorf("%w: run", workflowruntime.ErrNotFound)
@@ -111,6 +117,10 @@ type cancellationCollector struct {
 }
 
 func (s *Store) cancelRunLocked(runID workflowruntime.RunID, at time.Time, reason workflowruntime.Failure, key string, visited map[workflowruntime.RunID]struct{}, collector *cancellationCollector) error {
+	return s.cancelRunLockedWithOptions(runID, at, reason, key, visited, collector, nil, true, true)
+}
+
+func (s *Store) cancelRunLockedWithOptions(runID workflowruntime.RunID, at time.Time, reason workflowruntime.Failure, key string, visited map[workflowruntime.RunID]struct{}, collector *cancellationCollector, excluded map[workflowruntime.NodeInvocationID]struct{}, terminalize, recurseDirect bool) error {
 	if _, seen := visited[runID]; seen {
 		return invalid(errors.New("child run cancellation cycle"))
 	}
@@ -128,27 +138,30 @@ func (s *Store) cancelRunLocked(runID workflowruntime.RunID, at time.Time, reaso
 	if !run.Status.Active() || at.Before(run.UpdatedAt) {
 		return invalid(fmt.Errorf("run %q cannot be canceled at requested time", runID))
 	}
-	nextRun := cloneRun(run)
-	nextRun.Status = workflowruntime.RunCanceled
-	nextRun.Generation++
-	nextRun.UpdatedAt = at
-	if err := nextRun.Validate(); err != nil {
-		return invalid(err)
+	if terminalize {
+		nextRun := cloneRun(run)
+		nextRun.Status = workflowruntime.RunCanceled
+		nextRun.Generation++
+		nextRun.UpdatedAt = at
+		if err := nextRun.Validate(); err != nil {
+			return invalid(err)
+		}
+		runEvent, err := s.appendEventLocked(workflowruntime.AppendEventRequest{
+			RunID: runID, Type: workflowruntime.EventRunCancellationRequested, OccurredAt: at,
+			Attributes: map[string]string{"from_status": string(run.Status), "to_status": string(nextRun.Status), "reason_code": reason.Code},
+			Redaction:  values.RedactionPrivate, Retention: values.RetentionRun,
+		})
+		if err != nil {
+			return err
+		}
+		s.runs[runID] = nextRun
+		collector.events = append(collector.events, runEvent)
 	}
-	runEvent, err := s.appendEventLocked(workflowruntime.AppendEventRequest{
-		RunID: runID, Type: workflowruntime.EventRunCancellationRequested, OccurredAt: at,
-		Attributes: map[string]string{"from_status": string(run.Status), "to_status": string(nextRun.Status), "reason_code": reason.Code},
-		Redaction:  values.RedactionPrivate, Retention: values.RetentionRun,
-	})
-	if err != nil {
-		return err
-	}
-	s.runs[runID] = nextRun
-	collector.events = append(collector.events, runEvent)
 
 	ids := make([]workflowruntime.NodeInvocationID, 0)
 	for id, node := range s.nodes {
-		if id.RunID == runID && !node.Status.Terminal() {
+		_, skip := excluded[id]
+		if id.RunID == runID && !node.Status.Terminal() && !skip {
 			ids = append(ids, id)
 		}
 	}
@@ -241,8 +254,10 @@ func (s *Store) cancelRunLocked(runID workflowruntime.RunID, at time.Time, reaso
 	for _, link := range s.childRuns[runID] {
 		switch link.Policy {
 		case graph.ParentCloseCancel:
-			if err := s.cancelRunLocked(link.ChildRunID, at, reason, key, visited, collector); err != nil {
-				return err
+			if recurseDirect {
+				if err := s.cancelRunLocked(link.ChildRunID, at, reason, key, visited, collector); err != nil {
+					return err
+				}
 			}
 		case graph.ParentCloseRequestCancel:
 			intent, err := s.ensureCancellationIntentLocked(runID, workflowruntime.CancellationChildRun, nil, link.ChildRunID, link.Policy, at)
@@ -640,6 +655,11 @@ type cancellationStateBackup struct {
 	fanOuts             map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot
 	cancellationIntents map[string]workflowruntime.CancellationIntentSnapshot
 	events              map[workflowruntime.RunID][]workflowruntime.Event
+	controlDecisions    map[workflowruntime.ControlDecisionID]workflowruntime.ControlDecisionSnapshot
+	terminalIntents     map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot
+	terminalKeys        map[string]workflowruntime.RunID
+	valueSets           map[string]storedValues
+	nextValueSet        uint64
 }
 
 func (s *Store) backupCancellationStateLocked() cancellationStateBackup {
@@ -653,6 +673,11 @@ func (s *Store) backupCancellationStateLocked() cancellationStateBackup {
 		fanOuts:             make(map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot, len(s.fanOuts)),
 		cancellationIntents: make(map[string]workflowruntime.CancellationIntentSnapshot, len(s.cancellationIntents)),
 		events:              make(map[workflowruntime.RunID][]workflowruntime.Event, len(s.events)),
+		controlDecisions:    make(map[workflowruntime.ControlDecisionID]workflowruntime.ControlDecisionSnapshot, len(s.controlDecisions)),
+		terminalIntents:     make(map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot, len(s.terminalIntents)),
+		terminalKeys:        make(map[string]workflowruntime.RunID, len(s.terminalKeys)),
+		valueSets:           make(map[string]storedValues, len(s.valueSets)),
+		nextValueSet:        s.nextValueSet,
 	}
 	for id, snapshot := range s.runs {
 		backup.runs[id] = cloneRun(snapshot)
@@ -681,6 +706,18 @@ func (s *Store) backupCancellationStateLocked() cancellationStateBackup {
 	for runID, events := range s.events {
 		backup.events[runID] = cloneEvents(events)
 	}
+	for id, decision := range s.controlDecisions {
+		backup.controlDecisions[id] = cloneControlDecision(decision)
+	}
+	for runID, intent := range s.terminalIntents {
+		backup.terminalIntents[runID] = cloneTerminalIntent(intent)
+	}
+	for key, runID := range s.terminalKeys {
+		backup.terminalKeys[key] = runID
+	}
+	for id, stored := range s.valueSets {
+		backup.valueSets[id] = stored
+	}
 	return backup
 }
 
@@ -694,4 +731,9 @@ func (s *Store) restoreCancellationStateLocked(backup cancellationStateBackup) {
 	s.fanOuts = backup.fanOuts
 	s.cancellationIntents = backup.cancellationIntents
 	s.events = backup.events
+	s.controlDecisions = backup.controlDecisions
+	s.terminalIntents = backup.terminalIntents
+	s.terminalKeys = backup.terminalKeys
+	s.valueSets = backup.valueSets
+	s.nextValueSet = backup.nextValueSet
 }

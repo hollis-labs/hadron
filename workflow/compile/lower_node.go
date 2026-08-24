@@ -29,6 +29,7 @@ var supportedNodeFields = []string{
 	"id", "name", "display_name", "kind", "kind_version", "needs", "ready_when",
 	"if", "for_each", "concurrency", "config", "with", "outputs", "effects", "retry",
 	"idempotency", "timeout", "catch", "finally", "switch", "call", "metadata",
+	"continue_on_error",
 	"agent_launch", "checkpoint", "cmd", "emit", "http", "http_call", "human_gate",
 	"llm", "mcp", "mcp_call", "message_wait", "script", "sleep", "transform", "wait_for",
 }
@@ -158,6 +159,12 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 	}
 	if catches, exists := fields["catch"]; exists {
 		compiled.Catch = l.lowerCatch(catches.value, catches.path)
+	}
+	if field, exists := fields["continue_on_error"]; exists && l.boolean(field.value, field.path) {
+		ref := l.location(field.value, field.path)
+		compiled.Catch = append(compiled.Catch, graph.CatchRule{
+			Errors: []string{graph.CatchAllErrors}, Source: &ref,
+		})
 	}
 	if finally, exists := fields["finally"]; exists {
 		compiled.Finally = l.lowerFinally(finally.value, finally.path)

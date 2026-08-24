@@ -337,6 +337,13 @@ func TestRecoveryFiltersAndOrdering(t *testing.T) {
 
 func createNode(t *testing.T, store workflowruntime.StateStore, id workflowruntime.NodeInvocationID, status workflowruntime.NodeStatus, priority int, now time.Time) {
 	t.Helper()
+	if _, loadErr := store.LoadRun(context.Background(), id.RunID); errors.Is(loadErr, workflowruntime.ErrNotFound) {
+		if _, _, createErr := store.CreateRun(context.Background(), workflowruntime.CreateRunRequest{ID: id.RunID, Plan: testPlan(), Status: workflowruntime.RunPending, StartIdempotencyKey: "fixture-run-" + string(id.RunID), CreatedAt: now}); createErr != nil {
+			t.Fatalf("CreateRun(%s): %v", id.RunID, createErr)
+		}
+	} else if loadErr != nil {
+		t.Fatalf("LoadRun(%s): %v", id.RunID, loadErr)
+	}
 	_, err := store.CreateNodeInvocation(context.Background(), workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
 		ID: id, Status: workflowruntime.NodePending, Priority: priority, CreatedAt: now, UpdatedAt: now,
 	}})

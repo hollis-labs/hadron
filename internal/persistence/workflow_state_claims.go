@@ -37,6 +37,18 @@ func (s *WorkflowStateStore) ClaimNode(ctx context.Context, request workflowrunt
 			if validationErr := validateWorkflowClaimResult(result); validationErr != nil {
 				return workflowInvalid(validationErr)
 			}
+			current, err := loadWorkflowNode(ctx, query, request.InvocationID)
+			if err != nil {
+				return err
+			}
+			allowed, err := workflowControlAdmissionAllowed(ctx, query, current.ID)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				result = workflowruntime.ClaimResult{Acquired: false, Replayed: true}
+				return nil
+			}
 			result.Replayed = true
 			return nil
 		}
@@ -47,6 +59,14 @@ func (s *WorkflowStateStore) ClaimNode(ctx context.Context, request workflowrunt
 		}
 		if current.ClaimGeneration != request.ExpectedClaimGeneration {
 			return workflowCAS("node claim", request.ExpectedClaimGeneration, current.ClaimGeneration)
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, current.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			result = workflowruntime.ClaimResult{Acquired: false}
+			return recordWorkflowClaimIdempotency(ctx, query, request.IdempotencyKey, requestJSON, result)
 		}
 		now := request.Now.UTC()
 		run, err := loadWorkflowRun(ctx, query, current.ID.RunID)
@@ -115,6 +135,13 @@ func (s *WorkflowStateStore) RenewNodeLease(ctx context.Context, request workflo
 		current, err := loadWorkflowNode(ctx, query, request.InvocationID)
 		if err != nil {
 			return err
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, current.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences lease renewal"))
 		}
 		if !matchesWorkflowLease(current.Lease, request.Owner, request.Token, request.Generation) {
 			return workflowruntime.ErrClaimMismatch

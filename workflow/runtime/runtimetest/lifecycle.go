@@ -32,6 +32,9 @@ func (s *Store) TransitionRun(ctx context.Context, request workflowruntime.RunTr
 	if current.Generation != request.ExpectedGeneration {
 		return workflowruntime.RunTransitionResult{}, casMismatch("run", request.ExpectedGeneration, current.Generation)
 	}
+	if intent, exists := s.terminalIntents[request.RunID]; exists && intent.Status == workflowruntime.TerminalIntentPending {
+		return workflowruntime.RunTransitionResult{}, invalid(errors.New("pending terminal intent owns run completion"))
+	}
 	if request.At.Before(current.UpdatedAt) {
 		return workflowruntime.RunTransitionResult{}, invalid(errors.New("run transition time must not regress"))
 	}
@@ -92,6 +95,9 @@ func (s *Store) TransitionNode(ctx context.Context, request workflowruntime.Node
 	current, ok := s.nodes[request.InvocationID]
 	if !ok {
 		return workflowruntime.NodeTransitionResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
+	}
+	if !s.controlAdmissionAllowedLocked(current.ID) {
+		return workflowruntime.NodeTransitionResult{}, invalid(errors.New("pending terminal intent fences non-finalizer transition"))
 	}
 	if current.Generation != request.ExpectedGeneration {
 		return workflowruntime.NodeTransitionResult{}, casMismatch("node invocation", request.ExpectedGeneration, current.Generation)
@@ -207,6 +213,9 @@ func (s *Store) StartNodeAttempt(ctx context.Context, request workflowruntime.St
 	if !ok {
 		return workflowruntime.StartNodeAttemptResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
 	}
+	if !s.controlAdmissionAllowedLocked(current.ID) {
+		return workflowruntime.StartNodeAttemptResult{}, invalid(errors.New("pending terminal intent fences non-finalizer attempt start"))
+	}
 	if current.Generation != request.ExpectedNodeGeneration {
 		return workflowruntime.StartNodeAttemptResult{}, casMismatch("node invocation", request.ExpectedNodeGeneration, current.Generation)
 	}
@@ -296,6 +305,9 @@ func (s *Store) FinishNodeAttempt(ctx context.Context, request workflowruntime.F
 	}
 	if run, exists := s.runs[currentNode.ID.RunID]; exists && !run.Status.Active() {
 		return workflowruntime.FinishNodeAttemptResult{}, invalid(errors.New("terminal run fences attempt completion"))
+	}
+	if !s.controlAdmissionAllowedLocked(currentNode.ID) {
+		return workflowruntime.FinishNodeAttemptResult{}, invalid(errors.New("pending terminal intent fences non-finalizer attempt completion"))
 	}
 	if currentNode.Status != workflowruntime.NodeRunning {
 		return workflowruntime.FinishNodeAttemptResult{}, transitionError(currentNode, request.NextNodeStatus, "finishing requires running node")

@@ -1,0 +1,13 @@
+{
+  "name": "switch-default",
+  "expect": "pass",
+  "input": {
+    "scenario": "switch",
+    "switch": {
+      "arms": [{"when": {"text": "false"}, "targets": ["selected"]}],
+      "default": ["fallback"]
+    },
+    "want_outcome": "default",
+    "want_targets": ["fallback"]
+  }
+}

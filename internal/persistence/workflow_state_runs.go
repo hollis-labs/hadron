@@ -129,6 +129,13 @@ func (s *WorkflowStateStore) SaveRun(ctx context.Context, request workflowruntim
 		if current.Generation != request.ExpectedGeneration {
 			return workflowCAS("run", request.ExpectedGeneration, current.Generation)
 		}
+		pending, err := workflowRunHasPendingTerminalIntent(ctx, query, current.ID)
+		if err != nil {
+			return err
+		}
+		if pending {
+			return workflowInvalid(errors.New("pending terminal intent owns run mutation"))
+		}
 		if request.Snapshot.Status != current.Status {
 			return workflowInvalid(errors.New("run status changes require TransitionRun"))
 		}
@@ -137,6 +144,9 @@ func (s *WorkflowStateStore) SaveRun(ctx context.Context, request workflowruntim
 		}
 		if request.Snapshot.Plan != current.Plan {
 			return workflowInvalid(errors.New("run plan reference is immutable"))
+		}
+		if !equalWorkflowValueRef(request.Snapshot.Inputs, current.Inputs) {
+			return workflowInvalid(errors.New("run inputs are immutable after creation"))
 		}
 		result = request.Snapshot
 		result.Inputs = cloneWorkflowValueRef(request.Snapshot.Inputs)
@@ -171,6 +181,13 @@ func (s *WorkflowStateStore) TransitionRun(ctx context.Context, request workflow
 		}
 		if current.Generation != request.ExpectedGeneration {
 			return workflowCAS("run", request.ExpectedGeneration, current.Generation)
+		}
+		pending, err := workflowRunHasPendingTerminalIntent(ctx, query, request.RunID)
+		if err != nil {
+			return err
+		}
+		if pending {
+			return workflowInvalid(errors.New("pending terminal intent owns run completion"))
 		}
 		at := request.At.UTC()
 		if at.Before(current.UpdatedAt) {
@@ -243,8 +260,19 @@ func (s *WorkflowStateStore) CreateNodeInvocation(ctx context.Context, request w
 		return workflowruntime.NodeInvocationSnapshot{}, workflowInvalid(err)
 	}
 	writeErr := s.write(ctx, "create workflow node", func(query workflowSQL) error {
-		if _, parentErr := loadWorkflowRun(ctx, query, next.ID.RunID); parentErr != nil {
+		parent, parentErr := loadWorkflowRun(ctx, query, next.ID.RunID)
+		if parentErr != nil {
 			return parentErr
+		}
+		if !parent.Status.Active() {
+			return workflowInvalid(errors.New("terminal run fences node creation"))
+		}
+		pending, err := workflowRunHasPendingTerminalIntent(ctx, query, next.ID.RunID)
+		if err != nil {
+			return err
+		}
+		if pending {
+			return workflowInvalid(errors.New("pending terminal intent fences node creation"))
 		}
 		return insertWorkflowNode(ctx, query, next)
 	})
@@ -273,6 +301,13 @@ func (s *WorkflowStateStore) SaveNodeInvocation(ctx context.Context, request wor
 		}
 		if current.Generation != request.ExpectedGeneration {
 			return workflowCAS("node invocation", request.ExpectedGeneration, current.Generation)
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, current.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences non-finalizer node save"))
 		}
 		if request.Snapshot.Status != current.Status || !equalWorkflowBlocked(request.Snapshot.Blocked, current.Blocked) {
 			return workflowInvalid(errors.New("node lifecycle changes require TransitionNode"))

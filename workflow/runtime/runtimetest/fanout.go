@@ -91,6 +91,9 @@ func (s *Store) ExpandFanOut(ctx context.Context, request workflowruntime.Expand
 	if !run.Status.Active() {
 		return workflowruntime.ExpandFanOutResult{}, invalid(errors.New("terminal run cannot expand fan-out"))
 	}
+	if !s.controlAdmissionAllowedLocked(request.FanOut.Parent) {
+		return workflowruntime.ExpandFanOutResult{}, invalid(errors.New("pending terminal intent fences fan-out expansion"))
+	}
 	parent, ok := s.nodes[request.FanOut.Parent]
 	if !ok {
 		return workflowruntime.ExpandFanOutResult{}, fmt.Errorf("%w: fan-out parent", workflowruntime.ErrNotFound)
@@ -180,6 +183,9 @@ func (s *Store) CompleteFanOut(ctx context.Context, request workflowruntime.Comp
 	}
 	if !run.Status.Active() {
 		return workflowruntime.CompleteFanOutResult{}, invalid(errors.New("terminal run fences fan-out completion"))
+	}
+	if !s.controlAdmissionAllowedLocked(request.Parent) {
+		return workflowruntime.CompleteFanOutResult{}, invalid(errors.New("pending terminal intent fences fan-out completion"))
 	}
 	parent, ok := s.nodes[request.Parent]
 	if !ok {

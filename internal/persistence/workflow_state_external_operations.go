@@ -50,6 +50,13 @@ func (s *WorkflowStateStore) SuspendExternalOperation(ctx context.Context, reque
 		if currentNode.Generation != request.ExpectedNodeGeneration {
 			return workflowCAS("external operation node", request.ExpectedNodeGeneration, currentNode.Generation)
 		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, currentNode.ID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences external suspension"))
+		}
 		if currentNode.Status != workflowruntime.NodeRunning || currentNode.Wait != nil {
 			return workflowInvalid(errors.New("external suspension requires a running node without a generic wait"))
 		}
@@ -117,12 +124,25 @@ func (s *WorkflowStateStore) RequestExternalOperationCancel(ctx context.Context,
 	}
 	var result workflowruntime.RequestExternalOperationCancelResult
 	writeErr := s.write(ctx, "request workflow external operation cancellation", func(query workflowSQL) error {
-		current, err := loadWorkflowExternalOperation(ctx, query, request.Attempt)
-		if err != nil {
-			return err
+		current, loadErr := loadWorkflowExternalOperation(ctx, query, request.Attempt)
+		if loadErr != nil {
+			return loadErr
 		}
 		if current.Generation != request.ExpectedOperationGeneration {
 			return workflowCAS("external operation", request.ExpectedOperationGeneration, current.Generation)
+		}
+		allowed, admissionErr := workflowControlAdmissionAllowed(ctx, query, request.Attempt.Invocation)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		if !allowed {
+			cancellationAllowed, intentErr := workflowHasPendingExternalCancellation(ctx, query, request.Attempt)
+			if intentErr != nil {
+				return intentErr
+			}
+			if !cancellationAllowed {
+				return workflowInvalid(errors.New("pending terminal intent fences external cancellation request"))
+			}
 		}
 		if current.Status != stepkind.ObservationPending {
 			return &workflowruntime.TransitionConflictError{Entity: "external operation", ID: workflowExternalAttemptIdentity(current.Attempt), Status: string(current.Status), Reason: "terminal operation cannot accept cancellation intent"}
@@ -188,14 +208,33 @@ func (s *WorkflowStateStore) ApplyExternalOperation(ctx context.Context, request
 		if currentAttempt.Generation != request.ExpectedAttemptGeneration {
 			return workflowCAS("external operation attempt", request.ExpectedAttemptGeneration, currentAttempt.Generation)
 		}
+		allowedCanceledResolution := false
+		if request.Status == stepkind.ObservationCanceled && request.NextNodeStatus == workflowruntime.NodeCanceled {
+			allowedCanceledResolution, err = workflowHasPendingExternalCancellation(ctx, query, request.Attempt)
+			if err != nil {
+				return err
+			}
+		}
 		run, runErr := loadWorkflowRun(ctx, query, request.Attempt.Invocation.RunID)
 		if runErr != nil {
 			return runErr
 		}
 		if !run.Status.Active() {
-			allowedCanceledResolution := run.Status == workflowruntime.RunCanceled && request.Status == stepkind.ObservationCanceled && request.NextNodeStatus == workflowruntime.NodeCanceled
-			if !allowedCanceledResolution {
+			if run.Status != workflowruntime.RunCanceled || !allowedCanceledResolution {
 				return workflowInvalid(errors.New("terminal run fences external mutation"))
+			}
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, request.Attempt.Invocation)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			intent, err := loadWorkflowTerminalIntent(ctx, query, request.Attempt.Invocation.RunID)
+			if err != nil {
+				return err
+			}
+			if intent.IntendedStatus != workflowruntime.RunCanceled || !allowedCanceledResolution {
+				return workflowInvalid(errors.New("pending terminal intent fences external mutation"))
 			}
 		}
 		if currentOperation.Status != stepkind.ObservationPending || currentNode.Status != workflowruntime.NodeWaiting || currentNode.Wait != nil || currentNode.Lease != nil ||
@@ -283,6 +322,21 @@ func (s *WorkflowStateStore) ApplyExternalOperation(ctx context.Context, request
 		return nil
 	})
 	return result, err
+}
+
+func workflowHasPendingExternalCancellation(ctx context.Context, query workflowSQL, attempt workflowruntime.AttemptID) (bool, error) {
+	id, err := workflowCancellationIntentID(workflowruntime.CancellationExternalOperation, &attempt, "")
+	if err != nil {
+		return false, workflowInvalid(err)
+	}
+	intent, err := loadWorkflowCancellationIntent(ctx, query, id)
+	if errors.Is(err, workflowruntime.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return intent.Status == workflowruntime.CancellationPending && intent.RunID == attempt.Invocation.RunID && intent.Kind == workflowruntime.CancellationExternalOperation && intent.Attempt != nil && *intent.Attempt == attempt, nil
 }
 
 func (s *WorkflowStateStore) RecoverExternalOperations(ctx context.Context, query workflowruntime.ExternalOperationQuery) ([]workflowruntime.ExternalOperationSnapshot, error) {

@@ -181,13 +181,25 @@ type TimeoutPolicy struct {
 	ScheduleToClose Duration `json:"schedule_to_close,omitempty" yaml:"schedule_to_close,omitempty"`
 }
 
-// CatchRule routes a matching structured error to ordinary graph nodes.
+// CatchRule routes a matching structured error to ordinary graph nodes. An
+// empty Errors list deterministically matches every error; When may narrow it.
+// BindAs is an expression-local lower-snake identifier, not a graph node ID.
 type CatchRule struct {
 	Errors  []string    `json:"errors,omitempty" yaml:"errors,omitempty"`
 	When    *Expression `json:"when,omitempty" yaml:"when,omitempty"`
 	Targets []string    `json:"targets" yaml:"targets"`
 	BindAs  string      `json:"bind_as,omitempty" yaml:"bind_as,omitempty"`
 	Source  *SourceRef  `json:"source,omitempty" yaml:"source,omitempty"`
+}
+
+// CatchAllErrors is the canonical catch selector for every structured failure.
+const CatchAllErrors = "*"
+
+// ContinueOnError reports whether this rule is the compiler's exact policy
+// sugar for handling every failure without selecting a handler node. Keeping
+// the lowering in CatchRule means the runtime has one error-routing model.
+func (r CatchRule) ContinueOnError() bool {
+	return len(r.Errors) == 1 && r.Errors[0] == CatchAllErrors && r.When == nil && len(r.Targets) == 0 && r.BindAs == ""
 }
 
 // FinallySpec marks an ordinary node as cleanup for a declared graph scope.

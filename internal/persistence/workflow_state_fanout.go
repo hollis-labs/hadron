@@ -75,32 +75,6 @@ func (s *WorkflowStateStore) LoadFanOutItemResults(ctx context.Context, parent w
 	return result, nil
 }
 
-func loadWorkflowValues(ctx context.Context, query workflowSQL, ref values.ValueSetRef) (values.ValueSet, error) {
-	sequence, parseErr := parseWorkflowValueID(ref.ID)
-	if parseErr != nil {
-		return nil, parseErr
-	}
-	var digest, encoded string
-	if queryErr := query.QueryRowContext(ctx, `SELECT digest, values_json FROM workflow_value_sets WHERE sequence = ?`, sequence).Scan(&digest, &encoded); queryErr != nil {
-		if errors.Is(queryErr, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: value set %q", workflowruntime.ErrNotFound, ref.ID)
-		}
-		return nil, queryErr
-	}
-	if digest != ref.Digest {
-		return nil, fmt.Errorf("%w: value set digest", workflowruntime.ErrCASMismatch)
-	}
-	var set values.ValueSet
-	if decodeErr := decodeWorkflowJSON("value set", encoded, &set); decodeErr != nil {
-		return nil, decodeErr
-	}
-	computed, err := values.DigestValueSet(set)
-	if err != nil || computed != digest {
-		return nil, workflowInvalid(errors.New("persisted value-set content does not match its digest"))
-	}
-	return set, nil
-}
-
 func (s *WorkflowStateStore) ExpandFanOut(ctx context.Context, request workflowruntime.ExpandFanOutRequest) (workflowruntime.ExpandFanOutResult, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ExpandFanOutResult{}, workflowInvalid(err)
@@ -113,6 +87,13 @@ func (s *WorkflowStateStore) ExpandFanOut(ctx context.Context, request workflowr
 		}
 		if !run.Status.Active() {
 			return workflowInvalid(errors.New("terminal run cannot expand fan-out"))
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, request.FanOut.Parent)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences fan-out expansion"))
 		}
 		parent, parentErr := loadWorkflowNode(ctx, query, request.FanOut.Parent)
 		if parentErr != nil {
@@ -217,6 +198,13 @@ func (s *WorkflowStateStore) CompleteFanOut(ctx context.Context, request workflo
 		}
 		if !run.Status.Active() {
 			return workflowInvalid(errors.New("terminal run fences fan-out completion"))
+		}
+		allowed, err := workflowControlAdmissionAllowed(ctx, query, request.Parent)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return workflowInvalid(errors.New("pending terminal intent fences fan-out completion"))
 		}
 		parent, parentErr := loadWorkflowNode(ctx, query, request.Parent)
 		if parentErr != nil {

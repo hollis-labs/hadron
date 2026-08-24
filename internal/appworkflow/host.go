@@ -45,6 +45,7 @@ type Host struct {
 	cancellation *runtime.CancellationCoordinator
 	hooks        []RecoveryHook
 	childSource  ChildRunRecoverySource
+	childDefs    ChildRunDefinitionSource
 	childRuns    ChildRunMaterializer
 	telemetry    TelemetrySink
 	artifacts    values.ArtifactStore
@@ -83,6 +84,7 @@ func New(options Options) (*Host, error) {
 		}
 	}
 	childSource, hasChildSource := options.Journal.(ChildRunRecoverySource)
+	childDefs, _ := options.Journal.(ChildRunDefinitionSource)
 	if hasChildSource && nilInterface(options.ChildRuns) {
 		return nil, fmt.Errorf("%w: child-run materializer is required for the SQLite call recovery source", ErrInvalidHost)
 	}
@@ -122,7 +124,7 @@ func New(options Options) (*Host, error) {
 		identity: options.Identity, policy: options.Policy, dryRun: options.DryRun,
 		activations: options.Activations, waits: waits, cancellation: cancellation,
 		hooks: append([]RecoveryHook(nil), options.RecoveryHooks...), telemetry: options.Telemetry,
-		childSource: childSource, childRuns: options.ChildRuns,
+		childSource: childSource, childDefs: childDefs, childRuns: options.ChildRuns,
 		artifacts: options.Artifacts, clock: clock, registry: registry, dispatcher: dispatcher,
 		interval: interval, batchLimit: options.RecoveryBatchLimit,
 	}, nil
@@ -320,20 +322,6 @@ func (h *Host) recover(ctx context.Context, startup bool) error {
 			}
 		}
 	}
-	for {
-		cancellations, err := h.journal.ListPendingCancellations(ctx, h.batchLimit)
-		if err != nil {
-			return fmt.Errorf("recover host cancellations: %w", err)
-		}
-		if len(cancellations) == 0 {
-			break
-		}
-		for _, cancellation := range cancellations {
-			if _, _, err := h.applyCancellation(ctx, cancellation); err != nil {
-				return fmt.Errorf("recover host cancellation %s: %w", cancellation.Intent.IdempotencyKey, err)
-			}
-		}
-	}
 	if h.childSource != nil {
 		seen := make(map[string]struct{})
 		for {
@@ -353,6 +341,24 @@ func (h *Host) recover(ctx context.Context, startup bool) error {
 				if err := h.childRuns.MaterializeChildRun(ctx, child); err != nil {
 					return fmt.Errorf("materialize child run %s: %w", child.ChildRunID, err)
 				}
+			}
+		}
+	}
+	// A durable child start can exist without materialized node invocations
+	// after a crash. Materialize those exact pinned starts before planning a
+	// cancellation tree so descendant finalizers are never skipped or left in
+	// an unclosable pending run.
+	for {
+		cancellations, err := h.journal.ListPendingCancellations(ctx, h.batchLimit)
+		if err != nil {
+			return fmt.Errorf("recover host cancellations: %w", err)
+		}
+		if len(cancellations) == 0 {
+			break
+		}
+		for _, cancellation := range cancellations {
+			if _, _, err := h.applyCancellation(ctx, cancellation); err != nil {
+				return fmt.Errorf("recover host cancellation %s: %w", cancellation.Intent.IdempotencyKey, err)
 			}
 		}
 	}

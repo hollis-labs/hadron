@@ -30,6 +30,8 @@ const (
 	ValueFixtures FixtureSet = "values"
 	// SchedulerFixtures contains scheduler cases.
 	SchedulerFixtures FixtureSet = "scheduler"
+	// ControlFlowFixtures contains switch, catch, and finally scheduler cases.
+	ControlFlowFixtures FixtureSet = "control-flow"
 	// WaitFixtures contains wait and resume cases.
 	WaitFixtures FixtureSet = "waits"
 	// ExecutorMetadataFixtures contains step-kind registry metadata cases.
@@ -95,6 +97,9 @@ func RunAll(t *testing.T, store FixtureStore, host Host) {
 	t.Run("scheduler", func(t *testing.T) {
 		SchedulerSuite(t, store, host.SchedulerFactory())
 	})
+	t.Run("control-flow", func(t *testing.T) {
+		ControlFlowSuite(t, store, host.SchedulerFactory())
+	})
 	t.Run("wait", func(t *testing.T) {
 		WaitSuite(t, store, host.WaitFactory())
 	})
@@ -127,6 +132,13 @@ func StateStoreSuite(t *testing.T, store FixtureStore, factory Factory) {
 func SchedulerSuite(t *testing.T, store FixtureStore, factory Factory) {
 	t.Helper()
 	runSuite(t, "scheduler", store, factory, SchedulerFixtures)
+}
+
+// ControlFlowSuite runs graph-native switch, catch, and finally fixtures using
+// the scheduler/runtime factory without widening the extraction Host surface.
+func ControlFlowSuite(t *testing.T, store FixtureStore, factory Factory) {
+	t.Helper()
+	runSuite(t, "control-flow", store, factory, ControlFlowFixtures)
 }
 
 // WaitSuite runs suspend and resume fixtures.

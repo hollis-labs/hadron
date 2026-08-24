@@ -37,7 +37,7 @@ func TestInferValueDependenciesWalksEveryExpressionCarrier(t *testing.T) {
 		"need-only", "edge-only", "existing-data", "binding", "condition",
 		"collection", "switch-source", "transform-source", "node-output",
 		"verifier-source", "memo-source", "idempotency-source", "interpolation-source",
-		"workflow-output-source",
+		"workflow-output-source", "switch-target",
 	}
 	nodes := make([]graph.Node, 0, len(producerIDs)+1)
 	for i, id := range producerIDs {
@@ -59,7 +59,8 @@ func TestInferValueDependenciesWalksEveryExpressionCarrier(t *testing.T) {
 			Items: graph.Expression{Text: "steps.collection.outputs.items", Source: dependencySource(45, "steps", "consume", "for_each", "items")},
 		},
 		Switch: &graph.SwitchSpec{Arms: []graph.SwitchArm{{
-			When: graph.Expression{Text: "steps['switch-source'].outputs.enabled", Source: dependencySource(46, "steps", "consume", "switch", "arms", "0", "when")},
+			When:    graph.Expression{Text: "steps['switch-source'].outputs.enabled", Source: dependencySource(46, "steps", "consume", "switch", "arms", "0", "when")},
+			Targets: []string{"switch-target"},
 		}}},
 		Config: graph.Config{"nested": map[string]any{
 			"mapped": "steps['transform-source'].outputs.value",

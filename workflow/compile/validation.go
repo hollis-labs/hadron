@@ -41,6 +41,13 @@ const (
 	// CodeInvalidCallShape identifies a call kind without a call declaration or
 	// a non-call kind carrying call-only semantics.
 	CodeInvalidCallShape diagnostic.Code = "HADR-SOURCE-029"
+	// CodeInvalidCatch identifies a catch declaration that cannot produce one
+	// deterministic error route.
+	CodeInvalidCatch diagnostic.Code = "HADR-SOURCE-030"
+	// CodeInvalidSwitch identifies a switch without deterministic ordered arms.
+	CodeInvalidSwitch diagnostic.Code = "HADR-SOURCE-031"
+	// CodeInvalidFinally identifies an invalid cleanup scope or node shape.
+	CodeInvalidFinally diagnostic.Code = "HADR-SOURCE-032"
 
 	// CodeUnknownDependency identifies an explicit dependency endpoint absent
 	// from the graph.

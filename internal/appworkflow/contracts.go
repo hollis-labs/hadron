@@ -87,6 +87,13 @@ type ChildRunRecoverySource interface {
 	RecoverPendingChildRuns(context.Context, int) ([]calladapter.ChildRunRequest, error)
 }
 
+// ChildRunDefinitionSource loads the exact immutable request that created a
+// call.mode:run child. Cancellation uses its pinned resolved graph and never
+// synthesizes a root start record or re-resolves the definition.
+type ChildRunDefinitionSource interface {
+	LoadChildRunRequest(context.Context, runtime.RunID) (calladapter.ChildRunRequest, error)
+}
+
 // ChildRunMaterializer is the injected W05-T03 seam that turns a resolved,
 // pinned child definition into runnable child graph state. It must be
 // idempotent by ChildRunRequest.IdempotencyKey.

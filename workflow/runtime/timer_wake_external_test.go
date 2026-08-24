@@ -97,7 +97,6 @@ func TestTimerRecoveryPrefersWakeAndSchedulerFailureIsRecoverable(t *testing.T) 
 func TestConcurrentTimerWakeAndRunCancellationConverge(t *testing.T) {
 	base := time.Date(2026, time.August, 24, 19, 0, 0, 0, time.UTC)
 	running := prepareRunningWait(t, "timer-cancel-race", workflowwait.KindTimer, workflowwait.WakeTimer, base, time.Hour)
-	createRun(t, running.store, running.invocation.RunID, base)
 	schema, _ := workflowwait.NewSchemaRef(graph.Schema{"type": "object"})
 	running.request.Wait.ResumeSchema = schema
 	running.request.Wait.ResumeTokenDigest = ""

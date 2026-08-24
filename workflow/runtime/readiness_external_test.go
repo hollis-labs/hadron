@@ -529,6 +529,9 @@ func makeTerminalNode(t *testing.T, store workflowruntime.StateStore, id workflo
 	var failure *workflowruntime.Failure
 	if status != workflowruntime.NodeSucceeded {
 		failure = &workflowruntime.Failure{Code: "test_" + string(status), Message: "test terminal outcome"}
+		if status == workflowruntime.NodeTimedOut {
+			failure.Details = map[string]string{"timeout_kind": string(workflowruntime.TimeoutExecution)}
+		}
 	}
 	_, err = store.FinishNodeAttempt(context.Background(), workflowruntime.FinishNodeAttemptRequest{
 		InvocationID: id, AttemptNumber: started.Attempt.ID.Number,

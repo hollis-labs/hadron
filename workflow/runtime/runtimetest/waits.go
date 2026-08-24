@@ -40,6 +40,9 @@ func (s *Store) SuspendNodeWait(ctx context.Context, request workflowruntime.Sus
 	defer s.mu.Unlock()
 	if prior, ok := s.suspends[request.Wait.Ref.ID]; ok {
 		if equalJSON(prior.request, request) {
+			if !s.controlAdmissionAllowedLocked(request.Wait.Invocation) {
+				return workflowruntime.SuspendWaitResult{}, invalid(errors.New("pending terminal intent fences wait suspension replay"))
+			}
 			result := cloneSuspendResult(prior.result)
 			result.Outcome = workflowruntime.IdempotencyReplayed
 			return result, nil
@@ -52,6 +55,9 @@ func (s *Store) SuspendNodeWait(ctx context.Context, request workflowruntime.Sus
 	currentNode, ok := s.nodes[request.Wait.Invocation]
 	if !ok {
 		return workflowruntime.SuspendWaitResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
+	}
+	if !s.controlAdmissionAllowedLocked(currentNode.ID) {
+		return workflowruntime.SuspendWaitResult{}, invalid(errors.New("pending terminal intent fences wait suspension"))
 	}
 	if currentNode.Generation != request.ExpectedNodeGeneration {
 		return workflowruntime.SuspendWaitResult{}, casMismatch("suspend wait node", request.ExpectedNodeGeneration, currentNode.Generation)
@@ -161,6 +167,9 @@ func (s *Store) ResumeNodeWait(ctx context.Context, request workflowruntime.Resu
 			if !equalAtomicResumeRequest(prior.request, request) {
 				return workflowruntime.ResumeWaitResult{}, idempotencyConflict("resume node wait", request.IdempotencyKey)
 			}
+			if wait, exists := s.waits[request.WaitID]; exists && !s.controlAdmissionAllowedLocked(wait.Invocation) {
+				return workflowruntime.ResumeWaitResult{}, invalid(errors.New("pending terminal intent fences wait resume replay"))
+			}
 			result := cloneResumeResult(prior.result)
 			result.Outcome = workflowruntime.ResumeReplayed
 			return result, nil
@@ -197,6 +206,9 @@ func (s *Store) ResumeNodeWait(ctx context.Context, request workflowruntime.Resu
 	currentNode, ok := s.nodes[currentWait.Invocation]
 	if !ok {
 		return workflowruntime.ResumeWaitResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
+	}
+	if !s.controlAdmissionAllowedLocked(currentNode.ID) {
+		return workflowruntime.ResumeWaitResult{}, invalid(errors.New("pending terminal intent fences wait resume"))
 	}
 	if currentNode.Generation != request.ExpectedNodeGeneration {
 		return workflowruntime.ResumeWaitResult{}, casMismatch("resume wait node", request.ExpectedNodeGeneration, currentNode.Generation)
