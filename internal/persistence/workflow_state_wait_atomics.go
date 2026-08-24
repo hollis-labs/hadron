@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
@@ -19,6 +20,9 @@ func (s *WorkflowStateStore) SuspendNodeWait(ctx context.Context, request workfl
 	request.Wait.CreatedAt, request.Wait.UpdatedAt = request.At, request.At
 	if !request.Wait.Deadline.IsZero() {
 		request.Wait.Deadline = request.Wait.Deadline.UTC()
+	}
+	if !request.Wait.WakeAt.IsZero() {
+		request.Wait.WakeAt = request.Wait.WakeAt.UTC()
 	}
 	if err := request.Validate(); err != nil {
 		return workflowruntime.SuspendWaitResult{}, workflowInvalid(err)
@@ -314,6 +318,9 @@ func (s *WorkflowStateStore) TimeoutWait(ctx context.Context, request workflowru
 			result = workflowruntime.WaitTimeoutResult{Applied: false, Wait: currentWait, Node: currentNode}
 			return storeWorkflowTimeoutReplay(ctx, query, request.IdempotencyKey, requestJSON, result)
 		}
+		if !currentWait.WakeAt.IsZero() && !currentWait.WakeAt.After(request.Deadline) {
+			return workflowruntime.ErrWaitWakePending
+		}
 		if currentWait.Generation != request.ExpectedWaitGeneration {
 			return workflowCAS("wait timeout", request.ExpectedWaitGeneration, currentWait.Generation)
 		}
@@ -417,11 +424,7 @@ func (s *WorkflowStateStore) RecoverOpenWaits(ctx context.Context, query workflo
 		statement += ` AND run_id = ?`
 		arguments = append(arguments, query.RunID)
 	}
-	statement += ` ORDER BY CASE WHEN deadline IS NULL THEN 1 ELSE 0 END, deadline ASC, created_at ASC, wait_id ASC`
-	if query.Limit > 0 {
-		statement += ` LIMIT ?`
-		arguments = append(arguments, query.Limit)
-	}
+	statement += ` ORDER BY created_at ASC, wait_id ASC`
 	rows, err := s.db.QueryContext(ctx, statement, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("recover open waits: %w", err)
@@ -438,7 +441,33 @@ func (s *WorkflowStateStore) RecoverOpenWaits(ctx context.Context, query workflo
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	sort.Slice(result, func(i, j int) bool {
+		leftAt, rightAt := workflowNextWaitAction(result[i]), workflowNextWaitAction(result[j])
+		if leftAt.IsZero() != rightAt.IsZero() {
+			return !leftAt.IsZero()
+		}
+		if !leftAt.Equal(rightAt) {
+			return leftAt.Before(rightAt)
+		}
+		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].CreatedAt.Before(result[j].CreatedAt)
+		}
+		return result[i].Ref.ID < result[j].Ref.ID
+	})
+	if query.Limit > 0 && len(result) > query.Limit {
+		result = result[:query.Limit]
+	}
 	return result, nil
+}
+
+func workflowNextWaitAction(snapshot workflowruntime.WaitSnapshot) time.Time {
+	if snapshot.WakeAt.IsZero() {
+		return snapshot.Deadline
+	}
+	if snapshot.Deadline.IsZero() || snapshot.WakeAt.Before(snapshot.Deadline) {
+		return snapshot.WakeAt
+	}
+	return snapshot.Deadline
 }
 
 func canonicalAtomicResumeRequest(request workflowruntime.ResumeNodeWaitRequest) (string, error) {
@@ -496,6 +525,9 @@ func workflowWaitEventAttributes(snapshot workflowruntime.WaitSnapshot, from, to
 	}
 	if !snapshot.Deadline.IsZero() {
 		attributes["deadline"] = snapshot.Deadline.UTC().Format(time.RFC3339Nano)
+	}
+	if !snapshot.WakeAt.IsZero() {
+		attributes["wake_at"] = snapshot.WakeAt.UTC().Format(time.RFC3339Nano)
 	}
 	if snapshot.Resolution != nil {
 		attributes["responder_kind"] = snapshot.Resolution.Responder.Kind

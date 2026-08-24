@@ -161,8 +161,12 @@ func (r Resolution) Validate() error {
 // Record is the canonical semantic wait record. Runtime storage envelopes add
 // the wait and invocation identities plus CAS generations and storage times.
 type Record struct {
-	Kind              Kind                `json:"kind"`
-	Correlation       string              `json:"correlation"`
+	Kind        Kind   `json:"kind"`
+	Correlation string `json:"correlation"`
+	// WakeAt is the immutable successful timer firing time. It is distinct
+	// from Deadline, which always means timeout-at. Legacy timer records without
+	// WakeAt remain timeout-only.
+	WakeAt            time.Time           `json:"wake_at,omitempty"`
 	Deadline          time.Time           `json:"deadline,omitempty"`
 	Payload           *values.ValueSetRef `json:"payload,omitempty"`
 	ResumeSchema      SchemaRef           `json:"resume_schema"`
@@ -208,6 +212,12 @@ func (r Record) Validate() error {
 	}
 	if !r.WakeSource.Valid() {
 		return fmt.Errorf("unsupported wait wake source %q", r.WakeSource)
+	}
+	if !r.WakeAt.IsZero() && (r.Kind != KindTimer || r.WakeSource != WakeTimer) {
+		return fmt.Errorf("wait wake_at is supported only by timer waits")
+	}
+	if !r.WakeAt.IsZero() && !r.Deadline.IsZero() && !r.WakeAt.Before(r.Deadline) {
+		return fmt.Errorf("timer wait wake_at must precede deadline")
 	}
 	if !r.Status.Valid() {
 		return fmt.Errorf("unsupported wait status %q", r.Status)

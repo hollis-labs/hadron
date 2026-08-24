@@ -19,7 +19,7 @@ func TestAllWakeSourcesConvergeOnAtomicResume(t *testing.T) {
 	cases := []struct {
 		kind   workflowwait.Kind
 		source workflowwait.WakeSource
-	}{{workflowwait.KindGate, workflowwait.WakeGate}, {workflowwait.KindMessage, workflowwait.WakeMessage}, {workflowwait.KindTimer, workflowwait.WakeTimer}, {workflowwait.KindCallback, workflowwait.WakeCallback}, {workflowwait.KindChildRun, workflowwait.WakeChildRun}, {workflowwait.KindSignal, workflowwait.WakeSignal}}
+	}{{workflowwait.KindGate, workflowwait.WakeGate}, {workflowwait.KindMessage, workflowwait.WakeMessage}, {workflowwait.KindCallback, workflowwait.WakeCallback}, {workflowwait.KindChildRun, workflowwait.WakeChildRun}, {workflowwait.KindSignal, workflowwait.WakeSignal}}
 	for _, test := range cases {
 		t.Run(string(test.source), func(t *testing.T) {
 			fixture := prepareAtomicWait(t, string(test.source), test.kind, test.source, time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC), time.Hour)
@@ -36,6 +36,10 @@ func TestAllWakeSourcesConvergeOnAtomicResume(t *testing.T) {
 				t.Fatalf("resume values = %#v, %v", stored, err)
 			}
 		})
+	}
+	legacyTimer := prepareAtomicWait(t, "legacy-timer", workflowwait.KindTimer, workflowwait.WakeTimer, time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC), time.Hour)
+	if _, err := legacyTimer.coordinator.Resume(context.Background(), legacyTimer.resumeCommand("legacy-timer", legacyTimer.base.Add(4*time.Second))); err == nil {
+		t.Fatal("legacy timeout-only timer accepted generic successful resume")
 	}
 }
 

@@ -59,6 +59,9 @@ func (s *Store) TimeoutWait(ctx context.Context, request workflowruntime.Timeout
 		s.timeouts[request.IdempotencyKey] = timeoutRecord{request: request, result: cloneWaitTimeoutResult(result)}
 		return result, nil
 	}
+	if !currentWait.WakeAt.IsZero() && !currentWait.WakeAt.After(request.Deadline) {
+		return workflowruntime.WaitTimeoutResult{}, workflowruntime.ErrWaitWakePending
+	}
 	if currentWait.Generation != request.ExpectedWaitGeneration {
 		return workflowruntime.WaitTimeoutResult{}, casMismatch("wait timeout", request.ExpectedWaitGeneration, currentWait.Generation)
 	}

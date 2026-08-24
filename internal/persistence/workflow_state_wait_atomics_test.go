@@ -78,6 +78,73 @@ func TestWorkflowSQLiteLateResumeTimeoutAndRestartRecovery(t *testing.T) {
 	}
 }
 
+func TestWorkflowSQLiteSuccessfulTimerReopensAndMatchesRuntimeContract(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "timer-wake.db")
+	store, state := openWorkflowStateTest(t, path)
+	fixture := prepareWorkflowSQLiteWait(t, state, "timer-wake", workflowTestTime(), time.Hour)
+	schema, err := workflowwait.NewSchemaRef(graph.Schema{
+		"type": "object", "additionalProperties": false, "required": []any{"woke_at"},
+		"properties": map[string]any{"woke_at": map[string]any{"type": "string"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakeAt := fixture.base.Add(10 * time.Second)
+	deadline := fixture.base.Add(20 * time.Second)
+	fixture.request.Wait.Kind = workflowwait.KindTimer
+	fixture.request.Wait.WakeSource = workflowwait.WakeTimer
+	fixture.request.Wait.ResumeSchema = schema
+	fixture.request.Wait.ResumeTokenDigest = ""
+	fixture.request.Wait.ResumeURL = ""
+	fixture.request.Wait.Authority = workflowwait.ResponderAuthority{Kind: "system_timer", Reference: "runtime"}
+	fixture.request.Wait.WakeAt = wakeAt
+	fixture.request.Wait.Deadline = deadline
+	coordinator := workflowruntime.WaitCoordinator{Store: state}
+	suspended, err := coordinator.Suspend(context.Background(), workflowruntime.SuspendCommand{Request: fixture.request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, timeoutErr := state.TimeoutWait(context.Background(), workflowruntime.TimeoutWaitRequest{
+		WaitID: suspended.Wait.Ref.ID, ExpectedWaitGeneration: suspended.Wait.Generation,
+		ExpectedNodeGeneration: suspended.Node.Generation, IdempotencyKey: "timer-timeout-must-lose",
+		Deadline: deadline, Now: deadline,
+	}); !errors.Is(timeoutErr, workflowruntime.ErrWaitWakePending) {
+		t.Fatalf("timer timeout precedence = %v", timeoutErr)
+	}
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	reopenedStore, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopenedStore.Close() })
+	reopened, err := NewWorkflowStateStore(reopenedStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := reopened.LoadWait(context.Background(), fixture.waitID)
+	if err != nil || loaded.Status != workflowruntime.WaitOpen || !loaded.WakeAt.Equal(wakeAt) || !loaded.Deadline.Equal(deadline) {
+		t.Fatalf("reopened timer = %#v, %v", loaded, err)
+	}
+	woken, err := (workflowruntime.WaitCoordinator{Store: reopened}).WakeTimer(context.Background(), workflowruntime.TimerWakeCommand{WaitID: fixture.waitID, FiredAt: deadline.Add(time.Hour)})
+	if err != nil || woken.Outcome != workflowruntime.ResumeApplied || woken.Wait.Status != workflowruntime.WaitResumed || !woken.Wait.ResolvedAt.Equal(wakeAt) || woken.Node.Status != workflowruntime.NodeReady {
+		t.Fatalf("SQLite timer wake = %#v, %v", woken, err)
+	}
+	set, err := reopened.LoadValues(context.Background(), woken.Values)
+	object, ok := set[workflowruntime.ResumeValueName].Inline.(map[string]any)
+	if err != nil || !ok || object["woke_at"] != wakeAt.Format(time.RFC3339Nano) || set[workflowruntime.ResumeValueName].Redaction != values.RedactionPrivate || set[workflowruntime.ResumeValueName].Retention != values.RetentionRun {
+		t.Fatalf("SQLite timer values = %#v, %v", set, err)
+	}
+	if len(woken.Events) != 2 || woken.Events[0].Type != workflowruntime.EventWaitResumed || woken.Events[0].Attributes["wake_at"] != wakeAt.Format(time.RFC3339Nano) || !woken.Events[0].OccurredAt.Equal(wakeAt) {
+		t.Fatalf("SQLite timer events = %#v", woken.Events)
+	}
+	replayed, err := (workflowruntime.WaitCoordinator{Store: reopened}).WakeTimer(context.Background(), workflowruntime.TimerWakeCommand{WaitID: fixture.waitID, FiredAt: deadline.Add(2 * time.Hour)})
+	if err != nil || replayed.Outcome != workflowruntime.ResumeReplayed || replayed.Values != woken.Values {
+		t.Fatalf("SQLite timer replay = %#v, %v", replayed, err)
+	}
+}
+
 func TestWorkflowSQLiteConcurrentResumeHasOneAtomicWinner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "contention.db")
 	firstStore, first := openWorkflowStateTest(t, path)

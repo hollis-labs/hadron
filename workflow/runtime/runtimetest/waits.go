@@ -26,6 +26,9 @@ func (s *Store) SuspendNodeWait(ctx context.Context, request workflowruntime.Sus
 	if !request.Wait.Deadline.IsZero() {
 		request.Wait.Deadline = request.Wait.Deadline.UTC()
 	}
+	if !request.Wait.WakeAt.IsZero() {
+		request.Wait.WakeAt = request.Wait.WakeAt.UTC()
+	}
 	if err := request.Validate(); err != nil {
 		return workflowruntime.SuspendWaitResult{}, invalid(err)
 	}
@@ -294,11 +297,12 @@ func (s *Store) RecoverOpenWaits(ctx context.Context, query workflowruntime.Open
 	}
 	sort.Slice(result, func(i, j int) bool {
 		left, right := result[i], result[j]
-		if left.Deadline.IsZero() != right.Deadline.IsZero() {
-			return !left.Deadline.IsZero()
+		leftAt, rightAt := nextWaitAction(left), nextWaitAction(right)
+		if leftAt.IsZero() != rightAt.IsZero() {
+			return !leftAt.IsZero()
 		}
-		if !left.Deadline.Equal(right.Deadline) {
-			return left.Deadline.Before(right.Deadline)
+		if !leftAt.Equal(rightAt) {
+			return leftAt.Before(rightAt)
 		}
 		if !left.CreatedAt.Equal(right.CreatedAt) {
 			return left.CreatedAt.Before(right.CreatedAt)
@@ -306,6 +310,16 @@ func (s *Store) RecoverOpenWaits(ctx context.Context, query workflowruntime.Open
 		return left.Ref.ID < right.Ref.ID
 	})
 	return limit(result, query.Limit), nil
+}
+
+func nextWaitAction(snapshot workflowruntime.WaitSnapshot) time.Time {
+	if snapshot.WakeAt.IsZero() {
+		return snapshot.Deadline
+	}
+	if snapshot.Deadline.IsZero() || snapshot.WakeAt.Before(snapshot.Deadline) {
+		return snapshot.WakeAt
+	}
+	return snapshot.Deadline
 }
 
 func (s *Store) validateEventRequestsLocked(requests []workflowruntime.AppendEventRequest) error {
@@ -343,6 +357,9 @@ func waitEventAttributes(snapshot workflowruntime.WaitSnapshot, from, to string)
 	}
 	if !snapshot.Deadline.IsZero() {
 		attributes["deadline"] = snapshot.Deadline.UTC().Format(time.RFC3339Nano)
+	}
+	if !snapshot.WakeAt.IsZero() {
+		attributes["wake_at"] = snapshot.WakeAt.UTC().Format(time.RFC3339Nano)
 	}
 	if snapshot.Resolution != nil {
 		attributes["responder_kind"] = snapshot.Resolution.Responder.Kind

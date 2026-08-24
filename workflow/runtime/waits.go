@@ -16,6 +16,7 @@ const (
 	EventWaitSuspended = "wait.suspended"
 	EventWaitResumed   = "wait.resumed"
 	ResumeValueName    = "resume"
+	ActivationWaitWake = "wait_wake"
 )
 
 var (
@@ -23,6 +24,8 @@ var (
 	ErrWaitClosed         = errors.New("workflow wait is closed")
 	ErrWaitUnresumable    = errors.New("workflow wait cannot be resumed")
 	ErrWaitRecovery       = errors.New("workflow wait recovery failed")
+	ErrWaitWakeNotDue     = errors.New("workflow timer wake is not due")
+	ErrWaitWakePending    = errors.New("workflow timer wake precedes timeout")
 )
 
 // PostCommitError reports an operational adapter failure after the durable
@@ -155,11 +158,51 @@ type ResumeWaitResult struct {
 	Events  []Event
 }
 
+// TimerWakeCommand is the credential-free host handoff for a scheduled timer.
+// Correlation, payload, responder, semantic resolution time, and idempotency
+// identity are derived exclusively from the durable wait record.
+type TimerWakeCommand struct {
+	WaitID  WaitID
+	FiredAt time.Time
+}
+
+// Validate reports malformed timer delivery input. Whether the timer is due
+// is checked against the persisted WakeAt after the record is loaded.
+func (c TimerWakeCommand) Validate() error {
+	if err := (WaitRef{ID: c.WaitID}).Validate(); err != nil {
+		return err
+	}
+	if c.FiredAt.IsZero() {
+		return fmt.Errorf("timer fired_at is required")
+	}
+	return nil
+}
+
+// WaitWakeNotDueError reports an early host timer delivery without mutating
+// durable state.
+type WaitWakeNotDueError struct {
+	FiredAt time.Time
+	WakeAt  time.Time
+}
+
+func (e *WaitWakeNotDueError) Error() string {
+	return fmt.Sprintf("%s: fired_at %s precedes wake_at %s", ErrWaitWakeNotDue, e.FiredAt.Format(time.RFC3339Nano), e.WakeAt.Format(time.RFC3339Nano))
+}
+func (e *WaitWakeNotDueError) Unwrap() error { return ErrWaitWakeNotDue }
+
 // OpenWaitQuery supports deterministic durable recovery. Limit zero means
-// unlimited; results are ordered by deadline, creation time, then wait ID.
+// unlimited; results are ordered by earliest WakeAt/Deadline, creation time,
+// then wait ID.
 type OpenWaitQuery struct {
 	RunID RunID
 	Limit int
+}
+
+// WaitRecoveryResults contains every durable transition applied while
+// recovering open waits. Future waits are only re-materialized.
+type WaitRecoveryResults struct {
+	Woken    []ResumeWaitResult
+	TimedOut []WaitTimeoutResult
 }
 
 // WaitStore is the only production mutation surface for generic waits. The
@@ -243,6 +286,9 @@ func (c WaitCoordinator) Suspend(ctx context.Context, command SuspendCommand) (S
 	if !request.Wait.Deadline.IsZero() {
 		request.Wait.Deadline = request.Wait.Deadline.UTC()
 	}
+	if !request.Wait.WakeAt.IsZero() {
+		request.Wait.WakeAt = request.Wait.WakeAt.UTC()
+	}
 	if err := request.Validate(); err != nil {
 		return SuspendWaitResult{}, err
 	}
@@ -280,6 +326,10 @@ func (c WaitCoordinator) Suspend(ctx context.Context, command SuspendCommand) (S
 }
 
 func (c WaitCoordinator) Resume(ctx context.Context, command ResumeCommand) (ResumeWaitResult, error) {
+	return c.resume(ctx, command, false)
+}
+
+func (c WaitCoordinator) resume(ctx context.Context, command ResumeCommand, coreTimer bool) (ResumeWaitResult, error) {
 	if ctx == nil || c.Store == nil {
 		return ResumeWaitResult{}, fmt.Errorf("wait coordinator requires context and store")
 	}
@@ -290,6 +340,9 @@ func (c WaitCoordinator) Resume(ctx context.Context, command ResumeCommand) (Res
 	current, loadErr := c.Store.LoadWait(ctx, command.WaitID)
 	if loadErr != nil {
 		return ResumeWaitResult{}, loadErr
+	}
+	if current.Kind == workflowwait.KindTimer && current.WakeSource == workflowwait.WakeTimer && !coreTimer {
+		return ResumeWaitResult{}, fmt.Errorf("%w: successful timers must use WakeTimer", ErrInvalidRecord)
 	}
 	digest := ""
 	if command.Token != "" {
@@ -312,6 +365,9 @@ func (c WaitCoordinator) Resume(ctx context.Context, command ResumeCommand) (Res
 	}
 	if c.Authorizer != nil {
 		if err := c.Authorizer.AuthorizeResume(ctx, workflowwait.AuthorizationRequest{Record: current.Record, Source: command.WakeSource, Responder: command.Responder}); err != nil {
+			return ResumeWaitResult{}, err
+		}
+		if err := ctx.Err(); err != nil {
 			return ResumeWaitResult{}, err
 		}
 	}
@@ -357,18 +413,72 @@ func (c WaitCoordinator) Resume(ctx context.Context, command ResumeCommand) (Res
 	return result, nil
 }
 
+// WakeTimer resolves a due successful timer through the same authorized,
+// atomic, idempotent resume path as every external wake. Late delivery uses
+// persisted WakeAt as the semantic resolution time, so a scheduled wake that
+// precedes a later Deadline wins deterministically after recovery.
+func (c WaitCoordinator) WakeTimer(ctx context.Context, command TimerWakeCommand) (ResumeWaitResult, error) {
+	if ctx == nil || c.Store == nil {
+		return ResumeWaitResult{}, fmt.Errorf("wait coordinator requires context and store")
+	}
+	if err := command.Validate(); err != nil {
+		return ResumeWaitResult{}, err
+	}
+	command.FiredAt = command.FiredAt.UTC()
+	current, err := c.Store.LoadWait(ctx, command.WaitID)
+	if err != nil {
+		return ResumeWaitResult{}, err
+	}
+	if current.Kind != workflowwait.KindTimer || current.WakeSource != workflowwait.WakeTimer || current.WakeAt.IsZero() {
+		return ResumeWaitResult{}, fmt.Errorf("%w: wait is not a successful timer", ErrInvalidRecord)
+	}
+	if command.FiredAt.Before(current.WakeAt) {
+		return ResumeWaitResult{}, &WaitWakeNotDueError{FiredAt: command.FiredAt, WakeAt: current.WakeAt}
+	}
+	payload, err := values.NewInline(map[string]any{"woke_at": current.WakeAt.UTC().Format(time.RFC3339Nano)}, values.Metadata{
+		Producer:  values.Producer{Kind: "timer", Reference: string(current.Ref.ID), Output: ResumeValueName},
+		MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
+	})
+	if err != nil {
+		return ResumeWaitResult{}, err
+	}
+	return c.resume(ctx, ResumeCommand{
+		WaitID: current.Ref.ID, Correlation: current.Correlation, WakeSource: workflowwait.WakeTimer,
+		Responder: workflowwait.Responder{Kind: "system", Reference: "wait-timer"}, Payload: payload,
+		IdempotencyKey: timerActivationKey(current), ReceivedAt: current.WakeAt.UTC(),
+	}, true)
+}
+
 // Recover reconstructs open-wait scheduling solely from durable records.
 func (c WaitCoordinator) Recover(ctx context.Context, query OpenWaitQuery, now time.Time) ([]WaitTimeoutResult, error) {
+	result, err := c.RecoverWaits(ctx, query, now)
+	return result.TimedOut, err
+}
+
+// RecoverWaits deterministically fires due successful timers, times out due
+// deadlines, and re-materializes future waits. Store recovery ordering is by
+// the earliest applicable WakeAt or Deadline and respects query Limit.
+func (c WaitCoordinator) RecoverWaits(ctx context.Context, query OpenWaitQuery, now time.Time) (WaitRecoveryResults, error) {
 	if ctx == nil || c.Store == nil || now.IsZero() {
-		return nil, fmt.Errorf("wait recovery requires context, store, and now")
+		return WaitRecoveryResults{}, fmt.Errorf("wait recovery requires context, store, and now")
 	}
 	now = now.UTC()
 	waits, err := c.Store.RecoverOpenWaits(ctx, query)
 	if err != nil {
-		return nil, err
+		return WaitRecoveryResults{}, err
 	}
-	results := make([]WaitTimeoutResult, 0)
+	results := WaitRecoveryResults{}
 	for _, snapshot := range waits {
+		if !snapshot.WakeAt.IsZero() && !now.Before(snapshot.WakeAt) {
+			result, wakeErr := c.WakeTimer(ctx, TimerWakeCommand{WaitID: snapshot.Ref.ID, FiredAt: now})
+			if result.Outcome != "" {
+				results.Woken = append(results.Woken, result)
+			}
+			if wakeErr != nil {
+				return results, wakeErr
+			}
+			continue
+		}
 		if snapshot.Deadline.IsZero() || now.Before(snapshot.Deadline) {
 			if err := c.materialize(ctx, snapshot, false); err != nil {
 				return results, fmt.Errorf("%w: %w", ErrWaitRecovery, err)
@@ -383,7 +493,7 @@ func (c WaitCoordinator) Recover(ctx context.Context, query OpenWaitQuery, now t
 		if timeoutErr != nil {
 			return results, timeoutErr
 		}
-		results = append(results, result)
+		results.TimedOut = append(results.TimedOut, result)
 		if err := c.resolveAdapters(ctx, result.Wait); err != nil {
 			return results, err
 		}
@@ -401,6 +511,12 @@ func (c WaitCoordinator) materialize(ctx context.Context, snapshot WaitSnapshot,
 		}
 		return nil
 	}
+	if c.Scheduler != nil && !snapshot.WakeAt.IsZero() {
+		activation := TimerActivation(snapshot)
+		if err := c.Scheduler.Schedule(ctx, activation); err != nil {
+			return &PostCommitError{Operation: "schedule wait wake", Err: err}
+		}
+	}
 	if c.Scheduler != nil && !snapshot.Deadline.IsZero() {
 		activation := timeoutActivation(snapshot)
 		if err := c.Scheduler.Schedule(ctx, activation); err != nil {
@@ -417,6 +533,11 @@ func (c WaitCoordinator) materialize(ctx context.Context, snapshot WaitSnapshot,
 
 func (c WaitCoordinator) resolveAdapters(ctx context.Context, snapshot WaitSnapshot) error {
 	var operational []error
+	if c.Scheduler != nil && !snapshot.WakeAt.IsZero() {
+		if err := c.Scheduler.Cancel(ctx, TimerActivation(snapshot).ID); err != nil {
+			operational = append(operational, &PostCommitError{Operation: "cancel wait wake", Err: err})
+		}
+	}
 	if c.Scheduler != nil && !snapshot.Deadline.IsZero() {
 		if err := c.Scheduler.Cancel(ctx, timeoutActivation(snapshot).ID); err != nil {
 			operational = append(operational, &PostCommitError{Operation: "cancel wait timeout", Err: err})
@@ -438,4 +559,15 @@ func timeoutActivation(snapshot WaitSnapshot) workflowwait.Activation {
 
 func timeoutActivationKey(snapshot WaitSnapshot) string {
 	return "wait-timeout:" + values.SHA256Digest([]byte(snapshot.Ref.ID))[7:]
+}
+
+// TimerActivation converts a durable successful timer into the host scheduler
+// envelope. Identity depends only on immutable wait ID plus activation kind.
+func TimerActivation(snapshot WaitSnapshot) workflowwait.Activation {
+	id := workflowwait.ActivationID(timerActivationKey(snapshot))
+	return workflowwait.Activation{ID: id, Kind: ActivationWaitWake, RunID: string(snapshot.Invocation.RunID), NodeID: snapshot.Invocation.NodeID, Iteration: snapshot.Invocation.Iteration, WaitID: string(snapshot.Ref.ID), FireAt: snapshot.WakeAt.UTC(), DedupKey: string(id)}
+}
+
+func timerActivationKey(snapshot WaitSnapshot) string {
+	return "wait-wake:" + values.SHA256Digest([]byte(snapshot.Ref.ID))[7:]
 }

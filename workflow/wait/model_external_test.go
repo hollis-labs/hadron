@@ -72,6 +72,45 @@ func TestRecordRejectsTokenBearingURLAndIncompatibleTerminals(t *testing.T) {
 	}
 }
 
+func TestRecordSuccessfulTimerWakeAtIsDistinctFromLegacyTimeout(t *testing.T) {
+	schema, err := workflowwait.NewSchemaRef(graph.Schema{"type": "object"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 8, 24, 18, 0, 0, 0, time.UTC)
+	legacy := workflowwait.Record{
+		Kind: workflowwait.KindTimer, Correlation: "legacy-timeout", Deadline: base.Add(time.Hour), ResumeSchema: schema,
+		Visibility: workflowwait.VisibilityPrivate, Authority: workflowwait.ResponderAuthority{Kind: "system_timer", Reference: "runtime"}, WakeSource: workflowwait.WakeTimer, Status: workflowwait.StatusOpen,
+	}
+	if err := legacy.Validate(); err != nil {
+		t.Fatalf("legacy timer without wake_at = %v", err)
+	}
+	successful := legacy
+	successful.Correlation = "successful-timer"
+	successful.WakeAt = base.Add(30 * time.Minute)
+	if err := successful.Validate(); err != nil {
+		t.Fatalf("successful timer = %v", err)
+	}
+	for _, candidate := range []workflowwait.Record{
+		func() workflowwait.Record { value := successful; value.Kind = workflowwait.KindSignal; return value }(),
+		func() workflowwait.Record {
+			value := successful
+			value.WakeSource = workflowwait.WakeSignal
+			return value
+		}(),
+		func() workflowwait.Record { value := successful; value.WakeAt = value.Deadline; return value }(),
+		func() workflowwait.Record {
+			value := successful
+			value.WakeAt = value.Deadline.Add(time.Nanosecond)
+			return value
+		}(),
+	} {
+		if err := candidate.Validate(); err == nil {
+			t.Fatalf("invalid wake_at record accepted: %#v", candidate)
+		}
+	}
+}
+
 func TestActivationValidationOrderIsStable(t *testing.T) {
 	activation := workflowwait.Activation{}
 	for range 20 {

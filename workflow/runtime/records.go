@@ -397,6 +397,9 @@ func (s WaitSnapshot) Validate() error {
 	if !s.Deadline.IsZero() && s.Deadline.Before(s.CreatedAt) {
 		return fmt.Errorf("wait deadline must not precede created_at")
 	}
+	if !s.WakeAt.IsZero() && s.WakeAt.Before(s.CreatedAt) {
+		return fmt.Errorf("wait wake_at must not precede created_at")
+	}
 	return validateSnapshotTimes(s.Generation, s.CreatedAt, s.UpdatedAt)
 }
 
