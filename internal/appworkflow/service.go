@@ -22,6 +22,10 @@ import (
 const cancellationCASLimit = 8
 
 func (h *Host) StartRun(ctx context.Context, request StartRunRequest) (StartRunResult, error) {
+	return h.startRun(ctx, request, nil)
+}
+
+func (h *Host) startRun(ctx context.Context, request StartRunRequest, expectedIdentity *hoststate.IdentityBinding) (StartRunResult, error) {
 	if err := h.requireReady(); err != nil {
 		return StartRunResult{}, err
 	}
@@ -48,6 +52,9 @@ func (h *Host) StartRun(ctx context.Context, request StartRunRequest) (StartRunR
 		if authErr := h.authorizeStartReplay(ctx, request.Identity, prior.Record.Identity); authErr != nil {
 			return StartRunResult{}, authErr
 		}
+		if expectedIdentity != nil && !sameIdentity(prior.Record.Identity, expectedIdentity.Clone()) {
+			return StartRunResult{}, fmt.Errorf("%w: replayed activation identity differs from its immutable registration binding", ErrPolicyDenied)
+		}
 		if prior.Record.RequestDigest != requestDigest {
 			return StartRunResult{}, &runtime.IdempotencyConflictError{Operation: "start graph workflow", Key: request.IdempotencyKey}
 		}
@@ -60,6 +67,9 @@ func (h *Host) StartRun(ctx context.Context, request StartRunRequest) (StartRunR
 	identity, bindErr := h.bindIdentity(ctx, request.Identity)
 	if bindErr != nil {
 		return StartRunResult{}, bindErr
+	}
+	if expectedIdentity != nil && !sameIdentity(identity, expectedIdentity.Clone()) {
+		return StartRunResult{}, fmt.Errorf("%w: activation identity does not match its immutable scope and execution target binding", ErrPolicyDenied)
 	}
 	resolvedPlan, err := h.definitions.ResolvePlan(ctx, request.Definition)
 	if err != nil {

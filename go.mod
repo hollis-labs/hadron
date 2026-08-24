@@ -26,6 +26,10 @@ require (
 
 replace github.com/hollis-labs/agentkit => ../../libs/agentkit
 
+// W05-T04 consumes the pinned durable fire/attempt contract from the sibling
+// go-scheduler worktree (commit 51ebe8a); Hadron does not modify that module.
+replace github.com/hollis-labs/go-scheduler => ../../libs/go-scheduler
+
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
