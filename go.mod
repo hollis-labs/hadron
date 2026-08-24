@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/creack/pty v1.1.24
+	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/hollis-labs/agentkit v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
