@@ -217,3 +217,47 @@ integrated it as `e598e5f`.
 | integration `e598e5f` | `go vet ./workflow/...` | pass |
 | integration `e598e5f` | `make test` | pass |
 | integration `e598e5f` | `go test ./...` | pass |
+
+## W00-T06
+
+Reviewed the complete step-kind contract and registry, then requested an
+amendment to avoid a diagnostic-code collision and recursively validate and
+clone every accepted JSON-schema shape. The amended source commit `c8349c1`
+was integrated as `0983086`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `c8349c1` | `git diff --check 71ab61d..c8349c1` | pass |
+| source worktree `c8349c1` | `go test ./workflow/stepkind/... ./workflow/conformance/...` | pass |
+| source worktree `c8349c1` | `go test -race ./workflow/stepkind/...` | pass |
+| source worktree `c8349c1` | `go test ./workflow/...` | pass |
+| source worktree `c8349c1` | `go vet ./workflow/...` | pass |
+| source worktree `c8349c1` | `go test ./...` | pass |
+| integration `0983086` | `git diff --check HEAD^..HEAD` | pass |
+| integration `0983086` | `go test ./workflow/stepkind/... ./workflow/conformance/...` | pass |
+| integration `0983086` | `go test -race ./workflow/stepkind/... ./workflow/conformance/...` | pass |
+| integration `0983086` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `0983086` | `go generate ./workflow/graph` plus `git diff --exit-code` | pass; no generated drift |
+| integration `0983086` | `go test ./workflow/...` | pass |
+| integration `0983086` | `go vet ./workflow/...` | pass |
+| integration `0983086` | `make test` | pass |
+| integration `0983086` | `go test ./...` | pass |
+
+## Wave 00 gate
+
+All Wave 00 tasks are integrated. The gate was rerun from Hadron `0983086`
+and go-scheduler `51ebe8a`.
+
+| Repository | Command | Result |
+| --- | --- | --- |
+| Hadron | `go test ./workflow/stepkind/... ./workflow/conformance/...` | pass |
+| Hadron | `go test -race ./workflow/stepkind/... ./workflow/conformance/...` | pass |
+| Hadron | `go test -v ./workflow/internal/importguard/...` | pass |
+| Hadron | `go generate ./workflow/graph` plus `git diff --exit-code` | pass; no generated drift |
+| Hadron | `go test ./workflow/...` | pass |
+| Hadron | `go vet ./workflow/...` | pass |
+| Hadron | `make test` | pass |
+| Hadron | `go test ./...` | pass |
+| go-scheduler | `go test ./...` | pass |
+| go-scheduler | `go test -race ./...` | pass |
+| go-scheduler | `go vet ./...` | pass |
