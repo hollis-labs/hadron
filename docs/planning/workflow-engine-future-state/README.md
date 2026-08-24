@@ -69,7 +69,7 @@ superseded requirements are not mistaken for omissions.
 | W01-T06 | Add greenfield acceptance fixtures | 01 | W01-T04 | [ ] |
 | W01-T07 | Compile workflow activation declarations | 01 | W01-T03, W01-T04 | [ ] |
 | W02-T01 | Implement typed `Value` and `ArtifactRef` model | 02 | W01-T01 | [x] |
-| W02-T02 | Add expression and interpolation engine | 02 | W02-T01, W00-T05 | [ ] |
+| W02-T02 | Add expression and interpolation engine | 02 | W02-T01, W00-T05 | [x] |
 | W02-T03 | Bind workflow inputs and outputs | 02 | W02-T01, W02-T02, W02-T04 | [ ] |
 | W02-T04 | Define runtime state-store interface | 02 | W01-T04, W02-T01 | [ ] |
 | W02-T05 | Implement Hadron SQLite state adapter schema | 02 | W02-T04 | [ ] |

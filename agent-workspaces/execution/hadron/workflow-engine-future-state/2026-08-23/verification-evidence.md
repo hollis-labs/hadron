@@ -261,3 +261,32 @@ and go-scheduler `51ebe8a`.
 | go-scheduler | `go test ./...` | pass |
 | go-scheduler | `go test -race ./...` | pass |
 | go-scheduler | `go vet ./...` | pass |
+
+## W02-T02
+
+Reviewed the complete expression, interpolation, reference-parsing, policy, and
+cache implementation. A cache-schema mismatch for structurally heterogeneous
+arrays was found during review; amended source commit `5fee6ec` makes such
+arrays explicitly dynamic and adds a reversed-order shared-cache regression.
+The amended commit was integrated as `985243b`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `5fee6ec` | `git diff --check 3372b64..5fee6ec` | pass |
+| source worktree `5fee6ec` | `go test ./workflow/values/... ./workflow/compile/...` | pass |
+| source worktree `5fee6ec` | `go test -race ./workflow/values/...` | pass |
+| source worktree `5fee6ec` | focused cache, env-policy, and interpolation tests, `-count=50` | pass |
+| source worktree `5fee6ec` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `5fee6ec` | `go test ./workflow/...` | pass |
+| source worktree `5fee6ec` | `go vet ./workflow/...` | pass |
+| source worktree `5fee6ec` | `make test` | pass |
+| source worktree `5fee6ec` | `go test ./...` | pass |
+| integration `985243b` | `git diff --check HEAD^..HEAD` | pass |
+| integration `985243b` | `go test ./workflow/values/... ./workflow/compile/...` | pass |
+| integration `985243b` | `go test -race ./workflow/values/...` | pass |
+| integration `985243b` | focused cache, env-policy, and interpolation tests, `-count=50` | pass |
+| integration `985243b` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `985243b` | `go test ./workflow/...` | pass |
+| integration `985243b` | `go vet ./workflow/...` | pass |
+| integration `985243b` | `make test` | pass |
+| integration `985243b` | `go test ./...` | pass |
