@@ -11,7 +11,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W00-T04 | W00-T02 | dispatched | |
 | W00-T05 | W00-T02 | eligible | |
 | W00-T06 | W00-T02, W00-T05 | blocked | |
-| W00-T07 | none | dispatched | |
+| W00-T07 | none | integrated | `go-scheduler@51ebe8a` |
 | W01-T01 | W00-T02 | dispatched | |
 | W01-T02 | W01-T01 | blocked | |
 | W01-T03 | W01-T01 | blocked | |

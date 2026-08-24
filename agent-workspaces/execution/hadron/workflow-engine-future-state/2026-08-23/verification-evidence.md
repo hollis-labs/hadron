@@ -58,3 +58,23 @@ case were added.
 | integration `1fc2dbc` | `go test -v ./workflow/internal/importguard` | pass |
 | integration `1fc2dbc` | `make test` | pass |
 | integration `1fc2dbc` | `go test ./...` | pass |
+
+## W00-T07
+
+Reviewed the complete public contract and state transition implementation in
+source commit `51ebe8a`, including a review-requested regression expansion,
+then fast-forwarded go-scheduler local `main` from `962e415` to `51ebe8a`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `51ebe8a` | `git diff --check 962e415..51ebe8a` | pass |
+| source worktree `51ebe8a` | `go test ./...` | pass |
+| source worktree `51ebe8a` | `go test -race ./...` | pass |
+| source worktree `51ebe8a` | focused CAS/failure/configuration tests, `-count=100` | pass |
+| source worktree `51ebe8a` | `go vet ./...` | pass |
+| source worktree `51ebe8a` | `go list -deps ./...` | pass; no application imports |
+| go-scheduler integration `51ebe8a` | `go test ./...` | pass |
+| go-scheduler integration `51ebe8a` | `go test -race ./...` | pass |
+| go-scheduler integration `51ebe8a` | focused CAS/exhaustion/transition tests, `-count=100` | pass |
+| go-scheduler integration `51ebe8a` | `go vet ./...` | pass |
+| go-scheduler integration `51ebe8a` | `go list -deps ./...` | pass; only stdlib, robfig/cron, and go-scheduler |
