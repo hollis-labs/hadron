@@ -48,3 +48,5 @@
 | 44 | W05-T07 | `4a89c14` | `d717a58` | Hadron | accepted after caller-ownership, bounded-report, post-attestation, and exact namespace-authorization hardening |
 | 45 | W07-T01 | `93667ef` | `377490c` | Hadron | accepted after exact provider-identity, provenance, audit-budget, response-shape, and tool-batch hardening |
 | 46 | W03-T08-H1 | `04ba64b` | `77b65c0` | Hadron | accepted after stale intent/run read-skew, failure-side-effect, exact output-ref, reopen/replay, and contract-runner hardening |
+| 47 | W05-T02 | `65e1bc0` | `300257b` | Hadron | accepted after graph-requirement, public-metadata, defensive-ownership, and exact durable scope/target hardening |
+| 48 | W07-T07 | `aa01d1d` | `9431754` | Hadron | accepted after shared-profile, authority/responder, receipt, observation, restart, and conformance hardening |

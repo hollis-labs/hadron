@@ -94,7 +94,7 @@ superseded requirements are not mistaken for omissions.
 | W04-T07 | Implement wait-backed executor set | 04 | W03-T05, W04-T01 | [x] |
 | W04-T08 | Implement node verification modifier | 04 | W02-T02, W03-T08, W04-T01 | [x] |
 | W05-T01 | Create Hadron workflow host binding | 05 | W02-T05, W02-T08, W03-T02, W04-T01, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | [x] |
-| W05-T02 | Introduce `RunScope` and `ExecutionTarget` | 05 | W05-T01 | [ ] |
+| W05-T02 | Introduce `RunScope` and `ExecutionTarget` | 05 | W05-T01 | [x] |
 | W05-T03 | Bind registry and definition resolution | 05 | W01-T04, W05-T01 | [x] |
 | W05-T04 | Bind schedules and triggers to activation registrations | 05 | W00-T07, W03-T05, W05-T03 | [ ] |
 | W05-T05 | Persist plan/source snapshots and provenance | 05 | W01-T04, W05-T03 | [ ] |
@@ -117,7 +117,7 @@ superseded requirements are not mistaken for omissions.
 | W07-T04 | Add generated API client step families | 07 | W04-T01, W06-T02 | [ ] |
 | W07-T05 | Add compiled/offline workflow build path | 07 | W01-T02, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | [ ] |
 | W07-T06 | Finalize public engine boundary and downstream adoption kit | 07 | W00-T04, W06-T07 | [ ] |
-| W07-T07 | Add `emit` and `checkpoint` step kinds | 07 | W04-T01, W04-T07, W05-T01 | [ ] |
+| W07-T07 | Add `emit` and `checkpoint` step kinds | 07 | W04-T01, W04-T07, W05-T01 | [x] |
 | W07-T08 | Add reactor, signal, and durability controls | 07 | W00-T07, W03-T06, W04-T07, W05-T04 | [ ] |
 | W07-T09 | Add advanced graph authoring and service-node semantics | 07 | W02-T07, W03-T08, W04-T07 | [ ] |
 | W07-T10 | Add compensation and rollback contracts | 07 | W03-T08, W04-T06 | [ ] |

@@ -148,17 +148,13 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0SSDAAJ7T6Q6FJ6Z9VENBRG`.
 
-- W05-T01 intentionally keeps `RunScope` and `ExecutionTarget` as narrow
-  identity-binding strings. W05-T02 owns their durable public product models,
-  validation, and replacement of graph-native workspace-as-target APIs.
+- W05-T04 still owns production scheduler registration and version policy.
+  The host continues to fail closed when a required scheduler binding is not
+  configured; neither scope facts nor a target identity implicitly authorize
+  activation registration.
 
-- W05-T01 atomically creates a pinned child Run and exposes a restart-durable
-  materialization request, but the production registry/path/package resolver
-  and final child graph materializer remain W05-T03. Scheduler registration
-  policy remains W05-T04. The host fails closed when its SQLite child-recovery
-  source is present without an injected materializer.
-
-  Vanta revision for both W05-T01 limitations: `01M0SXD683VSN9V6HNDCK1SARF`.
+  Vanta revision: `01M0TP5RZS4YTEVT69023297S1` (supersedes
+  `01M0SXD683VSN9V6HNDCK1SARF`).
 
 - W05-T03's compiled-plan/source caches and graph-native `WorkflowIndex` are
   process-local. Durable source/plan snapshots and publishing remain W05-T05
@@ -246,6 +242,16 @@ No execution findings have been deferred.
   Vanta revision: `01M0TMBNX9G3GPV39W9SAPZJ5N`.
 
 ## Resolved follow-ups
+
+- W05-T02 resolved the temporary W05-T01 identity strings with durable,
+  validated, defensively owned `RunScope` and `ExecutionTarget` models in
+  `300257b`; graph-native public and journal JSON contains no `workspace_id`.
+  W05-T03 had already resolved the same deferred record's production
+  definition resolution and child graph materialization in `c950291`.
+
+  Vanta resolution revision: `01M0TP5RZS4YTEVT69023297S1` (supersedes
+  `01M0SXD683VSN9V6HNDCK1SARF`; the remaining W05-T04 scheduler boundary is
+  retained above).
 
 - W05-T07's canonical runner exposed an ordinary-runtime completion gap for a
   workflow that has both declared outputs and finalizers. W03-T08-H1 resolved

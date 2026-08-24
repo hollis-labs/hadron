@@ -46,7 +46,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W04-T07 | W03-T05, W04-T01 | integrated | `2229ed8` |
 | W04-T08 | W02-T02, W03-T08, W04-T01 | integrated | `92147ad` |
 | W05-T01 | W02-T05, W02-T08, W03-T02, W04-T01, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | integrated | `2d14c13` |
-| W05-T02 | W05-T01 | dispatched | |
+| W05-T02 | W05-T01 | integrated | `300257b` |
 | W05-T03 | W01-T04, W05-T01 | integrated | `c950291` |
 | W05-T04 | W00-T07, W03-T05, W05-T03 | eligible | |
 | W05-T05 | W01-T04, W05-T03 | eligible | |
@@ -69,7 +69,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W07-T04 | W04-T01, W06-T02 | blocked | |
 | W07-T05 | W01-T02, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | dispatched | |
 | W07-T06 | W00-T04, W06-T07 | blocked | |
-| W07-T07 | W04-T01, W04-T07, W05-T01 | dispatched | |
+| W07-T07 | W04-T01, W04-T07, W05-T01 | integrated | `9431754` |
 | W07-T08 | W00-T07, W03-T06, W04-T07, W05-T04 | blocked | |
 | W07-T09 | W02-T07, W03-T08, W04-T07 | eligible | |
 | W07-T10 | W03-T08, W04-T06, owner-approved compensation ADR | owner-gated | |

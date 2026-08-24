@@ -80,7 +80,7 @@ or the detailed architecture made a later choice. In particular:
 | --- | --- | --- |
 | Generic `WaitRecord`, worker release, correlated/idempotent resume | Implemented | W03-T05 |
 | Gate, message, callback, signal, timer, event, and child-run wakes use one path | Planned | W03-T05, W04-T07, W07-T08 |
-| Shared gate/checkpoint vocabulary with product-owned authority/presentation | Planned | W04-T07, W07-T07 |
+| Shared gate/checkpoint vocabulary with product-owned authority/presentation | Implemented | W04-T07, W07-T07 |
 | Environment-bound and optional/non-blocking manual gates | Planned | W04-T07, W07-T09 |
 | Stable scheduler fire identity, attempts, retry/exhaustion, observations, configurable clock/cadence/batch, CAS tests | Planned in the only secondary repository | W00-T07 |
 | Hadron activation registrations, overlap/missed-fire/catchup/reuse policy | Planned | W05-T04, W05-T08 |
@@ -97,7 +97,7 @@ or the detailed architecture made a later choice. In particular:
 | Sandboxed goja `script`, capability surface, schema inference | Implemented | W07-T02 |
 | Heavy `agent_launch` plus correlated wait sugar | Planned later | W07-T03, W07-T08 |
 | Generated OpenAPI/AsyncAPI/gRPC/GraphQL operation families | Planned later | W07-T04 |
-| `emit` and `checkpoint` | Planned later | W07-T07 |
+| `emit` and `checkpoint` | Implemented | W07-T07 |
 | Effect-driven retry/recovery/MCP/confirmation/dry-run/blast-radius policy | Planned | W01-T05, W03-T04, W03-T07, W05-T01, W06-T01, W06-T03 |
 
 ## Hadron Product Surfaces

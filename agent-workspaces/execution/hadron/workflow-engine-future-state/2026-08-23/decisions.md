@@ -387,3 +387,28 @@
   rather than allowing provider equality to stand in for instance identity.
 
   Vanta revision for both W07-T01 decisions: `01M0TMBN9MSPGR06F8RMWXP3FS`.
+
+- W05-T02 makes `RunScope` a closed, versioned logical grouping that carries
+  no compute authority. `ExecutionTarget` is a separate optional exact binding
+  for compute location, configuration references, capabilities, labels,
+  sandbox, readiness, lease, and provenance. Caller selectors are canonical
+  constraints; the identity provider's result must match them exactly, and
+  graph requirements are checked against the target before policy evaluation.
+  The graph-native journal is an intentional clean break with
+  `run_scope`/`execution_target` and no `workspace_id` compatibility shape.
+
+  Vanta revision: `01M0TP5S02DG2D02D0A186BFTM`.
+
+- W07-T07 models `emit@v1` as ordinary explicit mutate work: the runtime
+  supplies keyed idempotency, policy authorizes the exact immutable envelope
+  before publication, the host publisher owns durable apply/replay/conflict
+  behavior, outputs are typed private receipts, and observations contain only
+  bounded digests and safe vocabulary.
+
+- `checkpoint@v1` is an immutable thin profile over the same gate executor as
+  `human_gate@v1`. It uses the canonical gate wait/resume path and an exact
+  authored decision schema; responder policy and escalation actions remain
+  host/product concerns. Runtime timeout is a typed failed attempt rather than
+  a fabricated successful `timed_out:true` result.
+
+  Vanta revision for both W07-T07 decisions: `01M0TP7YJ2R10HMQ4GQFEVQT0K`.

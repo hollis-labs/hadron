@@ -1064,3 +1064,34 @@ truthful canonical contract-runner regression.
 | independent source review `04ba64b` | `go test -count=5 ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/... ./internal/appworkflow/...` | pass |
 | independent source review `04ba64b` | `go test -race -count=1 ./workflow/runtime/... ./internal/persistence/... ./internal/appworkflow/...`; import guard; committed diff check | pass |
 | integration `77b65c0` | focused suites at `-count=3` followed by `go test -count=1 ./...` | pass |
+
+## W05-T02
+
+Reviewed Hadron-local versioned scope and target models, exact selectors,
+closed compute/sandbox requirements, pre-policy target admission, separate
+policy projections, immutable start/policy journals, and the clean-break public
+JSON shape. Source commit `65e1bc0` was integrated as `300257b` after
+public-metadata, malformed-plan, callback-mutation, and SQLite replay hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `65e1bc0` | focused hoststate, appworkflow, and persistence suites at `-count=10` | pass |
+| source worktree `65e1bc0` | focused race suite, import guard, vet, targeted golangci, full repository suite, hooks, and diff checks | pass; zero issues |
+| independent source review `65e1bc0` | `go test -count=3 ./internal/appworkflow/hoststate ./internal/appworkflow ./internal/persistence/...` | pass |
+| independent source review `65e1bc0` | `go test -race -count=1 ./internal/appworkflow/hoststate ./internal/appworkflow ./internal/persistence/...`; committed diff audit | pass |
+| integration `300257b` | focused suites at `-count=3`, import guard, committed diff check, and `go test -count=1 ./...` | pass |
+
+## W07-T07
+
+Reviewed provider-neutral keyed event publication, typed private envelope
+receipts, pre-side-effect policy, redacted observations, shared profiled gate
+execution, configured checkpoint schemas, durable resume/restart/timeout and
+cancellation behavior, unsafe authority/responder fences, compiler lowering,
+and conformance fixtures. Source commit `aa01d1d` was integrated as `9431754`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `aa01d1d` | focused emit, checkpoint, gate, wait, runtime, compiler, and conformance suites at `-count=10` | pass |
+| source worktree `aa01d1d` | focused race suite, import guard, workflow vet, targeted golangci, full repository suite, hooks, and diff checks | pass; zero issues |
+| independent source review `aa01d1d` | focused emit, checkpoint, shared-gate, wait, and conformance suites at `-count=3`; same packages under the race detector | pass |
+| integration `9431754` | focused adapter/runtime/compiler/conformance suites at `-count=3`, import guard, and committed diff check | pass |
