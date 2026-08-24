@@ -639,3 +639,40 @@ hardening.
 | integration `5d9fbfc` | `go vet ./workflow/... ./internal/persistence/...` | pass |
 | integration `5d9fbfc` | failed agent-substrate test rerun, `-count=5`, then serial `go test ./... -count=1` | pass; initial concurrent full/race run caused timing contention |
 | integration `5d9fbfc` | `git diff --check HEAD^..HEAD` | pass |
+
+## W02-T08
+
+Reviewed the extraction-ready streaming store contract, bounded inline
+capture, structured and render-safe failures, local immutable filesystem
+adapter, opaque approved external passthrough, two-stage authorization,
+retention cleanup, root/file identity hardening, digest verification, and
+secret-data boundaries. Source commit `ee94487` was integrated as `177e0e1`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `ee94487` | `go test -count=1 ./workflow/values/... ./internal/artifacts/... ./internal/persistence/...` | pass |
+| source worktree `ee94487` | `go test -race ./workflow/values/... ./internal/artifacts/...` | pass |
+| source worktree `ee94487` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `ee94487` | `go vet ./workflow/... ./internal/artifacts/...` | pass |
+| source worktree `ee94487` | `go test ./... -count=1` | pass |
+| source worktree `ee94487` | `git diff --check dae5001..ee94487` | pass |
+| integration `177e0e1` | `go test -count=1 ./workflow/values/... ./internal/artifacts/... ./internal/persistence/...` | pass |
+| integration `177e0e1` | `go test -race ./workflow/values/... ./internal/artifacts/...` | pass |
+| integration `177e0e1` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `177e0e1` | `go vet ./workflow/... ./internal/artifacts/...` | pass |
+| integration `177e0e1` | `go test ./... -count=1` | pass |
+
+## Wave 02 Gate
+
+All eight Wave 02 tasks are integrated. The gate covers typed values and
+artifacts, expression/interpolation evaluation, input/output binding, inferred
+data dependencies and scoped visibility, StateStore and SQLite persistence,
+redaction/retention, opaque secret references, and the Hadron artifact adapter.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| integration `177e0e1` | `go test -shuffle=on -count=10 ./workflow/values/... ./workflow/compile/... ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/... ./internal/artifacts/...` | pass |
+| integration `177e0e1` | `go test -race -count=1 ./workflow/values/... ./workflow/compile/... ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/... ./internal/artifacts/...` | pass |
+| integration `177e0e1` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `177e0e1` | `go vet ./workflow/... ./internal/artifacts/...` | pass |
+| integration `177e0e1` | `go test ./... -count=1` | pass |

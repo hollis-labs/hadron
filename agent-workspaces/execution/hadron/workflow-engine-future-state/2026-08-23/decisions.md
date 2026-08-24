@@ -38,3 +38,18 @@
   replay result or payload-schema detail is returned.
 
   Vanta revision for both W03-T05 decisions: `01M0SDEDRSK370D6NDFXHPXZJH`.
+
+- W02-T08 sets the inline capture default to 64 KiB and the maximum
+  configurable inline threshold to 1 MiB. The artifact stream limit is a
+  separate required bound and may be larger. Secret values always promote;
+  oversized JSON remains byte-exact opaque artifact content rather than being
+  parsed or represented as validated JSON.
+
+- The Hadron adapter owns only durable `run` and `project` artifacts. `none`
+  may remain inline but cannot promote to local durable storage, while
+  `external` references are routed opaquely to explicitly approved read/stat
+  delegates and are never deleted by Hadron. Every resolution is authorized
+  before lookup/delegation and, when verified owner metadata is available,
+  authorized again with that owner context.
+
+  Vanta revision for both W02-T08 decisions: `01M0SEA3HYG29FQ1X92SJRS4M1`.

@@ -45,3 +45,11 @@ No execution findings have been deferred.
   require application-level reconciliation rather than synthesized authority.
 
   Vanta revision: `01M0SDEDBDN3P39TT03W5A1XSZ`.
+
+- W02-T08 checks context cancellation before and after every adapter read, but
+  Go's `io.Reader` interface cannot interrupt a source that blocks forever
+  inside its own `Read` method. Callers supplying potentially indefinite
+  streams must use a cancellation-aware reader. This is an interface-level
+  limitation rather than permission for artifact capture to become unbounded.
+
+  Vanta revision: `01M0SEA420A728STDHY9GRR83X`.

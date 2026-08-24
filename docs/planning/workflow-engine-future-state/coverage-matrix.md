@@ -49,11 +49,11 @@ or the detailed architecture made a later choice. In particular:
 
 | Source requirement | Disposition | Owning tasks |
 | --- | --- | --- |
-| Typed inline JSON values and referenced large/binary/sensitive artifacts | Planned | W02-T01, W02-T03, W02-T05, W02-T08 |
+| Typed inline JSON values and referenced large/binary/sensitive artifacts | Implemented | W02-T01, W02-T03, W02-T05, W02-T08 |
 | Declared node/workflow output schemas and typed child/tool results | Planned | W01-T01, W02-T03, W04-T01 through W04-T07 |
-| `expr-lang/expr` plus interpolation only in strings | Planned | W02-T02 |
-| Fail-hard unresolved references and scoped visibility | Planned | W01-T05, W02-T02, W02-T07 |
-| Inferred data edges plus explicit ordering-only `needs` | Planned | W02-T07 |
+| `expr-lang/expr` plus interpolation only in strings | Implemented | W02-T02 |
+| Fail-hard unresolved references and scoped visibility | Implemented | W01-T05, W02-T02, W02-T07 |
+| Inferred data edges plus explicit ordering-only `needs` | Implemented | W02-T07 |
 | Error and fan-out failure data available to expressions | Planned | W03-T04, W03-T08 |
 | Explicit `cmd` capture (`json`, `lines`, `kv`) and scoped legacy shim | Planned | W04-T03, W06-T06 |
 | Redaction, retention, opaque secret refs, and stream masking | Planned | W02-T01, W02-T06, W04-T03 through W04-T05 |
