@@ -202,3 +202,31 @@
   closure behavior.
 
   Vanta revision for both W04-T06 decisions: `01M0SSDA2YJ5JJ919KTS8DX7J2`.
+
+- W05-T01 makes Hadron's host journal the durable application boundary around
+  the extraction-safe runtime. Host start uses immutable intent and policy
+  facts plus a separate CAS phase checkpoint; readiness is granted only after
+  recovery drains, and concurrent materializers converge on the durable
+  winner even when it is several phases ahead. Every exact start replay
+  re-authenticates the current caller before returning prior state or conflict
+  detail.
+
+- Confirmation is an acknowledgment of the first append-only policy decision,
+  not a different start intent. Denied and confirmation-required evaluations
+  are retained even when no Run exists. Caller identity, resolved plan digest,
+  effects, capabilities, target requirements, dry-run truth, and blast radius
+  remain immutable policy evidence keyed by the logical start.
+
+- Host cancellation records an immutable caller intent and stable time lower
+  bound, but resolves the current Run generation for each application attempt.
+  CAS churn is context-aware and bounded; exhaustion leaves the durable intent
+  pending for startup/periodic recovery rather than freezing a stale
+  generation or spinning indefinitely.
+
+- Hadron SQLite owns call-resolution and child-run materialization journals.
+  Call resolution, its canonical event, and exact replay are atomic; child-run
+  inputs, pending Run, parent link, creation event, cancellation handle, and
+  idempotency result commit together before the injected definition
+  materializer advances the child.
+
+  Vanta revision for all W05-T01 decisions: `01M0SXD68BJD9N18SPV307T6FM`.

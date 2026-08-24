@@ -854,3 +854,24 @@ Source commit `d7c312f` was integrated as `8ac8dbe`.
 | integration `8ac8dbe` | `go test -count=1 ./workflow/adapters/call/... ./workflow/adapters/script/... ./workflow/runtime/... ./workflow/compile/...` | pass |
 | integration `8ac8dbe` plus tracking | `go test -count=1 ./...` | pass |
 | source | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |
+
+## W05-T01
+
+Reviewed the Hadron-owned workflow host, lifecycle and recovery state machine,
+identity and policy journal, app-service methods, SQLite migration 0018, call
+resolution journal, and atomic child-run start. Source commit `a5eb3bc` was
+integrated as `2d14c13` after review-requested hardening for authorization
+order, defensive plan ownership, exact cancellation replay, bounded CAS churn,
+concurrent start convergence, definition drift, and startup/shutdown races.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `a5eb3bc` | focused appworkflow/persistence suites at `-count=20` and focused race suites | pass |
+| source worktree `a5eb3bc` | `go test ./internal/appworkflow/... ./workflow/...` and race equivalent | pass |
+| source worktree `a5eb3bc` | import guard, focused vet, golangci/pre-commit hooks, full `go test ./...`, and diff check | pass; zero new issues |
+| independent source review `a5eb3bc` | `go test -count=10 ./internal/appworkflow/...` and `go test -count=1 ./internal/persistence/...` | pass |
+| independent source review `a5eb3bc` | `go test -race -count=1 ./internal/appworkflow/... ./internal/persistence/...` | pass |
+| independent source review `a5eb3bc` | `go test -count=1 ./workflow/internal/importguard/...` and `go vet ./internal/appworkflow/... ./internal/persistence/... ./workflow/...` | pass |
+| integration `2d14c13` | `go test -count=1 ./internal/appworkflow/... ./internal/persistence/... ./workflow/adapters/call/... ./workflow/runtime/...` | pass |
+| integration `2d14c13` plus tracking | `go test -count=1 ./...` | pass |
+| source | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012 |

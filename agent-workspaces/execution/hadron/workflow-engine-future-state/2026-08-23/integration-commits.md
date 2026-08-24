@@ -37,3 +37,4 @@
 | 33 | W04-T07 | `c680634` | `2229ed8` | Hadron | accepted after deterministic timer-wake ordering, typed timeout failure, retry-stable callback and gate payload contracts, authorized message bridging, restart recovery, and SQLite parity |
 | 34 | W07-T02 | `25dabcf` | `9e52e0a` | Hadron | accepted after fail-closed Goja sandbox hardening, deterministic structural limits, exact-number admission, typed private outputs, cancellation, and concurrent execution coverage |
 | 35 | W04-T06 | `d7c312f` | `8ac8dbe` | Hadron | accepted after immutable call-site resolution pinning, exact replay/conflict fencing, typed partial/default/local input binding, authoritative lineage validation, and nested inline/run runtime coverage |
+| 36 | W05-T01 | `a5eb3bc` | `2d14c13` | Hadron | accepted after exact authenticated start replay, append-only policy facts, convergent lifecycle recovery, bounded cancellation CAS, and atomic call/child-run SQLite binding |

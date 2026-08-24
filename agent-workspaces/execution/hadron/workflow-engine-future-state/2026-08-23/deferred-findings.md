@@ -147,3 +147,15 @@ No execution findings have been deferred.
   resolution events plus exact Run/ChildRunLink/input/event replay semantics.
 
   Vanta revision: `01M0SSDAAJ7T6Q6FJ6Z9VENBRG`.
+
+- W05-T01 intentionally keeps `RunScope` and `ExecutionTarget` as narrow
+  identity-binding strings. W05-T02 owns their durable public product models,
+  validation, and replacement of graph-native workspace-as-target APIs.
+
+- W05-T01 atomically creates a pinned child Run and exposes a restart-durable
+  materialization request, but the production registry/path/package resolver
+  and final child graph materializer remain W05-T03. Scheduler registration
+  policy remains W05-T04. The host fails closed when its SQLite child-recovery
+  source is present without an injected materializer.
+
+  Vanta revision for both W05-T01 limitations: `01M0SXD683VSN9V6HNDCK1SARF`.
