@@ -93,6 +93,61 @@ func TestWorkflowCatalogPinsExactVersionWhenSourceDigestIsShared(t *testing.T) {
 	}
 }
 
+func TestWorkflowCatalogRemovesOnlyExactCurrentAliasAndRetainsHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow-current-removal.json")
+	index, openErr := OpenWorkflowIndex(path)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	first := qualifiedRecord("team/removal", "team", "v1", "workflow:\n  name: removal\n  version: v1\n")
+	second := qualifiedRecord("team/removal", "team", "v2", "workflow:\n  name: removal\n  version: v2\n")
+	first, registerErr := index.RegisterWorkflow(t.Context(), first, true)
+	if registerErr != nil {
+		t.Fatal(registerErr)
+	}
+	second, registerErr = index.RegisterWorkflow(t.Context(), second, false)
+	if registerErr != nil {
+		t.Fatal(registerErr)
+	}
+	firstQuery := WorkflowQuery{Name: first.Name, Version: first.Version, Digest: first.Digest}
+	if removeErr := index.RemoveCurrentWorkflowExact(t.Context(), firstQuery); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	if removeErr := index.RemoveCurrentWorkflowExact(t.Context(), firstQuery); removeErr != nil {
+		t.Fatalf("exact current removal replay = %v", removeErr)
+	}
+	if _, resolveErr := index.ResolveWorkflow(t.Context(), WorkflowQuery{Name: first.Name}); !errors.Is(resolveErr, ErrWorkflowNotFound) {
+		t.Fatalf("removed current alias remains resolvable = %v", resolveErr)
+	}
+	for _, exact := range []WorkflowRecord{first, second} {
+		if resolution, resolveErr := index.ResolveWorkflow(t.Context(), WorkflowQuery{
+			Name: exact.Name, Version: exact.Version, Digest: exact.Digest,
+		}); resolveErr != nil || resolution.Record.Version != exact.Version {
+			t.Fatalf("immutable history %s = %#v, %v", exact.Version, resolution, resolveErr)
+		}
+	}
+
+	if _, registerErr = index.RegisterWorkflow(t.Context(), second, true); registerErr != nil {
+		t.Fatal(registerErr)
+	}
+	if removeErr := index.RemoveCurrentWorkflowExact(t.Context(), firstQuery); !errors.Is(removeErr, ErrWorkflowConflict) {
+		t.Fatalf("stale current removal = %v", removeErr)
+	}
+	current, resolveErr := index.ResolveWorkflow(t.Context(), WorkflowQuery{Name: second.Name})
+	if resolveErr != nil || current.Record.Version != second.Version {
+		t.Fatalf("stale removal changed newer current = %#v, %v", current, resolveErr)
+	}
+
+	reopened, reopenErr := OpenWorkflowIndex(path)
+	if reopenErr != nil {
+		t.Fatal(reopenErr)
+	}
+	reopenedCurrent, resolveErr := reopened.ResolveWorkflow(t.Context(), WorkflowQuery{Name: second.Name})
+	if resolveErr != nil || reopenedCurrent.Record.Version != second.Version {
+		t.Fatalf("reopened current = %#v, %v", reopenedCurrent, resolveErr)
+	}
+}
+
 func TestWorkflowCatalogPersistenceFailureCommitPoint(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workflow-catalog.json")
 	index, err := OpenWorkflowIndex(path)

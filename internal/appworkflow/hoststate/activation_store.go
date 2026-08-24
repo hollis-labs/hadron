@@ -14,6 +14,22 @@ var (
 	ErrCallbackCredential = errors.New("workflow callback credential rejected")
 )
 
+type ActivationReconcileRequest struct {
+	SourceOwnerKey            string                   `json:"source_owner_key"`
+	ExpectedCurrentPlanDigest string                   `json:"expected_current_plan_digest,omitempty"`
+	PlanDigest                string                   `json:"plan_digest,omitempty"`
+	Registrations             []ActivationRegistration `json:"registrations,omitempty"`
+	At                        time.Time                `json:"at"`
+}
+
+type ActivationReconcileResult struct {
+	SourceOwnerKey    string                     `json:"source_owner_key"`
+	CurrentPlanDigest string                     `json:"current_plan_digest,omitempty"`
+	SourceGeneration  uint64                     `json:"source_generation"`
+	Registrations     []ActivationRegistration   `json:"registrations,omitempty"`
+	Outcome           runtime.IdempotencyOutcome `json:"outcome"`
+}
+
 type ActivationPrepareRequest struct {
 	RegistrationID                 string
 	ExpectedRegistrationGeneration uint64
@@ -59,6 +75,8 @@ type CallbackDelivery struct {
 type ActivationStore interface {
 	gosched.Store
 	RegisterActivation(context.Context, ActivationRegistration) (ActivationRegistration, runtime.IdempotencyOutcome, error)
+	ReconcileDerivedActivations(context.Context, ActivationReconcileRequest) (ActivationReconcileResult, error)
+	ListDerivedActivations(context.Context, string) ([]ActivationRegistration, error)
 	LoadActivation(context.Context, string) (ActivationRegistration, error)
 	RecordActivationEvent(context.Context, ActivationEvent) (gosched.Fire, runtime.IdempotencyOutcome, error)
 	PrepareActivation(context.Context, ActivationPrepareRequest) (ActivationPrepareResult, error)

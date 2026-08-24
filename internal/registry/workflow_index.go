@@ -167,6 +167,46 @@ func (i *WorkflowIndex) RegisterWorkflow(ctx context.Context, input WorkflowReco
 	return cloneWorkflowRecord(record), nil
 }
 
+// RemoveCurrentWorkflowExact removes only the current alias when it still
+// identifies the supplied immutable version and source digest. Immutable
+// workflow records remain resolvable. An absent alias is an exact replay;
+// another current version is a conflict rather than a stale deletion.
+func (i *WorkflowIndex) RemoveCurrentWorkflowExact(ctx context.Context, query WorkflowQuery) error {
+	query, err := canonicalWorkflowQuery(ctx, query)
+	if err != nil {
+		return err
+	}
+	if query.Version == "" || query.Digest == "" {
+		return fmt.Errorf("%w: exact current removal requires version and digest", ErrInvalidWorkflow)
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	byVersion := i.versions[query.Name]
+	record, exists := byVersion[query.Version]
+	if !exists {
+		return fmt.Errorf("%w: %s@%s", ErrWorkflowNotFound, query.Name, query.Version)
+	}
+	if record.Digest != query.Digest {
+		return fmt.Errorf("%w: version and digest select different source", ErrWorkflowConflict)
+	}
+	current := i.current[query.Name]
+	if current == "" {
+		return nil
+	}
+	if current != query.Version {
+		return fmt.Errorf("%w: current workflow changed before removal", ErrWorkflowConflict)
+	}
+	delete(i.current, query.Name)
+	committed, persistErr := i.persistLocked()
+	if persistErr != nil {
+		if !committed {
+			i.current[query.Name] = current
+		}
+		return persistErr
+	}
+	return nil
+}
+
 func (i *WorkflowIndex) ResolveWorkflow(ctx context.Context, query WorkflowQuery) (WorkflowResolution, error) {
 	if ctx == nil {
 		return WorkflowResolution{}, fmt.Errorf("%w: context is required", ErrInvalidWorkflow)

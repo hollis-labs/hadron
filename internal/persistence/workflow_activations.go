@@ -42,6 +42,9 @@ func (s *WorkflowActivationStore) RegisterActivation(ctx context.Context, input 
 	if err != nil || registration.Validate() != nil {
 		return hoststate.ActivationRegistration{}, "", activationInvalid("registration is malformed")
 	}
+	if registration.Derivation != nil {
+		return hoststate.ActivationRegistration{}, "", activationInvalid("source-derived registrations require atomic reconciliation")
+	}
 	registration.CreatedAt = registration.CreatedAt.UTC()
 	registration.UpdatedAt = registration.UpdatedAt.UTC()
 	registration.ExpiresAt = registration.ExpiresAt.UTC()
@@ -81,6 +84,356 @@ registration_id, version, source_kind, scope_key, enabled, expires_at, generatio
 	}
 	cloned, cloneErr := registration.Clone()
 	return cloned, outcome, cloneErr
+}
+
+func (s *WorkflowActivationStore) ListDerivedActivations(ctx context.Context, sourceOwnerKey string) ([]hoststate.ActivationRegistration, error) {
+	if err := checkWorkflowContext(ctx); err != nil {
+		return nil, err
+	}
+	if values.ValidateDigest(sourceOwnerKey) != nil {
+		return nil, activationInvalid("source activation owner key is invalid")
+	}
+	registrations, err := loadWorkflowDerivedActivations(ctx, s.db, sourceOwnerKey)
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := derivedActivationState(registrations, sourceOwnerKey); err != nil {
+		return nil, err
+	}
+	return registrations, nil
+}
+
+func (s *WorkflowActivationStore) ReconcileDerivedActivations(ctx context.Context, input hoststate.ActivationReconcileRequest) (hoststate.ActivationReconcileResult, error) {
+	request, err := canonicalActivationReconcileRequest(input)
+	if err != nil {
+		return hoststate.ActivationReconcileResult{}, err
+	}
+	result := hoststate.ActivationReconcileResult{SourceOwnerKey: request.SourceOwnerKey, CurrentPlanDigest: request.PlanDigest}
+	err = s.state.write(ctx, "reconcile source workflow activations", func(query workflowSQL) error {
+		existing, loadErr := loadWorkflowDerivedActivations(ctx, query, request.SourceOwnerKey)
+		if loadErr != nil {
+			return loadErr
+		}
+		currentPlan, sourceGeneration, stateErr := derivedActivationState(existing, request.SourceOwnerKey)
+		if stateErr != nil {
+			return stateErr
+		}
+		// A declaration-free owner has no operational activation projection to
+		// persist. Its first registration/removal is therefore an exact no-op;
+		// callers use the returned empty current digest when a later plan first
+		// introduces activations. Once history exists, a declaration-free plan is
+		// persisted by retiring those rows and remains exactly replayable.
+		if len(existing) == 0 && len(request.Registrations) == 0 && request.ExpectedCurrentPlanDigest == "" {
+			result.CurrentPlanDigest = ""
+			result.Outcome = workflowruntime.IdempotencyReplayed
+			return nil
+		}
+		if currentPlan == request.PlanDigest && equalCurrentDerivedActivations(existing, request.Registrations) {
+			result.SourceGeneration = sourceGeneration
+			result.Outcome = workflowruntime.IdempotencyReplayed
+			result.Registrations = currentDerivedActivations(existing)
+			return nil
+		}
+		if currentPlan != request.ExpectedCurrentPlanDigest {
+			return &workflowruntime.IdempotencyConflictError{Operation: "reconcile source activations", Key: request.SourceOwnerKey}
+		}
+		if sourceGeneration == ^uint64(0) {
+			return activationInvalid("source activation generation is exhausted")
+		}
+		nextSourceGeneration := sourceGeneration + 1
+		desired := make(map[string]hoststate.ActivationRegistration, len(request.Registrations))
+		for _, registration := range request.Registrations {
+			registration.Derivation.SourceGeneration = nextSourceGeneration
+			registration.Derivation.CurrentPlanDigest = request.PlanDigest
+			registration.Derivation.Retired = false
+			desired[registration.ID] = registration
+		}
+		for _, prior := range existing {
+			next, retained := desired[prior.ID]
+			if retained {
+				if !sameDerivedOrigin(prior, next) {
+					return activationInvalid("source activation identity collision")
+				}
+				delete(desired, prior.ID)
+				next.CreatedAt = prior.CreatedAt
+			} else {
+				next, _ = prior.Clone()
+				next.Enabled = false
+				next.Derivation.Retired = true
+			}
+			if request.At.Before(prior.UpdatedAt) {
+				return activationInvalid("source activation reconciliation time regresses durable state")
+			}
+			next.UpdatedAt = request.At
+			next.Generation = prior.Generation + 1
+			next.Derivation.CurrentPlanDigest = request.PlanDigest
+			next.Derivation.SourceGeneration = nextSourceGeneration
+			encoded, encodeErr := encodeActivationJSON(next)
+			if encodeErr != nil || next.Validate() != nil {
+				return activationInvalid("reconciled source activation is invalid")
+			}
+			generation, generationErr := sqliteGeneration("activation generation", next.Generation)
+			if generationErr != nil {
+				return generationErr
+			}
+			expectedGeneration, generationErr := sqliteGeneration("expected activation generation", prior.Generation)
+			if generationErr != nil {
+				return generationErr
+			}
+			updated, updateErr := query.ExecContext(ctx, `UPDATE workflow_activation_registrations
+SET enabled = ?, expires_at = ?, generation = ?, updated_at = ?, registration_json = ?
+WHERE registration_id = ? AND generation = ?
+  AND json_extract(CAST(registration_json AS TEXT), '$.authority') = ?
+  AND json_extract(CAST(registration_json AS TEXT), '$.derivation.source_owner_key') = ?`,
+				boolInteger(next.Enabled), workflowOptionalTime(next.ExpiresAt), generation, workflowTime(next.UpdatedAt), encoded,
+				next.ID, expectedGeneration, hoststate.ActivationAuthorityProject, request.SourceOwnerKey)
+			if updateErr != nil {
+				return updateErr
+			}
+			count, rowsErr := updated.RowsAffected()
+			if rowsErr != nil {
+				return rowsErr
+			}
+			if count != 1 {
+				return workflowCAS("source activation registration", prior.Generation, next.Generation)
+			}
+			scheduleUpdate, scheduleErr := query.ExecContext(ctx, `UPDATE workflow_activation_schedules SET enabled = ?, generation = generation + 1 WHERE registration_id = ?`, boolInteger(next.Enabled), next.ID)
+			if scheduleErr != nil {
+				return scheduleErr
+			}
+			scheduleCount, rowsErr := scheduleUpdate.RowsAffected()
+			if rowsErr != nil {
+				return rowsErr
+			}
+			expectedScheduleCount := int64(0)
+			if prior.Source.Kind == hoststate.ActivationSourceSchedule {
+				expectedScheduleCount = 1
+			}
+			if scheduleCount != expectedScheduleCount {
+				return activationInvalid("source activation schedule projection is missing or incoherent")
+			}
+			kind := "source_activation_reconciled"
+			if next.Derivation.Retired {
+				kind = "source_activation_retired"
+			}
+			if eventErr := appendWorkflowActivationEvent(ctx, query, next.ID, "", 0, kind, "", request.At); eventErr != nil {
+				return eventErr
+			}
+		}
+		newIDs := make([]string, 0, len(desired))
+		for id := range desired {
+			newIDs = append(newIDs, id)
+		}
+		sort.Strings(newIDs)
+		for _, id := range newIDs {
+			registration := desired[id]
+			registration.CreatedAt, registration.UpdatedAt, registration.Generation = request.At, request.At, 1
+			registration.Derivation.SourceGeneration = nextSourceGeneration
+			registration.Derivation.CurrentPlanDigest = request.PlanDigest
+			registration.Derivation.Retired = false
+			if registration.Validate() != nil {
+				return activationInvalid("new source activation is invalid")
+			}
+			encoded, encodeErr := encodeActivationJSON(registration)
+			if encodeErr != nil {
+				return encodeErr
+			}
+			scopeKey, scopeErr := workflowActivationScopeKey(registration.RunScope)
+			if scopeErr != nil {
+				return scopeErr
+			}
+			if _, insertErr := query.ExecContext(ctx, `INSERT INTO workflow_activation_registrations(
+registration_id, version, source_kind, scope_key, enabled, expires_at, generation, created_at, updated_at, registration_json
+) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`, registration.ID, registration.Version, registration.Source.Kind, scopeKey,
+				boolInteger(registration.Enabled), workflowOptionalTime(registration.ExpiresAt), workflowTime(request.At), workflowTime(request.At), encoded); insertErr != nil {
+				return insertErr
+			}
+			if scheduleErr := insertWorkflowActivationSchedule(ctx, query, registration); scheduleErr != nil {
+				return scheduleErr
+			}
+			if eventErr := appendWorkflowActivationEvent(ctx, query, registration.ID, "", 0, "source_activation_materialized", "", request.At); eventErr != nil {
+				return eventErr
+			}
+		}
+		loaded, loadErr := loadWorkflowDerivedActivations(ctx, query, request.SourceOwnerKey)
+		if loadErr != nil {
+			return loadErr
+		}
+		result.SourceGeneration = nextSourceGeneration
+		result.Outcome = workflowruntime.IdempotencyApplied
+		result.Registrations = currentDerivedActivations(loaded)
+		return nil
+	})
+	if err != nil {
+		return hoststate.ActivationReconcileResult{}, err
+	}
+	return cloneActivationReconcileResult(result)
+}
+
+func canonicalActivationReconcileRequest(input hoststate.ActivationReconcileRequest) (hoststate.ActivationReconcileRequest, error) {
+	if values.ValidateDigest(input.SourceOwnerKey) != nil || input.At.IsZero() || input.At.Location() != time.UTC {
+		return hoststate.ActivationReconcileRequest{}, activationInvalid("source activation reconciliation identity or time is invalid")
+	}
+	if input.ExpectedCurrentPlanDigest != "" && values.ValidateDigest(input.ExpectedCurrentPlanDigest) != nil {
+		return hoststate.ActivationReconcileRequest{}, activationInvalid("expected source activation plan digest is invalid")
+	}
+	if input.PlanDigest == "" {
+		if len(input.Registrations) != 0 {
+			return hoststate.ActivationReconcileRequest{}, activationInvalid("retired source activation cannot contain registrations")
+		}
+	} else if values.ValidateDigest(input.PlanDigest) != nil {
+		return hoststate.ActivationReconcileRequest{}, activationInvalid("source activation plan digest is invalid")
+	}
+	if len(input.Registrations) > hoststate.MaximumActivationEvents {
+		return hoststate.ActivationReconcileRequest{}, activationInvalid("source activation registration set exceeds its bound")
+	}
+	result := input
+	result.Registrations = make([]hoststate.ActivationRegistration, len(input.Registrations))
+	seenIDs, seenTemplates := make(map[string]struct{}, len(input.Registrations)), make(map[string]struct{}, len(input.Registrations))
+	for index, registration := range input.Registrations {
+		cloned, err := registration.Clone()
+		if err != nil || cloned.Validate() != nil || cloned.Authority != hoststate.ActivationAuthorityProject || cloned.Derivation == nil ||
+			cloned.Derivation.SourceOwnerKey != input.SourceOwnerKey || cloned.Derivation.PlanDigest != input.PlanDigest ||
+			cloned.Derivation.SourceDigest != cloned.Definition.Digest || cloned.Derivation.CurrentPlanDigest != input.PlanDigest || cloned.Derivation.Retired ||
+			!validActivationMaterializationDigest(cloned) {
+			return hoststate.ActivationReconcileRequest{}, activationInvalid("source activation registration is invalid")
+		}
+		if _, duplicate := seenIDs[cloned.ID]; duplicate {
+			return hoststate.ActivationReconcileRequest{}, activationInvalid("source activation registration IDs must be unique")
+		}
+		if _, duplicate := seenTemplates[cloned.Derivation.TemplateID]; duplicate {
+			return hoststate.ActivationReconcileRequest{}, activationInvalid("source activation template IDs must be unique")
+		}
+		seenIDs[cloned.ID], seenTemplates[cloned.Derivation.TemplateID] = struct{}{}, struct{}{}
+		result.Registrations[index] = cloned
+	}
+	sort.Slice(result.Registrations, func(left, right int) bool { return result.Registrations[left].ID < result.Registrations[right].ID })
+	return result, nil
+}
+
+func validActivationMaterializationDigest(registration hoststate.ActivationRegistration) bool {
+	if registration.Derivation == nil {
+		return false
+	}
+	digest, err := hoststate.ActivationMaterializationDigest(registration, registration.Derivation.TemplateID)
+	if err != nil || digest != registration.Derivation.MaterializationDigest {
+		return false
+	}
+	id, err := hoststate.DerivedActivationRegistrationID(
+		registration.Derivation.SourceOwnerKey, registration.Derivation.PlanDigest, registration.Derivation.TemplateID,
+		registration.Derivation.TemplateDigest, registration.Derivation.MaterializationDigest,
+	)
+	return err == nil && id == registration.ID
+}
+
+func loadWorkflowDerivedActivations(ctx context.Context, query workflowSQL, sourceOwnerKey string) ([]hoststate.ActivationRegistration, error) {
+	rows, err := query.QueryContext(ctx, `SELECT registration_id FROM workflow_activation_registrations
+WHERE json_extract(CAST(registration_json AS TEXT), '$.authority') = ?
+  AND json_extract(CAST(registration_json AS TEXT), '$.derivation.source_owner_key') = ?
+ORDER BY registration_id LIMIT ?`, hoststate.ActivationAuthorityProject, sourceOwnerKey, hoststate.MaximumDerivedActivationHistory+1)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if len(ids) > hoststate.MaximumDerivedActivationHistory {
+		return nil, activationInvalid("source activation history exceeds its reconciliation bound")
+	}
+	result := make([]hoststate.ActivationRegistration, 0, len(ids))
+	for _, id := range ids {
+		registration, err := loadWorkflowActivation(ctx, query, id)
+		if err != nil {
+			return nil, err
+		}
+		if registration.Authority != hoststate.ActivationAuthorityProject || registration.Derivation == nil || registration.Derivation.SourceOwnerKey != sourceOwnerKey {
+			return nil, activationInvalid("source activation selection crossed its authority boundary")
+		}
+		result = append(result, registration)
+	}
+	return result, nil
+}
+
+func derivedActivationState(registrations []hoststate.ActivationRegistration, sourceOwnerKey string) (string, uint64, error) {
+	current := ""
+	generation := uint64(0)
+	for index, registration := range registrations {
+		if registration.Authority != hoststate.ActivationAuthorityProject || registration.Derivation == nil ||
+			registration.Derivation.SourceOwnerKey != sourceOwnerKey || registration.Derivation.SourceDigest != registration.Definition.Digest ||
+			!validActivationMaterializationDigest(registration) {
+			return "", 0, activationInvalid("stored source activation derivation is corrupt")
+		}
+		if index == 0 {
+			current, generation = registration.Derivation.CurrentPlanDigest, registration.Derivation.SourceGeneration
+		} else if current != registration.Derivation.CurrentPlanDigest || generation != registration.Derivation.SourceGeneration {
+			return "", 0, activationInvalid("stored source activation projection is inconsistent")
+		}
+	}
+	return current, generation, nil
+}
+
+func equalCurrentDerivedActivations(existing, desired []hoststate.ActivationRegistration) bool {
+	current := currentDerivedActivations(existing)
+	if len(current) != len(desired) {
+		return false
+	}
+	byID := make(map[string]hoststate.ActivationRegistration, len(current))
+	for _, registration := range current {
+		byID[registration.ID] = registration
+	}
+	for _, registration := range desired {
+		prior, exists := byID[registration.ID]
+		if !exists || !sameDerivedOrigin(prior, registration) || prior.Enabled != registration.Enabled || !prior.ExpiresAt.Equal(registration.ExpiresAt) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameDerivedOrigin(left, right hoststate.ActivationRegistration) bool {
+	return left.ID == right.ID && left.Authority == hoststate.ActivationAuthorityProject && right.Authority == hoststate.ActivationAuthorityProject &&
+		left.Derivation != nil && right.Derivation != nil && left.Derivation.SourceOwnerKey == right.Derivation.SourceOwnerKey &&
+		left.Derivation.SourceDigest == right.Derivation.SourceDigest && left.Derivation.PlanDigest == right.Derivation.PlanDigest &&
+		left.Derivation.TemplateID == right.Derivation.TemplateID && left.Derivation.TemplateDigest == right.Derivation.TemplateDigest &&
+		left.Derivation.MaterializationDigest == right.Derivation.MaterializationDigest
+}
+
+func currentDerivedActivations(input []hoststate.ActivationRegistration) []hoststate.ActivationRegistration {
+	result := make([]hoststate.ActivationRegistration, 0, len(input))
+	for _, registration := range input {
+		if registration.Derivation != nil && !registration.Derivation.Retired && registration.Derivation.CurrentPlanDigest == registration.Derivation.PlanDigest {
+			cloned, _ := registration.Clone()
+			result = append(result, cloned)
+		}
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].ID < result[right].ID })
+	return result
+}
+
+func cloneActivationReconcileResult(input hoststate.ActivationReconcileResult) (hoststate.ActivationReconcileResult, error) {
+	result := input
+	result.Registrations = make([]hoststate.ActivationRegistration, len(input.Registrations))
+	for index, registration := range input.Registrations {
+		cloned, err := registration.Clone()
+		if err != nil {
+			return hoststate.ActivationReconcileResult{}, err
+		}
+		result.Registrations[index] = cloned
+	}
+	return result, nil
 }
 
 func (s *WorkflowActivationStore) LoadActivation(ctx context.Context, id string) (hoststate.ActivationRegistration, error) {

@@ -27,6 +27,10 @@ const (
 	MaximumActivationPayloadBytes   = 1 << 20
 	MaximumActivationTextBytes      = 1024
 	MaximumActivationAttempts       = 1000
+	// MaximumDerivedActivationHistory bounds one source owner's retained
+	// registration history. Reconciliation fails closed rather than scanning
+	// or rewriting an unbounded history inside one transaction.
+	MaximumDerivedActivationHistory = 4096
 )
 
 type ActivationSourceKind string
@@ -59,6 +63,80 @@ const (
 
 func (a ActivationAuthority) Valid() bool {
 	return a == ActivationAuthorityProject || a == ActivationAuthorityOperator
+}
+
+// ActivationDerivation binds a source-owned operational registration to the
+// exact compiled plan and activation template that produced it. PlanDigest,
+// TemplateID, and TemplateDigest are immutable row identity. SourceOwnerKey is
+// stable across source revisions; SourceDigest identifies the exact source
+// bytes. CurrentPlanDigest, SourceGeneration, and Retired form the source-level
+// CAS projection shared by every historical registration for the owner.
+type ActivationDerivation struct {
+	SourceOwnerKey        string `json:"source_owner_key"`
+	SourceDigest          string `json:"source_digest"`
+	PlanDigest            string `json:"plan_digest"`
+	TemplateID            string `json:"template_id"`
+	TemplateDigest        string `json:"template_digest"`
+	MaterializationDigest string `json:"materialization_digest"`
+	CurrentPlanDigest     string `json:"current_plan_digest,omitempty"`
+	SourceGeneration      uint64 `json:"source_generation"`
+	Retired               bool   `json:"retired,omitempty"`
+}
+
+func (d ActivationDerivation) Validate() error {
+	if values.ValidateDigest(d.SourceOwnerKey) != nil || values.ValidateDigest(d.SourceDigest) != nil ||
+		values.ValidateDigest(d.PlanDigest) != nil || values.ValidateDigest(d.TemplateDigest) != nil ||
+		values.ValidateDigest(d.MaterializationDigest) != nil || graph.ValidateID(d.TemplateID) != nil || d.SourceGeneration == 0 {
+		return errors.New("activation derivation identity is invalid")
+	}
+	if d.CurrentPlanDigest != "" && values.ValidateDigest(d.CurrentPlanDigest) != nil {
+		return errors.New("activation derivation current plan digest is invalid")
+	}
+	if !d.Retired && d.CurrentPlanDigest != d.PlanDigest {
+		return errors.New("active activation derivation must identify its current plan")
+	}
+	return nil
+}
+
+// DerivedActivationRegistrationID returns the deterministic operational ID
+// bound to one immutable source owner, plan, template, and materialization.
+func DerivedActivationRegistrationID(sourceOwnerKey, planDigest, templateID, templateDigest, materializationDigest string) (string, error) {
+	if values.ValidateDigest(sourceOwnerKey) != nil || values.ValidateDigest(planDigest) != nil || graph.ValidateID(templateID) != nil ||
+		values.ValidateDigest(templateDigest) != nil || values.ValidateDigest(materializationDigest) != nil {
+		return "", errors.New("derived activation identity is invalid")
+	}
+	sum := sha256.Sum256([]byte(sourceOwnerKey + "\x00" + planDigest + "\x00" + templateID + "\x00" + templateDigest + "\x00" + materializationDigest))
+	return "source-activation-" + hex.EncodeToString(sum[:20]), nil
+}
+
+// ActivationTemplateDigest binds the exact compiler-owned declaration without
+// requiring persistence to retain or reparse transport source.
+func ActivationTemplateDigest(declaration graph.ActivationDeclaration) (string, error) {
+	encoded, err := json.Marshal(declaration)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// ActivationMaterializationDigest binds the source template's full resolved
+// operational registration while excluding mutable lifecycle state.
+func ActivationMaterializationDigest(registration ActivationRegistration, templateID string) (string, error) {
+	canonical, err := registration.Clone()
+	if err != nil || graph.ValidateID(templateID) != nil {
+		return "", errors.New("activation materialization is invalid")
+	}
+	canonical.ID = templateID
+	canonical.Enabled = false
+	canonical.CreatedAt, canonical.UpdatedAt, canonical.Generation = time.Time{}, time.Time{}, 0
+	canonical.Derivation = nil
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 type ActivationSource struct {
@@ -285,6 +363,7 @@ type ActivationRegistration struct {
 	ExecutionTarget *ExecutionTarget         `json:"execution_target,omitempty"`
 	Source          ActivationSource         `json:"source"`
 	Authority       ActivationAuthority      `json:"authority"`
+	Derivation      *ActivationDerivation    `json:"derivation,omitempty"`
 	Provenance      graph.Provenance         `json:"provenance"`
 	Policy          ActivationPolicy         `json:"policy"`
 	Enabled         bool                     `json:"enabled"`
@@ -333,6 +412,18 @@ func (r ActivationRegistration) Validate() error {
 	}
 	if !r.Authority.Valid() || !validProvenance(r.Provenance) {
 		return errors.New("activation authority or provenance is invalid")
+	}
+	if r.Derivation != nil {
+		materializationDigest, materializationErr := ActivationMaterializationDigest(r, r.Derivation.TemplateID)
+		registrationID, identityErr := DerivedActivationRegistrationID(
+			r.Derivation.SourceOwnerKey, r.Derivation.PlanDigest, r.Derivation.TemplateID,
+			r.Derivation.TemplateDigest, r.Derivation.MaterializationDigest,
+		)
+		if r.Authority != ActivationAuthorityProject || r.Derivation.Validate() != nil ||
+			r.Derivation.SourceDigest != r.Definition.Digest || (r.Derivation.Retired && r.Enabled) ||
+			materializationErr != nil || materializationDigest != r.Derivation.MaterializationDigest || identityErr != nil || registrationID != r.ID {
+			return errors.New("activation derivation is invalid or incoherent")
+		}
 	}
 	if err := r.Policy.Validate(); err != nil {
 		return err

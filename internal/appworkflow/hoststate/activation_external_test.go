@@ -48,6 +48,57 @@ func TestActivationRegistrationValidationAndDefensiveClone(t *testing.T) {
 	}
 }
 
+func TestActivationDerivationValidationAndDefensiveClone(t *testing.T) {
+	registration := activationModelFixture()
+	planDigest := values.SHA256Digest([]byte("plan"))
+	registration.Derivation = &hoststate.ActivationDerivation{
+		SourceOwnerKey: values.SHA256Digest([]byte("owner")), SourceDigest: registration.Definition.Digest,
+		PlanDigest: planDigest, TemplateID: "hook", TemplateDigest: values.SHA256Digest([]byte("template")),
+		MaterializationDigest: values.SHA256Digest([]byte("materialization")), CurrentPlanDigest: planDigest, SourceGeneration: 1,
+	}
+	registration.Derivation.MaterializationDigest, _ = hoststate.ActivationMaterializationDigest(registration, registration.Derivation.TemplateID)
+	registration.ID, _ = hoststate.DerivedActivationRegistrationID(
+		registration.Derivation.SourceOwnerKey, planDigest, registration.Derivation.TemplateID,
+		registration.Derivation.TemplateDigest, registration.Derivation.MaterializationDigest,
+	)
+	clone, err := registration.Clone()
+	if err != nil || clone.Validate() != nil {
+		t.Fatalf("derived Clone = %#v, %v", clone, err)
+	}
+	registration.Derivation.TemplateID = "mutated"
+	if clone.Derivation.TemplateID != "hook" {
+		t.Fatal("derived clone retained caller pointer")
+	}
+	for name, mutate := range map[string]func(*hoststate.ActivationRegistration){
+		"operator authority": func(input *hoststate.ActivationRegistration) { input.Authority = hoststate.ActivationAuthorityOperator },
+		"wrong current plan": func(input *hoststate.ActivationRegistration) {
+			input.Derivation.CurrentPlanDigest = values.SHA256Digest([]byte("other"))
+		},
+		"wrong source digest": func(input *hoststate.ActivationRegistration) {
+			input.Derivation.SourceDigest = values.SHA256Digest([]byte("other-source"))
+		},
+		"forged template digest": func(input *hoststate.ActivationRegistration) {
+			input.Derivation.TemplateDigest = values.SHA256Digest([]byte("forged-template"))
+		},
+		"forged registration id": func(input *hoststate.ActivationRegistration) {
+			input.ID = "forged-derived-registration"
+		},
+		"retired enabled":        func(input *hoststate.ActivationRegistration) { input.Derivation.Retired = true },
+		"zero source generation": func(input *hoststate.ActivationRegistration) { input.Derivation.SourceGeneration = 0 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate, err := clone.Clone()
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate(&candidate)
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("malformed activation derivation passed")
+			}
+		})
+	}
+}
+
 func activationModelFixture() hoststate.ActivationRegistration {
 	base := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 	return hoststate.ActivationRegistration{
