@@ -852,4 +852,5 @@ Source commit `d7c312f` was integrated as `8ac8dbe`.
 | source worktree `d7c312f` | import guard, workflow vet, targeted golangci, hooks, and diff checks | pass; zero new issues |
 | source worktree `d7c312f` | `go test -count=1 ./...` | pass |
 | integration `8ac8dbe` | `go test -count=1 ./workflow/adapters/call/... ./workflow/adapters/script/... ./workflow/runtime/... ./workflow/compile/...` | pass |
+| integration `8ac8dbe` plus tracking | `go test -count=1 ./...` | pass |
 | source | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |
