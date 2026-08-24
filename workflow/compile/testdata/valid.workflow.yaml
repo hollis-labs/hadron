@@ -1,0 +1,12 @@
+workflow:
+  name: loader-example
+steps:
+  - id: preserved
+    kind: example
+    if: "unknown.function("
+    call:
+      definition:
+        locator: missing.workflow.yaml
+      mode: inline
+    config:
+      message: "{{ unresolved.value }}"

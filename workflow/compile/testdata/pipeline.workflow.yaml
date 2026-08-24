@@ -1,0 +1,5 @@
+meta:
+  name: archived-example
+stages:
+  - name: build
+    blueprint_path: build.yaml

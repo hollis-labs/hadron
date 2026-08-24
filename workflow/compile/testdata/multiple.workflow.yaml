@@ -1,0 +1,5 @@
+workflow:
+  name: first
+---
+workflow:
+  name: second
