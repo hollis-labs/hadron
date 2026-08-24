@@ -170,3 +170,27 @@ The amended source commit `3babe00` was integrated as `0fd8245`.
 | integration `0fd8245` | `go vet ./workflow/...` | pass |
 | integration `0fd8245` | `make test` | pass |
 | integration `0fd8245` | `go test ./...` | pass |
+
+## W02-T01
+
+Reviewed the typed value, artifact, value-set, JSON, validation, and digest
+contracts, then requested invalid UTF-8 rejection to preserve exact transport
+round trips and object-key identity. The amended source commit `9776847` was
+integrated as `10e0068`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `9776847` | `git diff --check 63b8246..9776847` | pass |
+| source worktree `9776847` | `go test ./workflow/values/...` | pass |
+| source worktree `9776847` | `go test -race ./workflow/values/...` | pass |
+| source worktree `9776847` | `go test ./workflow/...` | pass |
+| source worktree `9776847` | `go vet ./workflow/...` | pass |
+| source worktree `9776847` | `go test ./...` | pass |
+| integration `10e0068` | `git diff --check HEAD^..HEAD` | pass |
+| integration `10e0068` | `go test ./workflow/values/...` | pass |
+| integration `10e0068` | `go test -race ./workflow/values/...` | pass |
+| integration `10e0068` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `10e0068` | `go test ./workflow/...` | pass |
+| integration `10e0068` | `go vet ./workflow/...` | pass |
+| integration `10e0068` | `make test` | pass |
+| integration `10e0068` | `go test ./...` | pass |

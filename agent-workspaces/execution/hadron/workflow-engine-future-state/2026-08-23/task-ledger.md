@@ -19,8 +19,8 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W01-T05 | W01-T04, W00-T06 | blocked | |
 | W01-T06 | W01-T04 | blocked | |
 | W01-T07 | W01-T03, W01-T04 | blocked | |
-| W02-T01 | W01-T01 | dispatched | |
-| W02-T02 | W02-T01, W00-T05 | blocked | |
+| W02-T01 | W01-T01 | integrated | `10e0068` |
+| W02-T02 | W02-T01, W00-T05 | eligible | |
 | W02-T03 | W02-T01, W02-T02, W02-T04 | blocked | |
 | W02-T04 | W01-T04, W02-T01 | blocked | |
 | W02-T05 | W02-T04 | blocked | |
