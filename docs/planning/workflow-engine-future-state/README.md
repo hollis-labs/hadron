@@ -79,7 +79,7 @@ superseded requirements are not mistaken for omissions.
 | W03-T01 | Implement node lifecycle state machine | 03 | W02-T04 | [x] |
 | W03-T02 | Implement durable ready queue and claims | 03 | W03-T01 | [x] |
 | W03-T03 | Implement readiness rules, skip, failure, and timeout propagation | 03 | W02-T02, W03-T01 | [x] |
-| W03-T04 | Implement retry, backoff, cancellation, and fan-out | 03 | W02-T02, W02-T07, W03-T01, W03-T02, W03-T05 | [ ] |
+| W03-T04 | Implement retry, backoff, cancellation, and fan-out | 03 | W02-T02, W02-T07, W03-T01, W03-T02, W03-T05 | [x] |
 | W03-T05 | Implement generic `WaitRecord` suspend/resume | 03 | W03-T01, W02-T05 | [x] |
 | W03-T06 | Implement crash recovery and replay | 03 | W03-T02, W03-T05 | [ ] |
 | W03-T07 | Enforce scheduler concurrency resources and run policies | 03 | W03-T02, W03-T04 | [ ] |
@@ -88,10 +88,10 @@ superseded requirements are not mistaken for omissions.
 | W04-T01 | Harden step-kind runtime integration | 04 | W00-T06, W03-T01 | [x] |
 | W04-T02 | Implement `transform` executor | 04 | W02-T02, W04-T01 | [x] |
 | W04-T03 | Implement `cmd` executor | 04 | W02-T01, W04-T01 | [x] |
-| W04-T04 | Implement `http` executor | 04 | W02-T01, W04-T01 | [ ] |
+| W04-T04 | Implement `http` executor | 04 | W02-T01, W04-T01 | [x] |
 | W04-T05 | Implement `mcp` executor | 04 | W02-T01, W04-T01 | [x] |
 | W04-T06 | Implement `call` executor | 04 | W01-T04, W03-T02, W04-T01 | [ ] |
-| W04-T07 | Implement wait-backed executor set | 04 | W03-T05, W04-T01 | [ ] |
+| W04-T07 | Implement wait-backed executor set | 04 | W03-T05, W04-T01 | [x] |
 | W04-T08 | Implement node verification modifier | 04 | W02-T02, W03-T08, W04-T01 | [ ] |
 | W05-T01 | Create Hadron workflow host binding | 05 | W02-T05, W02-T08, W03-T02, W04-T01, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | [ ] |
 | W05-T02 | Introduce `RunScope` and `ExecutionTarget` | 05 | W05-T01 | [ ] |
