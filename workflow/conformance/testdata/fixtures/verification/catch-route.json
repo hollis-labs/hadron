@@ -1,0 +1,5 @@
+{
+  "name": "verification-catch-route",
+  "expect": "pass",
+  "input": {"scenario": "catch_route"}
+}

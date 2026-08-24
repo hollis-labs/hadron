@@ -16,6 +16,9 @@ terminal accounting. The
 missing metadata, duplicate registration, unknown exact resolution, adapter
 config rejection, optional lifecycle/interface agreement, and immutable
 registered-spec snapshots.
+The `verification` set covers deterministic pass/fail, missing literal
+activity evidence, unsafe retry denial, catch selection by verification failure
+code, and strict reviewer-result rejection.
 
 Later implementation tasks replace or extend each payload with semantic cases
 while retaining the directory names, fixture envelope, and deterministic suite

@@ -11,18 +11,20 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 // ExternalOperationResult is one durable reconciliation outcome. A non-nil
 // error may accompany a terminal result or a post-commit finalization warning;
 // callers must treat the returned snapshots as authoritative.
 type ExternalOperationResult struct {
-	Operation ExternalOperationSnapshot
-	Node      NodeInvocationSnapshot
-	Attempt   AttemptSnapshot
-	Result    *stepkind.StepResult
-	Outputs   *values.ValueSetRef
-	Warnings  []DispatchWarning
+	Operation    ExternalOperationSnapshot
+	Node         NodeInvocationSnapshot
+	Attempt      AttemptSnapshot
+	Result       *stepkind.StepResult
+	Outputs      *values.ValueSetRef
+	Verification *VerificationRecord
+	Warnings     []DispatchWarning
 }
 
 // ExternalOperationCoordinator reconciles adapter-owned work without a worker
@@ -36,6 +38,7 @@ type ExternalOperationCoordinator struct {
 	disposition FailureDisposition
 	retention   RetentionHook
 	redactor    *values.Redactor
+	verifiers   verification.Registry
 }
 
 // ExternalOperationOptions supplies extraction-safe reconciliation
@@ -48,6 +51,9 @@ type ExternalOperationOptions struct {
 	FailureDisposition FailureDisposition
 	RetentionHook      RetentionHook
 	Redactor           *values.Redactor
+	// Verifiers must match the dispatcher catalog. Nil selects the core
+	// deterministic catalog; construction freezes the exact snapshot.
+	Verifiers verification.Registry
 }
 
 // NewExternalOperationCoordinator constructs recovery-aware external work
@@ -63,10 +69,20 @@ func NewExternalOperationCoordinator(options ExternalOperationOptions) (*Externa
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
+	verifiers := options.Verifiers
+	if verifiers == nil {
+		verifiers = verification.NewDefaultRegistry()
+	} else if nilVerificationRegistry(verifiers) {
+		return nil, fmt.Errorf("%w: verification registry is typed nil", ErrInvalidDispatch)
+	}
+	frozenVerifiers, err := verification.SnapshotRegistry(verifiers)
+	if err != nil {
+		return nil, fmt.Errorf("%w: snapshot verification registry: %w", ErrInvalidDispatch, err)
+	}
 	return &ExternalOperationCoordinator{
 		store: options.Store, registry: options.Registry, now: now,
 		disposition: options.FailureDisposition, retention: options.RetentionHook,
-		redactor: options.Redactor,
+		redactor: options.Redactor, verifiers: frozenVerifiers,
 	}, nil
 }
 
@@ -128,7 +144,7 @@ func (c *ExternalOperationCoordinator) Reconcile(ctx context.Context, id Attempt
 		if observation.State != stepkind.ObservationSucceeded && observation.State != stepkind.ObservationFailed && observation.State != stepkind.ObservationCanceled {
 			return c.persistPendingObservationError(durableCtx, result, observation.Progress, heartbeatAt, observedAt, DispatchObserve, validationErr)
 		}
-		return c.failWithResult(durableCtx, result, kind, spec, stepkind.StepResult{}, stepkind.ObservationFailed, heartbeatAt, observedAt, DispatchObserve, failureInvalidResult, validationErr)
+		return c.failWithResult(durableCtx, result, kind, spec, stepkind.StepResult{}, stepkind.ObservationFailed, heartbeatAt, observedAt, nil, DispatchObserve, failureInvalidResult, validationErr)
 	}
 	at := observedAt
 	switch observation.State {
@@ -145,7 +161,22 @@ func (c *ExternalOperationCoordinator) Reconcile(ctx context.Context, id Attempt
 	case stepkind.ObservationSucceeded:
 		stepResult := cloneStepResult(*observation.Result)
 		if err := values.ValidateValueSetSchema(spec.OutputSchema, stepResult.Outputs); err != nil {
-			return c.failWithResult(durableCtx, result, kind, spec, stepResult, stepkind.ObservationFailed, heartbeatAt, observedAt, DispatchValidateOutput, failureInvalidResult, errors.Join(ErrStepValidation, err))
+			return c.failWithResult(durableCtx, result, kind, spec, stepResult, stepkind.ObservationFailed, heartbeatAt, observedAt, nil, DispatchValidateOutput, failureInvalidResult, errors.Join(ErrStepValidation, err))
+		}
+		var pendingVerification *pendingExternalVerification
+		var verificationErr *verificationFailure
+		if operation.Invocation.Verification != nil {
+			var report verification.Report
+			report, verificationErr = executeVerification(ctx, c.verifiers, *operation.Invocation.Verification, spec.OutputSchema, stepResult.Outputs, nil)
+			prepared, persistErr := prepareExternalVerification(durableCtx, c.store, c.retention, c.redactor, id, report)
+			if persistErr != nil {
+				failure := &stepkind.ExecutionError{Code: "verification_persistence_failed", Message: verificationFailureMessage("verification_persistence_failed"), Classification: stepkind.RetryUnspecified, Cause: persistErr}
+				return c.failWithResult(durableCtx, result, kind, spec, stepResult, stepkind.ObservationFailed, heartbeatAt, observedAt, nil, DispatchPersistVerify, failurePersistOutput, failure)
+			}
+			pendingVerification = &prepared
+			if verificationErr != nil {
+				return c.failWithResult(durableCtx, result, kind, spec, stepResult, stepkind.ObservationFailed, heartbeatAt, observedAt, pendingVerification, DispatchVerify, failureExecute, verificationExecutionError(verificationErr))
+			}
 		}
 		outputRef, err := SaveValuesWithRetention(durableCtx, c.store, c.retention, SaveValuesRequest{
 			Owner:  ValueOwner{Kind: "external-operation-outputs", RunID: id.Invocation.RunID, Invocation: &id.Invocation, Attempt: &id},
@@ -158,17 +189,24 @@ func (c *ExternalOperationCoordinator) Reconcile(ctx context.Context, id Attempt
 			Attempt: id, ExpectedOperationGeneration: operation.Generation,
 			ExpectedNodeGeneration: node.Generation, ExpectedAttemptGeneration: attempt.Generation,
 			Status: stepkind.ObservationSucceeded, Progress: maskExternalProgress(observation.Progress, c.redactor),
-			Outputs: &outputRef, NextNodeStatus: NodeSucceeded, ObservedAt: observedAt, HeartbeatAt: heartbeatAt, At: at,
+			Outputs: &outputRef, Verification: externalVerificationCompletion(pendingVerification), NextNodeStatus: NodeSucceeded, ObservedAt: observedAt, HeartbeatAt: heartbeatAt, At: at,
 		})
 		if err != nil {
 			return result, c.externalDispatchError(DispatchFinishAttempt, operation, attempt, err)
 		}
 		terminal := externalResult(applied, &stepResult)
 		terminal.Outputs = cloneValueSetRef(&outputRef)
+		if pendingVerification != nil {
+			recorded, recordErr := verificationFromExternalApply(*pendingVerification, applied.Events)
+			if recordErr != nil {
+				return terminal, c.externalDispatchError(DispatchPersistVerify, applied.Operation, applied.Attempt, recordErr)
+			}
+			terminal.Verification = &recorded
+		}
 		c.finalize(durableCtx, kind, spec, operation.Invocation, stepResult, nil, &terminal)
 		return terminal, nil
 	case stepkind.ObservationFailed, stepkind.ObservationCanceled:
-		return c.failWithResult(durableCtx, result, kind, spec, stepkind.StepResult{}, observation.State, heartbeatAt, observedAt, DispatchObserve, observation.Failure.Code, observation.Failure)
+		return c.failWithResult(durableCtx, result, kind, spec, stepkind.StepResult{}, observation.State, heartbeatAt, observedAt, nil, DispatchObserve, observation.Failure.Code, observation.Failure)
 	default:
 		panic("validated observation has unsupported state")
 	}
@@ -258,7 +296,7 @@ func (c *ExternalOperationCoordinator) fail(
 	stage DispatchStage,
 	cause error,
 ) (ExternalOperationResult, error) {
-	return c.failWithResult(ctx, result, kind, spec, stepkind.StepResult{}, stepkind.ObservationFailed, time.Time{}, time.Time{}, stage, failureExecute, cause)
+	return c.failWithResult(ctx, result, kind, spec, stepkind.StepResult{}, stepkind.ObservationFailed, time.Time{}, time.Time{}, nil, stage, failureExecute, cause)
 }
 
 func (c *ExternalOperationCoordinator) failWithResult(
@@ -270,6 +308,7 @@ func (c *ExternalOperationCoordinator) failWithResult(
 	observedState stepkind.ObservationState,
 	heartbeatAt time.Time,
 	observedAt time.Time,
+	verificationPending *pendingExternalVerification,
 	stage DispatchStage,
 	code string,
 	cause error,
@@ -304,22 +343,38 @@ func (c *ExternalOperationCoordinator) failWithResult(
 	applied, applyErr := c.store.ApplyExternalOperation(ctx, ApplyExternalOperationRequest{
 		Attempt: result.Attempt.ID, ExpectedOperationGeneration: result.Operation.Generation,
 		ExpectedNodeGeneration: result.Node.Generation, ExpectedAttemptGeneration: result.Attempt.Generation,
-		Status: status, Progress: cloneDispatchStringMap(result.Operation.Progress), Failure: &persisted,
+		Status: status, Progress: cloneDispatchStringMap(result.Operation.Progress), Failure: &persisted, Verification: externalVerificationCompletion(verificationPending),
 		NextNodeStatus: next, ObservedAt: observedAt, HeartbeatAt: heartbeatAt, At: at,
 	})
 	if applyErr != nil {
 		return result, c.externalDispatchError(DispatchFinishAttempt, result.Operation, result.Attempt, errors.Join(cause, policyErr, applyErr))
 	}
 	terminal := externalResult(applied, nil)
+	if verificationPending != nil {
+		recorded, recordErr := verificationFromExternalApply(*verificationPending, applied.Events)
+		if recordErr != nil {
+			return terminal, c.externalDispatchError(DispatchPersistVerify, applied.Operation, applied.Attempt, recordErr)
+		}
+		terminal.Verification = &recorded
+	}
 	if !isNilStepKindValue(kind) {
 		c.finalize(ctx, kind, spec, result.Operation.Invocation, produced, cause, &terminal)
 	}
 	return terminal, c.externalDispatchError(stage, result.Operation, result.Attempt, errors.Join(cause, policyErr))
 }
 
+func externalVerificationCompletion(pending *pendingExternalVerification) *ExternalVerificationCompletion {
+	if pending == nil {
+		return nil
+	}
+	completion := pending.Completion
+	completion.Attributes = cloneDispatchStringMap(completion.Attributes)
+	return &completion
+}
+
 func (c *ExternalOperationCoordinator) finalize(ctx context.Context, kind stepkind.StepKind, spec stepkind.StepKindSpec, invocation stepkind.Invocation, result stepkind.StepResult, executionErr error, terminal *ExternalOperationResult) {
-	dispatcher := StepDispatcher{store: c.store, registry: c.registry, now: c.now, disposition: c.disposition, retention: c.retention, redactor: c.redactor}
-	dispatchResult := DispatchResult{Node: terminal.Node, Attempt: terminal.Attempt, Result: terminal.Result, Outputs: terminal.Outputs, Warnings: terminal.Warnings}
+	dispatcher := StepDispatcher{store: c.store, registry: c.registry, now: c.now, disposition: c.disposition, retention: c.retention, redactor: c.redactor, verifiers: c.verifiers}
+	dispatchResult := DispatchResult{Node: terminal.Node, Attempt: terminal.Attempt, Result: terminal.Result, Outputs: terminal.Outputs, Verification: terminal.Verification, Warnings: terminal.Warnings}
 	dispatcher.finalize(ctx, DispatchRequest{
 		Claim: ReadyClaim{Candidate: ReadyCandidate{InvocationID: terminal.Attempt.ID.Invocation}},
 		Node:  graph.Node{ID: terminal.Attempt.ID.Invocation.NodeID, Kind: spec.Name, KindVersion: spec.Version},
@@ -345,7 +400,7 @@ func (c *ExternalOperationCoordinator) validate(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("%w: context is required", ErrInvalidDispatch)
 	}
-	if c == nil || nilStateStore(c.store) || nilStepKindRegistry(c.registry) || c.now == nil {
+	if c == nil || nilStateStore(c.store) || nilStepKindRegistry(c.registry) || c.now == nil || nilVerificationRegistry(c.verifiers) {
 		return fmt.Errorf("%w: external operation coordinator is not initialized", ErrInvalidDispatch)
 	}
 	return nil

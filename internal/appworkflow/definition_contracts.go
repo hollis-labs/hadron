@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/runtime"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 const (
@@ -81,7 +82,12 @@ type ResolvedSource struct {
 }
 
 type DefinitionCompileOptions struct {
-	StepKinds         compile.StepKindLookup
+	StepKinds compile.StepKindLookup
+	// Verifiers is frozen with its full advertised specs at resolver
+	// construction. Nil selects the deterministic core catalog; typed nil is
+	// invalid. SemanticRevision remains the behavior-version escape hatch for
+	// implementations whose VerifierSpec is unchanged.
+	Verifiers         verification.Registry
 	PolicyHooks       []compile.PolicyHook
 	DependencyOptions compile.DependencyOptions
 	// NodeExpanders are pure graph-source extensions captured by stable name

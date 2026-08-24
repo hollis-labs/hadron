@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 func TestExternalOperationCoordinatorPersistsProgressSuccessAndFinalizeWarning(t *testing.T) {
@@ -101,6 +103,112 @@ func TestExternalOperationCoordinatorCancelIntentReplayPersistsCanceled(t *testi
 	}
 }
 
+func TestExternalOperationCoordinatorAppliesPersistedVerificationModifier(t *testing.T) {
+	t.Run("deterministic pass", func(t *testing.T) {
+		fixture := dispatchExternalOperationWithVerification(t, "external-verification-pass", &graph.VerificationSpec{Checks: []graph.VerificationCheck{{Kind: verification.CheckNoError, Config: graph.Config{}}}})
+		fixture.kind.ObserveFunc = func(context.Context, stepkind.ExternalOperationRef) (stepkind.Observation, error) {
+			result := stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{"result": dispatchValue(t, "result", "complete")}}
+			return stepkind.Observation{State: stepkind.ObservationSucceeded, Result: &result}, nil
+		}
+		completed, err := fixture.coordinator(t).Reconcile(context.Background(), fixture.attempt)
+		if err != nil || completed.Node.Status != workflowruntime.NodeSucceeded || completed.Verification == nil || completed.Verification.Report.Status != verification.ReportPassed {
+			t.Fatalf("Reconcile() = %#v, %v", completed, err)
+		}
+	})
+
+	t.Run("missing process-local activity fails closed", func(t *testing.T) {
+		fixture := dispatchExternalOperationWithVerification(t, "external-verification-evidence", &graph.VerificationSpec{Checks: []graph.VerificationCheck{{Kind: verification.CheckExpectedToolCall, Config: graph.Config{"tool": "remote.write"}}}})
+		fixture.kind.ObserveFunc = func(context.Context, stepkind.ExternalOperationRef) (stepkind.Observation, error) {
+			result := stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{"result": dispatchValue(t, "result", "complete")}}
+			return stepkind.Observation{State: stepkind.ObservationSucceeded, Result: &result}, nil
+		}
+		completed, err := fixture.coordinator(t).Reconcile(context.Background(), fixture.attempt)
+		if err == nil || completed.Node.Status != workflowruntime.NodeFailed || completed.Attempt.Failure == nil || completed.Attempt.Failure.Code != "verification_failed" || completed.Verification == nil {
+			t.Fatalf("Reconcile() = %#v, %v", completed, err)
+		}
+	})
+}
+
+func TestExternalOperationCoordinatorAtomicallyFencesCompetingVerifiedObservers(t *testing.T) {
+	fixture := dispatchExternalOperationWithVerification(t, "external-verification-contention", &graph.VerificationSpec{
+		Checks: []graph.VerificationCheck{{Kind: verification.CheckNoError, Config: graph.Config{}}},
+	})
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	completedValue := dispatchValue(t, "result", "complete")
+	fixture.kind.ObserveFunc = func(context.Context, stepkind.ExternalOperationRef) (stepkind.Observation, error) {
+		entered <- struct{}{}
+		<-release
+		result := stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{
+			"result": completedValue,
+		}}
+		return stepkind.Observation{State: stepkind.ObservationSucceeded, Result: &result}, nil
+	}
+	coordinators := []*workflowruntime.ExternalOperationCoordinator{fixture.coordinator(t), fixture.coordinator(t)}
+	type outcome struct {
+		result workflowruntime.ExternalOperationResult
+		err    error
+	}
+	outcomes := make(chan outcome, len(coordinators))
+	var group sync.WaitGroup
+	for _, coordinator := range coordinators {
+		group.Add(1)
+		go func(coordinator *workflowruntime.ExternalOperationCoordinator) {
+			defer group.Done()
+			result, err := coordinator.Reconcile(context.Background(), fixture.attempt)
+			outcomes <- outcome{result: result, err: err}
+		}(coordinator)
+	}
+	<-entered
+	<-entered
+	close(release)
+	group.Wait()
+	close(outcomes)
+
+	succeeded, stale := 0, 0
+	var winner workflowruntime.ExternalOperationResult
+	for outcome := range outcomes {
+		switch {
+		case outcome.err == nil:
+			succeeded++
+			winner = outcome.result
+		case errors.Is(outcome.err, workflowruntime.ErrCASMismatch):
+			stale++
+		default:
+			t.Fatalf("competing Reconcile() = %#v, %v", outcome.result, outcome.err)
+		}
+	}
+	if succeeded != 1 || stale != 1 || winner.Verification == nil || winner.Node.Status != workflowruntime.NodeSucceeded {
+		t.Fatalf("contention succeeded=%d stale=%d winner=%#v", succeeded, stale, winner)
+	}
+	events, err := fixture.store.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: fixture.attempt.Invocation.RunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationEvents, finishedEvents := 0, 0
+	verificationSequence, finishedSequence := uint64(0), uint64(0)
+	for _, event := range events {
+		switch event.Type {
+		case workflowruntime.EventNodeVerificationCompleted:
+			verificationEvents++
+			verificationSequence = event.Sequence
+		case workflowruntime.EventNodeAttemptFinished:
+			finishedEvents++
+			finishedSequence = event.Sequence
+		}
+	}
+	if verificationEvents != 1 || finishedEvents != 1 || verificationSequence >= finishedSequence {
+		t.Fatalf("atomic verification event history = %#v", events)
+	}
+	replayed, err := workflowruntime.PersistVerificationForTest(
+		context.Background(), fixture.store, nil, nil, fixture.attempt,
+		winner.Verification.Report, fixture.now.Add(time.Second),
+	)
+	if err != nil || !replayed.Replayed || replayed.Ref != winner.Verification.Ref {
+		t.Fatalf("verification replay after contention = %#v, %v", replayed, err)
+	}
+}
+
 func TestExternalOperationCoordinatorContextCancellationLeavesRemotePending(t *testing.T) {
 	fixture := dispatchExternalOperation(t, "external-context-cancel")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -177,6 +285,10 @@ type dispatchedExternalFixture struct {
 }
 
 func dispatchExternalOperation(t *testing.T, run string) *dispatchedExternalFixture {
+	return dispatchExternalOperationWithVerification(t, run, nil)
+}
+
+func dispatchExternalOperationWithVerification(t *testing.T, run string, modifier *graph.VerificationSpec) *dispatchedExternalFixture {
 	t.Helper()
 	store, claim, node, base := dispatchFixture(t, run)
 	registry := stepkind.NewRegistry()
@@ -197,7 +309,7 @@ func dispatchExternalOperation(t *testing.T, run string) *dispatchedExternalFixt
 		t.Fatal(err)
 	}
 	result, err := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{
-		Claim: claim, Node: graph.Node{ID: node.ID.NodeID, Kind: "external-kind", KindVersion: "v1", Config: graph.Config{"large": json.Number("9007199254740993")}},
+		Claim: claim, Node: graph.Node{ID: node.ID.NodeID, Kind: "external-kind", KindVersion: "v1", Config: graph.Config{"large": json.Number("9007199254740993")}, Verification: modifier},
 	})
 	if err != nil || result.External == nil || result.Node.Status != workflowruntime.NodeWaiting || result.Attempt.Status != workflowruntime.NodeRunning {
 		t.Fatalf("Dispatch(external) = %#v, %v", result, err)

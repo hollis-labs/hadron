@@ -7,6 +7,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
@@ -122,13 +123,18 @@ type StepKindSpec struct {
 // extends it with runtime context and typed values without replacing the
 // executor interfaces.
 type Invocation struct {
-	Identity       InvocationIdentity `json:"identity"`
-	Config         graph.Config       `json:"config"`
-	Inputs         values.ValueSet    `json:"inputs"`
-	Call           *CallInvocation    `json:"call,omitempty"`
-	Continuation   *WaitContinuation  `json:"continuation,omitempty"`
-	IdempotencyKey string             `json:"idempotency_key,omitempty"`
-	Deadline       time.Time          `json:"deadline,omitempty"`
+	Identity     InvocationIdentity `json:"identity"`
+	Config       graph.Config       `json:"config"`
+	Inputs       values.ValueSet    `json:"inputs"`
+	Call         *CallInvocation    `json:"call,omitempty"`
+	Continuation *WaitContinuation  `json:"continuation,omitempty"`
+	// Verification is the immutable graph modifier carried through durable
+	// external-operation recovery. Activity is a runtime-issued, process-local
+	// recorder; it is deliberately excluded from durable invocation JSON.
+	Verification   *graph.VerificationSpec        `json:"verification,omitempty"`
+	Activity       *verification.ActivityRecorder `json:"-"`
+	IdempotencyKey string                         `json:"idempotency_key,omitempty"`
+	Deadline       time.Time                      `json:"deadline,omitempty"`
 }
 
 // CallInvocation carries the graph-native call declaration and the immutable

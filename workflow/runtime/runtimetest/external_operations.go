@@ -244,7 +244,17 @@ func (s *Store) ApplyExternalOperation(ctx context.Context, request workflowrunt
 	}
 
 	nextNode, nextAttempt := cloneNode(currentNode), cloneAttempt(currentAttempt)
-	eventRequests := []workflowruntime.AppendEventRequest{externalObservationEventRequest(currentOperation, nextOperation, request.At)}
+	eventRequests := make([]workflowruntime.AppendEventRequest, 0, 4)
+	if request.Verification != nil {
+		invocation, attempt := request.Attempt.Invocation, request.Attempt
+		eventRequests = append(eventRequests, workflowruntime.AppendEventRequest{
+			RunID: invocation.RunID, Invocation: &invocation, Attempt: &attempt,
+			Type: workflowruntime.EventNodeVerificationCompleted, OccurredAt: request.At,
+			Attributes: cloneStringMap(request.Verification.Attributes), Values: cloneValueSetRef(&request.Verification.Values),
+			Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
+		})
+	}
+	eventRequests = append(eventRequests, externalObservationEventRequest(currentOperation, nextOperation, request.At))
 	if request.Status != stepkind.ObservationPending {
 		attemptStatus := externalAttemptStatus(request.Status)
 		nextAttempt.Status = attemptStatus

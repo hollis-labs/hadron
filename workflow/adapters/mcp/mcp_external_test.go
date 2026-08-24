@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 type fakeClient struct {
@@ -466,6 +467,39 @@ func TestResultRedactionCollisionAndTransportCollisionFailClosed(t *testing.T) {
 			}
 			_, err = kind.Execute(t.Context(), invocation(config(map[string]any{"token": string(ref)})))
 			assertExecutionCode(t, err, "mcp_invalid_result")
+		})
+	}
+}
+
+func TestExecuteRecordsOnlyLiteralToolBoundaryEvidence(t *testing.T) {
+	tests := []struct {
+		name    string
+		client  *fakeClient
+		outcome verification.ActivityOutcome
+	}{
+		{name: "success", client: &fakeClient{result: mcpadapter.CallResult{Content: []mcpadapter.Content{{Kind: mcpadapter.ContentText, Text: "model claims another tool ran"}}}}, outcome: verification.ActivitySucceeded},
+		{name: "tool error", client: &fakeClient{result: mcpadapter.CallResult{IsError: true, Content: []mcpadapter.Content{{Kind: mcpadapter.ContentText, Text: "failure"}}}}, outcome: verification.ActivityFailed},
+		{name: "transport error", client: &fakeClient{err: errors.New("unavailable")}, outcome: verification.ActivityFailed},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kind := mustKind(t, test.client, &fakeDescriptor{}, nil, 0, 0)
+			recorder := verification.NewActivityRecorder()
+			prepared := invocation(config(map[string]any{}))
+			prepared.Invocation.Activity = recorder
+			_, _ = kind.Execute(t.Context(), prepared)
+			activity, err := recorder.Freeze()
+			if err != nil || len(activity) != 1 || activity[0].ToolCall == nil ||
+				activity[0].ToolCall.Server != "fixture" || activity[0].ToolCall.Tool != "echo" || activity[0].ToolCall.Outcome != test.outcome {
+				t.Fatalf("Freeze() = %#v, %v", activity, err)
+			}
+			encoded, err := json.Marshal(activity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), "model claims") || strings.Contains(string(encoded), "unavailable") {
+				t.Fatalf("evidence contains executor/model data: %s", encoded)
+			}
 		})
 	}
 }

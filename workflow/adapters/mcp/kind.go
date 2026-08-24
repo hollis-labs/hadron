@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 const (
@@ -263,6 +264,17 @@ func (k *Kind) Execute(ctx context.Context, invocation stepkind.PreparedInvocati
 		Server: parsed.Server, Tool: parsed.Tool, Arguments: arguments, IdempotencyKey: idempotencyKey,
 	})
 	forgetArgumentSecrets(arguments)
+	activityOutcome := verification.ActivitySucceeded
+	if callErr != nil || callCtx.Err() != nil || result.IsError {
+		activityOutcome = verification.ActivityFailed
+	}
+	if invocation.Invocation.Activity != nil {
+		if activityErr := invocation.Invocation.Activity.RecordToolCall(context.WithoutCancel(callCtx), verification.ToolCall{
+			Server: parsed.Server, Tool: parsed.Tool, Outcome: activityOutcome,
+		}); activityErr != nil {
+			return stepkind.StepResult{}, permanent("mcp_activity_recording", "MCP tool activity could not be recorded", activityErr, safeDetails(parsed))
+		}
+	}
 	if callErr != nil {
 		var resultErr *ResultError
 		if errors.As(callErr, &resultErr) {

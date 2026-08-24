@@ -1,7 +1,9 @@
 package stepkind_test
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
@@ -128,6 +131,33 @@ func TestInvocationRejectsNonCanonicalOptionalIdentityText(t *testing.T) {
 		if err := candidate.Validate(); err != nil {
 			t.Fatalf("Invocation.Validate() rejected canonical optional text: %v", err)
 		}
+	}
+}
+
+func TestInvocationCarriesVerificationButNeverPersistsActivityRecorder(t *testing.T) {
+	recorder := verification.NewActivityRecorder()
+	invocation := stepkind.Invocation{
+		Identity: stepkind.InvocationIdentity{RunID: "run-1", NodeID: "node", Attempt: 1},
+		Config:   graph.Config{}, Inputs: values.ValueSet{},
+		Verification: &graph.VerificationSpec{Checks: []graph.VerificationCheck{{Kind: verification.CheckNoError, Config: graph.Config{}}}},
+		Activity:     recorder,
+	}
+	if err := invocation.Validate(); err != nil {
+		t.Fatalf("Invocation.Validate() = %v", err)
+	}
+	encoded, err := json.Marshal(invocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"verification"`) || strings.Contains(string(encoded), "activities") || strings.Contains(string(encoded), "frozen") {
+		t.Fatalf("durable invocation JSON = %s", encoded)
+	}
+	var replay stepkind.Invocation
+	if err := json.Unmarshal(encoded, &replay); err != nil {
+		t.Fatal(err)
+	}
+	if replay.Verification == nil || replay.Activity != nil {
+		t.Fatalf("replayed invocation = %#v", replay)
 	}
 }
 

@@ -29,7 +29,7 @@ var supportedNodeFields = []string{
 	"id", "name", "display_name", "kind", "kind_version", "needs", "ready_when",
 	"if", "for_each", "concurrency", "config", "with", "outputs", "effects", "retry",
 	"idempotency", "timeout", "catch", "finally", "switch", "call", "metadata",
-	"continue_on_error",
+	"continue_on_error", "verify",
 	"agent_launch", "checkpoint", "cmd", "emit", "http", "http_call", "human_gate",
 	"llm", "mcp", "mcp_call", "message_wait", "script", "sleep", "transform", "wait_for",
 }
@@ -181,10 +181,44 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 			l.invalidShape(call.value, call.path, "call requires kind: call")
 		}
 	}
+	if verify, exists := fields["verify"]; exists {
+		compiled.Verification = l.lowerVerification(verify.value, verify.path)
+	}
 	if metadata, exists := fields["metadata"]; exists {
 		compiled.Metadata = l.metadata(metadata.value, metadata.path)
 	}
 	return compiled, edges
+}
+
+func (l *lowerer) lowerVerification(node *yaml.Node, path []string) *graph.VerificationSpec {
+	items := l.sequence(node, path)
+	spec := &graph.VerificationSpec{Checks: make([]graph.VerificationCheck, 0, len(items))}
+	for index, item := range items {
+		itemPath := appendPath(path, strconv.Itoa(index))
+		fields := l.mapping(item, itemPath, "type", "kind", "config")
+		typeField, hasType := fields["type"]
+		kindField, hasKind := fields["kind"]
+		if hasType && hasKind {
+			l.invalidShape(item, itemPath, "verification check may declare type or kind, not both")
+		}
+		var check graph.VerificationCheck
+		checkRef := l.location(item, itemPath)
+		check.Source = &checkRef
+		switch {
+		case hasKind:
+			check.Kind = l.string(kindField.value, kindField.path)
+		case hasType:
+			check.Kind = l.string(typeField.value, typeField.path)
+		default:
+			l.invalidShape(item, itemPath, "verification check.type is required")
+		}
+		check.Config = graph.Config{}
+		if config, exists := fields["config"]; exists {
+			check.Config = l.config(config.value, config.path)
+		}
+		spec.Checks = append(spec.Checks, check)
+	}
+	return spec
 }
 
 func executorDeclarations(node *yaml.Node, path []string) []sourceField {

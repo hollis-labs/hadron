@@ -36,6 +36,8 @@ const (
 	WaitFixtures FixtureSet = "waits"
 	// ExecutorMetadataFixtures contains step-kind registry metadata cases.
 	ExecutorMetadataFixtures FixtureSet = "executor-metadata"
+	// VerificationFixtures contains post-execution verification/evidence cases.
+	VerificationFixtures FixtureSet = "verification"
 )
 
 // Fixture is a conformance-only test case. Input remains opaque to the harness
@@ -151,6 +153,14 @@ func WaitSuite(t *testing.T, store FixtureStore, factory Factory) {
 func StepKindRegistrySuite(t *testing.T, store FixtureStore, factory Factory) {
 	t.Helper()
 	runSuite(t, "step-kind-registry", store, factory, ExecutorMetadataFixtures)
+}
+
+// VerificationSuite runs deterministic decision, literal evidence, retry,
+// catch, and fail-closed reviewer fixtures without widening Host for callers
+// that have not yet adopted the optional node modifier.
+func VerificationSuite(t *testing.T, store FixtureStore, factory Factory) {
+	t.Helper()
+	runSuite(t, "verification", store, factory, VerificationFixtures)
 }
 
 func runSuite(t *testing.T, suite string, store FixtureStore, factory Factory, sets ...FixtureSet) {

@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
@@ -167,13 +168,17 @@ type HealthStatus struct {
 // Options contains only host boundaries. Concrete transport startup remains
 // outside New, making construction deterministic and testable.
 type Options struct {
-	State              runtime.StateStore
-	Journal            hoststate.Journal
-	Definitions        DefinitionProvider
-	Identity           IdentityProvider
-	Policy             PolicyEvaluator
-	Kinds              []stepkind.StepKind
-	RequiredKinds      []KindRef
+	State         runtime.StateStore
+	Journal       hoststate.Journal
+	Definitions   DefinitionProvider
+	Identity      IdentityProvider
+	Policy        PolicyEvaluator
+	Kinds         []stepkind.StepKind
+	RequiredKinds []KindRef
+	// Verifiers is the exact host verification catalog. Nil adopts a catalog
+	// exposed by Definitions when available, otherwise the deterministic core.
+	// Construction freezes implementations and specs for the Host lifetime.
+	Verifiers          verification.Registry
 	DryRun             DryRunSupport
 	Activations        workflowwait.ActivationScheduler
 	Waits              *runtime.WaitCoordinator

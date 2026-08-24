@@ -1,0 +1,5 @@
+{
+  "name": "verification-deterministic-fail",
+  "expect": "fail",
+  "input": {"scenario": "deterministic_fail"}
+}

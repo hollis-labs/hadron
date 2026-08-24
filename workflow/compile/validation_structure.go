@@ -9,6 +9,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 type structuralArc struct {
@@ -253,6 +254,7 @@ func (v *validator) validateNodes() {
 			v.validateKindConfig(node, kind, spec)
 		}
 		v.validatePolicies(node, spec)
+		v.diagnostics = append(v.diagnostics, verification.ValidateSpec(v.ctx, v.verifiers, node.Verification)...)
 	}
 }
 

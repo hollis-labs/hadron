@@ -24,6 +24,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 func TestDefinitionResolverFreezesNodeExpanderNamesInSemanticIdentity(t *testing.T) {
@@ -39,11 +40,11 @@ func TestDefinitionResolverFreezesNodeExpanderNamesInSemanticIdentity(t *testing
 	if !reflect.DeepEqual(names, []string{"alpha", "zeta"}) || normalized[0].Name() != "alpha" || normalized[1].Name() != "zeta" {
 		t.Fatalf("frozen expanders = %#v / %#v", names, normalized)
 	}
-	without, err := semanticDefinitionKey("revision", 8, nil, 0, nil, nil)
+	without, err := semanticDefinitionKey("revision", 8, nil, nil, 0, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	with, err := semanticDefinitionKey("revision", 8, nil, 0, nil, names)
+	with, err := semanticDefinitionKey("revision", 8, nil, nil, 0, nil, names)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +58,167 @@ func TestDefinitionResolverFreezesNodeExpanderNamesInSemanticIdentity(t *testing
 	if _, _, err := normalizeNodeExpanders([]workflowcompile.NodeExpander{typedNil}); err == nil {
 		t.Fatal("typed-nil node expander was accepted")
 	}
+}
+
+func TestDefinitionResolverFreezesVerifierCatalogAndKeysFullSpecs(t *testing.T) {
+	permissiveSpec := verification.VerifierSpec{
+		Kind: "custom_review", Version: "v1", Mode: verification.ModeReviewer,
+		ConfigSchema: graph.Schema{"type": "object", "additionalProperties": false},
+	}
+	strictSpec := permissiveSpec
+	strictSpec.ConfigSchema = graph.Schema{
+		"type": "object", "required": []any{"approval"},
+		"properties":           map[string]any{"approval": map[string]any{"type": "boolean"}},
+		"additionalProperties": false,
+	}
+	evidenceSpec := permissiveSpec
+	evidenceSpec.RequiredEvidence = []verification.ActivityKind{verification.ActivityToolCall}
+	otherSpec := verification.VerifierSpec{Kind: "alpha", Version: "v2", Mode: verification.ModeDeterministic, ConfigSchema: graph.Schema{"type": "object"}}
+
+	firstKey, keyErr := semanticDefinitionKey("verifier-test-v1", 8, nil, []verification.VerifierSpec{permissiveSpec, otherSpec}, 0, nil, nil)
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	reorderedKey, keyErr := semanticDefinitionKey("verifier-test-v1", 8, nil, []verification.VerifierSpec{otherSpec, permissiveSpec}, 0, nil, nil)
+	if keyErr != nil || reorderedKey != firstKey {
+		t.Fatalf("canonical verifier key = %q, %v; want %q", reorderedKey, keyErr, firstKey)
+	}
+	nilKey, keyErr := semanticDefinitionKey("verifier-test-v1", 8, nil, nil, 0, nil, nil)
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	emptyKey, keyErr := semanticDefinitionKey("verifier-test-v1", 8, nil, []verification.VerifierSpec{}, 0, nil, nil)
+	if keyErr != nil || emptyKey != nilKey {
+		t.Fatalf("nil/empty verifier catalogs are not canonical: %q / %q, %v", nilKey, emptyKey, keyErr)
+	}
+	strictKey, keyErr := semanticDefinitionKey("verifier-test-v1", 8, nil, []verification.VerifierSpec{strictSpec, otherSpec}, 0, nil, nil)
+	if keyErr != nil || strictKey == firstKey {
+		t.Fatalf("config schema did not change semantic key: %q / %q, %v", firstKey, strictKey, keyErr)
+	}
+	evidenceKey, keyErr := semanticDefinitionKey("verifier-test-v1", 8, nil, []verification.VerifierSpec{evidenceSpec, otherSpec}, 0, nil, nil)
+	if keyErr != nil || evidenceKey == firstKey {
+		t.Fatalf("required evidence did not change semantic key: %q / %q, %v", firstKey, evidenceKey, keyErr)
+	}
+	revisedKey, keyErr := semanticDefinitionKey("verifier-test-v2", 8, nil, []verification.VerifierSpec{permissiveSpec, otherSpec}, 0, nil, nil)
+	if keyErr != nil || revisedKey == firstKey {
+		t.Fatalf("semantic revision did not change verifier behavior key: %q / %q, %v", firstKey, revisedKey, keyErr)
+	}
+
+	root := t.TempDir()
+	if writeErr := os.WriteFile(filepath.Join(root, "workflow.yaml"), testVerifiedWorkflowSource("verified", "custom_review"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	kinds := stepkind.NewRegistry()
+	if registerErr := kinds.Register(stepkindtest.NewNoopKind("noop", "v1")); registerErr != nil {
+		t.Fatal(registerErr)
+	}
+	permissiveResolverKey, keyErr := semanticDefinitionKey("verifier-test-v1", workflowcompile.DefaultMaxCallDepth, kinds.List(), []verification.VerifierSpec{permissiveSpec}, 0, []string{}, []string{})
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	strictResolverKey, keyErr := semanticDefinitionKey("verifier-test-v1", workflowcompile.DefaultMaxCallDepth, kinds.List(), []verification.VerifierSpec{strictSpec}, 0, []string{}, []string{})
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	permissiveCatalog := verification.NewRegistry()
+	permissive := &resolverTestVerifier{spec: permissiveSpec}
+	if registerErr := permissiveCatalog.Register(permissive); registerErr != nil {
+		t.Fatal(registerErr)
+	}
+	permissiveResolver, resolverErr := NewDefinitionResolver(DefinitionResolverOptions{
+		Roots: []string{root}, Authorizer: DefinitionAuthorizerFunc(allowDefinitions),
+		Compile: DefinitionCompileOptions{StepKinds: kinds, Verifiers: permissiveCatalog, SemanticRevision: "verifier-test-v1"},
+	})
+	if resolverErr != nil {
+		t.Fatal(resolverErr)
+	}
+	if permissiveResolver.semanticKey != permissiveResolverKey {
+		t.Fatalf("resolver semantic key = %q, want %q", permissiveResolver.semanticKey, permissiveResolverKey)
+	}
+	request := graph.DefinitionRef{Kind: DefinitionKindFile, ID: "verified", Locator: root, Version: "1.0.0"}
+	if _, resolveErr := permissiveResolver.ResolvePlan(t.Context(), request); resolveErr != nil {
+		t.Fatalf("permissive verifier ResolvePlan() = %v", resolveErr)
+	}
+
+	strictCatalog := verification.NewRegistry()
+	strict := &resolverTestVerifier{spec: strictSpec}
+	if registerErr := strictCatalog.Register(strict); registerErr != nil {
+		t.Fatal(registerErr)
+	}
+	strictResolver, resolverErr := NewDefinitionResolver(DefinitionResolverOptions{
+		Roots: []string{root}, Authorizer: DefinitionAuthorizerFunc(allowDefinitions),
+		Compile: DefinitionCompileOptions{StepKinds: kinds, Verifiers: strictCatalog, SemanticRevision: "verifier-test-v1"},
+	})
+	if resolverErr != nil {
+		t.Fatal(resolverErr)
+	}
+	if strictResolver.semanticKey != strictResolverKey {
+		t.Fatalf("strict resolver semantic key = %q, want %q", strictResolver.semanticKey, strictResolverKey)
+	}
+	if _, err := strictResolver.ResolvePlan(t.Context(), request); err == nil {
+		t.Fatal("strict verifier schema accepted missing config")
+	} else {
+		var diagnosticErr *DefinitionDiagnosticError
+		if !errors.As(err, &diagnosticErr) || len(diagnosticErr.Diagnostics()) == 0 || diagnosticErr.Diagnostics()[0].Code != verification.CodeInvalidCheck {
+			t.Fatalf("strict verifier diagnostics = %v", err)
+		}
+	}
+	if strict.validationCalls.Load() != 0 {
+		t.Fatalf("schema-invalid config reached verifier implementation %d times", strict.validationCalls.Load())
+	}
+
+	if err := permissiveCatalog.Register(&resolverTestVerifier{spec: verification.VerifierSpec{
+		Kind: "late_review", Version: "v1", Mode: verification.ModeReviewer,
+		ConfigSchema: graph.Schema{"type": "object"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := permissiveResolver.Verifiers().Lookup("late_review"); ok {
+		t.Fatal("late verifier registration changed resolver snapshot")
+	}
+	if err := os.WriteFile(filepath.Join(root, "late.workflow.yaml"), testVerifiedWorkflowSource("late", "late_review"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := permissiveResolver.ResolvePlan(t.Context(), graph.DefinitionRef{Kind: DefinitionKindFile, ID: "late", Locator: "late.workflow.yaml", Version: "1.0.0"}); err == nil {
+		t.Fatal("late verifier changed compiled validation behavior")
+	}
+
+	var typedNil *verification.MemoryRegistry
+	if _, err := NewDefinitionResolver(DefinitionResolverOptions{
+		Roots: []string{root}, Authorizer: DefinitionAuthorizerFunc(allowDefinitions),
+		Compile: DefinitionCompileOptions{StepKinds: kinds, Verifiers: typedNil, SemanticRevision: "verifier-test-v1"},
+	}); !errors.Is(err, ErrInvalidDefinitionOptions) {
+		t.Fatalf("typed-nil verifier registry error = %v", err)
+	}
+}
+
+type resolverTestVerifier struct {
+	spec            verification.VerifierSpec
+	validationCalls atomic.Int64
+}
+
+func (v *resolverTestVerifier) Spec() verification.VerifierSpec { return v.spec }
+
+func (v *resolverTestVerifier) ValidateConfig(context.Context, graph.VerificationCheck) []diagnostic.Diagnostic {
+	v.validationCalls.Add(1)
+	return nil
+}
+
+func (v *resolverTestVerifier) Verify(context.Context, verification.Request) (verification.CheckResult, error) {
+	return verification.CheckResult{Kind: v.spec.Kind, Version: v.spec.Version, Outcome: verification.CheckPassed, Code: "custom_passed", Message: "custom verifier passed"}, nil
+}
+
+func testVerifiedWorkflowSource(name, verifier string) []byte {
+	return []byte(fmt.Sprintf(`workflow:
+  name: %s
+  version: 1.0.0
+steps:
+  - id: root
+    kind: noop
+    kind_version: v1
+    verify:
+      - type: %s
+`, name, verifier))
 }
 
 type mutableNodeExpander struct{ name string }

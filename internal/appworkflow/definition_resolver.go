@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 	"gopkg.in/yaml.v3"
 )
 
@@ -64,6 +65,7 @@ type DefinitionResolver struct {
 	authorizer   DefinitionAuthorizer
 	bundles      hoststate.BundledDefinitionSource
 	kinds        *frozenKindLookup
+	verifiers    *verification.MemoryRegistry
 	policyHooks  []compile.PolicyHook
 	dependencies compile.DependencyOptions
 	expanders    []compile.NodeExpander
@@ -92,6 +94,20 @@ func NewDefinitionResolver(options DefinitionResolverOptions) (*DefinitionResolv
 	kinds, specs, err := freezeKindLookup(options.Compile.StepKinds)
 	if err != nil {
 		return nil, invalidDefinitionOptions(err.Error())
+	}
+	verifierSource := options.Compile.Verifiers
+	if verifierSource == nil {
+		verifierSource = verification.NewDefaultRegistry()
+	} else if nilInterface(verifierSource) {
+		return nil, invalidDefinitionOptions("verification registry must not be typed nil")
+	}
+	verifiers, err := verification.SnapshotRegistry(verifierSource)
+	if err != nil {
+		return nil, invalidDefinitionOptions(fmt.Sprintf("snapshot verification registry: %v", err))
+	}
+	verifierSpecs, err := canonicalVerifierSpecs(verifiers.List())
+	if err != nil {
+		return nil, invalidDefinitionOptions(fmt.Sprintf("canonical verification registry: %v", err))
 	}
 	maxDepth := options.Compile.MaxCallDepth
 	if maxDepth == 0 {
@@ -123,18 +139,28 @@ func NewDefinitionResolver(options DefinitionResolverOptions) (*DefinitionResolv
 	if options.BundledDefinitions != nil && nilInterface(options.BundledDefinitions) {
 		return nil, invalidDefinitionOptions("bundled definition source must not be typed nil")
 	}
-	semanticKey, err := semanticDefinitionKey(options.Compile.SemanticRevision, maxDepth, specs, len(hooks), extractorKeys, expanderNames)
+	semanticKey, err := semanticDefinitionKey(options.Compile.SemanticRevision, maxDepth, specs, verifierSpecs, len(hooks), extractorKeys, expanderNames)
 	if err != nil {
 		return nil, invalidDefinitionOptions(err.Error())
 	}
 	return &DefinitionResolver{
-		sources: sources, authorizer: options.Authorizer, bundles: options.BundledDefinitions, kinds: kinds,
+		sources: sources, authorizer: options.Authorizer, bundles: options.BundledDefinitions, kinds: kinds, verifiers: verifiers,
 		policyHooks: hooks, dependencies: compile.DependencyOptions{VerificationExtractors: extractors},
 		expanders: expanders, maxCallDepth: maxDepth, semanticKey: semanticKey,
 		plans:        make(map[definitionCacheKey]*compile.ExecutionPlan),
 		planByDigest: make(map[string]planVariants),
 		exactSources: make(map[string]ResolvedSource), flights: make(map[definitionCacheKey]*definitionFlight),
 	}, nil
+}
+
+// Verifiers returns the resolver's frozen verifier catalog. The read-only
+// interface lets Hadron Host and worker composition consume the exact same
+// implementations and specs used by cached definition validation.
+func (r *DefinitionResolver) Verifiers() verification.Registry {
+	if r == nil {
+		return nil
+	}
+	return r.verifiers
 }
 
 // ResolveSource authorizes and resolves exact source bytes without compiling.
@@ -269,7 +295,7 @@ func (r *DefinitionResolver) ResolvePlan(ctx context.Context, requested graph.De
 		return nil, err
 	}
 	findings := compile.ValidatePlan(ctx, plan, compile.ValidationOptions{
-		StepKinds: r.kinds, PolicyHooks: r.policyHooks, Definitions: r,
+		StepKinds: r.kinds, Verifiers: r.verifiers, PolicyHooks: r.policyHooks, Definitions: r,
 		MaxCallDepth: r.maxCallDepth,
 	})
 	if len(findings) != 0 {
@@ -615,7 +641,7 @@ func (r *DefinitionResolver) compileLocalPlan(ctx context.Context, source Resolv
 	provenance := plan.Provenance
 	plan.Definition.Provenance = &provenance
 	findings := compile.ValidatePlan(ctx, plan, compile.ValidationOptions{
-		StepKinds: r.kinds, MaxCallDepth: r.maxCallDepth,
+		StepKinds: r.kinds, Verifiers: r.verifiers, MaxCallDepth: r.maxCallDepth,
 	})
 	if len(findings) != 0 {
 		return nil, diagnosticsError(ErrDefinitionUnresolved, findings)
@@ -995,19 +1021,55 @@ func equalResolvedDefinitions(left, right compile.ResolvedDefinition) bool {
 	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
 }
 
-func semanticDefinitionKey(revision string, maxDepth int, specs []stepkind.StepKindSpec, hookCount int, extractorKeys, expanderNames []string) (string, error) {
+func semanticDefinitionKey(revision string, maxDepth int, specs []stepkind.StepKindSpec, verifierSpecs []verification.VerifierSpec, hookCount int, extractorKeys, expanderNames []string) (string, error) {
+	canonicalVerifiers, err := canonicalVerifierSpecs(verifierSpecs)
+	if err != nil {
+		return "", err
+	}
 	encoded, err := json.Marshal(struct {
-		Revision     string                  `json:"revision"`
-		MaxCallDepth int                     `json:"max_call_depth"`
-		StepKinds    []stepkind.StepKindSpec `json:"step_kinds"`
-		PolicyHooks  int                     `json:"policy_hooks"`
-		Extractors   []string                `json:"verification_extractors"`
-		Expanders    []string                `json:"node_expanders"`
-	}{revision, maxDepth, specs, hookCount, extractorKeys, expanderNames})
+		Revision     string                      `json:"revision"`
+		MaxCallDepth int                         `json:"max_call_depth"`
+		StepKinds    []stepkind.StepKindSpec     `json:"step_kinds"`
+		Verifiers    []verification.VerifierSpec `json:"verifiers"`
+		PolicyHooks  int                         `json:"policy_hooks"`
+		Extractors   []string                    `json:"verification_extractors"`
+		Expanders    []string                    `json:"node_expanders"`
+	}{revision, maxDepth, specs, canonicalVerifiers, hookCount, extractorKeys, expanderNames})
 	if err != nil {
 		return "", err
 	}
 	return values.SHA256Digest(encoded), nil
+}
+
+func canonicalVerifierSpecs(input []verification.VerifierSpec) ([]verification.VerifierSpec, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	result := make([]verification.VerifierSpec, 0, len(input))
+	if err := decoder.Decode(&result); err != nil {
+		return nil, err
+	}
+	if result == nil {
+		result = []verification.VerifierSpec{}
+	}
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].Kind == result[right].Kind {
+			return result[left].Version < result[right].Version
+		}
+		return result[left].Kind < result[right].Kind
+	})
+	for index, spec := range result {
+		if err := spec.Validate(); err != nil {
+			return nil, err
+		}
+		if index > 0 && spec.Kind == result[index-1].Kind {
+			return nil, fmt.Errorf("duplicate verifier spec %q", spec.Kind)
+		}
+	}
+	return result, nil
 }
 
 func exactPlanVariantKey(plan *compile.ExecutionPlan) (string, error) {

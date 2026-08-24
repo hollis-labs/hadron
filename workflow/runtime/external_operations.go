@@ -161,6 +161,27 @@ type RequestExternalOperationCancelResult struct {
 	Event     *Event
 }
 
+// ExternalVerificationCompletion links one already-saved immutable report to
+// a terminal external observation. The store appends the attempt-bound event
+// inside the same CAS transaction that closes the operation, so competing
+// observers cannot publish duplicate verification histories. A CAS loser may
+// leave an unlinked value set for retention/repair, but never a durable claim
+// that verification was applied.
+type ExternalVerificationCompletion struct {
+	Values     values.ValueSetRef
+	Attributes map[string]string
+}
+
+func (c ExternalVerificationCompletion) Validate() error {
+	if err := c.Values.Validate(); err != nil {
+		return fmt.Errorf("external verification values: %w", err)
+	}
+	if err := validateStringMap("external verification attributes", c.Attributes); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ApplyExternalOperationRequest atomically records one observation. Pending
 // observations update only operational metadata. Terminal observations also
 // close the unfinished attempt and set the aggregate node terminal or ready
@@ -174,6 +195,7 @@ type ApplyExternalOperationRequest struct {
 	Progress                    map[string]string
 	Outputs                     *values.ValueSetRef
 	Failure                     *Failure
+	Verification                *ExternalVerificationCompletion
 	NextNodeStatus              NodeStatus
 	ObservedAt                  time.Time
 	HeartbeatAt                 time.Time
@@ -207,9 +229,14 @@ func (r ApplyExternalOperationRequest) Validate() error {
 			return err
 		}
 	}
+	if r.Verification != nil {
+		if err := r.Verification.Validate(); err != nil {
+			return err
+		}
+	}
 	switch r.Status {
 	case stepkind.ObservationPending:
-		if r.Outputs != nil || r.Failure != nil || r.NextNodeStatus != "" {
+		if r.Outputs != nil || r.Failure != nil || r.Verification != nil || r.NextNodeStatus != "" {
 			return fmt.Errorf("pending external observation must not contain terminal state")
 		}
 		if r.ObservedAt.IsZero() && r.HeartbeatAt.IsZero() {
@@ -224,7 +251,7 @@ func (r ApplyExternalOperationRequest) Validate() error {
 			return fmt.Errorf("failed external observation requires failure and failed or ready node")
 		}
 	case stepkind.ObservationCanceled:
-		if r.Outputs != nil || r.Failure == nil || r.NextNodeStatus != NodeCanceled {
+		if r.Outputs != nil || r.Failure == nil || r.Verification != nil || r.NextNodeStatus != NodeCanceled {
 			return fmt.Errorf("canceled external observation requires failure and canceled node")
 		}
 	}

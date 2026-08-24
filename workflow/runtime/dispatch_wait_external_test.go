@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
@@ -64,10 +65,9 @@ func TestStepDispatcherDurableWaitContinuationEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{
-		Claim: claim, Node: graph.Node{ID: node.ID.NodeID, Kind: "waiter", KindVersion: "v1", Config: graph.Config{}},
-	})
-	if err != nil || first.Node.Status != workflowruntime.NodeWaiting || first.Node.Lease != nil || first.Wait == nil || first.Attempt.ID.Number != 1 {
+	graphNode := graph.Node{ID: node.ID.NodeID, Kind: "waiter", KindVersion: "v1", Config: graph.Config{}, Verification: &graph.VerificationSpec{Checks: []graph.VerificationCheck{{Kind: verification.CheckNoError, Config: graph.Config{}}}}}
+	first, err := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{Claim: claim, Node: graphNode})
+	if err != nil || first.Node.Status != workflowruntime.NodeWaiting || first.Node.Lease != nil || first.Wait == nil || first.Attempt.ID.Number != 1 || first.Verification != nil {
 		t.Fatalf("first Dispatch() = %#v, %v", first, err)
 	}
 	payload := dispatchValue(t, workflowruntime.ResumeValueName, "accepted")
@@ -89,11 +89,9 @@ func TestStepDispatcherDurableWaitContinuationEndToEnd(t *testing.T) {
 		t.Fatalf("ClaimNext(resumed) = %#v, %v, %v", secondClaim, ok, err)
 	}
 	now = base.Add(6 * time.Second)
-	second, err := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{
-		Claim: secondClaim, Node: graph.Node{ID: node.ID.NodeID, Kind: "waiter", KindVersion: "v1", Config: graph.Config{}},
-	})
+	second, err := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{Claim: secondClaim, Node: graphNode})
 	if err != nil || second.Node.Status != workflowruntime.NodeSucceeded || second.Attempt.Status != workflowruntime.NodeSucceeded ||
-		second.Attempt.ID.Number != 1 || executions != 2 {
+		second.Attempt.ID.Number != 1 || executions != 2 || second.Verification == nil || second.Verification.Report.Status != verification.ReportPassed {
 		t.Fatalf("second Dispatch() = %#v, %v; executions=%d", second, err, executions)
 	}
 }

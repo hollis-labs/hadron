@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -17,10 +18,12 @@ import (
 	calladapter "github.com/hollis-labs/hadron/workflow/adapters/call"
 	"github.com/hollis-labs/hadron/workflow/adapters/transform"
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
+	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
@@ -82,6 +85,174 @@ func TestHostAuthenticatesBeforeResolvingFirstStart(t *testing.T) {
 	request := fixture.startRequest("run-no-auth", "key-no-auth", "untrusted-hint")
 	if _, err := fixture.host.StartRun(t.Context(), request); err == nil || fixture.definitionCalls.Load() != 0 {
 		t.Fatalf("unauthenticated StartRun error=%v resolver_calls=%d", err, fixture.definitionCalls.Load())
+	}
+}
+
+func TestHostUsesDefinitionResolverFrozenVerifierCatalogForStartAndDispatch(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "verified-host.workflow.yaml")
+	if err := os.WriteFile(sourcePath, []byte(`workflow:
+  id: verified-host
+  version: v1
+inputs:
+  - name: message
+    type: string
+    required: true
+steps:
+  - id: echo
+    transform:
+      result: inputs.message
+    with:
+      message: inputs.message
+    verify:
+      - type: custom_review
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spec := verification.VerifierSpec{
+		Kind: "custom_review", Version: "v1", Mode: verification.ModeReviewer,
+		ConfigSchema: graph.Schema{"type": "object", "additionalProperties": false},
+	}
+	authoritative := &hostTestVerifier{
+		spec: spec,
+		result: verification.CheckResult{
+			Outcome: verification.CheckPassed, Code: "custom_review_passed", Message: "custom review passed",
+		},
+	}
+	resolverCatalog := verification.NewRegistry()
+	if err := resolverCatalog.Register(authoritative); err != nil {
+		t.Fatal(err)
+	}
+	kinds := stepkind.NewRegistry()
+	if err := kinds.Register(transform.New()); err != nil {
+		t.Fatal(err)
+	}
+	resolver, resolverErr := appworkflow.NewDefinitionResolver(appworkflow.DefinitionResolverOptions{
+		Roots: []string{root},
+		Authorizer: appworkflow.DefinitionAuthorizerFunc(func(context.Context, appworkflow.DefinitionAuthorization) error {
+			return nil
+		}),
+		Compile: appworkflow.DefinitionCompileOptions{
+			StepKinds: kinds, Verifiers: resolverCatalog, SemanticRevision: "host-verifier-v1",
+		},
+	})
+	if resolverErr != nil {
+		t.Fatal(resolverErr)
+	}
+	definition := graph.DefinitionRef{Kind: appworkflow.DefinitionKindFile, ID: "verified-host", Locator: sourcePath, Version: "v1"}
+	plan, resolveErr := resolver.ResolvePlan(t.Context(), definition)
+	if resolveErr != nil || plan.Graph.Nodes[0].Verification == nil || authoritative.validationCalls.Load() == 0 {
+		t.Fatalf("ResolvePlan() = %#v, %v validation_calls=%d", plan, resolveErr, authoritative.validationCalls.Load())
+	}
+
+	// A same-spec implementation supplied directly to Host is only a parity
+	// assertion. DefinitionProvider's frozen implementation remains execution
+	// authority so same-spec/different-behavior implementations cannot diverge.
+	supplied := &hostTestVerifier{
+		spec: spec,
+		result: verification.CheckResult{
+			Outcome: verification.CheckFailed, Code: "must_not_execute", Message: "supplied implementation must not execute",
+		},
+	}
+	suppliedCatalog := verification.NewRegistry()
+	if err := suppliedCatalog.Register(supplied); err != nil {
+		t.Fatal(err)
+	}
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	identity := identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+		principal, _ := ctx.Value(authenticatedPrincipalKey{}).(string)
+		if principal == "" {
+			return hoststate.IdentityBinding{}, errors.New("missing authenticated principal")
+		}
+		return hoststate.IdentityBinding{
+			Principal: principal, SourceAuthority: request.SourceAuthority, Trust: "trusted",
+			Grants: []string{"workflow.run"}, RunScope: "scope:test", ExecutionTarget: "local",
+		}, nil
+	})
+	options := appworkflow.Options{
+		State: fixture.state, Journal: fixture.journal, Definitions: resolver, Identity: identity,
+		Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "allow verified workflow"}, nil
+		}),
+		Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}},
+		Verifiers: suppliedCatalog, Activations: fixture.scheduler, Artifacts: fixture.artifacts,
+		Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now }), RecoveryInterval: time.Hour,
+		ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }),
+	}
+	var typedNil *verification.MemoryRegistry
+	typedNilOptions := options
+	typedNilOptions.Verifiers = typedNil
+	if _, err := appworkflow.New(typedNilOptions); !errors.Is(err, appworkflow.ErrInvalidHost) {
+		t.Fatalf("typed-nil Host verifier catalog error = %v", err)
+	}
+	mismatchedCatalog := verification.NewRegistry()
+	mismatchedSpec := spec
+	mismatchedSpec.RequiredEvidence = []verification.ActivityKind{verification.ActivityToolCall}
+	if err := mismatchedCatalog.Register(&hostTestVerifier{spec: mismatchedSpec}); err != nil {
+		t.Fatal(err)
+	}
+	mismatchedOptions := options
+	mismatchedOptions.Verifiers = mismatchedCatalog
+	if _, err := appworkflow.New(mismatchedOptions); !errors.Is(err, appworkflow.ErrInvalidHost) {
+		t.Fatalf("mismatched Host/definition verifier catalog error = %v", err)
+	}
+
+	host, hostErr := appworkflow.New(options)
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
+	if resolvedVerifier, ok := host.Verifiers().Lookup(spec.Kind); !ok || resolvedVerifier != authoritative {
+		t.Fatalf("Host verifier implementation = %#v, %v", resolvedVerifier, ok)
+	}
+	if _, err := workflowruntime.NewExternalOperationCoordinator(workflowruntime.ExternalOperationOptions{
+		Store: fixture.state, Registry: host.Registry(), Verifiers: host.Verifiers(), Now: func() time.Time { return fixture.now },
+	}); err != nil {
+		t.Fatalf("construct external coordinator from Host catalog seam: %v", err)
+	}
+	if err := resolverCatalog.Register(&hostTestVerifier{spec: verification.VerifierSpec{
+		Kind: "late_review", Version: "v1", Mode: verification.ModeReviewer,
+		ConfigSchema: graph.Schema{"type": "object"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := host.Verifiers().Lookup("late_review"); ok {
+		t.Fatal("late source registration changed Host verifier snapshot")
+	}
+	listed := host.Verifiers().List()
+	listed[0].ConfigSchema["mutated"] = true
+	if _, exists := host.Verifiers().List()[0].ConfigSchema["mutated"]; exists {
+		t.Fatal("Host verifier specs were not defensive copies")
+	}
+	if err := host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
+	started, startErr := host.StartRun(authenticatedContext(t.Context(), "user:verified"), appworkflow.StartRunRequest{
+		RunID: "verified-host-run", Definition: definition, Inputs: map[string]any{"message": "hello"},
+		IdempotencyKey: "verified-host-start", Identity: appworkflow.IdentityRequest{PrincipalHint: "user:verified", SourceAuthority: "test"},
+	})
+	if startErr != nil || started.Run == nil || started.Run.Status != workflowruntime.RunRunning {
+		t.Fatalf("StartRun() = %#v, %v", started, startErr)
+	}
+	queue := workflowruntime.NewReadyQueueCoordinator(fixture.state, nil)
+	claim, acquired, claimErr := queue.ClaimNext(t.Context(), workflowruntime.ReadyClaimRequest{
+		Owner: "verified-worker", Token: "verified-token", IdempotencyKey: "verified-claim",
+		Now: fixture.now.Add(time.Second), LeaseUntil: fixture.now.Add(time.Minute),
+	})
+	if claimErr != nil || !acquired {
+		t.Fatalf("ClaimNext() = %#v, %v, %v", claim, acquired, claimErr)
+	}
+	node := plan.Graph.Nodes[0]
+	node.KindVersion = transform.Version
+	dispatched, dispatchErr := host.Dispatcher().Dispatch(t.Context(), workflowruntime.DispatchRequest{
+		Claim: claim, Node: node, IdempotencyKey: "verified-operation",
+	})
+	if dispatchErr != nil || dispatched.Node.Status != workflowruntime.NodeSucceeded || dispatched.Verification == nil ||
+		dispatched.Verification.Report.Status != verification.ReportPassed {
+		t.Fatalf("Dispatch() = %#v, %v", dispatched, dispatchErr)
+	}
+	if authoritative.verifyCalls.Load() != 1 || supplied.verifyCalls.Load() != 0 || supplied.validationCalls.Load() != 0 {
+		t.Fatalf("verifier calls authoritative=%d supplied_validate=%d supplied_verify=%d", authoritative.verifyCalls.Load(), supplied.validationCalls.Load(), supplied.verifyCalls.Load())
 	}
 }
 
@@ -1260,6 +1431,25 @@ func mustInline(t *testing.T, input any) values.Value {
 type definitionProvider struct {
 	plan  *workflowcompile.ExecutionPlan
 	calls *atomic.Int32
+}
+
+type hostTestVerifier struct {
+	spec            verification.VerifierSpec
+	result          verification.CheckResult
+	validationCalls atomic.Int32
+	verifyCalls     atomic.Int32
+}
+
+func (v *hostTestVerifier) Spec() verification.VerifierSpec { return v.spec }
+
+func (v *hostTestVerifier) ValidateConfig(context.Context, graph.VerificationCheck) []diagnostic.Diagnostic {
+	v.validationCalls.Add(1)
+	return nil
+}
+
+func (v *hostTestVerifier) Verify(context.Context, verification.Request) (verification.CheckResult, error) {
+	v.verifyCalls.Add(1)
+	return v.result, nil
 }
 
 func (p definitionProvider) ResolvePlan(context.Context, graph.DefinitionRef) (*workflowcompile.ExecutionPlan, error) {

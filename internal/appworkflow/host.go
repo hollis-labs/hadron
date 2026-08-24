@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
@@ -51,6 +52,7 @@ type Host struct {
 	artifacts    values.ArtifactStore
 	clock        Clock
 	registry     *stepkind.MemoryRegistry
+	verifiers    *verification.MemoryRegistry
 	dispatcher   *runtime.StepDispatcher
 	interval     time.Duration
 	batchLimit   int
@@ -101,13 +103,19 @@ func New(options Options) (*Host, error) {
 	if err := requireKinds(registry, required); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidHost, err)
 	}
+	verifiers, err := freezeHostVerifiers(options.Definitions, options.Verifiers)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidHost, err)
+	}
 	waits := options.Waits
 	if waits == nil {
 		if waitStore, ok := options.State.(runtime.WaitStore); ok {
 			waits = &runtime.WaitCoordinator{Store: waitStore, Scheduler: options.Activations}
 		}
 	}
-	dispatcher, err := runtime.NewStepDispatcher(runtime.DispatcherOptions{Store: options.State, Registry: registry, WaitCoordinator: waits})
+	dispatcher, err := runtime.NewStepDispatcher(runtime.DispatcherOptions{
+		Store: options.State, Registry: registry, Now: clock.Now, WaitCoordinator: waits, Verifiers: verifiers,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: construct dispatcher: %w", ErrInvalidHost, err)
 	}
@@ -125,9 +133,45 @@ func New(options Options) (*Host, error) {
 		activations: options.Activations, waits: waits, cancellation: cancellation,
 		hooks: append([]RecoveryHook(nil), options.RecoveryHooks...), telemetry: options.Telemetry,
 		childSource: childSource, childDefs: childDefs, childRuns: options.ChildRuns,
-		artifacts: options.Artifacts, clock: clock, registry: registry, dispatcher: dispatcher,
+		artifacts: options.Artifacts, clock: clock, registry: registry, verifiers: verifiers, dispatcher: dispatcher,
 		interval: interval, batchLimit: options.RecoveryBatchLimit,
 	}, nil
+}
+
+type definitionVerifierCatalog interface {
+	Verifiers() verification.Registry
+}
+
+func freezeHostVerifiers(definitions DefinitionProvider, supplied verification.Registry) (*verification.MemoryRegistry, error) {
+	if supplied != nil && nilInterface(supplied) {
+		return nil, errors.New("verification registry must not be typed nil")
+	}
+	var suppliedSnapshot *verification.MemoryRegistry
+	var err error
+	if supplied != nil {
+		suppliedSnapshot, err = verification.SnapshotRegistry(supplied)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot supplied verification registry: %w", err)
+		}
+	}
+	if provider, ok := definitions.(definitionVerifierCatalog); ok {
+		resolved := provider.Verifiers()
+		if nilInterface(resolved) {
+			return nil, errors.New("definition provider returned a nil verification registry")
+		}
+		definitionSnapshot, snapshotErr := verification.SnapshotRegistry(resolved)
+		if snapshotErr != nil {
+			return nil, fmt.Errorf("snapshot definition verification registry: %w", snapshotErr)
+		}
+		if suppliedSnapshot != nil && !reflect.DeepEqual(suppliedSnapshot.List(), definitionSnapshot.List()) {
+			return nil, errors.New("host and definition verifier catalogs differ")
+		}
+		return definitionSnapshot, nil
+	}
+	if suppliedSnapshot != nil {
+		return suppliedSnapshot, nil
+	}
+	return verification.SnapshotRegistry(verification.NewDefaultRegistry())
 }
 
 func requireKinds(registry *stepkind.MemoryRegistry, required []KindRef) error {
@@ -154,6 +198,17 @@ func (h *Host) Registry() stepkind.Registry {
 		return nil
 	}
 	return h.registry
+}
+
+// Verifiers returns the frozen read-only catalog used by start validation and
+// dispatch. Worker composition can pass this exact catalog to
+// runtime.ExternalOperationOptions without constructing an unused coordinator
+// inside Host.
+func (h *Host) Verifiers() verification.Registry {
+	if h == nil {
+		return nil
+	}
+	return h.verifiers
 }
 
 // Dispatcher exposes the core dispatcher already bound to the host registry

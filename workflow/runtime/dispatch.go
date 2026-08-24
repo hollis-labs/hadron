@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 const (
@@ -47,6 +48,8 @@ const (
 	DispatchPrepare        DispatchStage = "prepare"
 	DispatchExecute        DispatchStage = "execute"
 	DispatchValidateOutput DispatchStage = "validate_output"
+	DispatchVerify         DispatchStage = "verify"
+	DispatchPersistVerify  DispatchStage = "persist_verification"
 	DispatchPersistOutput  DispatchStage = "persist_output"
 	DispatchSuspend        DispatchStage = "suspend"
 	DispatchHeartbeat      DispatchStage = "heartbeat"
@@ -121,14 +124,15 @@ type DispatchRequest struct {
 // DispatchResult contains durable attempt state even when Error is returned
 // after a failed invocation. Result and Outputs are populated only on success.
 type DispatchResult struct {
-	Node        NodeInvocationSnapshot
-	Attempt     AttemptSnapshot
-	Result      *stepkind.StepResult
-	Outputs     *values.ValueSetRef
-	Wait        *WaitSnapshot
-	External    *ExternalOperationSnapshot
-	Diagnostics []diagnostic.Diagnostic
-	Warnings    []DispatchWarning
+	Node         NodeInvocationSnapshot
+	Attempt      AttemptSnapshot
+	Result       *stepkind.StepResult
+	Outputs      *values.ValueSetRef
+	Wait         *WaitSnapshot
+	External     *ExternalOperationSnapshot
+	Verification *VerificationRecord
+	Diagnostics  []diagnostic.Diagnostic
+	Warnings     []DispatchWarning
 }
 
 // StepDispatcher executes claimed nodes exclusively through a step-kind
@@ -142,6 +146,7 @@ type StepDispatcher struct {
 	redactor    *values.Redactor
 	waits       *WaitCoordinator
 	retry       *RetryCoordinator
+	verifiers   verification.Registry
 }
 
 // DispatcherOptions supplies extraction-safe dispatcher collaborators.
@@ -154,6 +159,9 @@ type DispatcherOptions struct {
 	Redactor           *values.Redactor
 	WaitCoordinator    *WaitCoordinator
 	RetryCoordinator   *RetryCoordinator
+	// Verifiers defaults to the deterministic core registry when nil. A
+	// supplied typed-nil registry is rejected rather than silently defaulted.
+	Verifiers verification.Registry
 }
 
 // NewStepDispatcher constructs a registry-driven dispatcher. A nil Now uses
@@ -174,6 +182,16 @@ func NewStepDispatcher(options DispatcherOptions) (*StepDispatcher, error) {
 		disposition: options.FailureDisposition, retention: options.RetentionHook,
 		redactor: options.Redactor,
 	}
+	if options.Verifiers == nil {
+		options.Verifiers = verification.NewDefaultRegistry()
+	} else if nilVerificationRegistry(options.Verifiers) {
+		return nil, fmt.Errorf("%w: verification registry is typed nil", ErrInvalidDispatch)
+	}
+	frozenVerifiers, err := verification.SnapshotRegistry(options.Verifiers)
+	if err != nil {
+		return nil, fmt.Errorf("%w: snapshot verification registry: %w", ErrInvalidDispatch, err)
+	}
+	dispatcher.verifiers = frozenVerifiers
 	if options.RetryCoordinator != nil {
 		retry := *options.RetryCoordinator
 		retry.Store = options.Store
@@ -233,8 +251,14 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchError(DispatchValidateConfig, request, err))
 	}
 	diagnostics := kind.ValidateConfig(ctx, configForValidation)
-	prestart.Diagnostics = cloneDiagnostics(diagnostics)
 	if diagnosticsErr := validateAdapterDiagnostics(diagnostics); diagnosticsErr != nil {
+		prestart.Diagnostics = cloneDiagnostics(diagnostics)
+		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchValidationError(DispatchValidateConfig, request, diagnosticsErr))
+	}
+	verificationDiagnostics := verification.ValidateSpec(ctx, d.verifiers, request.Node.Verification)
+	diagnostics = append(diagnostics, verificationDiagnostics...)
+	prestart.Diagnostics = cloneDiagnostics(diagnostics)
+	if diagnosticsErr := verificationDiagnosticsError(verificationDiagnostics); diagnosticsErr != nil {
 		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchValidationError(DispatchValidateConfig, request, diagnosticsErr))
 	}
 
@@ -276,6 +300,13 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 		},
 		Config: config, Inputs: cloneValueSet(inputs), IdempotencyKey: request.IdempotencyKey,
 	}
+	if request.Node.Verification != nil {
+		invocation.Verification, err = cloneVerificationSpec(request.Node.Verification)
+		if err != nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, stepkind.PreparedInvocation{Invocation: invocation}, stepkind.StepResult{}, DispatchPrepare, failurePrepare, err)
+		}
+		invocation.Activity = verification.NewActivityRecorder()
+	}
 	if request.Node.Call != nil {
 		call, callErr := cloneCallInvocation(request.Node.Call, request.CallLineage)
 		if callErr != nil {
@@ -302,13 +333,19 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 
 	prepared := stepkind.PreparedInvocation{Invocation: invocation}
 	if preparer, ok := kind.(stepkind.Preparer); ok {
-		prepared, err = preparer.Prepare(ctx, cloneStepInvocation(invocation))
+		// Preparation may normalize adapter-owned config but is not an activity
+		// boundary. Withhold the runtime-issued recorder so a preparer cannot
+		// inject literal evidence or freeze recording before Execute starts.
+		prepareInput := cloneStepInvocation(invocation)
+		prepareInput.Activity = nil
+		prepared, err = preparer.Prepare(ctx, prepareInput)
 		if err != nil {
 			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepkind.StepResult{}, DispatchPrepare, failurePrepare, err)
 		}
-		if preparedErr := validatePreparedInvocation(invocation, prepared); preparedErr != nil {
+		if preparedErr := validatePreparedInvocation(prepareInput, prepared); preparedErr != nil {
 			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepkind.StepResult{}, DispatchPrepare, failurePrepare, preparedErr)
 		}
+		prepared.Invocation.Activity = invocation.Activity
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepkind.StepResult{}, DispatchExecute, failureExecute, contextErr)
@@ -323,6 +360,24 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	}
 	if resultErr := stepResult.Validate(); resultErr != nil {
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, resultErr)
+	}
+	if invocation.Verification != nil && (stepResult.Outcome == stepkind.StepWaiting || stepResult.Outcome == stepkind.StepExternal) {
+		// Activity evidence is intentionally process-local. A suspension may
+		// continue this attempt in another process, so accepting activity before
+		// the durable boundary would silently discard evidence. Empty segments
+		// may suspend; the resumed/observed terminal segment is verified later.
+		evidence, freezeErr := invocation.Activity.Freeze()
+		if freezeErr != nil || len(evidence) != 0 {
+			cause := freezeErr
+			if cause == nil {
+				cause = errors.New("verified suspension cannot carry pre-suspension activity evidence")
+			}
+			invalid := &stepkind.ExecutionError{
+				Code: "verification_evidence_not_durable", Message: verificationFailureMessage("verification_evidence_not_durable"),
+				Classification: stepkind.RetryPermanent, Cause: cause,
+			}
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchVerify, failureInvalidResult, invalid)
+		}
 	}
 	clonedResult := cloneStepResult(stepResult)
 	switch stepResult.Outcome {
@@ -374,6 +429,32 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	}
 	if schemaErr := validateDeclaredNodeOutputs(request.Node.Outputs, stepResult.Outputs); schemaErr != nil {
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, schemaErr)
+	}
+	if invocation.Verification != nil {
+		evidence, freezeErr := invocation.Activity.Freeze()
+		if freezeErr != nil {
+			invalid := &stepkind.ExecutionError{
+				Code: "verification_result_invalid", Message: verificationFailureMessage("verification_result_invalid"),
+				Classification: stepkind.RetryPermanent, Cause: freezeErr,
+			}
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchVerify, failureInvalidResult, invalid)
+		}
+		report, verificationErr := executeVerification(ctx, d.verifiers, *invocation.Verification, spec.OutputSchema, stepResult.Outputs, evidence)
+		recorded, persistErr := persistVerification(
+			durableCtx, d.store, d.retention, d.redactor, started.Attempt.ID, report,
+			d.atOrAfter(started.Attempt.StartedAt),
+		)
+		if persistErr != nil {
+			failure := &stepkind.ExecutionError{
+				Code: "verification_persistence_failed", Message: verificationFailureMessage("verification_persistence_failed"),
+				Classification: stepkind.RetryUnspecified, Cause: persistErr,
+			}
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchPersistVerify, failurePersistOutput, failure)
+		}
+		result.Verification = &recorded
+		if verificationErr != nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchVerify, failureExecute, verificationExecutionError(verificationErr))
+		}
 	}
 
 	outputRef, err := SaveValuesWithRetention(durableCtx, d.store, d.retention, SaveValuesRequest{
@@ -822,6 +903,9 @@ func validatePreparedInvocation(want stepkind.Invocation, prepared stepkind.Prep
 	if !bytes.Equal(wantJSON, gotJSON) {
 		return fmt.Errorf("prepared invocation changed immutable invocation fields")
 	}
+	if prepared.Invocation.Activity != want.Activity {
+		return fmt.Errorf("prepared invocation changed the runtime-issued activity recorder")
+	}
 	return nil
 }
 
@@ -891,7 +975,7 @@ func cloneStepInvocation(invocation stepkind.Invocation) stepkind.Invocation {
 	config, _ := cloneGraphConfig(invocation.Config)
 	cloned := stepkind.Invocation{
 		Identity: invocation.Identity, Config: config, Inputs: cloneValueSet(invocation.Inputs),
-		IdempotencyKey: invocation.IdempotencyKey, Deadline: invocation.Deadline,
+		Activity: invocation.Activity, IdempotencyKey: invocation.IdempotencyKey, Deadline: invocation.Deadline,
 	}
 	if invocation.Call != nil {
 		cloned.Call, _ = cloneCallInvocation(&invocation.Call.Spec, invocation.Call.Lineage)
@@ -905,7 +989,25 @@ func cloneStepInvocation(invocation stepkind.Invocation) stepkind.Invocation {
 		continuation.Values = cloneValueSet(invocation.Continuation.Values)
 		cloned.Continuation = &continuation
 	}
+	if invocation.Verification != nil {
+		cloned.Verification, _ = cloneVerificationSpec(invocation.Verification)
+	}
 	return cloned
+}
+
+func cloneVerificationSpec(spec *graph.VerificationSpec) (*graph.VerificationSpec, error) {
+	if spec == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(spec)
+	if err != nil {
+		return nil, fmt.Errorf("clone verification spec: %w", err)
+	}
+	var cloned graph.VerificationSpec
+	if err := decodeDispatchJSONUseNumber(encoded, &cloned); err != nil {
+		return nil, fmt.Errorf("clone verification spec: %w", err)
+	}
+	return &cloned, nil
 }
 
 func cloneCallInvocation(spec *graph.CallSpec, lineage []graph.DefinitionRef) (*stepkind.CallInvocation, error) {

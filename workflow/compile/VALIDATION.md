@@ -48,12 +48,15 @@ fan-out node invocation; they are unavailable while `for_each.items` is being
 selected.
 
 Transform config is the one core node config whose string leaves are defined
-as expressions. Verification config remains adapter-opaque. A verifier kind
-must supply a `VerificationExpressionExtractor` to expose typed expressions;
-otherwise non-empty config is retained as an `opaque_verification` deferred
-dependency. Core never guesses by scanning arbitrary verifier strings. Because
-Graph config has only a carrier-level source, transform and verifier findings
-use that nearest honest carrier plus a deterministic semantic surface path.
+as expressions. Verification config remains verifier-owned and is validated
+against the exact frozen verifier registry; unknown kinds fail closed with the
+check source. A verifier kind must separately supply a
+`VerificationExpressionExtractor` to expose typed expressions to dependency
+inference; otherwise non-empty config is retained as an
+`opaque_verification` deferred dependency. Core never guesses by scanning
+arbitrary verifier strings. Because Graph config has only a carrier-level
+source, transform and verifier findings use that nearest honest carrier plus a
+deterministic semantic surface path.
 
 Static `steps.<id>` references add data edges. Computed `steps[...]` lookups and
 root-only `steps` map access do not guess producers; they are deferred and at

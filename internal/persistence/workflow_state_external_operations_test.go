@@ -118,10 +118,31 @@ WHEN NEW.event_type = 'external_operation.observed'
 BEGIN SELECT RAISE(ABORT, 'reject external observation'); END`); execErr != nil {
 		t.Fatal(execErr)
 	}
+	verificationRef, err := first.SaveValues(context.Background(), workflowruntime.SaveValuesRequest{
+		Owner: workflowruntime.ValueOwner{
+			Kind: "node-attempt-verification", RunID: fixture.attempt.ID.Invocation.RunID,
+			Invocation: &fixture.attempt.ID.Invocation, Attempt: &fixture.attempt.ID,
+		},
+		Values: workflowTestValues(t, "verification report"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputRef, err := first.SaveValues(context.Background(), workflowruntime.SaveValuesRequest{
+		Owner: workflowruntime.ValueOwner{
+			Kind: "external-operation-outputs", RunID: fixture.attempt.ID.Invocation.RunID,
+			Invocation: &fixture.attempt.ID.Invocation, Attempt: &fixture.attempt.ID,
+		},
+		Values: workflowTestValues(t, "complete"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = first.ApplyExternalOperation(context.Background(), workflowruntime.ApplyExternalOperationRequest{
 		Attempt: fixture.attempt.ID, ExpectedOperationGeneration: fixture.operation.Generation,
 		ExpectedNodeGeneration: fixture.node.Generation, ExpectedAttemptGeneration: fixture.attempt.Generation,
-		Status: stepkind.ObservationPending, Progress: map[string]string{"winner": "none"}, ObservedAt: fixture.base.Add(5 * time.Second), At: fixture.base.Add(5 * time.Second),
+		Status: stepkind.ObservationSucceeded, Outputs: &outputRef, Verification: workflowTestExternalVerificationCompletion(verificationRef),
+		NextNodeStatus: workflowruntime.NodeSucceeded, ObservedAt: fixture.base.Add(5 * time.Second), At: fixture.base.Add(5 * time.Second),
 	})
 	if err == nil {
 		t.Fatal("event trigger did not reject external observation")
@@ -130,6 +151,15 @@ BEGIN SELECT RAISE(ABORT, 'reject external observation'); END`); execErr != nil 
 	if err != nil || afterRollback.Generation != fixture.operation.Generation || afterRollback.Progress["phase"] != "seed" ||
 		!afterRollback.LastObservedAt.Equal(fixture.operation.LastObservedAt) || !afterRollback.LastHeartbeatAt.Equal(fixture.operation.LastHeartbeatAt) {
 		t.Fatalf("failed transaction mutated operation: %#v, %v", afterRollback, err)
+	}
+	eventsAfterRollback, err := first.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: fixture.attempt.ID.Invocation.RunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range eventsAfterRollback {
+		if event.Type == workflowruntime.EventNodeVerificationCompleted {
+			t.Fatalf("failed terminal transaction retained verification event: %#v", event)
+		}
 	}
 	if _, execErr := store.DB().Exec(`DROP TRIGGER test_reject_external_observation`); execErr != nil {
 		t.Fatal(execErr)
@@ -174,6 +204,111 @@ BEGIN SELECT RAISE(ABORT, 'reject external observation'); END`); execErr != nil 
 	}
 	if succeeded != 1 || stale != contenders-1 {
 		t.Fatalf("external contention succeeded=%d stale=%d", succeeded, stale)
+	}
+}
+
+func TestWorkflowSQLiteExternalVerificationAndTerminalApplyAreAtomicUnderContention(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "external-verification-contention.db")
+	_, first := openWorkflowStateTest(t, path)
+	fixture := prepareWorkflowSQLiteExternal(t, first, "verification-contention", workflowTestTime())
+	verificationRef, err := first.SaveValues(context.Background(), workflowruntime.SaveValuesRequest{
+		Owner: workflowruntime.ValueOwner{
+			Kind: "node-attempt-verification", RunID: fixture.attempt.ID.Invocation.RunID,
+			Invocation: &fixture.attempt.ID.Invocation, Attempt: &fixture.attempt.ID,
+		},
+		Values: workflowTestValues(t, "verification report"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputRef, err := first.SaveValues(context.Background(), workflowruntime.SaveValuesRequest{
+		Owner: workflowruntime.ValueOwner{
+			Kind: "external-operation-outputs", RunID: fixture.attempt.ID.Invocation.RunID,
+			Invocation: &fixture.attempt.ID.Invocation, Attempt: &fixture.attempt.ID,
+		},
+		Values: workflowTestValues(t, "complete"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStore, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = secondStore.Close() })
+	second, err := NewWorkflowStateStore(secondStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := workflowruntime.ApplyExternalOperationRequest{
+		Attempt: fixture.attempt.ID, ExpectedOperationGeneration: fixture.operation.Generation,
+		ExpectedNodeGeneration: fixture.node.Generation, ExpectedAttemptGeneration: fixture.attempt.Generation,
+		Status: stepkind.ObservationSucceeded, Outputs: &outputRef,
+		Verification:   workflowTestExternalVerificationCompletion(verificationRef),
+		NextNodeStatus: workflowruntime.NodeSucceeded,
+		ObservedAt:     fixture.base.Add(4 * time.Second), At: fixture.base.Add(4 * time.Second),
+	}
+	stores := []*WorkflowStateStore{first, second}
+	start := make(chan struct{})
+	results := make(chan error, len(stores))
+	var group sync.WaitGroup
+	for _, state := range stores {
+		group.Add(1)
+		go func(state *WorkflowStateStore) {
+			defer group.Done()
+			<-start
+			_, applyErr := state.ApplyExternalOperation(context.Background(), request)
+			results <- applyErr
+		}(state)
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	succeeded, stale := 0, 0
+	for applyErr := range results {
+		switch {
+		case applyErr == nil:
+			succeeded++
+		case errors.Is(applyErr, workflowruntime.ErrCASMismatch):
+			stale++
+		default:
+			t.Fatalf("ApplyExternalOperation() contention error = %v", applyErr)
+		}
+	}
+	if succeeded != 1 || stale != 1 {
+		t.Fatalf("external verification contention succeeded=%d stale=%d", succeeded, stale)
+	}
+	events, err := first.ListEvents(context.Background(), workflowruntime.EventQuery{RunID: fixture.attempt.ID.Invocation.RunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationEvents, finishEvents := 0, 0
+	verificationSequence, finishSequence := uint64(0), uint64(0)
+	for _, event := range events {
+		switch event.Type {
+		case workflowruntime.EventNodeVerificationCompleted:
+			verificationEvents++
+			verificationSequence = event.Sequence
+			if event.Values == nil || *event.Values != verificationRef {
+				t.Fatalf("verification event value ref = %#v", event)
+			}
+		case workflowruntime.EventNodeAttemptFinished:
+			finishEvents++
+			finishSequence = event.Sequence
+		}
+	}
+	if verificationEvents != 1 || finishEvents != 1 || verificationSequence >= finishSequence {
+		t.Fatalf("atomic SQLite event history = %#v", events)
+	}
+}
+
+func workflowTestExternalVerificationCompletion(ref values.ValueSetRef) *workflowruntime.ExternalVerificationCompletion {
+	return &workflowruntime.ExternalVerificationCompletion{
+		Values: ref,
+		Attributes: map[string]string{
+			"status": "passed", "spec_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"check_count": "1", "evidence_count": "0",
+		},
 	}
 }
 

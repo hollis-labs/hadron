@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
+	"github.com/hollis-labs/hadron/workflow/verification"
 )
 
 const (
@@ -129,7 +130,10 @@ func (f DefinitionResolverFunc) ResolveDefinition(ctx context.Context, ref graph
 // Definitions is optional; when nil, validation does not resolve calls.
 // MaxCallDepth defaults to DefaultMaxCallDepth when it is not positive.
 type ValidationOptions struct {
-	StepKinds    StepKindLookup
+	StepKinds StepKindLookup
+	// Verifiers defaults to the deterministic core verification registry when
+	// nil. Host-owned reviewer adapters supply an exact immutable registry.
+	Verifiers    verification.Registry
 	PolicyHooks  []PolicyHook
 	Definitions  DefinitionResolver
 	MaxCallDepth int
@@ -171,6 +175,7 @@ type validator struct {
 	root        graph.DefinitionRef
 	options     ValidationOptions
 	kinds       kindCatalog
+	verifiers   verification.Registry
 	diagnostics []diagnostic.Diagnostic
 }
 
@@ -178,12 +183,21 @@ func validate(ctx context.Context, value graph.Graph, root graph.DefinitionRef, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	verifiers := options.Verifiers
+	if verifiers == nil {
+		verifiers = verification.NewDefaultRegistry()
+	}
+	frozenVerifiers, verifierErr := verification.SnapshotRegistry(verifiers)
 	v := validator{
-		ctx:     ctx,
-		graph:   value,
-		root:    root,
-		options: options,
-		kinds:   newKindCatalog(options.StepKinds),
+		ctx:       ctx,
+		graph:     value,
+		root:      root,
+		options:   options,
+		kinds:     newKindCatalog(options.StepKinds),
+		verifiers: frozenVerifiers,
+	}
+	if verifierErr != nil {
+		v.add(CodeInvalidValidationInput, value.Source, "verification registry could not be frozen", "Supply one deterministic registry whose lookup and listed specs agree.")
 	}
 	v.validateStructure()
 	v.validateNodes()

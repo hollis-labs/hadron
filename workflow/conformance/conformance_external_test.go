@@ -183,6 +183,7 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 		conformance.ControlFlowFixtures,
 		conformance.WaitFixtures,
 		conformance.ExecutorMetadataFixtures,
+		conformance.VerificationFixtures,
 	}
 	store := conformance.EmbeddedFixtures()
 
@@ -206,6 +207,9 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				wantCount = 7
 			}
 			if set == conformance.ControlFlowFixtures {
+				wantCount = 6
+			}
+			if set == conformance.VerificationFixtures {
 				wantCount = 6
 			}
 			if len(fixtures) != wantCount {
@@ -248,6 +252,19 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 			if set == conformance.ControlFlowFixtures {
 				for _, name := range []string{"switch-default", "catch", "continue-on-error", "timeout-catch", "nested-finally", "cleanup-failure"} {
 					if fixture := byName[name]; fixture.Expectation != conformance.ExpectPass {
+						t.Fatalf("%s fixture = %#v", name, fixture)
+					}
+				}
+				return
+			}
+			if set == conformance.VerificationFixtures {
+				for _, name := range []string{"verification-deterministic-pass", "verification-retry-safety", "verification-catch-route"} {
+					if fixture := byName[name]; fixture.Expectation != conformance.ExpectPass {
+						t.Fatalf("%s fixture = %#v", name, fixture)
+					}
+				}
+				for _, name := range []string{"verification-deterministic-fail", "verification-missing-evidence", "verification-reviewer-malformed"} {
+					if fixture := byName[name]; fixture.Expectation != conformance.ExpectFail {
 						t.Fatalf("%s fixture = %#v", name, fixture)
 					}
 				}

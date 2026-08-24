@@ -68,7 +68,7 @@ func (h *Host) StartRun(ctx context.Context, request StartRunRequest) (StartRunR
 	if err != nil {
 		return StartRunResult{}, fmt.Errorf("clone resolved workflow definition: %w", err)
 	}
-	validationOptions := compile.ValidationOptions{StepKinds: h.registry}
+	validationOptions := compile.ValidationOptions{StepKinds: h.registry, Verifiers: h.verifiers}
 	if resolver, ok := h.definitions.(compile.DefinitionResolver); ok {
 		validationOptions.Definitions = resolver
 	}
