@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -256,6 +257,25 @@ func TestWorkflowHTTPHiddenRunReadsMatchNonexistent(t *testing.T) {
 	}
 	if serviceCalls != len(tests) {
 		t.Fatalf("hidden runs crossed profile boundary: service calls=%d", serviceCalls)
+	}
+}
+
+func TestWorkflowHTTPPreservesEscapedOpaqueRunID(t *testing.T) {
+	runID := appworkflow.RunID("source/run one")
+	service := &workflowHTTPService{inspect: func(_ context.Context, request appworkflow.InspectWorkflowRunRequest) (rundiagnostics.Result, error) {
+		if request.RunID != runID {
+			t.Fatalf("inspect run id = %q, want %q", request.RunID, runID)
+		}
+		return rundiagnostics.Result{}, nil
+	}}
+	server := workflowHTTPTestServer(t, service, allowWorkflowHTTP)
+	defer server.Close()
+
+	response := workflowPOST(t, server, "/v1/workflows/runs/"+url.PathEscape(string(runID))+"/inspect", `{"run_id":"source/run one","identity":{}}`, map[string]string{"Authorization": "Bearer allowed"})
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("escaped run id status=%d body=%s", response.StatusCode, body)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
@@ -89,13 +90,18 @@ func (s *Server) handleWorkflowRunAction(w http.ResponseWriter, r *http.Request)
 	if !s.requireWorkflowPOST(w, r) {
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/v1/workflows/runs/")
+	path := strings.TrimPrefix(r.URL.EscapedPath(), "/v1/workflows/runs/")
 	parts := strings.Split(path, "/")
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 		writeWorkflowOperationError(w, http.StatusNotFound, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeNotFound})
 		return
 	}
-	runID, action := appworkflow.RunID(parts[0]), parts[1]
+	decodedRunID, err := url.PathUnescape(parts[0])
+	if err != nil || strings.TrimSpace(decodedRunID) == "" {
+		writeWorkflowOperationError(w, http.StatusNotFound, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeNotFound})
+		return
+	}
+	runID, action := appworkflow.RunID(decodedRunID), parts[1]
 	switch action {
 	case "inspect":
 		s.handleWorkflowInspect(w, r, runID)
