@@ -112,7 +112,7 @@ or the detailed architecture made a later choice. In particular:
 | A2A durable task correlation and schema/effect/provenance-derived cards | Planned | W06-T04 |
 | UI graph, edge values, waits, artifacts, source maps, exposure, blast radius, replay | Planned | W06-T05 |
 | Legacy Wails workflow UI replaced while preserving the flow canvas | Planned | W06-T10 |
-| Compiled CLI and stdio MCP-server artifacts | Planned later | W07-T05 |
+| Compiled CLI and stdio MCP-server artifacts | Implemented | W07-T05 |
 | Global run-failure workflow | Planned later | W07-T08 |
 | Torque bulk-create runs end to end as a pinned MCP tool | Required release gate | W06-T09 |
 

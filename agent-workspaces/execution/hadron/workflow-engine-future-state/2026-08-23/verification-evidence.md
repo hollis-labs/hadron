@@ -1096,3 +1096,18 @@ and conformance fixtures. Source commit `aa01d1d` was integrated as `9431754`.
 | independent source review `aa01d1d` | focused emit, checkpoint, shared-gate, wait, and conformance suites at `-count=3`; same packages under the race detector | pass |
 | integration `9431754` | focused adapter/runtime/compiler/conformance suites at `-count=3`, import guard, and committed diff check | pass |
 | integration `9431754` plus tracking `cb173aa` | `go test -count=1 ./...` after W05-T02 and W07-T07 integration | pass |
+
+## W07-T05
+
+Reviewed the conservative compiled/offline subset, canonical manifest and build
+identity, exact node-scoped remote execution profiles, in-memory execution over
+the ordinary runtime coordinators, typed CLI and single-tool MCP surfaces, and
+native reproducible publication. Source commit `6348a06` was integrated as
+`4d9c2c7` after arbitrary unsafe-source narrowing was restricted to the
+accepted MCP/LLM exception and remote observation carried the bound profile.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `6348a06` | focused offline/build suites at `-count=10`; compile suite; focused race suite; import guard; vet; targeted golangci; module-tidy diff; hooks | pass; zero issues |
+| source worktree `6348a06` | real generated CLI, stdio MCP, bound MCP/LLM, arbitrary-CWD atomic rebuild, and remote-wait kill/restart fixtures | pass |
+| independent source review `6348a06` | `go test -count=1 ./...`; committed diff and worktree checks | pass; clean |
