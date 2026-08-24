@@ -156,16 +156,21 @@ func TestBindRunRejectsNonLiteralDefaultsLossyCoercionAndSchemaFailures(t *testi
 
 func TestBindRunAcceptsAndPreservesPreEnvelopedAndArtifactInputs(t *testing.T) {
 	plan := bindingPlan([]graph.InputSpec{
-		{Name: "secret", Required: true, Schema: graph.Schema{"type": "string"}, Source: bindingSource("inputs", "secret", 4)},
+		{Name: "secret", Required: true, Schema: graph.Schema{"type": "secret_ref"}, Source: bindingSource("inputs", "secret", 4)},
+		{Name: "typed-ref", Required: true, Schema: graph.Schema{"type": "secret_ref"}, Source: bindingSource("inputs", "typed-ref", 6)},
 		{Name: "report", Required: true, Schema: graph.Schema{"type": "artifact"}, Source: bindingSource("inputs", "report", 8)},
 	}, nil, nil)
-	secret := bindingInline(t, "opaque", "activation/secret", values.RedactionSecret, values.RetentionProject)
+	secret := bindingSecretRef(t, "secret://project/activation#token", "activation/secret", values.RetentionProject)
+	typedRef, err := values.ParseSecretRef("secret://project/activation#secondary")
+	if err != nil {
+		t.Fatal(err)
+	}
 	artifactValue := bindingArtifact(t)
 	artifactRef := *artifactValue.Artifact
 	store := runtimetest.NewStore()
 	result, err := workflowruntime.BindRun(t.Context(), store, workflowruntime.BindRunRequest{
 		ID: "run-artifact-input", Plan: plan,
-		Inputs: map[string]any{"secret": secret, "report": artifactRef}, CreatedAt: bindingTime(),
+		Inputs: map[string]any{"secret": secret, "typed-ref": typedRef, "report": artifactRef}, CreatedAt: bindingTime(),
 	})
 	if err != nil || result.Run == nil || len(result.Diagnostics) != 0 {
 		t.Fatalf("BindRun artifact inputs = %#v, %v", result, err)
@@ -177,13 +182,19 @@ func TestBindRunAcceptsAndPreservesPreEnvelopedAndArtifactInputs(t *testing.T) {
 	if !reflect.DeepEqual(persisted["secret"], secret) || !reflect.DeepEqual(persisted["report"], artifactValue) {
 		t.Fatalf("pre-enveloped inputs changed: %#v", persisted)
 	}
+	if typed := persisted["typed-ref"]; typed.Type != values.TypeSecretRef || typed.SecretRef == nil || *typed.SecretRef != typedRef ||
+		typed.Redaction != values.RedactionSecret || typed.Retention != values.RetentionRun ||
+		typed.MediaType != "application/json" ||
+		typed.Producer.Kind != "workflow_input" || typed.Producer.Reference != "run-artifact-input" || typed.Producer.Output != "typed-ref" {
+		t.Fatalf("typed SecretRef input = %#v", typed)
+	}
 
 	invalid := secret
 	invalid.Digest = values.SHA256Digest([]byte("wrong"))
 	observed := &observedStateStore{StateStore: runtimetest.NewStore()}
 	rejected, err := workflowruntime.BindRun(t.Context(), observed, workflowruntime.BindRunRequest{
 		ID: "run-invalid-envelope", Plan: plan,
-		Inputs: map[string]any{"secret": invalid, "report": artifactRef}, CreatedAt: bindingTime(),
+		Inputs: map[string]any{"secret": invalid, "typed-ref": typedRef, "report": artifactRef}, CreatedAt: bindingTime(),
 	})
 	if err != nil {
 		t.Fatalf("invalid envelope returned operational error: %v", err)
@@ -269,7 +280,7 @@ func TestBoundRunValidateRejectsIncompleteEnvelope(t *testing.T) {
 
 func TestFinalizeRunOutputsPreservesPassthroughAndPublishesCompleteSet(t *testing.T) {
 	outputs := []graph.OutputSpec{
-		bindingOutput("secret", graph.Schema{"type": "object"}, "steps.render.outputs.secret", 20),
+		bindingOutput("secret", graph.Schema{"type": "secret_ref"}, "steps.render.outputs.secret", 20),
 		bindingOutput("report", graph.Schema{"type": "artifact"}, "steps.render.outputs.report", 24),
 		bindingOutput("count", graph.Schema{"type": "integer"}, "steps.render.outputs.count + 1", 28),
 	}
@@ -277,7 +288,7 @@ func TestFinalizeRunOutputsPreservesPassthroughAndPublishesCompleteSet(t *testin
 	plan := bindingPlan(nil, outputs, []graph.Node{{ID: "render", Kind: "test", Source: bindingSource("steps", "render", 12)}})
 	store := runtimetest.NewStore()
 	bound, running := startedBindingRun(t, store, plan, "run-output")
-	secret := bindingInline(t, map[string]any{"token": "opaque"}, "node-secret", values.RedactionSecret, values.RetentionProject)
+	secret := bindingSecretRef(t, "secret://project/render#token", "node-secret", values.RetentionProject)
 	artifact := bindingArtifact(t)
 	count := bindingInline(t, json.Number("2"), "node-count", values.RedactionPrivate, values.RetentionRun)
 	expressionContext := values.ExpressionContext{Steps: map[string]values.StepContext{
@@ -324,7 +335,7 @@ func TestFinalizeRunOutputsDiagnosticsDoNotPersistPartialOutputs(t *testing.T) {
 			outputs: []graph.OutputSpec{bindingOutput("result", graph.Schema{"type": "string"}, "steps.secret.outputs.value", 20)},
 			context: values.ExpressionContext{Steps: map[string]values.StepContext{
 				"render": {Status: string(workflowruntime.NodeSucceeded), Outputs: values.ValueSet{}},
-				"secret": {Status: string(workflowruntime.NodeSucceeded), Outputs: values.ValueSet{"value": bindingInline(t, "hidden", "secret", values.RedactionSecret, values.RetentionProject)}},
+				"secret": {Status: string(workflowruntime.NodeSucceeded), Outputs: values.ValueSet{"value": bindingInline(t, "hidden", "secret", values.RedactionPrivate, values.RetentionProject)}},
 			}},
 			code: values.CodeExpressionInvisibleStep,
 		},
@@ -594,6 +605,22 @@ func bindingArtifact(t *testing.T) values.Value {
 		Digest: values.SHA256Digest([]byte("report")), MediaType: "application/pdf", SizeBytes: 6,
 		Producer:  values.Producer{Kind: "node_output", Reference: "run/render", Output: "report"},
 		Redaction: values.RedactionPrivate, Retention: values.RetentionExternal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+func bindingSecretRef(t *testing.T, raw, reference string, retention values.RetentionClass) values.Value {
+	t.Helper()
+	ref, err := values.ParseSecretRef(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := values.NewSecretRef(ref, values.Metadata{
+		Producer:  values.Producer{Kind: "node_output", Reference: reference, Output: "value"},
+		MediaType: "application/json", Redaction: values.RedactionSecret, Retention: retention,
 	})
 	if err != nil {
 		t.Fatal(err)

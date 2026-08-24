@@ -18,6 +18,12 @@ and delegates exact idempotency replay/conflict decisions to `StateStore`.
 unreferenced input set. A start retry must reuse the same `BoundRun` and
 `InputsRef`; it must not bind again.
 
+Binding routes writes through `SaveValuesWithRetention`. A nil retention hook
+still enforces persistability. A configured hook receives stable run/project/
+external groups before and after the immutable write; `none` is rejected before
+storage. A post-write hook failure exposes the unreferenced `ValueSetRef`
+through `RetentionHookError`.
+
 ## Input rules
 
 - Caller keys must exactly match normalized declared input names. Unknown keys
@@ -37,11 +43,12 @@ unreferenced input set. A start retry must reuse the same `BoundRun` and
   boundary. Integer-valued floats beyond their exact consecutive-integer range
   are rejected; JSON callers should decode with `json.Decoder.UseNumber` when
   numeric precision matters.
-- Callers may supply an already-valid `values.Value` or `values.ArtifactRef` for
-  artifact-bearing and pre-classified inputs. The complete envelope is copied
-  and preserved, then schema-validated. Authorization to supply or downgrade a
-  classification remains W02-T06 policy work; descriptive `graph.Metadata`
-  never changes the envelope.
+- Callers may supply an already-valid `values.Value`, `values.ArtifactRef`, or
+  typed secret reference Value for artifact-bearing and pre-classified inputs.
+  The complete envelope is copied and preserved, then schema-validated.
+  Secret-classified inline material is rejected; exact secret envelope
+  passthrough is preserved and computed use fails closed. Descriptive
+  `graph.Metadata` never changes the envelope.
 - Each normalized value is checked against its complete inline JSON Schema.
   Local JSON Pointer and `$defs` references work; network, file, and all other
   external resource loading is denied.
@@ -65,7 +72,8 @@ Exact passthrough expressions such as `inputs.payload` and
 including inline/artifact mode, producer, digest, media type, redaction, and
 retention. Computed, literal, and interpolated values use the
 `workflow_output` producer with `application/json`, `private`, and `run`
-defaults.
+defaults. Secret-classified Values and ArtifactRefs can only use exact
+passthrough; they cannot be unwrapped or derived by expressions.
 
 Only a complete output set is saved, and only its reference is published by the
 atomic transition to `succeeded`. Evaluation, visibility, type, or schema

@@ -15,7 +15,7 @@ func TestClosedEnums(t *testing.T) {
 	t.Parallel()
 
 	for _, valueType := range []Type{
-		TypeNull, TypeString, TypeNumber, TypeBoolean, TypeArray, TypeObject, TypeArtifact,
+		TypeNull, TypeString, TypeNumber, TypeBoolean, TypeArray, TypeObject, TypeArtifact, TypeSecretRef,
 	} {
 		if !valueType.Valid() {
 			t.Errorf("declared value type %q is invalid", valueType)
@@ -54,7 +54,7 @@ func TestInlineValueJSONRoundTripsEveryType(t *testing.T) {
 		{name: "null", inline: nil, valueType: TypeNull, metadata: testMetadata(RedactionPublic, RetentionNone)},
 		{name: "string", inline: "hello", valueType: TypeString, metadata: testMetadata(RedactionPrivate, RetentionRun)},
 		{name: "number", inline: json.Number("9007199254740993123456789"), valueType: TypeNumber, metadata: testMetadata(RedactionPublic, RetentionProject)},
-		{name: "boolean", inline: true, valueType: TypeBoolean, metadata: testMetadata(RedactionSecret, RetentionExternal)},
+		{name: "boolean", inline: true, valueType: TypeBoolean, metadata: testMetadata(RedactionPublic, RetentionExternal)},
 		{
 			name: "array", valueType: TypeArray,
 			inline:   []any{nil, "item", json.Number("12.50"), false, map[string]any{"nested": "value"}},
@@ -256,7 +256,7 @@ func TestDigestValueSetIsStableAndMetadataSensitive(t *testing.T) {
 
 	changed := ValueSet{"alpha": alpha, "beta": beta}
 	changedBeta := changed["beta"]
-	changedBeta.Redaction = RedactionSecret
+	changedBeta.Retention = RetentionExternal
 	changed["beta"] = changedBeta
 	changedDigest, err := DigestValueSet(changed)
 	if err != nil {

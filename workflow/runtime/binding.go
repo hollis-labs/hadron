@@ -89,12 +89,13 @@ func (r BoundRun) Validate() error {
 
 // BindRunRequest supplies immutable plan identity and caller data. Inputs are
 // losslessly normalized native JSON values; strings are never parsed into
-// numbers, booleans, null, arrays, or objects.
+// numbers, booleans, null, arrays, or objects. RetentionHook is optional.
 type BindRunRequest struct {
-	ID        RunID
-	Plan      *compile.ExecutionPlan
-	Inputs    map[string]any
-	CreatedAt time.Time
+	ID            RunID
+	Plan          *compile.ExecutionPlan
+	Inputs        map[string]any
+	CreatedAt     time.Time
+	RetentionHook RetentionHook
 }
 
 // BindRunResult contains a BoundRun only when all diagnostics are absent and
@@ -141,7 +142,7 @@ func BindRun(ctx context.Context, store StateStore, request BindRunRequest) (Bin
 	if err != nil {
 		return BindRunResult{}, fmt.Errorf("clone bound run provenance: %w", err)
 	}
-	inputRef, err := store.SaveValues(ctx, SaveValuesRequest{
+	inputRef, err := SaveValuesWithRetention(ctx, store, request.RetentionHook, SaveValuesRequest{
 		Owner:  ValueOwner{Kind: "run-inputs", RunID: request.ID},
 		Values: boundInputs,
 	})
@@ -192,13 +193,15 @@ const (
 // FinalizeRunRequest binds declared workflow outputs after graph completion.
 // Context may contain more steps than the plan, but output evaluation sees
 // only declared plan nodes. BaseOptions retains host policy such as AllowEnv.
+// RetentionHook is optional and is not consulted during replay without writes.
 type FinalizeRunRequest struct {
-	BoundRun    BoundRun
-	Run         RunSnapshot
-	Plan        *compile.ExecutionPlan
-	Context     values.ExpressionContext
-	BaseOptions values.ExpressionOptions
-	At          time.Time
+	BoundRun      BoundRun
+	Run           RunSnapshot
+	Plan          *compile.ExecutionPlan
+	Context       values.ExpressionContext
+	BaseOptions   values.ExpressionOptions
+	RetentionHook RetentionHook
+	At            time.Time
 }
 
 // FinalizeRunResult is present only after outputs have been published or an
@@ -245,7 +248,7 @@ func FinalizeRunOutputs(ctx context.Context, store StateStore, request FinalizeR
 	if request.Run.Status == RunSucceeded {
 		return replayFinalizedOutputs(ctx, store, request.Run, outputs)
 	}
-	outputRef, err := store.SaveValues(ctx, SaveValuesRequest{
+	outputRef, err := SaveValuesWithRetention(ctx, store, request.RetentionHook, SaveValuesRequest{
 		Owner: ValueOwner{Kind: "run-outputs", RunID: request.BoundRun.ID}, Values: outputs,
 	})
 	if err != nil {
@@ -419,6 +422,9 @@ func bindCallerValue(raw any, metadata values.Metadata, allowEnvelope bool) (val
 			return cloneBoundValue(typed)
 		case values.ArtifactRef:
 			return values.NewArtifact(typed)
+		case values.SecretRef:
+			metadata.Redaction = values.RedactionSecret
+			return values.NewSecretRef(typed, metadata)
 		}
 	}
 	if err := validateLosslessCallerNumbers(reflect.ValueOf(raw), 0); err != nil {

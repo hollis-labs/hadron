@@ -88,6 +88,14 @@ func (e *ExpressionEngine) evaluate(
 	if err != nil {
 		return nil, err
 	}
+	if taintErr := rejectSecretReferenceUse(references, context); taintErr != nil {
+		return nil, expressionError(
+			CodeExpressionValue,
+			"computed expressions cannot unwrap or derive from secret references",
+			expression.Source,
+			taintErr,
+		)
+	}
 	visibility, visible := visibilitySet(options.VisibleSteps)
 	if policyErr := enforceReferencePolicy(references, context, options, visibility, visible, expression.Source); policyErr != nil {
 		return nil, policyErr
@@ -355,6 +363,12 @@ func unwrapValue(value Value) (any, error) {
 	if err := value.Validate(); err != nil {
 		return nil, err
 	}
+	if value.Type == TypeSecretRef {
+		// Reference policy rejects every actual use before evaluation. Keeping a
+		// non-secret placeholder in the environment lets unrelated expressions
+		// operate without exposing the opaque URI to expr.
+		return RedactedMarker, nil
+	}
 	if value.Type != TypeArtifact {
 		return prepareExpressionValue(value.Inline), nil
 	}
@@ -371,6 +385,103 @@ func unwrapValue(value Value) (any, error) {
 		"redaction": string(artifact.Redaction),
 		"retention": string(artifact.Retention),
 	}, nil
+}
+
+func rejectSecretReferenceUse(references []Reference, context ExpressionContext) error {
+	for _, reference := range references {
+		switch reference.Root {
+		case "inputs":
+			if reference.Dynamic || len(reference.Path) == 0 {
+				if valueSetContainsSecret(context.Inputs) {
+					return ErrSecretDerivation
+				}
+				continue
+			}
+			if value, ok := context.Inputs[reference.Path[0]]; ok && value.Redaction == RedactionSecret {
+				return ErrSecretDerivation
+			}
+		case "steps":
+			if reference.Dynamic || len(reference.Path) == 0 {
+				if stepsContainSecret(context.Steps) {
+					return ErrSecretDerivation
+				}
+				continue
+			}
+			step, ok := context.Steps[reference.Path[0]]
+			if !ok {
+				continue
+			}
+			if len(reference.Path) == 1 {
+				if stepContainsSecret(step) {
+					return ErrSecretDerivation
+				}
+				continue
+			}
+			switch reference.Path[1] {
+			case "outputs":
+				if len(reference.Path) == 2 {
+					if valueSetContainsSecret(step.Outputs) {
+						return ErrSecretDerivation
+					}
+					continue
+				}
+				if value, exists := step.Outputs[reference.Path[2]]; exists && value.Redaction == RedactionSecret {
+					return ErrSecretDerivation
+				}
+			case "items":
+				for _, item := range step.Items {
+					if stepContainsSecret(item) {
+						return ErrSecretDerivation
+					}
+				}
+			}
+		case "item":
+			if context.Item != nil && context.Item.Redaction == RedactionSecret {
+				return ErrSecretDerivation
+			}
+		case "env":
+			if reference.Dynamic || len(reference.Path) == 0 {
+				if valueSetContainsSecret(context.Env) {
+					return ErrSecretDerivation
+				}
+				continue
+			}
+			if value, ok := context.Env[reference.Path[0]]; ok && value.Redaction == RedactionSecret {
+				return ErrSecretDerivation
+			}
+		}
+	}
+	return nil
+}
+
+func valueSetContainsSecret(set ValueSet) bool {
+	for _, value := range set {
+		if value.Redaction == RedactionSecret {
+			return true
+		}
+	}
+	return false
+}
+
+func stepsContainSecret(steps map[string]StepContext) bool {
+	for _, step := range steps {
+		if stepContainsSecret(step) {
+			return true
+		}
+	}
+	return false
+}
+
+func stepContainsSecret(step StepContext) bool {
+	if valueSetContainsSecret(step.Outputs) {
+		return true
+	}
+	for _, item := range step.Items {
+		if stepContainsSecret(item) {
+			return true
+		}
+	}
+	return false
 }
 
 func prepareExpressionValue(value any) any {

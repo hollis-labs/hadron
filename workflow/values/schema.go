@@ -27,8 +27,10 @@ const valueSchemaResource = "urn:hadron:workflow:values:schema"
 // ValidateValueSchema validates one typed Value against an inline JSON Schema.
 // Local JSON Pointer and $defs references are supported. Network, file, and
 // other external resource loading is always rejected. The graph-native
-// "artifact" type validates the immutable ArtifactRef projection; an empty
-// schema accepts either inline or artifact values.
+// "artifact" type validates the immutable ArtifactRef projection and
+// "secret_ref" validates an opaque canonical reference string. Plain string
+// schemas do not accept typed secret references. An empty schema accepts every
+// valid Value envelope.
 func ValidateValueSchema(schema graph.Schema, value Value) error {
 	if err := value.Validate(); err != nil {
 		return fmt.Errorf("%w: invalid value envelope: %w", ErrSchemaMismatch, err)
@@ -37,7 +39,7 @@ func ValidateValueSchema(schema graph.Schema, value Value) error {
 	if err != nil {
 		return err
 	}
-	declarationDocument, err := rewriteArtifactTypes(document, true)
+	declarationDocument, err := rewriteValueTypes(document, true, true)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidSchema, err)
 	}
@@ -48,13 +50,26 @@ func ValidateValueSchema(schema graph.Schema, value Value) error {
 
 	var instance any
 	compiled := declarationSchema
-	if value.Type == TypeArtifact {
+	switch value.Type {
+	case TypeArtifact:
 		if len(document) != 0 && !schemaPermitsArtifact(document, document, make(map[string]bool)) {
 			return fmt.Errorf("%w: schema does not explicitly permit artifact", ErrSchemaMismatch)
 		}
 		instance, err = plainJSONValue(value.Artifact)
-	} else {
-		inlineDocument, rewriteErr := rewriteArtifactTypes(document, false)
+	case TypeSecretRef:
+		if len(document) != 0 && !schemaPermitsSecretRef(document, document, make(map[string]bool)) {
+			return fmt.Errorf("%w: schema does not explicitly permit secret_ref", ErrSchemaMismatch)
+		}
+		secretDocument, rewriteErr := rewriteValueTypes(document, false, true)
+		if rewriteErr != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidSchema, rewriteErr)
+		}
+		compiled, err = compileValueSchema(secretDocument)
+		if err == nil {
+			instance = string(*value.SecretRef)
+		}
+	default:
+		inlineDocument, rewriteErr := rewriteValueTypes(document, false, false)
 		if rewriteErr != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidSchema, rewriteErr)
 		}
@@ -81,7 +96,7 @@ func ValidateSchema(schema graph.Schema) error {
 	if err != nil {
 		return err
 	}
-	rewritten, err := rewriteArtifactTypes(document, true)
+	rewritten, err := rewriteValueTypes(document, true, true)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidSchema, err)
 	}
@@ -117,33 +132,33 @@ func valueSchemaDocument(schema graph.Schema) (map[string]any, error) {
 	return object, nil
 }
 
-func rewriteArtifactTypes(value any, allowArtifact bool) (any, error) {
+func rewriteValueTypes(value any, allowArtifact, allowSecretRef bool) (any, error) {
 	switch typed := value.(type) {
 	case map[string]any:
 		result := make(map[string]any, len(typed))
 		for key, child := range typed {
 			switch key {
 			case "$defs", "definitions", "properties", "patternProperties", "dependentSchemas":
-				rewritten, err := rewriteSchemaMap(child, allowArtifact)
+				rewritten, err := rewriteSchemaMap(child, allowArtifact, allowSecretRef)
 				if err != nil {
 					return nil, err
 				}
 				result[key] = rewritten
 			case "items", "additionalItems", "additionalProperties", "unevaluatedItems", "unevaluatedProperties",
 				"propertyNames", "contains", "not", "if", "then", "else", "contentSchema":
-				rewritten, err := rewriteArtifactTypes(child, allowArtifact)
+				rewritten, err := rewriteValueTypes(child, allowArtifact, allowSecretRef)
 				if err != nil {
 					return nil, err
 				}
 				result[key] = rewritten
 			case "prefixItems", "allOf", "anyOf", "oneOf":
-				rewritten, err := rewriteSchemaList(child, allowArtifact)
+				rewritten, err := rewriteSchemaList(child, allowArtifact, allowSecretRef)
 				if err != nil {
 					return nil, err
 				}
 				result[key] = rewritten
 			case "dependencies":
-				rewritten, err := rewriteLegacyDependencies(child, allowArtifact)
+				rewritten, err := rewriteLegacyDependencies(child, allowArtifact, allowSecretRef)
 				if err != nil {
 					return nil, err
 				}
@@ -160,11 +175,15 @@ func rewriteArtifactTypes(value any, allowArtifact bool) (any, error) {
 		}
 		switch schemaType := declared.(type) {
 		case string:
-			if schemaType != "artifact" {
+			if schemaType != "artifact" && schemaType != "secret_ref" {
 				return result, nil
 			}
-			if allowArtifact {
+			if schemaType == "artifact" && allowArtifact {
 				result["type"] = "object"
+				return result, nil
+			}
+			if schemaType == "secret_ref" && allowSecretRef {
+				result["type"] = "string"
 				return result, nil
 			}
 			return map[string]any{"not": map[string]any{}}, nil
@@ -181,6 +200,11 @@ func rewriteArtifactTypes(value any, allowArtifact bool) (any, error) {
 						continue
 					}
 					name = "object"
+				} else if name == "secret_ref" {
+					if !allowSecretRef {
+						continue
+					}
+					name = "string"
 				}
 				if !seen[name] {
 					types = append(types, name)
@@ -202,14 +226,14 @@ func rewriteArtifactTypes(value any, allowArtifact bool) (any, error) {
 	}
 }
 
-func rewriteSchemaMap(value any, allowArtifact bool) (map[string]any, error) {
+func rewriteSchemaMap(value any, allowArtifact, allowSecretRef bool) (map[string]any, error) {
 	container, ok := value.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("schema map keyword must contain an object")
 	}
 	result := make(map[string]any, len(container))
 	for name, schema := range container {
-		rewritten, err := rewriteArtifactTypes(schema, allowArtifact)
+		rewritten, err := rewriteValueTypes(schema, allowArtifact, allowSecretRef)
 		if err != nil {
 			return nil, fmt.Errorf("subschema %q: %w", name, err)
 		}
@@ -218,14 +242,14 @@ func rewriteSchemaMap(value any, allowArtifact bool) (map[string]any, error) {
 	return result, nil
 }
 
-func rewriteSchemaList(value any, allowArtifact bool) ([]any, error) {
+func rewriteSchemaList(value any, allowArtifact, allowSecretRef bool) ([]any, error) {
 	items, ok := value.([]any)
 	if !ok {
 		return nil, fmt.Errorf("schema list keyword must contain an array")
 	}
 	result := make([]any, len(items))
 	for index, schema := range items {
-		rewritten, err := rewriteArtifactTypes(schema, allowArtifact)
+		rewritten, err := rewriteValueTypes(schema, allowArtifact, allowSecretRef)
 		if err != nil {
 			return nil, fmt.Errorf("subschema[%d]: %w", index, err)
 		}
@@ -234,7 +258,7 @@ func rewriteSchemaList(value any, allowArtifact bool) ([]any, error) {
 	return result, nil
 }
 
-func rewriteLegacyDependencies(value any, allowArtifact bool) (map[string]any, error) {
+func rewriteLegacyDependencies(value any, allowArtifact, allowSecretRef bool) (map[string]any, error) {
 	container, ok := value.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("dependencies must contain an object")
@@ -243,7 +267,7 @@ func rewriteLegacyDependencies(value any, allowArtifact bool) (map[string]any, e
 	for name, dependency := range container {
 		switch dependency.(type) {
 		case map[string]any, bool:
-			rewritten, err := rewriteArtifactTypes(dependency, allowArtifact)
+			rewritten, err := rewriteValueTypes(dependency, allowArtifact, allowSecretRef)
 			if err != nil {
 				return nil, fmt.Errorf("dependency %q: %w", name, err)
 			}
@@ -256,6 +280,14 @@ func rewriteLegacyDependencies(value any, allowArtifact bool) (map[string]any, e
 }
 
 func schemaPermitsArtifact(root, schema any, resolving map[string]bool) bool {
+	return schemaPermitsType(root, schema, "artifact", resolving)
+}
+
+func schemaPermitsSecretRef(root, schema any, resolving map[string]bool) bool {
+	return schemaPermitsType(root, schema, "secret_ref", resolving)
+}
+
+func schemaPermitsType(root, schema any, valueType string, resolving map[string]bool) bool {
 	switch typed := schema.(type) {
 	case bool:
 		return typed
@@ -266,10 +298,10 @@ func schemaPermitsArtifact(root, schema any, resolving map[string]bool) bool {
 		if declared, ok := typed["type"]; ok {
 			switch schemaType := declared.(type) {
 			case string:
-				return schemaType == "artifact"
+				return schemaType == valueType
 			case []any:
 				for _, candidate := range schemaType {
-					if candidate == "artifact" {
+					if candidate == valueType {
 						return true
 					}
 				}
@@ -279,7 +311,7 @@ func schemaPermitsArtifact(root, schema any, resolving map[string]bool) bool {
 		if ref, ok := typed["$ref"].(string); ok && strings.HasPrefix(ref, "#") && !resolving[ref] {
 			if target, resolved := resolveLocalSchemaRef(root, ref); resolved {
 				resolving[ref] = true
-				allowed := schemaPermitsArtifact(root, target, resolving)
+				allowed := schemaPermitsType(root, target, valueType, resolving)
 				delete(resolving, ref)
 				return allowed
 			}
@@ -290,7 +322,7 @@ func schemaPermitsArtifact(root, schema any, resolving map[string]bool) bool {
 				continue
 			}
 			for _, branch := range branches {
-				if schemaPermitsArtifact(root, branch, resolving) {
+				if schemaPermitsType(root, branch, valueType, resolving) {
 					return true
 				}
 			}

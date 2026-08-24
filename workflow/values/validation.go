@@ -107,9 +107,28 @@ func (v Value) Validate() error {
 	if err := ValidateDigest(v.Digest); err != nil {
 		return fmt.Errorf("value.digest: %w", err)
 	}
+	if v.Type == TypeSecretRef {
+		if v.SecretRef == nil || v.Inline != nil || v.Artifact != nil {
+			return fmt.Errorf("%w: secret_ref type requires only secret_ref payload", ErrAmbiguousEnvelope)
+		}
+		if v.Redaction != RedactionSecret {
+			return fmt.Errorf("%w: secret_ref values require secret redaction", ErrInvalidValue)
+		}
+		if err := v.SecretRef.Validate(); err != nil {
+			return err
+		}
+		digest, err := DigestInline(string(*v.SecretRef))
+		if err != nil {
+			return err
+		}
+		if v.Digest != digest {
+			return fmt.Errorf("%w: recorded %q, computed %q", ErrDigestMismatch, v.Digest, digest)
+		}
+		return nil
+	}
 
 	if v.Type == TypeArtifact {
-		if v.Artifact == nil || v.Inline != nil {
+		if v.Artifact == nil || v.Inline != nil || v.SecretRef != nil {
 			return fmt.Errorf("%w: artifact type requires only artifact payload", ErrAmbiguousEnvelope)
 		}
 		if err := v.Artifact.Validate(); err != nil {
@@ -123,8 +142,11 @@ func (v Value) Validate() error {
 		return nil
 	}
 
-	if v.Artifact != nil {
+	if v.Artifact != nil || v.SecretRef != nil {
 		return fmt.Errorf("%w: inline type must not carry artifact payload", ErrAmbiguousEnvelope)
+	}
+	if v.Redaction == RedactionSecret {
+		return fmt.Errorf("%w: secret-classified inline payloads must use an opaque SecretRef", ErrSecretMaterial)
 	}
 	normalized, inferred, err := normalizeInline(v.Inline)
 	if err != nil {

@@ -31,14 +31,15 @@ type ArtifactRef struct {
 	Retention RetentionClass `json:"retention"`
 }
 
-// Value is the workflow data-plane envelope. An inline value has exactly one
-// JSON-compatible payload in Inline and no Artifact. An artifact value has an
-// Artifact and no Inline payload. Type makes inline null distinct from a
-// missing payload.
+// Value is the workflow data-plane envelope. It carries exactly one
+// JSON-compatible Inline payload, Artifact reference, or opaque SecretRef.
+// Type makes inline null distinct from a missing payload. Resolved secret
+// material is intentionally not a Value payload mode.
 type Value struct {
 	Type      Type
 	Inline    any
 	Artifact  *ArtifactRef
+	SecretRef *SecretRef
 	Producer  Producer
 	MediaType string
 	Digest    string

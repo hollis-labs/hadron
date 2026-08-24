@@ -4,19 +4,20 @@ package values
 type Type string
 
 const (
-	TypeNull     Type = "null"
-	TypeString   Type = "string"
-	TypeNumber   Type = "number"
-	TypeBoolean  Type = "boolean"
-	TypeArray    Type = "array"
-	TypeObject   Type = "object"
-	TypeArtifact Type = "artifact"
+	TypeNull      Type = "null"
+	TypeString    Type = "string"
+	TypeNumber    Type = "number"
+	TypeBoolean   Type = "boolean"
+	TypeArray     Type = "array"
+	TypeObject    Type = "object"
+	TypeArtifact  Type = "artifact"
+	TypeSecretRef Type = "secret_ref"
 )
 
 // Valid reports whether t is a supported value type.
 func (t Type) Valid() bool {
 	switch t {
-	case TypeNull, TypeString, TypeNumber, TypeBoolean, TypeArray, TypeObject, TypeArtifact:
+	case TypeNull, TypeString, TypeNumber, TypeBoolean, TypeArray, TypeObject, TypeArtifact, TypeSecretRef:
 		return true
 	default:
 		return false
@@ -24,7 +25,7 @@ func (t Type) Valid() bool {
 }
 
 // RedactionClass controls whether a value may be displayed or recorded by a
-// consumer. Enforcement belongs to later policy and transport work.
+// consumer. Secret payloads are always masked; private display is policy-bound.
 type RedactionClass string
 
 const (

@@ -75,11 +75,15 @@ func NewInline(inline any, metadata Metadata) (Value, error) {
 	if err != nil {
 		return Value{}, err
 	}
-	return Value{
+	value := Value{
 		Type: valueType, Inline: normalized,
 		Producer: metadata.Producer, MediaType: metadata.MediaType, Digest: digest,
 		Redaction: metadata.Redaction, Retention: metadata.Retention,
-	}, nil
+	}
+	if err := value.Validate(); err != nil {
+		return Value{}, err
+	}
+	return value, nil
 }
 
 // NewArtifact constructs a validated artifact Value and mirrors the reference
@@ -89,11 +93,44 @@ func NewArtifact(ref ArtifactRef) (Value, error) {
 		return Value{}, err
 	}
 	refCopy := ref
-	return Value{
+	value := Value{
 		Type: TypeArtifact, Artifact: &refCopy,
 		Producer: ref.Producer, MediaType: ref.MediaType, Digest: ref.Digest,
 		Redaction: ref.Redaction, Retention: ref.Retention,
-	}, nil
+	}
+	if err := value.Validate(); err != nil {
+		return Value{}, err
+	}
+	return value, nil
+}
+
+// NewSecretRef constructs a validated reference Value. Only the opaque URI and
+// its producer/classification metadata enter the data plane; resolved material
+// is not accepted by this constructor.
+func NewSecretRef(ref SecretRef, metadata Metadata) (Value, error) {
+	if err := ref.Validate(); err != nil {
+		return Value{}, err
+	}
+	if err := metadata.Validate(); err != nil {
+		return Value{}, err
+	}
+	if metadata.Redaction != RedactionSecret {
+		return Value{}, fmt.Errorf("%w: secret_ref values require secret redaction", ErrInvalidValue)
+	}
+	digest, err := DigestInline(string(ref))
+	if err != nil {
+		return Value{}, err
+	}
+	copyRef := ref
+	value := Value{
+		Type: TypeSecretRef, SecretRef: &copyRef,
+		Producer: metadata.Producer, MediaType: metadata.MediaType, Digest: digest,
+		Redaction: metadata.Redaction, Retention: metadata.Retention,
+	}
+	if err := value.Validate(); err != nil {
+		return Value{}, err
+	}
+	return value, nil
 }
 
 // NewValueSetRef constructs a validated opaque reference bound to set's
@@ -146,8 +183,13 @@ func normalizeJSONValue(value reflect.Value, visiting map[visit]bool) (any, erro
 		return normalizeJSONValue(value.Elem(), visiting)
 	}
 	if value.CanInterface() {
-		if number, ok := value.Interface().(json.Number); ok {
-			return normalizeNumber(number)
+		switch typed := value.Interface().(type) {
+		case json.Number:
+			return normalizeNumber(typed)
+		case SecretRef:
+			return nil, fmt.Errorf("%w: SecretRef must use NewSecretRef", ErrSecretDerivation)
+		case ResolvedSecret, *ResolvedSecret:
+			return nil, fmt.Errorf("%w: resolved secret material cannot be normalized inline", ErrSecretMaterial)
 		}
 	}
 

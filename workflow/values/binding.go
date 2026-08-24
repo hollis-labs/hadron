@@ -45,9 +45,15 @@ func (e *ExpressionEngine) EvaluateBinding(
 		if binding.Literal != nil || binding.Interpolation != "" {
 			return Value{}, invalidBindingShape(binding, "expression binding must not also contain literal or interpolation data")
 		}
-		result, err := e.EvaluateRaw(*binding.Expression, context, options)
-		if err != nil {
-			return Value{}, err
+		references, referenceErr := ParseReferences(*binding.Expression)
+		if referenceErr != nil {
+			return Value{}, referenceErr
+		}
+		visibility, explicit := visibilitySet(options.VisibleSteps)
+		if policyErr := enforceReferencePolicy(
+			references, context, options, visibility, explicit, binding.Expression.Source,
+		); policyErr != nil {
+			return Value{}, policyErr
 		}
 		if passthrough, ok, resolveErr := exactValuePassthrough(*binding.Expression, context); resolveErr != nil {
 			return Value{}, expressionError(
@@ -58,6 +64,10 @@ func (e *ExpressionEngine) EvaluateBinding(
 			)
 		} else if ok {
 			return passthrough, nil
+		}
+		result, err := e.EvaluateRaw(*binding.Expression, context, options)
+		if err != nil {
+			return Value{}, err
 		}
 		return NewInline(result, metadata)
 	default:

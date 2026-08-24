@@ -402,6 +402,9 @@ func (s *Store) SaveValues(ctx context.Context, request workflowruntime.SaveValu
 	if err := request.Owner.Validate(); err != nil {
 		return values.ValueSetRef{}, invalid(err)
 	}
+	if err := values.ValidatePersistableSet(request.Values); err != nil {
+		return values.ValueSetRef{}, invalid(err)
+	}
 	copySet, err := cloneValueSet(request.Values)
 	if err != nil {
 		return values.ValueSetRef{}, invalid(err)

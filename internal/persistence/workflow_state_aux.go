@@ -19,7 +19,7 @@ func (s *WorkflowStateStore) SaveValues(ctx context.Context, request workflowrun
 	if err := request.Owner.Validate(); err != nil {
 		return values.ValueSetRef{}, workflowInvalid(err)
 	}
-	if err := request.Values.Validate(); err != nil {
+	if err := values.ValidatePersistableSet(request.Values); err != nil {
 		return values.ValueSetRef{}, workflowInvalid(err)
 	}
 	ownerJSON, ownerEncodeErr := encodeWorkflowJSON(request.Owner)

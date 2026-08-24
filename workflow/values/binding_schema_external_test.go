@@ -170,8 +170,8 @@ func TestValidateValueSchemaDeniesExternalRefsAndRequiresArtifactType(t *testing
 }
 
 func TestEvaluateBindingPreservesExactValuePassthroughEnvelopes(t *testing.T) {
-	secretInline, err := values.NewInline(
-		map[string]any{"token": "opaque"},
+	secretRef, err := values.NewSecretRef(
+		values.SecretRef("secret://project/api-token#value"),
 		bindingTestMetadata("node-secret", values.RedactionSecret, values.RetentionProject),
 	)
 	if err != nil {
@@ -187,11 +187,11 @@ func TestEvaluateBindingPreservesExactValuePassthroughEnvelopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	context := values.ExpressionContext{Steps: map[string]values.StepContext{
-		"render": {Outputs: values.ValueSet{"secret": secretInline, "report": artifact}, Status: "succeeded"},
+		"render": {Outputs: values.ValueSet{"secret": secretRef, "report": artifact}, Status: "succeeded"},
 	}}
 	engine := values.NewExpressionEngine()
 	computedMetadata := bindingTestMetadata("workflow-output", values.RedactionPrivate, values.RetentionRun)
-	for name, want := range map[string]values.Value{"secret": secretInline, "report": artifact} {
+	for name, want := range map[string]values.Value{"secret": secretRef, "report": artifact} {
 		binding := graph.Binding{
 			Kind:       graph.BindingExpression,
 			Expression: &graph.Expression{Text: "steps.render.outputs." + name},
@@ -205,16 +205,12 @@ func TestEvaluateBindingPreservesExactValuePassthroughEnvelopes(t *testing.T) {
 		}
 	}
 
-	computed, err := engine.EvaluateBinding(graph.Binding{
+	_, err = engine.EvaluateBinding(graph.Binding{
 		Kind:       graph.BindingExpression,
-		Expression: &graph.Expression{Text: `steps.render.outputs.secret.token + "-derived"`},
+		Expression: &graph.Expression{Text: `string(steps.render.outputs.secret) + "-derived"`},
 	}, context, values.ExpressionOptions{VisibleSteps: []string{"render"}}, computedMetadata)
-	if err != nil {
-		t.Fatalf("computed binding: %v", err)
-	}
-	if computed.Inline != "opaque-derived" || computed.Producer != computedMetadata.Producer ||
-		computed.Redaction != computedMetadata.Redaction || computed.Retention != computedMetadata.Retention {
-		t.Fatalf("computed binding metadata/value = %#v", computed)
+	if !errors.Is(err, values.ErrSecretDerivation) {
+		t.Fatalf("computed secret-ref binding error = %v, want ErrSecretDerivation", err)
 	}
 }
 

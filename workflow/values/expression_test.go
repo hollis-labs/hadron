@@ -99,7 +99,9 @@ func TestExpressionEngineStepItemsAndArtifactReferences(t *testing.T) {
 	t.Parallel()
 
 	context := expressionTestContext(t)
-	artifact, err := NewArtifact(testArtifactRef())
+	artifactRef := testArtifactRef()
+	artifactRef.Redaction = RedactionPrivate
+	artifact, err := NewArtifact(artifactRef)
 	if err != nil {
 		t.Fatal(err)
 	}

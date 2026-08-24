@@ -19,6 +19,22 @@ func (v Value) MarshalJSON() ([]byte, error) {
 	if err := v.Validate(); err != nil {
 		return nil, err
 	}
+	if v.Type == TypeSecretRef {
+		wire := struct {
+			Type      Type           `json:"type"`
+			SecretRef *SecretRef     `json:"secret_ref"`
+			Producer  Producer       `json:"producer"`
+			MediaType string         `json:"media_type"`
+			Digest    string         `json:"digest"`
+			Redaction RedactionClass `json:"redaction"`
+			Retention RetentionClass `json:"retention"`
+		}{
+			Type: v.Type, SecretRef: v.SecretRef, Producer: v.Producer,
+			MediaType: v.MediaType, Digest: v.Digest,
+			Redaction: v.Redaction, Retention: v.Retention,
+		}
+		return json.Marshal(wire)
+	}
 	if v.Type == TypeArtifact {
 		wire := struct {
 			Type      Type           `json:"type"`
@@ -68,7 +84,7 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 	if err := requireFields(fields, valueCommonFields...); err != nil {
 		return err
 	}
-	allowedFields := append(append([]string(nil), valueCommonFields...), "inline", "artifact")
+	allowedFields := append(append([]string(nil), valueCommonFields...), "inline", "artifact", "secret_ref")
 	if err := rejectUnknownFields(fields, allowedFields...); err != nil {
 		return err
 	}
@@ -95,10 +111,12 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 
 	_, hasInline := fields["inline"]
 	_, hasArtifact := fields["artifact"]
-	if hasInline == hasArtifact {
-		return fmt.Errorf("%w: exactly one of inline or artifact is required", ErrAmbiguousEnvelope)
+	_, hasSecretRef := fields["secret_ref"]
+	if countTrue(hasInline, hasArtifact, hasSecretRef) != 1 {
+		return fmt.Errorf("%w: exactly one of inline, artifact, or secret_ref is required", ErrAmbiguousEnvelope)
 	}
-	if decoded.Type == TypeArtifact {
+	switch decoded.Type {
+	case TypeArtifact:
 		if !hasArtifact {
 			return fmt.Errorf("%w: artifact type requires artifact payload", ErrAmbiguousEnvelope)
 		}
@@ -107,7 +125,16 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		decoded.Artifact = &artifact
-	} else {
+	case TypeSecretRef:
+		if !hasSecretRef {
+			return fmt.Errorf("%w: secret_ref type requires secret_ref payload", ErrAmbiguousEnvelope)
+		}
+		var ref SecretRef
+		if err := decodeField(fields, "secret_ref", &ref); err != nil {
+			return err
+		}
+		decoded.SecretRef = &ref
+	default:
 		if !hasInline {
 			return fmt.Errorf("%w: inline type requires inline payload", ErrAmbiguousEnvelope)
 		}
@@ -123,6 +150,16 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 	}
 	*v = decoded
 	return nil
+}
+
+func countTrue(values ...bool) int {
+	count := 0
+	for _, value := range values {
+		if value {
+			count++
+		}
+	}
+	return count
 }
 
 // MarshalJSON validates standalone producer metadata before encoding it.

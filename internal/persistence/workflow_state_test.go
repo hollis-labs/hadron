@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -832,6 +833,57 @@ SELECT COUNT(1) FROM workflow_external_activations WHERE activation_id = ?`, act
 	conflictingActivation.RequestedRunID = "activated-run-conflict"
 	if _, _, err := state.RecordExternalActivation(ctx, conflictingActivation); !errors.Is(err, workflowruntime.ErrIdempotencyConflict) {
 		t.Fatalf("RecordExternalActivation conflict error = %v", err)
+	}
+}
+
+func TestWorkflowStateSaveValuesEnforcesSecretAndRetentionInvariantsBeforeWrite(t *testing.T) {
+	store, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "hadron.db"))
+	ctx := context.Background()
+	owner := workflowruntime.ValueOwner{Kind: "classification-test", RunID: "run-classification"}
+
+	none, err := values.NewInline("ephemeral", values.Metadata{
+		Producer: values.Producer{Kind: "test", Reference: "none"}, MediaType: "text/plain",
+		Redaction: values.RedactionPrivate, Retention: values.RetentionNone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, saveErr := state.SaveValues(ctx, workflowruntime.SaveValuesRequest{
+		Owner: owner, Values: values.ValueSet{"none": none},
+	}); !errors.Is(saveErr, values.ErrRetentionViolation) {
+		t.Fatalf("retention-none SaveValues error = %v", saveErr)
+	}
+
+	raw := workflowTestValue(t, "raw-secret")
+	raw.Redaction = values.RedactionSecret
+	if _, saveErr := state.SaveValues(ctx, workflowruntime.SaveValuesRequest{
+		Owner: owner, Values: values.ValueSet{"raw": raw},
+	}); !errors.Is(saveErr, values.ErrSecretMaterial) {
+		t.Fatalf("secret-inline SaveValues error = %v", saveErr)
+	}
+	var rows int
+	if queryErr := store.DB().QueryRowContext(ctx, `SELECT COUNT(1) FROM workflow_value_sets`).Scan(&rows); queryErr != nil || rows != 0 {
+		t.Fatalf("invalid values wrote rows=%d err=%v", rows, queryErr)
+	}
+
+	artifact, err := values.NewArtifact(values.ArtifactRef{
+		Store: "external", URI: "artifact://vault/secret", Digest: values.SHA256Digest([]byte("secret")),
+		MediaType: "application/octet-stream", SizeBytes: 6,
+		Producer:  values.Producer{Kind: "test", Reference: "artifact"},
+		Redaction: values.RedactionSecret, Retention: values.RetentionExternal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := state.SaveValues(ctx, workflowruntime.SaveValuesRequest{
+		Owner: owner, Values: values.ValueSet{"artifact": artifact},
+	})
+	if err != nil {
+		t.Fatalf("secret ArtifactRef SaveValues: %v", err)
+	}
+	loaded, err := state.LoadValues(ctx, ref)
+	if err != nil || !reflect.DeepEqual(loaded["artifact"], artifact) {
+		t.Fatalf("loaded secret ArtifactRef = %#v, %v", loaded, err)
 	}
 }
 
