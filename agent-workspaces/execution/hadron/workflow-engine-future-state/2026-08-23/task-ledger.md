@@ -74,3 +74,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W07-T09 | W02-T07, W03-T08, W04-T07 | dispatched | |
 | W07-T10 | W03-T08, W04-T06, owner-approved compensation ADR | owner-gated | |
 | W07-T11 | W01-T02, W05-T03, W06-T01, W06-T02 | blocked | |
+
+W07-T09 remains semantically dependency-ready, but its durable service-store
+migration is reserved as `0024` and its integration is ordered after W05-T04's
+`0023` activation migration.
