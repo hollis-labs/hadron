@@ -74,7 +74,7 @@ superseded requirements are not mistaken for omissions.
 | W02-T04 | Define runtime state-store interface | 02 | W01-T04, W02-T01 | [ ] |
 | W02-T05 | Implement Hadron SQLite state adapter schema | 02 | W02-T04 | [ ] |
 | W02-T06 | Enforce redaction, retention, and secret-ref metadata | 02 | W02-T01, W02-T04 | [ ] |
-| W02-T07 | Infer data dependencies and enforce value visibility | 02 | W01-T04, W02-T02 | [ ] |
+| W02-T07 | Infer data dependencies and enforce value visibility | 02 | W01-T04, W01-T05, W02-T02 | [ ] |
 | W02-T08 | Implement artifact-store contract and Hadron adapter | 02 | W02-T01, W02-T04, W02-T06 | [ ] |
 | W03-T01 | Implement node lifecycle state machine | 03 | W02-T04 | [ ] |
 | W03-T02 | Implement durable ready queue and claims | 03 | W03-T01 | [ ] |
