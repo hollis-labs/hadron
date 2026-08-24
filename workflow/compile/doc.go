@@ -6,8 +6,9 @@
 // packages are forbidden.
 //
 // The source loader preserves YAML authoring shape and locations. Compilation
-// lowers that shape to an immutable ExecutionPlan, and validation checks
-// explicit graph structure plus caller-supplied step-kind, policy, and
-// definition seams. None of these phases executes expressions or starts
-// runtime work.
+// lowers that shape to an immutable ExecutionPlan. Value-dependency inference
+// parses structural expression references into data edges and a direct
+// invocation visibility plan. Validation checks graph structure plus
+// caller-supplied step-kind, policy, and definition seams. None of these phases
+// executes expressions or starts runtime work.
 package compile

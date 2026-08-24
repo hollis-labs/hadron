@@ -68,7 +68,7 @@ func TestExternalHostRunsAllSuites(t *testing.T) {
 	calls := 0
 	conformance.RunAll(t, conformance.EmbeddedFixtures(), fakeHost{calls: &calls})
 
-	const wantCalls = 12
+	const wantCalls = 17
 	if calls != wantCalls {
 		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
 	}
@@ -91,14 +91,22 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(fixtures) != 2 {
-				t.Fatalf("fixture count = %d, want 2", len(fixtures))
+			wantCount := 2
+			if set == conformance.GraphValidationFixtures {
+				wantCount = 7
 			}
-			if fixtures[0].Name != "minimal-fail" || fixtures[0].Expectation != conformance.ExpectFail {
-				t.Fatalf("first fixture = %#v, want stable fail fixture", fixtures[0])
+			if len(fixtures) != wantCount {
+				t.Fatalf("fixture count = %d, want %d", len(fixtures), wantCount)
 			}
-			if fixtures[1].Name != "minimal-pass" || fixtures[1].Expectation != conformance.ExpectPass {
-				t.Fatalf("second fixture = %#v, want stable pass fixture", fixtures[1])
+			byName := make(map[string]conformance.Fixture, len(fixtures))
+			for _, fixture := range fixtures {
+				byName[fixture.Name] = fixture
+			}
+			if fixture := byName["minimal-fail"]; fixture.Expectation != conformance.ExpectFail {
+				t.Fatalf("minimal-fail fixture = %#v, want stable fail fixture", fixture)
+			}
+			if fixture := byName["minimal-pass"]; fixture.Expectation != conformance.ExpectPass {
+				t.Fatalf("minimal-pass fixture = %#v, want stable pass fixture", fixture)
 			}
 		})
 	}

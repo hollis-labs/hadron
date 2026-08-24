@@ -345,6 +345,49 @@ func TestParseReferencesReturnsStableStructuralReferences(t *testing.T) {
 	}
 }
 
+func TestParseInterpolationReferencesReturnsOnlyExpressionReferences(t *testing.T) {
+	t.Parallel()
+
+	source := &graph.SourceRef{Format: graph.SourceWorkflow, Locator: "workflow.yaml", StartLine: 9}
+	references, err := ParseInterpolationReferences(
+		`literal steps.hidden {{ steps.fetch.outputs.value }} / {{ inputs.name }} / {{ steps.fetch.status }}`,
+		source,
+	)
+	if err != nil {
+		t.Fatalf("ParseInterpolationReferences failed: %v", err)
+	}
+	want := []Reference{
+		{Root: "inputs", Path: []string{"name"}},
+		{Root: "steps", Path: []string{"fetch", "outputs", "value"}},
+		{Root: "steps", Path: []string{"fetch", "status"}},
+	}
+	if !reflect.DeepEqual(references, want) {
+		t.Fatalf("references = %#v, want %#v", references, want)
+	}
+
+	_, err = ParseInterpolationReferences("{{ steps.fetch.outputs.value", source)
+	expressionErr := requireExpressionError(t, err, CodeInterpolation)
+	if !reflect.DeepEqual(expressionErr.Diagnostic.Source, source) {
+		t.Fatalf("source = %#v, want %#v", expressionErr.Diagnostic.Source, source)
+	}
+}
+
+func TestParseReferencesDoesNotReportDynamicRootAsStaticProducer(t *testing.T) {
+	t.Parallel()
+
+	references, err := ParseReferences(graph.Expression{Text: "steps[run.step_id].status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Reference{
+		{Root: "run", Path: []string{"step_id"}},
+		{Root: "steps", Path: []string{"status"}, Dynamic: true},
+	}
+	if !reflect.DeepEqual(references, want) {
+		t.Fatalf("references = %#v, want %#v", references, want)
+	}
+}
+
 func TestExpressionProgramCacheIsPolicyAndShapeSafeUnderConcurrency(t *testing.T) {
 	t.Parallel()
 

@@ -126,8 +126,8 @@ func (v *validator) validateCycles(known map[string]int, arcs []structuralArc) {
 				v.add(
 					CodeGraphCycle,
 					arc.source,
-					"explicit dependency cycle: "+strings.Join(cycle, " -> "),
-					"Remove or redirect one explicit need or edge so the graph is acyclic.",
+					"dependency cycle: "+strings.Join(cycle, " -> "),
+					"Remove or redirect one need, explicit edge, or inferred expression reference so the graph is acyclic.",
 					relatedSource("cycle returns to this node", v.nodeSource(firstNode))...,
 				)
 			}

@@ -47,7 +47,43 @@ func ParseReferences(expression graph.Expression) ([]Reference, error) {
 
 	references := make([]Reference, 0, len(collector.references))
 	for _, reference := range collector.references {
+		references = append(references, reference)
+	}
+	return stableReferences(references), nil
+}
+
+// ParseInterpolationReferences reports structural references from every raw
+// expression segment in an interpolation template. Literal segments are not
+// parsed and no expression is evaluated.
+func ParseInterpolationReferences(template string, source *graph.SourceRef) ([]Reference, error) {
+	segments, err := parseInterpolation(template)
+	if err != nil {
+		return nil, expressionError(CodeInterpolation, "string interpolation is malformed", source, err)
+	}
+
+	var references []Reference
+	for _, segment := range segments {
+		if !segment.expression {
+			continue
+		}
+		parsed, err := ParseReferences(graph.Expression{Text: segment.text, Source: cloneSourceRef(source)})
+		if err != nil {
+			return nil, err
+		}
+		references = append(references, parsed...)
+	}
+	return stableReferences(references), nil
+}
+
+func stableReferences(references []Reference) []Reference {
+	unique := make(map[string]Reference, len(references))
+	for _, reference := range references {
 		reference.Path = append([]string(nil), reference.Path...)
+		key := fmt.Sprintf("%s\x00%s\x00%t", reference.Root, strings.Join(reference.Path, "\x00"), reference.Dynamic)
+		unique[key] = reference
+	}
+	references = references[:0]
+	for _, reference := range unique {
 		references = append(references, reference)
 	}
 	sort.Slice(references, func(i, j int) bool {
@@ -60,7 +96,7 @@ func ParseReferences(expression graph.Expression) ([]Reference, error) {
 		}
 		return !references[i].Dynamic && references[j].Dynamic
 	})
-	return removeReferencePrefixes(references), nil
+	return removeReferencePrefixes(references)
 }
 
 type referenceCollector struct {
@@ -106,7 +142,17 @@ func removeReferencePrefixes(references []Reference) []Reference {
 	for i, candidate := range references {
 		prefix := false
 		for j, other := range references {
-			if i == j || candidate.Root != other.Root || candidate.Dynamic != other.Dynamic || len(candidate.Path) >= len(other.Path) {
+			if i == j || candidate.Root != other.Root {
+				continue
+			}
+			// AST walks encounter the root identifier separately from a computed
+			// member such as steps[run.step_id].status. The root is structural
+			// scaffolding in that case, not an independent whole-map reference.
+			if len(candidate.Path) == 0 && other.Dynamic {
+				prefix = true
+				break
+			}
+			if candidate.Dynamic != other.Dynamic || len(candidate.Path) >= len(other.Path) {
 				continue
 			}
 			if pathPrefix(candidate.Path, other.Path) {

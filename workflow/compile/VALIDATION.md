@@ -30,3 +30,37 @@ Structural validation consumes only explicit `needs` and normalized `edges`.
 It never parses or executes expressions, infers dependencies from `steps.*`
 references, or enforces output visibility. Those typed-reference rules belong
 to the value-binding pass.
+
+## Value dependency inference
+
+`InferValueDependencies` is the separate value-binding pass. It clones a
+compiled plan, parses typed expression and interpolation carriers, adds stable
+`data` edges, re-runs only topology and node-shape validation, and recomputes
+the graph and plan digests. Existing `needs` and edges are preserved. A
+control and data edge may share endpoints; only duplicate data edges are
+coalesced.
+
+The returned `ValueVisibilityPlan` contains direct explicit and inferred
+producers, never transitive or merely completed nodes. `ScopeNodeContext`
+filters an available `values.ExpressionContext` to that set and preserves the
+caller's base expression policy. Fan-out `item` and `index` survive only for a
+fan-out node invocation; they are unavailable while `for_each.items` is being
+selected.
+
+Transform config is the one core node config whose string leaves are defined
+as expressions. Verification config remains adapter-opaque. A verifier kind
+must supply a `VerificationExpressionExtractor` to expose typed expressions;
+otherwise non-empty config is retained as an `opaque_verification` deferred
+dependency. Core never guesses by scanning arbitrary verifier strings. Because
+Graph config has only a carrier-level source, transform and verifier findings
+use that nearest honest carrier plus a deterministic semantic surface path.
+
+Static `steps.<id>` references add data edges. Computed `steps[...]` lookups and
+root-only `steps` map access do not guess producers; they are deferred and at
+runtime may observe only steps already present in the direct visibility scope.
+Conditional, branch-selected, and fan-out producers also carry deferred
+availability metadata so absence is handled as a structured runtime value
+failure rather than silently dropping the reference. Workflow outputs may read
+any statically named producer without adding execution edges. Activation
+expressions run before node results exist and therefore reject every `steps`
+reference.
