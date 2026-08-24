@@ -130,9 +130,13 @@ Validate the install:
 
 ```sh
 hadron daemon
-hadron validate examples/hello-hadron.yaml
-hadron run examples/hello-hadron.yaml
+hadron validate examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
+hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
 ```
+
+The blueprint above is an archived legacy reference used only to smoke-test the
+current runtime. It is not graph-native authoring guidance; new examples will
+live under `examples/workflow/`.
 
 ## Daemon And MCP Modes
 

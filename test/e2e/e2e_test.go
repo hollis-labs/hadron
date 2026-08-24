@@ -133,10 +133,10 @@ func hadron(args ...string) (string, int) {
 	return string(out), code
 }
 
-// examplesDir returns the absolute path to the examples directory.
-func examplesDir() string {
+// legacyExamplesDir returns the absolute path to archived legacy reference inputs.
+func legacyExamplesDir() string {
 	_, filename, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(filename), "../../examples")
+	return filepath.Join(filepath.Dir(filename), "../../examples/archive/legacy-blueprints-pipelines")
 }
 
 // ── test cases ────────────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ func TestHealthCheck(t *testing.T) {
 }
 
 func TestRunHelloHadron(t *testing.T) {
-	bp := filepath.Join(examplesDir(), "hello-hadron.yaml")
+	bp := filepath.Join(legacyExamplesDir(), "hello-hadron.yaml")
 	if _, err := os.Stat(bp); err != nil {
 		t.Skipf("hello-hadron.yaml not found: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestRunHelloHadron(t *testing.T) {
 }
 
 func TestValidateValidBlueprint(t *testing.T) {
-	bp := filepath.Join(examplesDir(), "hello-hadron.yaml")
+	bp := filepath.Join(legacyExamplesDir(), "hello-hadron.yaml")
 	if _, err := os.Stat(bp); err != nil {
 		t.Skipf("hello-hadron.yaml not found: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestValidateInvalidBlueprint(t *testing.T) {
 }
 
 func TestBlueprintLint(t *testing.T) {
-	out, code := hadron("lint", examplesDir())
+	out, code := hadron("lint", legacyExamplesDir())
 	if code != 0 {
 		t.Fatalf("hadron lint exited %d: %s", code, out)
 	}
@@ -204,7 +204,7 @@ func TestBlueprintLint(t *testing.T) {
 func TestScheduleLifecycle(t *testing.T) {
 	// Create schedule.
 	out, code := hadron("schedule", "create",
-		"--blueprint", "examples/hello-hadron.yaml",
+		"--blueprint", filepath.Join(legacyExamplesDir(), "hello-hadron.yaml"),
 		"--cron", "0 * * * *",
 		"--name", "e2e-sched",
 	)
@@ -252,7 +252,7 @@ func TestWorkspaceCreate(t *testing.T) {
 }
 
 func TestRunWithInputs(t *testing.T) {
-	bp := filepath.Join(examplesDir(), "parameterized.yaml")
+	bp := filepath.Join(legacyExamplesDir(), "parameterized.yaml")
 	if _, err := os.Stat(bp); err != nil {
 		t.Skipf("parameterized.yaml not found: %v", err)
 	}

@@ -3,6 +3,10 @@
 This page shows the kinds of workflows Hadron is already good at during the
 public beta period.
 
+The blueprint and pipeline material below documents the current legacy runtime.
+Its files are archived rewrite references, not preferred future authoring
+formats. Graph-native examples will live under `examples/workflow/`.
+
 ## 1. Local Developer Automation
 
 Use Hadron when you want repeatable local workflows with validation and an
@@ -15,11 +19,11 @@ Examples:
 - scaffold or patch project files
 - standardize recurring setup tasks for a team
 
-Good starting examples:
+Archived reference examples:
 
-- `examples/hello-hadron.yaml`
-- `examples/dev-cleanup.yaml`
-- `examples/hooks-demo.yaml`
+- `examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml`
+- `examples/archive/legacy-blueprints-pipelines/dev-cleanup.yaml`
+- `examples/archive/legacy-blueprints-pipelines/hooks-demo.yaml`
 
 ## 2. Scheduled Housekeeping
 
@@ -50,9 +54,9 @@ Examples:
 - collect -> analyze -> report
 - stage a deploy, then run post-checks
 
-Starting point:
+Archived reference:
 
-- `examples/pipeline-demo/`
+- `examples/archive/legacy-blueprints-pipelines/pipeline-demo/`
 
 ## 4. Agent-Driven Workflow Execution
 
@@ -87,10 +91,10 @@ Examples:
 - send or wait on a local message thread
 - pause for a human approval step before continuing
 
-Starting examples:
+Archived reference examples:
 
-- `examples/agentic-message-wait-local.yaml`
-- `examples/agentic-launch-and-wait.yaml`
+- `examples/archive/legacy-blueprints-pipelines/agentic-message-wait-local.yaml`
+- `examples/archive/legacy-blueprints-pipelines/agentic-launch-and-wait.yaml`
 
 Reference:
 

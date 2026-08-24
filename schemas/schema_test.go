@@ -140,12 +140,12 @@ func TestBlueprintExamplesMatchSchema(t *testing.T) {
 	schemaPath := filepath.Join(schemaDir(t), "blueprint-v0.4.schema.json")
 	sch := loadSchema(t, schemaPath)
 
-	// Collect blueprint YAML files from examples/ and testdata/blueprints/
+	// Collect blueprint YAML files from the legacy archive and testdata/blueprints/.
 	var blueprintFiles []string
 
-	// examples/ — skip pipeline files and pipeline sub-directories' pipeline.yaml
-	examplesDir := filepath.Join(root, "examples")
-	for _, f := range collectYAMLFiles(t, examplesDir) {
+	// Legacy archive — skip pipeline files and pipeline sub-directories' pipeline.yaml.
+	legacyExamplesDir := filepath.Join(root, "examples", "archive", "legacy-blueprints-pipelines")
+	for _, f := range collectYAMLFiles(t, legacyExamplesDir) {
 		if isPipelineFile(t, f) {
 			continue
 		}
@@ -176,12 +176,12 @@ func TestPipelineExamplesMatchSchema(t *testing.T) {
 	schemaPath := filepath.Join(schemaDir(t), "pipeline-v2.schema.json")
 	sch := loadSchema(t, schemaPath)
 
-	// Collect pipeline YAML files from examples/ and testdata/pipelines/
+	// Collect pipeline YAML files from the legacy archive and testdata/pipelines/.
 	var pipelineFiles []string
 
-	// examples/ — only pipeline files
-	examplesDir := filepath.Join(root, "examples")
-	for _, f := range collectYAMLFiles(t, examplesDir) {
+	// Legacy archive — only pipeline files.
+	legacyExamplesDir := filepath.Join(root, "examples", "archive", "legacy-blueprints-pipelines")
+	for _, f := range collectYAMLFiles(t, legacyExamplesDir) {
 		if isPipelineFile(t, f) {
 			pipelineFiles = append(pipelineFiles, f)
 		}

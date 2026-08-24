@@ -338,11 +338,11 @@ stages:
 
 func TestExamplesNoErrors(t *testing.T) {
 	examples := []string{
-		"../../examples/hello-hadron.yaml",
-		"../../examples/hooks-demo.yaml",
-		"../../examples/dev-cleanup.yaml",
-		"../../examples/parameterized.yaml",
-		"../../examples/laravel-app.yaml",
+		"../../examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml",
+		"../../examples/archive/legacy-blueprints-pipelines/hooks-demo.yaml",
+		"../../examples/archive/legacy-blueprints-pipelines/dev-cleanup.yaml",
+		"../../examples/archive/legacy-blueprints-pipelines/parameterized.yaml",
+		"../../examples/archive/legacy-blueprints-pipelines/laravel-app.yaml",
 	}
 
 	for _, path := range examples {
@@ -368,7 +368,7 @@ func TestExamplesNoErrors(t *testing.T) {
 
 func TestExamplePipelinesNoErrors(t *testing.T) {
 	pipelines := []string{
-		"../../examples/pipeline-v2-dag/pipeline.yaml",
+		"../../examples/archive/legacy-blueprints-pipelines/pipeline-v2-dag/pipeline.yaml",
 	}
 
 	for _, path := range pipelines {

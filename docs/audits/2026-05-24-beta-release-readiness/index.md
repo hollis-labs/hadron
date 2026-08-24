@@ -22,7 +22,9 @@ This pass fixes those items directly.
 
 - example blueprints now include explicit `timeout_seconds` where needed
 - example metadata warnings were removed
-- `hadron lint examples/` is expected to pass cleanly
+- the then-active `hadron lint examples/` check was expected to pass cleanly;
+  those inputs are now historical references under
+  `examples/archive/legacy-blueprints-pipelines/`
 - `make e2e` is unblocked by example lint noise
 - `lefthook` now targets the intended Go package set instead of raw `./...`
 - GitHub Actions CI now runs build, Go tests, frontend tests, typecheck, and e2e

@@ -298,9 +298,9 @@ func TestNilBlueprint(t *testing.T) {
 	}
 }
 
-// TestParameterizedBlueprint tests against the actual parameterized.yaml example.
+// TestParameterizedBlueprint tests against the archived parameterized.yaml reference fixture.
 func TestParameterizedBlueprint(t *testing.T) {
-	bp, err := blueprint.ParseFile("../../examples/parameterized.yaml")
+	bp, err := blueprint.ParseFile("../../examples/archive/legacy-blueprints-pipelines/parameterized.yaml")
 	if err != nil {
 		t.Skipf("could not load parameterized.yaml: %v", err)
 	}

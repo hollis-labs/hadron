@@ -221,10 +221,10 @@ func TestSkillFromBlueprint_NoInputs(t *testing.T) {
 // ── FromDirectory tests ───────────────────────────────────────────────────────
 
 func TestFromDirectory_WithExamples(t *testing.T) {
-	// Use the project's examples/ directory which contains real blueprints
-	examplesDir := filepath.Join("..", "..", "examples")
+	// Use the archived legacy examples as reference fixtures for blueprint behavior.
+	examplesDir := filepath.Join("..", "..", "examples", "archive", "legacy-blueprints-pipelines")
 	if _, err := os.Stat(examplesDir); os.IsNotExist(err) {
-		t.Skip("examples/ directory not found")
+		t.Skip("archived legacy examples directory not found")
 	}
 
 	card, err := FromDirectory(examplesDir, "http://localhost:9999")
@@ -238,7 +238,7 @@ func TestFromDirectory_WithExamples(t *testing.T) {
 		t.Fatalf("expected URL http://localhost:9999, got %q", card.URL)
 	}
 	if len(card.Skills) == 0 {
-		t.Fatal("expected at least one skill from examples/")
+		t.Fatal("expected at least one skill from archived legacy examples")
 	}
 
 	// Verify it produces valid JSON

@@ -8,6 +8,11 @@ product, a survey of prior art, the target shape of the engine, the decisions
 made in this session, and the open questions for the design session. This is
 not an implementation plan and does not define phases or estimates.
 
+This exploration predates the accepted graph-native source decision. Legacy
+examples cited here now live under
+`examples/archive/legacy-blueprints-pipelines/` and remain historical evidence,
+not authoring guidance or compatibility commitments.
+
 The direction document says what Hadron must *not* own. This document says
 what Hadron *can become* inside those boundaries. Where the two appear to
 conflict, the direction document's ownership rules win; nothing here requires
@@ -183,7 +188,8 @@ and no values.
   `AgentLauncher.LaunchAgent` and **returns immediately** with `session_id`,
   `mailbox`, and handles. It is fire-and-forget; a result is obtained by
   pairing it with a `message_wait` on the mailbox with a shared
-  `correlation_id` (`examples/agentic-launch-and-wait.yaml`).
+  `correlation_id`
+  (`examples/archive/legacy-blueprints-pipelines/agentic-launch-and-wait.yaml`).
 - `agentsubstrate.Launcher.LaunchAgent` (`launcher.go:89-178`) resolves a
   provider/runtime binding through agentkit (`runtimebind.Resolve`), builds a
   CLI adapter, plants a boot directory, starts an `agentsessions` session,
@@ -1085,7 +1091,8 @@ Hadron (`apps/hadron`):
 - `internal/mcpadapter/adapter.go` — `New` `:154`, `sessionID` `:172`;
   `server_surface.go:119-121` annotations; `tools.go:1262,1322` `created_by`
 - `internal/agentcard/agentcard.go:78` — `SkillFromBlueprint`
-- `examples/agentic-launch-and-wait.yaml`, `examples/pipeline-v2-dag/pipeline.yaml`
+- `examples/archive/legacy-blueprints-pipelines/agentic-launch-and-wait.yaml`,
+  `examples/archive/legacy-blueprints-pipelines/pipeline-v2-dag/pipeline.yaml`
 
 Nanite (`apps/nanite`):
 
@@ -1102,8 +1109,11 @@ Nanite (`apps/nanite`):
 
 ## Appendix B — Existing example rewritten in the target form
 
-`examples/agentic-launch-and-wait.yaml` today pairs `agent_launch` with a
-`message_wait` and a hand-maintained correlation ID. In the target form:
+The archived legacy input at
+`examples/archive/legacy-blueprints-pipelines/agentic-launch-and-wait.yaml`
+pairs `agent_launch` with a `message_wait` and a hand-maintained correlation ID.
+The following pre-design sketch is retained as exploration history, not current
+source-format guidance:
 
 ```yaml
 blueprint:

@@ -222,7 +222,7 @@ Source maps allow a runtime error to say:
 
 ```text
 node deploy input build_version references missing output build.version
-source: examples/pipeline-v2-dag/pipeline.yaml:62
+source: examples/archive/legacy-blueprints-pipelines/pipeline-v2-dag/pipeline.yaml:62
 ```
 
 instead of exposing only a compiled node ID.

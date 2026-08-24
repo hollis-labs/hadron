@@ -119,9 +119,12 @@ These are optional convenience surfaces for MCP clients that understand prompts/
 
 Expected call path: `hadron_blueprint_broker` or `hadron_blueprint_discover`.
 
-> "Inspect the schema for `examples/parameterized.yaml` and then run it with reasonable demo inputs."
+> "Inspect the schema for the archived legacy input at `examples/archive/legacy-blueprints-pipelines/parameterized.yaml` and then run it with reasonable demo inputs."
 
 Expected call path: `hadron_blueprint_schema` → `hadron_run_enqueue`.
+
+This prompt exercises the current legacy MCP surface; the archived file is a
+rewrite reference, not a future source-format commitment.
 
 > "This run failed. Use Hadron to explain which step failed and why."
 

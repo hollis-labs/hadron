@@ -64,6 +64,10 @@ artifacts, and first-time setup details.
 
 ## Quick Start
 
+The commands below exercise the currently implemented legacy runtime with
+archived reference inputs. They are smoke tests, not graph-native authoring
+guidance; target-format examples will live under `examples/workflow/`.
+
 ```sh
 # Start the daemon
 hadrond serve
@@ -71,23 +75,23 @@ hadrond serve
 # Check daemon status
 hadron daemon
 
-# Run your first blueprint
-hadron run examples/hello-hadron.yaml
+# Run an archived legacy blueprint
+hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
 
-# Validate a blueprint
-hadron validate examples/parameterized.yaml
+# Validate an archived legacy blueprint
+hadron validate examples/archive/legacy-blueprints-pipelines/parameterized.yaml
 
-# Lint a directory of blueprints
-hadron lint examples/
+# Lint the archived legacy inputs
+hadron lint examples/archive/legacy-blueprints-pipelines/
 
 # Schedule a blueprint
 hadron schedule create \
-  --blueprint examples/hello-hadron.yaml \
+  --blueprint examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml \
   --cron "* * * * *" \
   --name hello-every-minute
 
 # Inspect a blueprint locally
-hadron blueprint show examples/parameterized.yaml
+hadron blueprint show examples/archive/legacy-blueprints-pipelines/parameterized.yaml
 ```
 
 ---
@@ -124,18 +128,21 @@ core run/schedule/pipeline controls.
 
 ---
 
-## Examples
+## Archived Legacy Examples
+
+These files preserve beta-era blueprint and pipeline behavior for reference and
+selective rewriting. They are not the preferred future authoring format.
 
 | File | What it demonstrates |
 |---|---|
-| `examples/hello-hadron.yaml` | Minimal blueprint |
-| `examples/parameterized.yaml` | All input types (string, number, boolean, array, enum) |
-| `examples/dev-cleanup.yaml` | Conditional tasks, `continue_on_error`, env vars |
-| `examples/hooks-demo.yaml` | Blueprint and per-task lifecycle hooks |
-| `examples/laravel-app.yaml` | Realistic multi-section project scaffold |
-| `examples/agentic-message-wait-local.yaml` | Runnable local mailbox wait with self-targeted MCP message send |
-| `examples/agentic-launch-and-wait.yaml` | Local runtime launch followed by correlated mailbox wait |
-| `examples/pipeline-demo/` | Multi-blueprint pipeline |
+| `examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml` | Minimal blueprint |
+| `examples/archive/legacy-blueprints-pipelines/parameterized.yaml` | All input types (string, number, boolean, array, enum) |
+| `examples/archive/legacy-blueprints-pipelines/dev-cleanup.yaml` | Conditional tasks, `continue_on_error`, env vars |
+| `examples/archive/legacy-blueprints-pipelines/hooks-demo.yaml` | Blueprint and per-task lifecycle hooks |
+| `examples/archive/legacy-blueprints-pipelines/laravel-app.yaml` | Realistic multi-section project scaffold |
+| `examples/archive/legacy-blueprints-pipelines/agentic-message-wait-local.yaml` | Runnable local mailbox wait with self-targeted MCP message send |
+| `examples/archive/legacy-blueprints-pipelines/agentic-launch-and-wait.yaml` | Local runtime launch followed by correlated mailbox wait |
+| `examples/archive/legacy-blueprints-pipelines/pipeline-demo/` | Multi-blueprint pipeline |
 
 ---
 

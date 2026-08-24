@@ -57,12 +57,16 @@ In a second shell, confirm the daemon is reachable:
 hadron daemon
 ```
 
-## 3. Run A Blueprint
+## 3. Smoke-Test The Legacy Blueprint Runtime
+
+The archived inputs in this section verify the currently implemented runtime.
+They are reference material for selective rewrites, not the preferred future
+authoring format. Graph-native examples will live under `examples/workflow/`.
 
 Start with the smallest example:
 
 ```sh
-hadron run examples/hello-hadron.yaml
+hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
 ```
 
 Typical output:
@@ -78,14 +82,14 @@ run completed successfully
 Validate a blueprint without running it:
 
 ```sh
-hadron validate examples/hello-hadron.yaml
+hadron validate examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
 ```
 
 Inspect a parameterized blueprint:
 
 ```sh
-hadron blueprint show examples/parameterized.yaml
-hadron run examples/parameterized.yaml --input app_name=demo --input worker_count=4
+hadron blueprint show examples/archive/legacy-blueprints-pipelines/parameterized.yaml
+hadron run examples/archive/legacy-blueprints-pipelines/parameterized.yaml --input app_name=demo --input worker_count=4
 ```
 
 ## 4. Create A Schedule
@@ -94,7 +98,7 @@ Schedule the hello-world blueprint to run every minute:
 
 ```sh
 hadron schedule create \
-  --blueprint examples/hello-hadron.yaml \
+  --blueprint examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml \
   --cron "* * * * *" \
   --name hello-every-minute
 ```

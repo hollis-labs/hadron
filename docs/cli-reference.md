@@ -2,6 +2,10 @@
 
 The `hadron` CLI communicates with a running `hadrond` daemon over HTTP.
 
+This page documents the currently implemented legacy blueprint/pipeline CLI.
+Commands that need sample input use archived reference files; those files are
+not graph-native authoring guidance or public source-format commitments.
+
 ## Typical Flow
 
 Most users only need four commands to get started:
@@ -9,8 +13,8 @@ Most users only need four commands to get started:
 ```sh
 hadrond serve
 hadron daemon
-hadron validate examples/hello-hadron.yaml
-hadron run examples/hello-hadron.yaml
+hadron validate examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
+hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
 ```
 
 Use `hadron blueprint ...` for local file inspection without a running daemon.
@@ -40,9 +44,9 @@ hadron run <blueprint-path> [flags]
 **Examples:**
 
 ```sh
-hadron run examples/hello-hadron.yaml
-hadron run examples/parameterized.yaml --input app_name=myapp --input worker_count=4
-hadron run examples/laravel-app.yaml --workspace production --dry-run
+hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
+hadron run examples/archive/legacy-blueprints-pipelines/parameterized.yaml --input app_name=myapp --input worker_count=4
+hadron run examples/archive/legacy-blueprints-pipelines/laravel-app.yaml --workspace production --dry-run
 ```
 
 Use this when:
@@ -65,7 +69,7 @@ Exits 0 if valid, 1 if invalid.
 **Example:**
 
 ```sh
-hadron validate examples/hello-hadron.yaml
+hadron validate examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
 # valid
 ```
 
@@ -95,9 +99,9 @@ Exits 0 if all valid, 1 if any invalid.
 **Examples:**
 
 ```sh
-hadron lint examples/
-hadron lint examples/ --json
-hadron lint examples/hello-hadron.yaml
+hadron lint examples/archive/legacy-blueprints-pipelines/
+hadron lint examples/archive/legacy-blueprints-pipelines/ --json
+hadron lint examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
 ```
 
 ---
@@ -123,9 +127,9 @@ Also normalises legacy field aliases:
 **Examples:**
 
 ```sh
-hadron fmt examples/hello-hadron.yaml              # print to stdout
-hadron fmt examples/hello-hadron.yaml --write      # rewrite in place
-hadron fmt examples/hello-hadron.yaml --check      # CI check
+hadron fmt examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml              # print to stdout
+hadron fmt examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml --write      # rewrite in place
+hadron fmt examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml --check      # CI check
 ```
 
 ---
@@ -185,7 +189,7 @@ hadron schedule create --blueprint <path> --cron <expr> [--name <name>] [--works
 
 ```sh
 hadron schedule create \
-  --blueprint examples/hello-hadron.yaml \
+  --blueprint examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml \
   --cron "0 9 * * 1-5" \
   --name weekday-morning
 ```

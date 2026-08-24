@@ -21,20 +21,21 @@ func setupTestRegistry(t *testing.T) (*Registry, func()) {
 	return reg, cleanup
 }
 
-func examplesDir(t *testing.T) string {
+func legacyExamplesDir(t *testing.T) string {
 	t.Helper()
-	// Walk up to find the project root containing examples/
+	// Walk up to find the project root containing the archived legacy examples.
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "examples")); err == nil {
-			return filepath.Join(dir, "examples")
+		archive := filepath.Join(dir, "examples", "archive", "legacy-blueprints-pipelines")
+		if _, err := os.Stat(archive); err == nil {
+			return archive
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Skip("cannot find examples/ directory")
+			t.Skip("cannot find archived legacy examples directory")
 		}
 		dir = parent
 	}
@@ -44,7 +45,7 @@ func TestIndex_AllBlueprints(t *testing.T) {
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
-	dir := examplesDir(t)
+	dir := legacyExamplesDir(t)
 	result, err := reg.Index(dir)
 	if err != nil {
 		t.Fatalf("index: %v", err)
@@ -64,7 +65,7 @@ func TestIndex_ReindexUnchanged(t *testing.T) {
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
-	dir := examplesDir(t)
+	dir := legacyExamplesDir(t)
 	_, err := reg.Index(dir)
 	if err != nil {
 		t.Fatalf("first index: %v", err)
@@ -152,7 +153,7 @@ func TestSearch_FindsLaravel(t *testing.T) {
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
-	dir := examplesDir(t)
+	dir := legacyExamplesDir(t)
 	_, err := reg.Index(dir)
 	if err != nil {
 		t.Fatalf("index: %v", err)
@@ -181,7 +182,7 @@ func TestSearch_Nonexistent(t *testing.T) {
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
-	dir := examplesDir(t)
+	dir := legacyExamplesDir(t)
 	_, err := reg.Index(dir)
 	if err != nil {
 		t.Fatalf("index: %v", err)
@@ -200,7 +201,7 @@ func TestResolve_ByName(t *testing.T) {
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
-	dir := examplesDir(t)
+	dir := legacyExamplesDir(t)
 	_, err := reg.Index(dir)
 	if err != nil {
 		t.Fatalf("index: %v", err)
@@ -271,7 +272,7 @@ func TestShow_ByName(t *testing.T) {
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
-	dir := examplesDir(t)
+	dir := legacyExamplesDir(t)
 	_, err := reg.Index(dir)
 	if err != nil {
 		t.Fatalf("index: %v", err)
