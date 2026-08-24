@@ -97,6 +97,9 @@ type ObservationSpec struct {
 type LifecycleSpec struct {
 	Prepare  bool `json:"prepare,omitempty"`
 	Finalize bool `json:"finalize,omitempty"`
+	// Service routes polling, heartbeat, and explicit stop through the durable
+	// ServiceController lane instead of the generic external-operation lane.
+	Service bool `json:"service,omitempty"`
 }
 
 // MemoizationSupport is an executor's immutable opt-in to result reuse.
@@ -146,6 +149,7 @@ type Invocation struct {
 	Inputs       values.ValueSet    `json:"inputs"`
 	Call         *CallInvocation    `json:"call,omitempty"`
 	Continuation *WaitContinuation  `json:"continuation,omitempty"`
+	Service      *ServiceBinding    `json:"service,omitempty"`
 	// Verification is the immutable graph modifier carried through durable
 	// external-operation recovery. Activity is a runtime-issued, process-local
 	// recorder; it is deliberately excluded from durable invocation JSON.

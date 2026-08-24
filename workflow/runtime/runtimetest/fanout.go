@@ -270,21 +270,30 @@ func (s *Store) enforceFanOutStartLocked(node workflowruntime.NodeInvocationSnap
 	}
 	parent := workflowruntime.NodeInvocationID{RunID: node.ID.RunID, NodeID: node.ID.NodeID}
 	fanOut, ok := s.fanOuts[parent]
-	if !ok || fanOut.MaxConcurrency == 0 {
+	if !ok {
 		return nil
 	}
 	member := false
 	active := 0
+	children := make([]workflowruntime.NodeInvocationSnapshot, 0, len(fanOut.Items))
 	for _, item := range fanOut.Items {
 		if item.Invocation == node.ID {
 			member = true
 		}
 		child, exists := s.nodes[item.Invocation]
+		if exists {
+			children = append(children, child)
+		}
 		if exists && item.Invocation != node.ID && child.LatestAttempt > 0 && !child.Status.Terminal() {
 			active++
 		}
 	}
-	if member && active >= fanOut.MaxConcurrency {
+	if allowed, err := workflowruntime.FanOutFailFastAdmissionAllowed(fanOut, children); err != nil {
+		return err
+	} else if member && !allowed {
+		return fmt.Errorf("%w: parent %s is fail-fast fenced", workflowruntime.ErrFanOutLimit, nodeIdentity(parent))
+	}
+	if fanOut.MaxConcurrency > 0 && member && active >= fanOut.MaxConcurrency {
 		return fmt.Errorf("%w: parent %s has %d active items", workflowruntime.ErrFanOutLimit, nodeIdentity(parent), active)
 	}
 	return nil
@@ -299,22 +308,32 @@ func (s *Store) fanOutClaimEligibleLocked(node workflowruntime.NodeInvocationSna
 	}
 	parent := workflowruntime.NodeInvocationID{RunID: node.ID.RunID, NodeID: node.ID.NodeID}
 	fanOut, ok := s.fanOuts[parent]
-	if !ok || fanOut.MaxConcurrency == 0 {
+	if !ok {
 		return true
 	}
 	member, occupied := false, 0
+	children := make([]workflowruntime.NodeInvocationSnapshot, 0, len(fanOut.Items))
 	for _, item := range fanOut.Items {
 		if item.Invocation == node.ID {
 			member = true
 			continue
 		}
 		child, exists := s.nodes[item.Invocation]
+		if exists {
+			children = append(children, child)
+		}
 		if !exists || child.Status.Terminal() {
 			continue
 		}
 		if child.LatestAttempt > 0 || child.Lease != nil && child.Lease.ExpiresAt.After(now) {
 			occupied++
 		}
+	}
+	if allowed, err := workflowruntime.FanOutFailFastAdmissionAllowed(fanOut, children); err != nil || member && !allowed {
+		return false
+	}
+	if fanOut.MaxConcurrency == 0 {
+		return true
 	}
 	return !member || occupied < fanOut.MaxConcurrency
 }

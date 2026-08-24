@@ -252,6 +252,76 @@ func TestFanOutClaimSlotsPersistAcrossWaitAndTypedItemsRecover(t *testing.T) {
 	}
 }
 
+func TestFanOutFailFastFencesAndCancelsUnstartedItems(t *testing.T) {
+	ctx := context.Background()
+	store := runtimetest.NewStore()
+	base := time.Date(2026, time.August, 24, 16, 30, 0, 0, time.UTC)
+	runID := workflowruntime.RunID("run-fanout-fail-fast")
+	parent := invocationID(runID, "matrix")
+	createRun(t, store, runID, base)
+	createNode(t, store, parent, workflowruntime.NodePending, 0, base)
+	coordinator := workflowruntime.FanOutCoordinator{Store: store}
+	expanded, err := coordinator.Expand(ctx, workflowruntime.FanOutExpandCommand{
+		Parent: parent, ExpectedParentGeneration: 1,
+		Spec: graph.ForEachSpec{Items: graph.Expression{Text: `[1, 2, 3]`}, MaxConcurrency: 1, FailFast: true},
+		At:   base.Add(time.Second),
+	})
+	if err != nil || !expanded.FanOut.FailFast || len(expanded.Children) != 3 {
+		t.Fatalf("Expand = %#v, %v", expanded, err)
+	}
+	first := expanded.Children[0]
+	claim := claimNode(t, store, first.ID, 0, "worker", "first", "fail-fast-first", base.Add(2*time.Second), base.Add(time.Minute))
+	claimed, _ := store.LoadNodeInvocation(ctx, first.ID)
+	started, err := store.StartNodeAttempt(ctx, workflowruntime.StartNodeAttemptRequest{
+		InvocationID: first.ID, ExpectedNodeGeneration: claimed.Generation, Claim: claim,
+		Executor: testExecutor(), Inputs: first.Inputs, At: base.Add(3 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := workflowruntime.Failure{Code: "matrix_failed", Message: "matrix item failed"}
+	if _, finishErr := store.FinishNodeAttempt(ctx, workflowruntime.FinishNodeAttemptRequest{
+		InvocationID: first.ID, AttemptNumber: started.Attempt.ID.Number,
+		ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation,
+		Claim: claim, AttemptStatus: workflowruntime.NodeFailed, NextNodeStatus: workflowruntime.NodeFailed,
+		Failure: &failure, At: base.Add(4 * time.Second),
+	}); finishErr != nil {
+		t.Fatal(finishErr)
+	}
+	second := expanded.Children[1]
+	denied, err := store.ClaimNode(ctx, workflowruntime.ClaimNodeRequest{
+		InvocationID: second.ID, ExpectedClaimGeneration: 0, Owner: "worker", Token: "second",
+		IdempotencyKey: "fail-fast-second", Now: base.Add(5 * time.Second), LeaseUntil: base.Add(time.Minute),
+	})
+	if err != nil || denied.Acquired {
+		t.Fatalf("claim after fail-fast failure = %#v, %v", denied, err)
+	}
+	registry := recoveryRegistry(t, graph.EffectSet{graph.EffectCompute}, graph.IdempotencyIntrinsic, stepkind.RetrySafe)
+	recovery := workflowruntime.RecoveryCoordinator{
+		Store: store, Recovery: store, Inputs: store, Control: store,
+		Plans:    staticRecoveryPlans{graph: graph.Graph{ID: "plan", Version: "v1", Nodes: []graph.Node{{ID: "matrix", Kind: "safe", KindVersion: "v1", ForEach: &graph.ForEachSpec{Items: graph.Expression{Text: `[1,2,3]`}, FailFast: true}}}}},
+		Registry: registry,
+	}
+	recovered, err := recovery.Recover(ctx, workflowruntime.RecoveryRequest{Now: base.Add(6 * time.Second)})
+	if err != nil || len(recovered.FanOutCanceled) != 2 || len(recovered.FanOuts) != 1 || recovered.FanOuts[0].FanOut.Status != workflowruntime.FanOutFailed {
+		t.Fatalf("Recover fail-fast = %#v, %v", recovered, err)
+	}
+	for _, item := range expanded.Children[1:] {
+		node, loadErr := store.LoadNodeInvocation(ctx, item.ID)
+		if loadErr != nil || node.Status != workflowruntime.NodeCanceled || node.LatestAttempt != 0 {
+			t.Fatalf("unstarted item = %#v, %v", node, loadErr)
+		}
+	}
+	if replay, replayErr := recovery.Recover(ctx, workflowruntime.RecoveryRequest{Now: base.Add(7 * time.Second)}); replayErr != nil || len(replay.FanOutCanceled) != 0 || len(replay.FanOuts) != 0 {
+		t.Fatalf("Recover fail-fast replay = %#v, %v", replay, replayErr)
+	}
+	completed, err := store.LoadFanOut(ctx, parent)
+	items, itemsErr := store.LoadFanOutItemResults(ctx, parent)
+	if err != nil || itemsErr != nil || completed.Status != workflowruntime.FanOutFailed || len(items) != 3 {
+		t.Fatalf("durable fan-out = %#v items=%#v, %v/%v", completed, items, err, itemsErr)
+	}
+}
+
 func TestFanOutToleranceCountAndPercentageBoundaries(t *testing.T) {
 	for _, test := range []struct {
 		name     string

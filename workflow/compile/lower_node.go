@@ -1,6 +1,8 @@
 package compile
 
 import (
+	"bytes"
+	"encoding/json"
 	"strconv"
 
 	"github.com/hollis-labs/hadron/workflow/graph"
@@ -23,20 +25,24 @@ var executorSourceKinds = map[string]string{
 	"sleep":        "sleep",
 	"transform":    "transform",
 	"wait_for":     "wait_for",
+	"service":      "service",
 }
 
 var supportedNodeFields = []string{
 	"id", "name", "display_name", "kind", "kind_version", "needs", "ready_when",
-	"if", "for_each", "concurrency", "config", "with", "outputs", "effects", "retry",
+	"if", "for_each", "matrix", "join", "concurrency", "config", "with", "outputs", "effects", "retry",
 	"idempotency", "timeout", "catch", "finally", "switch", "call", "metadata",
 	"continue_on_error", "verify",
 	"agent_launch", "checkpoint", "cmd", "emit", "http", "http_call", "human_gate",
 	"llm", "mcp", "mcp_call", "message_wait", "script", "sleep", "transform", "wait_for",
+	"service",
 }
 
 func (l *lowerer) lowerNodes(node *yaml.Node, path []string, sourceMap *graph.SourceMap, forceFinally bool) ([]graph.Node, []graph.Edge) {
 	items := l.sequence(node, path)
 	nodes := make([]graph.Node, 0, len(items))
+	generatedIdentities := make(map[string]struct{})
+	seenIdentities := make(map[string]struct{})
 	var edges []graph.Edge
 	for i, item := range items {
 		itemPath := appendPath(path, strconv.Itoa(i))
@@ -44,12 +50,34 @@ func (l *lowerer) lowerNodes(node *yaml.Node, path []string, sourceMap *graph.So
 		if forceFinally && compiled.Finally == nil {
 			compiled.Finally = &graph.FinallySpec{}
 		}
+		normalizedID := graph.NormalizeID(compiled.ID)
+		if _, generated := generatedIdentities[normalizedID]; generated {
+			l.invalidShape(item, itemPath, "authored node identity collides with a generated service teardown")
+		}
+		seenIdentities[normalizedID] = struct{}{}
 		nodes = append(nodes, compiled)
+		if compiled.Service != nil && compiled.Service.TeardownOf == "" {
+			teardown := l.serviceTeardownNode(compiled)
+			teardownIdentity := graph.NormalizeID(teardown.ID)
+			if _, collision := seenIdentities[teardownIdentity]; collision {
+				l.invalidShape(item, appendPath(itemPath, "service"), "generated service teardown identity collides with an authored node")
+			}
+			seenIdentities[teardownIdentity] = struct{}{}
+			generatedIdentities[teardownIdentity] = struct{}{}
+			nodes = append(nodes, teardown)
+			if teardown.ID != "" {
+				sourceMap.Nodes[teardown.ID] = l.location(item, appendPath(itemPath, "service"))
+			}
+		}
 		edges = append(edges, nodeEdges...)
 		if compiled.ID != "" {
 			sourceMap.Nodes[compiled.ID] = l.location(item, itemPath)
 		}
 		for j, edge := range nodeEdges {
+			if edge.Source != nil {
+				sourceMap.Edges[EdgeSourceKey(edge.From, edge.To, edge.Kind)] = *edge.Source
+				continue
+			}
 			needPath := appendPath(appendPath(itemPath, "needs"), strconv.Itoa(j))
 			needNode, ok := l.source.Node(needPath...)
 			if !ok {
@@ -103,7 +131,11 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 	}
 	if len(executors) != 0 {
 		compiled.Kind = executorSourceKinds[executors[0].key.Value]
-		compiled.Config = l.executorConfig(executors[0].key.Value, executors[0].value, executors[0].path)
+		if executors[0].key.Value == "service" {
+			compiled.Config, compiled.Service = l.lowerService(executors[0].value, executors[0].path, compiled.ID)
+		} else {
+			compiled.Config = l.executorConfig(executors[0].key.Value, executors[0].value, executors[0].path)
+		}
 	} else {
 		kind, exists := fields["kind"]
 		if !exists {
@@ -120,6 +152,13 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 	if needs, exists := fields["needs"]; exists {
 		compiled.Needs, edges = l.lowerNeeds(needs.value, needs.path, compiled.ID)
 	}
+	if join, exists := fields["join"]; exists {
+		if _, hasNeeds := fields["needs"]; hasNeeds {
+			l.invalidShape(join.value, join.path, "join cannot be combined with needs")
+		} else {
+			compiled.Needs, edges = l.lowerJoin(join.value, join.path, compiled.ID)
+		}
+	}
 	if ready, exists := fields["ready_when"]; exists {
 		compiled.ReadyWhen = graph.ReadyRule(l.string(ready.value, ready.path))
 	}
@@ -130,11 +169,21 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 	if forEach, exists := fields["for_each"]; exists {
 		compiled.ForEach = l.lowerForEach(forEach.value, forEach.path)
 	}
+	if matrix, exists := fields["matrix"]; exists {
+		if _, hasForEach := fields["for_each"]; hasForEach {
+			l.invalidShape(matrix.value, matrix.path, "matrix cannot be combined with for_each")
+		} else {
+			compiled.ForEach = l.lowerMatrix(matrix.value, matrix.path)
+		}
+	}
 	if concurrency, exists := fields["concurrency"]; exists {
 		l.lowerConcurrency(concurrency.value, concurrency.path, &compiled)
 	}
 	if bindings, exists := fields["with"]; exists {
 		compiled.InputBindings = l.lowerBindings(bindings.value, bindings.path)
+	}
+	if len(executors) == 1 && (executors[0].key.Value == "checkpoint" || executors[0].key.Value == "human_gate") {
+		l.lowerOptionalGate(executors[0].value, executors[0].path, fields, &compiled)
 	}
 	if outputs, exists := fields["outputs"]; exists {
 		compiled.Outputs = l.lowerOutputs(outputs.value, outputs.path, nil, false)
@@ -153,6 +202,16 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 		compiled.Idempotency = l.lowerIdempotency(idempotency.value, idempotency.path)
 	} else {
 		compiled.Idempotency = retryIdempotency
+	}
+	if compiled.Service != nil {
+		if compiled.Idempotency == nil {
+			compiled.Idempotency = &graph.IdempotencySpec{Mode: graph.IdempotencyKeyed}
+		}
+		for _, modifier := range []string{"for_each", "matrix", "catch", "finally", "switch", "call"} {
+			if field, exists := fields[modifier]; exists {
+				l.invalidShape(field.value, field.path, "service does not support "+modifier+"; put control flow around dependent ordinary nodes")
+			}
+		}
 	}
 	if timeout, exists := fields["timeout"]; exists {
 		compiled.Timeout = l.lowerTimeout(timeout.value, timeout.path)
@@ -188,6 +247,124 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 		compiled.Metadata = l.metadata(metadata.value, metadata.path)
 	}
 	return compiled, edges
+}
+
+func (l *lowerer) lowerOptionalGate(node *yaml.Node, path []string, stepFields map[string]sourceField, compiled *graph.Node) {
+	fields := l.mapping(node, path, "prompt", "options", "decision_schema", "environment", "policy_subject", "correlation", "timeout", "optional", "blocking", "escalations", "trigger", "not_triggered", "default_decision")
+	optional, blocking := false, true
+	if field, ok := fields["optional"]; ok {
+		optional = l.boolean(field.value, field.path)
+	}
+	if field, ok := fields["blocking"]; ok {
+		blocking = l.boolean(field.value, field.path)
+	}
+	if !optional || blocking {
+		return
+	}
+	trigger, hasTrigger := fields["trigger"]
+	disposition, hasDisposition := fields["not_triggered"]
+	if !hasTrigger {
+		l.invalidShape(node, path, "optional non-blocking gate requires trigger")
+		return
+	}
+	if !hasDisposition {
+		l.invalidShape(node, path, "optional non-blocking gate requires not_triggered")
+		return
+	}
+	const triggerInput = "gate-trigger"
+	if _, collision := compiled.InputBindings[triggerInput]; collision {
+		l.invalidShape(trigger.value, trigger.path, "optional gate reserved binding gate-trigger conflicts with step.with")
+		return
+	}
+	if compiled.InputBindings == nil {
+		compiled.InputBindings = make(map[string]graph.Binding)
+	}
+	expression := l.expression(trigger.value, trigger.path)
+	ref := l.location(trigger.value, trigger.path)
+	compiled.InputBindings[triggerInput] = graph.Binding{Kind: graph.BindingExpression, Expression: &expression, Source: &ref}
+	dispositionValue := l.string(disposition.value, disposition.path)
+	if dispositionValue != "proceed" && dispositionValue != "skip" {
+		l.invalidShape(disposition.value, disposition.path, "not_triggered must be proceed or skip")
+	}
+	if dispositionValue == "proceed" {
+		if _, ok := fields["default_decision"]; !ok {
+			l.invalidShape(node, path, "not_triggered proceed requires default_decision")
+		}
+	} else {
+		if _, exists := fields["default_decision"]; exists {
+			l.invalidShape(fields["default_decision"].value, fields["default_decision"].path, "not_triggered skip cannot declare default_decision")
+		}
+		if existing, exists := stepFields["if"]; exists {
+			l.invalidShape(existing.value, existing.path, "not_triggered skip cannot be combined with step.if")
+		} else {
+			copyExpression := expression
+			compiled.If = &copyExpression
+		}
+	}
+	delete(compiled.Config, "trigger")
+	compiled.Config["trigger_input"] = triggerInput
+}
+
+func (l *lowerer) lowerService(node *yaml.Node, path []string, id string) (graph.Config, *graph.ServiceNodeSpec) {
+	fields := l.mapping(node, path, "provider", "config", "heartbeat_timeout", "ready_check")
+	provider, hasProvider := fields["provider"]
+	config, hasConfig := fields["config"]
+	if !hasProvider {
+		l.invalidShape(node, path, "service.provider is required")
+	}
+	if !hasConfig {
+		l.invalidShape(node, path, "service.config is required")
+	}
+	result := graph.Config{"provider": "", "config": map[string]any{}}
+	if hasProvider {
+		result["provider"] = l.string(provider.value, provider.path)
+	}
+	if hasConfig {
+		result["config"] = l.config(config.value, config.path)
+	}
+	teardownID := id + "-teardown"
+	spec := &graph.ServiceNodeSpec{TeardownNodes: []string{teardownID}}
+	if field, ok := fields["heartbeat_timeout"]; ok {
+		spec.HeartbeatTimeout = graph.Duration(l.string(field.value, field.path))
+	}
+	if field, ok := fields["ready_check"]; ok {
+		spec.ReadyCheck = l.lowerVerification(field.value, field.path)
+	}
+	return result, spec
+}
+
+func (l *lowerer) serviceTeardownNode(start graph.Node) graph.Node {
+	ref := start.Source
+	displayName := start.DisplayName
+	if displayName == "" {
+		displayName = start.ID
+	}
+	config, err := cloneConfigForLowering(start.Config)
+	if err != nil {
+		l.addDiagnostic(CodeInvalidWorkflowShape, nil, sourcePath(start.Source), "service configuration cannot be cloned for generated teardown", "Keep service configuration JSON-compatible.")
+		config = graph.Config{}
+	}
+	return graph.Node{
+		ID: start.ID + "-teardown", DisplayName: displayName + " teardown",
+		Kind: start.Kind, KindVersion: start.KindVersion, Config: config,
+		Effects:     append(graph.EffectSet(nil), start.Effects...),
+		Idempotency: &graph.IdempotencySpec{Mode: graph.IdempotencyKeyed},
+		Finally:     &graph.FinallySpec{}, Service: &graph.ServiceNodeSpec{TeardownOf: start.ID}, Source: ref,
+	}
+}
+
+func cloneConfigForLowering(input graph.Config) (graph.Config, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var result graph.Config
+	if err := decoder.Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (l *lowerer) lowerVerification(node *yaml.Node, path []string) *graph.VerificationSpec {
@@ -516,12 +693,16 @@ func (l *lowerer) lowerSwitch(node *yaml.Node, path []string) *graph.SwitchSpec 
 }
 
 func (l *lowerer) lowerCall(node *yaml.Node, path []string) *graph.CallSpec {
-	fields := l.mapping(node, path, "definition", "mode", "on_parent_close")
+	fields := l.mapping(node, path, "definition", "definition_input", "mode", "on_parent_close")
 	call := &graph.CallSpec{}
-	if definition, ok := fields["definition"]; ok {
+	definition, hasDefinition := fields["definition"]
+	definitionInput, hasDefinitionInput := fields["definition_input"]
+	if hasDefinition == hasDefinitionInput {
+		l.invalidShape(node, path, "call requires exactly one of definition or definition_input")
+	} else if hasDefinition {
 		call.Definition = l.lowerDefinition(definition.value, definition.path)
 	} else {
-		l.invalidShape(node, path, "call.definition is required")
+		call.DefinitionInput = l.normalizeID(definitionInput.value, definitionInput.path)
 	}
 	if mode, ok := fields["mode"]; ok {
 		call.Mode = graph.CallMode(l.string(mode.value, mode.path))

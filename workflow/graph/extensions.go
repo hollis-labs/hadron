@@ -75,7 +75,10 @@ type ServiceNodeSpec struct {
 	ReadyCheck       *VerificationSpec `json:"ready_check,omitempty" yaml:"ready_check,omitempty"`
 	HeartbeatTimeout Duration          `json:"heartbeat_timeout,omitempty" yaml:"heartbeat_timeout,omitempty"`
 	TeardownNodes    []string          `json:"teardown_nodes,omitempty" yaml:"teardown_nodes,omitempty"`
-	Extension        Extension         `json:"extension,omitempty" yaml:"extension,omitempty"`
+	// TeardownOf identifies the service-start node owned by this finally node.
+	// It is empty on a service start and required on generated teardown nodes.
+	TeardownOf string    `json:"teardown_of,omitempty" yaml:"teardown_of,omitempty"`
+	Extension  Extension `json:"extension,omitempty" yaml:"extension,omitempty"`
 }
 
 // CompensationSpec is intentionally opaque until the compensation ADR selects

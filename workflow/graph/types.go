@@ -132,11 +132,15 @@ type Binding struct {
 
 // ForEachSpec describes runtime fan-out while keeping the graph static.
 type ForEachSpec struct {
-	Items          Expression              `json:"items" yaml:"items"`
-	ItemName       string                  `json:"item_name,omitempty" yaml:"item_name,omitempty"`
-	IndexName      string                  `json:"index_name,omitempty" yaml:"index_name,omitempty"`
-	MaxConcurrency int                     `json:"max_concurrency,omitempty" yaml:"max_concurrency,omitempty"`
-	Tolerate       *ToleratedFailurePolicy `json:"tolerate,omitempty" yaml:"tolerate,omitempty"`
+	Items          Expression `json:"items" yaml:"items"`
+	ItemName       string     `json:"item_name,omitempty" yaml:"item_name,omitempty"`
+	IndexName      string     `json:"index_name,omitempty" yaml:"index_name,omitempty"`
+	MaxConcurrency int        `json:"max_concurrency,omitempty" yaml:"max_concurrency,omitempty"`
+	// FailFast prevents fan-out items that have not started from being admitted
+	// after the first non-tolerated terminal item failure. Already-running items
+	// still converge through their ordinary attempt lifecycle.
+	FailFast bool                    `json:"fail_fast,omitempty" yaml:"fail_fast,omitempty"`
+	Tolerate *ToleratedFailurePolicy `json:"tolerate,omitempty" yaml:"tolerate,omitempty"`
 }
 
 // ToleratedFailurePolicy permits an explicit count or percentage of fan-out
@@ -235,9 +239,13 @@ type DefinitionRef struct {
 
 // CallSpec invokes another workflow inline or as a separately identified run.
 type CallSpec struct {
-	Definition    DefinitionRef     `json:"definition" yaml:"definition"`
-	Mode          CallMode          `json:"mode" yaml:"mode"`
-	OnParentClose ParentClosePolicy `json:"on_parent_close,omitempty" yaml:"on_parent_close,omitempty"`
+	Definition DefinitionRef `json:"definition,omitempty" yaml:"definition,omitempty"`
+	// DefinitionInput names a typed invocation input containing an immutable,
+	// exact-digest DefinitionRef. It is mutually exclusive with Definition and
+	// is resolved by the runtime before the ordinary call adapter executes.
+	DefinitionInput string            `json:"definition_input,omitempty" yaml:"definition_input,omitempty"`
+	Mode            CallMode          `json:"mode" yaml:"mode"`
+	OnParentClose   ParentClosePolicy `json:"on_parent_close,omitempty" yaml:"on_parent_close,omitempty"`
 }
 
 // Provenance explains the authority and immutable origin of graph material

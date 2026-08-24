@@ -159,8 +159,11 @@ func (c Checkpoint) Validate() error {
 	if err := c.Behavior.Validate(); err != nil {
 		return err
 	}
-	if c.Behavior.Optional && skipCount != 1 {
+	if c.Behavior.Optional && c.Behavior.Blocking && skipCount != 1 {
 		return fmt.Errorf("an optional gate requires exactly one skip option")
+	}
+	if c.Behavior.Optional && !c.Behavior.Blocking && skipCount > 1 {
+		return fmt.Errorf("an optional non-blocking gate may declare at most one skip option")
 	}
 	if !c.Behavior.Optional && skipCount != 0 {
 		return fmt.Errorf("a required gate must not declare a skip option")

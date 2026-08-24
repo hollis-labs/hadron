@@ -178,6 +178,13 @@ func (s *WorkflowStateStore) StartNodeAttempt(ctx context.Context, request workf
 		if current.Status != workflowruntime.NodeReady {
 			return workflowNodeTransitionError(current, workflowruntime.NodeRunning, "new attempt requires ready node")
 		}
+		eligible, eligibilityErr := workflowFanOutClaimEligible(ctx, query, current, at)
+		if eligibilityErr != nil {
+			return eligibilityErr
+		}
+		if !eligible {
+			return workflowInvalid(workflowruntime.ErrFanOutLimit)
+		}
 		unfinished, attemptErr := unfinishedWorkflowAttempt(ctx, query, current)
 		if attemptErr != nil {
 			return attemptErr

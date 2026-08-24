@@ -37,6 +37,12 @@ func (t *callTraversal) walk(value graph.Graph, depth int, active map[string]*gr
 		if node.Kind != "call" || node.Call == nil {
 			continue
 		}
+		if node.Call.DefinitionInput != "" {
+			// Dynamic definitions are exact-digest runtime values. Their registrar
+			// validates the emitted graph before publication; the ordinary call
+			// adapter re-resolves and applies lineage policy at execution.
+			continue
+		}
 		callSource := node.Source
 		if callSource == nil {
 			if source, ok := value.SourceMap.Nodes[node.ID]; ok {

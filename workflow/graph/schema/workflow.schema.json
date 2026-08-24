@@ -131,6 +131,9 @@
         "definition": {
           "$ref": "#/$defs/DefinitionRef"
         },
+        "definition_input": {
+          "type": "string"
+        },
         "mode": {
           "$ref": "#/$defs/CallMode"
         },
@@ -139,7 +142,6 @@
         }
       },
       "required": [
-        "definition",
         "mode"
       ],
       "type": "object"
@@ -418,6 +420,9 @@
     "ForEachSpec": {
       "additionalProperties": false,
       "properties": {
+        "fail_fast": {
+          "type": "boolean"
+        },
         "index_name": {
           "type": "string"
         },
@@ -950,6 +955,9 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "teardown_of": {
+          "type": "string"
         }
       },
       "type": "object"

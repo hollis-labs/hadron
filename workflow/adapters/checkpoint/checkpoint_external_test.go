@@ -34,7 +34,7 @@ func TestRegisterCheckpointMetadataAndConfiguredResumeSchema(t *testing.T) {
 		t.Fatalf("checkpoint spec = %#v, %v", spec, err)
 	}
 	encoded, _ := json.Marshal(spec.OutputSchema)
-	if !strings.Contains(string(encoded), `"timed_out":{"const":false}`) {
+	if !strings.Contains(string(encoded), `"timed_out":{"const":false}`) || !strings.Contains(string(encoded), `"triggered":{"type":"boolean"}`) {
 		t.Fatalf("output schema claims an unreachable successful timeout: %s", encoded)
 	}
 
@@ -48,6 +48,62 @@ func TestRegisterCheckpointMetadataAndConfiguredResumeSchema(t *testing.T) {
 	}
 	if result.Wait.Record.ResumeSchema.Digest != expected.Digest || !reflect.DeepEqual(result.Wait.Record.ResumeSchema.Schema, expected.Schema) {
 		t.Fatalf("configured decision schema was not surfaced exactly: %#v / %#v", result.Wait.Record.ResumeSchema, expected)
+	}
+}
+
+func TestCheckpointOptionalNonBlockingTriggerAndProceedOutputs(t *testing.T) {
+	var authorityCalls, payloadCalls int
+	executor, err := checkpointadapter.New(checkpointadapter.Options{
+		Authority: workflowgate.AuthorityResolverFunc(func(context.Context, workflowgate.AuthorizationRequest) (workflowwait.ResponderAuthority, error) {
+			authorityCalls++
+			return workflowwait.ResponderAuthority{Kind: workflowgate.AuthorityGatePolicy, Reference: "release-policy"}, nil
+		}),
+		Payloads: workflowgate.PayloadStoreFunc(func(context.Context, workflowgate.PayloadRequest) (values.ValueSetRef, error) {
+			payloadCalls++
+			return values.ValueSetRef{ID: "checkpoint-payload", Digest: values.SHA256Digest([]byte("checkpoint-payload"))}, nil
+		}),
+		Now: func() time.Time { return checkpointTime },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := checkpointWithTwo("optional", true, "blocking", false)
+	config["trigger_input"], config["not_triggered"], config["default_decision"] = "gate-trigger", "proceed", "approve"
+	falseInvocation := checkpointPrepared(config)
+	falseInvocation.Invocation.Inputs["gate-trigger"] = checkpointResume(t, false, values.RedactionPrivate, values.RetentionRun)
+	completed, err := executor.Execute(t.Context(), falseInvocation)
+	if err != nil || completed.Outcome != stepkind.StepCompleted || completed.Outputs["decision"].Inline != "approve" || completed.Outputs["skipped"].Inline != true || completed.Outputs["triggered"].Inline != false || completed.Outputs["timed_out"].Inline != false {
+		t.Fatalf("non-triggered proceed = %#v, %v", completed, err)
+	}
+	resume := completed.Outputs["resume"].Inline.(map[string]any)
+	if resume["status"] != "not-triggered" || resume["source"] != "not-triggered" || resume["correlation"] != config["correlation"] || resume["wait_id"] != nil || resume["responder"] != nil || resume["resolved_at"] != nil || authorityCalls != 0 || payloadCalls != 0 {
+		t.Fatalf("non-triggered resume/side effects = %#v authority=%d payload=%d", resume, authorityCalls, payloadCalls)
+	}
+	trueInvocation := checkpointPrepared(config)
+	trueInvocation.Invocation.Inputs["gate-trigger"] = checkpointResume(t, true, values.RedactionPrivate, values.RetentionRun)
+	waiting, err := executor.Execute(t.Context(), trueInvocation)
+	if err != nil || waiting.Outcome != stepkind.StepWaiting || authorityCalls != 1 || payloadCalls != 1 {
+		t.Fatalf("triggered wait = %#v calls=%d/%d err=%v", waiting, authorityCalls, payloadCalls, err)
+	}
+	continued := trueInvocation
+	continued.Invocation.Continuation = checkpointContinuation(t, waiting.Wait, checkpointResume(t, map[string]any{"decision": "reject"}, values.RedactionPrivate, values.RetentionRun))
+	resolved, err := executor.Execute(t.Context(), continued)
+	if err != nil || resolved.Outputs["triggered"].Inline != true || resolved.Outputs["decision"].Inline != "reject" {
+		t.Fatalf("triggered continuation = %#v, %v", resolved, err)
+	}
+
+	invalidDefault := cloneCheckpointConfig(config)
+	invalidDefault["default_decision"] = "missing"
+	if findings := executor.ValidateConfig(t.Context(), invalidDefault); len(findings) == 0 {
+		t.Fatal("unknown default decision accepted")
+	}
+	skip := cloneCheckpointConfig(config)
+	skip["not_triggered"] = "skip"
+	delete(skip, "default_decision")
+	invocation := checkpointPrepared(skip)
+	invocation.Invocation.Inputs["gate-trigger"] = checkpointResume(t, false, values.RedactionPrivate, values.RetentionRun)
+	if _, err := executor.Execute(t.Context(), invocation); err == nil {
+		t.Fatal("non-triggered skip bypassed compiler readiness lowering")
 	}
 }
 
@@ -163,7 +219,7 @@ func TestCheckpointRetryIdentityAndContinuationAreTyped(t *testing.T) {
 	invocation := checkpointPrepared(checkpointConfig())
 	invocation.Invocation.Continuation = checkpointContinuation(t, first.Wait, checkpointResume(t, map[string]any{"decision": "approve"}, values.RedactionPrivate, values.RetentionRun))
 	completed, err := executor.Execute(t.Context(), invocation)
-	if err != nil || completed.Outcome != stepkind.StepCompleted || completed.Outputs["decision"].Inline != "approve" || completed.Outputs["skipped"].Inline != false || completed.Outputs["timed_out"].Inline != false {
+	if err != nil || completed.Outcome != stepkind.StepCompleted || completed.Outputs["decision"].Inline != "approve" || completed.Outputs["skipped"].Inline != false || completed.Outputs["timed_out"].Inline != false || completed.Outputs["triggered"].Inline != true {
 		t.Fatalf("continued Execute = %#v, %v", completed, err)
 	}
 	resume := completed.Outputs["resume"].Inline.(map[string]any)

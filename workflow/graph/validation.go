@@ -198,6 +198,16 @@ func (g Graph) ValidateEnums() error {
 		}
 		if node.Service != nil {
 			validateVerification(path+".service.ready_check", node.Service.ReadyCheck, add)
+			if node.Service.HeartbeatTimeout != "" {
+				duration, err := time.ParseDuration(string(node.Service.HeartbeatTimeout))
+				add(path+".service.heartbeat_timeout", string(node.Service.HeartbeatTimeout), err == nil && duration > 0)
+			}
+			for j, target := range node.Service.TeardownNodes {
+				add(fmt.Sprintf("%s.service.teardown_nodes[%d]", path, j), target, ValidateID(target) == nil)
+			}
+			if node.Service.TeardownOf != "" {
+				add(path+".service.teardown_of", node.Service.TeardownOf, ValidateID(node.Service.TeardownOf) == nil)
+			}
 			validateExtension(path+".service.extension", node.Service.Extension, add)
 		}
 		if node.Compensation != nil {

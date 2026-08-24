@@ -117,6 +117,17 @@ func validateSpec(spec StepKindSpec) []diagnostic.Diagnostic {
 	if spec.Observation.Heartbeat && spec.Observation.Mode == ObservationNone {
 		add("observation.heartbeat", "requires polling observation")
 	}
+	if spec.Lifecycle.Service {
+		if spec.Observation.Mode != ObservationPoll || !spec.Observation.Heartbeat {
+			add("lifecycle.service", "requires polling observation with heartbeat")
+		}
+		if spec.Cancellation.Mode != CancellationExplicit {
+			add("lifecycle.service", "requires explicit durable stop cancellation")
+		}
+		if spec.CanSuspend {
+			add("lifecycle.service", "uses the service coordinator and cannot advertise generic wait suspension")
+		}
+	}
 
 	seenCapabilities := make(map[string]struct{}, len(spec.RequiredCapabilities))
 	for _, capability := range spec.RequiredCapabilities {
@@ -177,18 +188,22 @@ func validateImplementation(kind StepKind, spec StepKindSpec) error {
 	if finalizes != spec.Lifecycle.Finalize {
 		add("lifecycle.finalize", matchOptionalInterface(spec.Lifecycle.Finalize, "Finalizer"))
 	}
+	_, services := kind.(ServiceController)
+	if services != spec.Lifecycle.Service {
+		add("lifecycle.service", matchOptionalInterface(spec.Lifecycle.Service, "ServiceController"))
+	}
 	_, observes := kind.(Observer)
 	wantObserver := spec.Observation.Mode != ObservationNone
-	if spec.Observation.Mode.Valid() && observes != wantObserver {
+	if spec.Observation.Mode.Valid() && !spec.Lifecycle.Service && observes != wantObserver {
 		add("observation.mode", matchOptionalInterface(wantObserver, "Observer"))
 	}
 	_, heartbeats := kind.(Heartbeater)
-	if heartbeats != spec.Observation.Heartbeat {
+	if !spec.Lifecycle.Service && heartbeats != spec.Observation.Heartbeat {
 		add("observation.heartbeat", matchOptionalInterface(spec.Observation.Heartbeat, "Heartbeater"))
 	}
 	_, cancels := kind.(Canceler)
 	wantCanceler := spec.Cancellation.Mode == CancellationExplicit
-	if spec.Cancellation.Mode.Valid() && cancels != wantCanceler {
+	if spec.Cancellation.Mode.Valid() && !spec.Lifecycle.Service && cancels != wantCanceler {
 		add("cancellation.mode", matchOptionalInterface(wantCanceler, "Canceler"))
 	}
 

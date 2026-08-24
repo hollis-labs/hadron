@@ -389,6 +389,9 @@ func validateAndExtendLineage(lineage []graph.DefinitionRef, child graph.Definit
 }
 
 func validateCallSpec(spec graph.CallSpec) error {
+	if spec.DefinitionInput != "" {
+		return fmt.Errorf("dynamic definition input must be resolved by the runtime before call execution")
+	}
 	if !spec.Mode.Valid() {
 		return fmt.Errorf("unsupported call mode %q", spec.Mode)
 	}

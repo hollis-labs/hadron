@@ -77,6 +77,7 @@ type FanOutSnapshot struct {
 	ItemName       string                        `json:"item_name"`
 	IndexName      string                        `json:"index_name"`
 	MaxConcurrency int                           `json:"max_concurrency,omitempty"`
+	FailFast       bool                          `json:"fail_fast,omitempty"`
 	Tolerate       *graph.ToleratedFailurePolicy `json:"tolerate,omitempty"`
 	Status         FanOutStatus                  `json:"status"`
 	Items          []FanOutItemBinding           `json:"items"`
@@ -367,13 +368,80 @@ func (c FanOutCoordinator) Expand(ctx context.Context, command FanOutExpandComma
 	}
 	snapshot := FanOutSnapshot{
 		Parent: command.Parent, ItemName: itemName, IndexName: indexName,
-		MaxConcurrency: command.Spec.MaxConcurrency, Tolerate: cloneFanOutTolerance(command.Spec.Tolerate),
+		MaxConcurrency: command.Spec.MaxConcurrency, FailFast: command.Spec.FailFast, Tolerate: cloneFanOutTolerance(command.Spec.Tolerate),
 		Status: FanOutActive, Items: bindings,
 	}
 	return c.Store.ExpandFanOut(ctx, ExpandFanOutRequest{
 		FanOut: snapshot, ExpectedParentGeneration: command.ExpectedParentGeneration,
 		Priority: command.Priority, At: command.At,
 	})
+}
+
+// ReconcileFailFast fences admission and cancels fan-out items that have not
+// started after failures exceed the declared tolerance. The transition uses
+// ordinary node CAS and is therefore safe to replay and race with a worker
+// claim; already-started items are never interrupted by this policy.
+func (c FanOutCoordinator) ReconcileFailFast(ctx context.Context, parent NodeInvocationID, at time.Time) ([]NodeInvocationSnapshot, error) {
+	if ctx == nil || nilStateStore(c.Store) || at.IsZero() {
+		return nil, fmt.Errorf("%w: fail-fast reconciliation requires context, store, and timestamp", ErrInvalidFanOut)
+	}
+	fanOut, err := c.Store.LoadFanOut(ctx, parent)
+	if err != nil {
+		return nil, err
+	}
+	if !fanOut.FailFast || fanOut.Status != FanOutActive {
+		return nil, nil
+	}
+	children := make([]NodeInvocationSnapshot, 0, len(fanOut.Items))
+	failures := 0
+	for _, item := range fanOut.Items {
+		child, loadErr := c.Store.LoadNodeInvocation(ctx, item.Invocation)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		children = append(children, child)
+		if hardFailure(child.Status) && child.LatestAttempt > 0 {
+			failures++
+		}
+	}
+	tolerated, err := FanOutFailuresTolerated(fanOut.Tolerate, failures, len(children))
+	if err != nil || tolerated {
+		return nil, err
+	}
+	canceled := make([]NodeInvocationSnapshot, 0)
+	for _, child := range children {
+		if child.LatestAttempt != 0 || child.Status.Terminal() {
+			continue
+		}
+		result, transitionErr := c.Store.TransitionNode(ctx, NodeTransitionRequest{
+			InvocationID: child.ID, ExpectedGeneration: child.Generation, To: NodeCanceled, At: at,
+		})
+		if transitionErr != nil {
+			if errors.Is(transitionErr, ErrCASMismatch) {
+				continue
+			}
+			return canceled, transitionErr
+		}
+		canceled = append(canceled, result.Snapshot)
+	}
+	return canceled, nil
+}
+
+// FanOutFailFastAdmissionAllowed reports whether a first attempt may be
+// admitted under the immutable fan-out snapshot. Stores call it while holding
+// their claim transaction/lock so no post-failure first attempt slips through.
+func FanOutFailFastAdmissionAllowed(fanOut FanOutSnapshot, children []NodeInvocationSnapshot) (bool, error) {
+	if !fanOut.FailFast || fanOut.Status != FanOutActive {
+		return true, nil
+	}
+	failures := 0
+	for _, child := range children {
+		if hardFailure(child.Status) && child.LatestAttempt > 0 {
+			failures++
+		}
+	}
+	tolerated, err := FanOutFailuresTolerated(fanOut.Tolerate, failures, len(children))
+	return tolerated, err
 }
 
 // Collect loads every terminal child in stable index order, publishes an

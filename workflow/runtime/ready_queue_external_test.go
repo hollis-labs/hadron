@@ -249,16 +249,14 @@ func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 
 	t.Run("nil_context", func(t *testing.T) {
 		queue := workflowruntime.NewReadyQueueCoordinator(runtimetest.NewStore(), nil)
-		//nolint:staticcheck // This regression deliberately verifies nil-context rejection.
-		if _, _, err := queue.ClaimNext(nil, readyClaimRequest(now, 1)); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
+		var nilContext context.Context
+		if _, _, err := queue.ClaimNext(nilContext, readyClaimRequest(now, 1)); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
 			t.Fatalf("nil ClaimNext context = %v", err)
 		}
-		//nolint:staticcheck // This regression deliberately verifies nil-context rejection.
-		if _, err := queue.Renew(nil, workflowruntime.RenewLeaseRequest{}); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
+		if _, err := queue.Renew(nilContext, workflowruntime.RenewLeaseRequest{}); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
 			t.Fatalf("nil Renew context = %v", err)
 		}
-		//nolint:staticcheck // This regression deliberately verifies nil-context rejection.
-		if err := queue.Release(nil, workflowruntime.ReleaseClaimRequest{}); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
+		if err := queue.Release(nilContext, workflowruntime.ReleaseClaimRequest{}); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
 			t.Fatalf("nil Release context = %v", err)
 		}
 	})

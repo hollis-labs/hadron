@@ -219,6 +219,22 @@ func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvoca
 	if prepared.Invocation.Continuation != nil {
 		return e.continueGate(prepared.Invocation, config, expectedID)
 	}
+	if config.triggerInput != "" {
+		trigger, ok := prepared.Invocation.Inputs[config.triggerInput]
+		if !ok || trigger.Type != values.TypeBoolean || trigger.Artifact != nil {
+			return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" trigger input is invalid", errors.New("trigger input must be an inline boolean"))
+		}
+		triggered, ok := trigger.Inline.(bool)
+		if !ok {
+			return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" trigger input is invalid", errors.New("trigger input must be an inline boolean"))
+		}
+		if !triggered {
+			if config.notTriggered != "proceed" {
+				return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" non-triggered skip must be lowered to ordinary node readiness", errors.New("non-triggered skip reached executor"))
+			}
+			return nonTriggeredOutputs(profile, prepared.Invocation, config)
+		}
+	}
 	if e == nil || nilInterface(e.authority) || nilInterface(e.payloads) || e.now == nil {
 		return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" execution boundary is unavailable", errors.New("executor is not initialized"))
 	}
@@ -277,8 +293,11 @@ func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvoca
 }
 
 type parsedConfig struct {
-	checkpoint workflowgate.Checkpoint
-	timeout    time.Duration
+	checkpoint      workflowgate.Checkpoint
+	timeout         time.Duration
+	triggerInput    string
+	notTriggered    string
+	defaultDecision string
 }
 
 func (e *Executor) continueGate(invocation stepkind.Invocation, config parsedConfig, expectedID string) (stepkind.StepResult, error) {
@@ -356,6 +375,27 @@ func (e *Executor) continueGate(invocation stepkind.Invocation, config parsedCon
 	if err != nil {
 		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" timeout output is invalid", err)
 	}
+	outputs["triggered"], err = values.NewInline(true, metadata(profile.Name, invocation.Identity, "triggered"))
+	if err != nil {
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" trigger output is invalid", err)
+	}
+	return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: outputs}, nil
+}
+
+func nonTriggeredOutputs(profile Profile, invocation stepkind.Invocation, config parsedConfig) (stepkind.StepResult, error) {
+	resume := map[string]any{"status": "not-triggered", "source": "not-triggered", "correlation": config.checkpoint.Correlation}
+	outputValues := map[string]any{
+		"decision": config.defaultDecision, "skipped": true, "resume": resume,
+		"timed_out": false, "triggered": false,
+	}
+	outputs := make(values.ValueSet, len(outputValues))
+	for _, name := range []string{"decision", "skipped", "resume", "timed_out", "triggered"} {
+		value, err := values.NewInline(outputValues[name], metadata(profile.Name, invocation.Identity, name))
+		if err != nil {
+			return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" non-triggered output is invalid", err)
+		}
+		outputs[name] = value
+	}
 	return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: outputs}, nil
 }
 
@@ -368,6 +408,7 @@ func parseConfig(profile Profile, input graph.Config, defaultCorrelation string)
 	allowed := map[string]struct{}{
 		"prompt": {}, "options": {}, "environment": {}, "policy_subject": {}, "correlation": {},
 		"timeout": {}, "optional": {}, "blocking": {}, "escalations": {},
+		"trigger_input": {}, "not_triggered": {}, "default_decision": {},
 	}
 	if profile.DecisionSchema == DecisionSchemaConfigured {
 		allowed["decision_schema"] = struct{}{}
@@ -386,6 +427,9 @@ func parseConfig(profile Profile, input graph.Config, defaultCorrelation string)
 	}
 	timeout := duration(object["timeout"], "config.timeout", &findings)
 	behavior := workflowgate.Behavior{Optional: boolean(object["optional"], false, "config.optional", &findings), Blocking: boolean(object["blocking"], true, "config.blocking", &findings)}
+	triggerInput := optionalString(object["trigger_input"], "config.trigger_input", 128, &findings)
+	notTriggered := optionalString(object["not_triggered"], "config.not_triggered", 32, &findings)
+	defaultDecision := optionalString(object["default_decision"], "config.default_decision", 128, &findings)
 	escalations := parseEscalations(object["escalations"], &findings)
 	resumeSchemaValue := decisionSchema(options)
 	if profile.DecisionSchema == DecisionSchemaConfigured {
@@ -421,10 +465,36 @@ func parseConfig(profile Profile, input graph.Config, defaultCorrelation string)
 		}
 	}
 	if behavior.Optional && !behavior.Blocking {
-		findings = append(findings, finding("config.blocking", "non-blocking optional gates require W07-T09 graph lowering and cannot execute directly"))
+		if triggerInput == "" || notTriggered == "" {
+			findings = append(findings, finding("config.blocking", "non-blocking gates require compiler-lowered trigger and disposition fields"))
+		}
+		if !profileIdentifier(triggerInput) {
+			findings = append(findings, finding("config.trigger_input", "must name the compiler-lowered boolean trigger input"))
+		}
+		if notTriggered != "proceed" && notTriggered != "skip" {
+			findings = append(findings, finding("config.not_triggered", "must be proceed or skip"))
+		}
+		if notTriggered == "proceed" {
+			if defaultDecision == "" || !decisionSchemaAccepts(resumeSchema.Schema, defaultDecision) || !configuredOption(options, defaultDecision) {
+				findings = append(findings, finding("config.default_decision", "must be a configured option accepted by the decision schema"))
+			}
+		} else if defaultDecision != "" {
+			findings = append(findings, finding("config.default_decision", "is allowed only when not_triggered is proceed"))
+		}
+	} else if triggerInput != "" || notTriggered != "" || defaultDecision != "" {
+		findings = append(findings, finding("config.trigger_input", "trigger fields require optional true and blocking false"))
 	}
 	sort.SliceStable(findings, func(i, j int) bool { return findings[i].Message < findings[j].Message })
-	return parsedConfig{checkpoint: checkpoint, timeout: timeout}, findings
+	return parsedConfig{checkpoint: checkpoint, timeout: timeout, triggerInput: triggerInput, notTriggered: notTriggered, defaultDecision: defaultDecision}, findings
+}
+
+func configuredOption(options []workflowgate.Option, decision string) bool {
+	for _, option := range options {
+		if option.ID == decision {
+			return true
+		}
+	}
+	return false
 }
 
 func parseOptions(value any, findings *[]diagnostic.Diagnostic) []workflowgate.Option {
@@ -585,6 +655,9 @@ func configSchema(profile Profile) graph.Schema {
 			"correlation":    map[string]any{"type": "string", "minLength": json.Number("1")},
 			"timeout":        map[string]any{"type": "string", "minLength": json.Number("1")},
 			"optional":       map[string]any{"type": "boolean"}, "blocking": map[string]any{"type": "boolean"},
+			"trigger_input":    map[string]any{"type": "string", "minLength": json.Number("1")},
+			"not_triggered":    map[string]any{"type": "string", "enum": []any{"proceed", "skip"}},
+			"default_decision": map[string]any{"type": "string", "minLength": json.Number("1")},
 			"escalations": map[string]any{"type": "array", "maxItems": json.Number("32"), "items": map[string]any{
 				"type": "object", "additionalProperties": false, "required": []any{"after", "subject"},
 				"properties": map[string]any{"after": map[string]any{"type": "string", "minLength": json.Number("1")}, "subject": subject},
@@ -601,10 +674,10 @@ func configSchema(profile Profile) graph.Schema {
 func outputSchema() graph.Schema {
 	return graph.Schema{
 		"type": "object", "additionalProperties": false,
-		"required": []any{"decision", "skipped", "resume", "timed_out"},
+		"required": []any{"decision", "skipped", "resume", "timed_out", "triggered"},
 		"properties": map[string]any{
 			"decision": map[string]any{"type": "string"}, "skipped": map[string]any{"type": "boolean"},
-			"resume": map[string]any{"type": "object"}, "timed_out": map[string]any{"const": false},
+			"resume": map[string]any{"type": "object"}, "timed_out": map[string]any{"const": false}, "triggered": map[string]any{"type": "boolean"},
 		},
 	}
 }

@@ -489,13 +489,14 @@ func TestNewFailureValueRejectsMismatchedAttemptOrigin(t *testing.T) {
 
 func TestControlFlowPublicHelpersRejectNilAndTypedNilStores(t *testing.T) {
 	var typedNil *runtimetest.Store
+	var nilContext context.Context
 	var state workflowruntime.StateStore = typedNil
 	var control workflowruntime.ControlFlowStore = typedNil
 	id := workflowruntime.ControlDecisionID{Source: workflowruntime.NodeInvocationID{RunID: "nil-run", NodeID: "source"}, Kind: workflowruntime.ControlCatch}
 	if _, _, err := workflowruntime.CatchBinding(context.Background(), state, control, id); !errors.Is(err, workflowruntime.ErrInvalidControlFlow) {
 		t.Fatalf("typed-nil CatchBinding = %v", err)
 	}
-	if _, _, err := workflowruntime.CatchBinding(nil, runtimetest.NewStore(), runtimetest.NewStore(), id); !errors.Is(err, workflowruntime.ErrInvalidControlFlow) { //nolint:staticcheck // nil is the transport case under test.
+	if _, _, err := workflowruntime.CatchBinding(nilContext, runtimetest.NewStore(), runtimetest.NewStore(), id); !errors.Is(err, workflowruntime.ErrInvalidControlFlow) {
 		t.Fatalf("nil-context CatchBinding = %v", err)
 	}
 	coordinator := workflowruntime.NewControlFlowCoordinator(state, control, nil)

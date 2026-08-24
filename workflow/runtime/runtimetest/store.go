@@ -31,6 +31,7 @@ type Store struct {
 	waitResumeResults   map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult
 	timeouts            map[string]timeoutRecord
 	externalOperations  map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot
+	services            map[workflowruntime.NodeInvocationID]workflowruntime.ServiceSnapshot
 	retryActivations    map[string]workflowruntime.RetryActivationSnapshot
 	retryActivationKeys map[string]retryActivationRecord
 	fanOuts             map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot
@@ -147,6 +148,7 @@ func NewStore() *Store {
 		waitResumeResults:    make(map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult),
 		timeouts:             make(map[string]timeoutRecord),
 		externalOperations:   make(map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot),
+		services:             make(map[workflowruntime.NodeInvocationID]workflowruntime.ServiceSnapshot),
 		retryActivations:     make(map[string]workflowruntime.RetryActivationSnapshot),
 		retryActivationKeys:  make(map[string]retryActivationRecord),
 		fanOuts:              make(map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot),

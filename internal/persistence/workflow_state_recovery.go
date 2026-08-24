@@ -423,7 +423,7 @@ func (s *WorkflowStateStore) BeginReplay(ctx context.Context, request workflowru
 			if err != nil {
 				return err
 			}
-			if _, err := query.ExecContext(ctx, `INSERT INTO workflow_fanouts(run_id, node_id, iteration, status, max_concurrency, generation, snapshot_json) VALUES (?, ?, '', ?, ?, ?, ?)`, fanOut.Parent.RunID, fanOut.Parent.NodeID, fanOut.Status, fanOut.MaxConcurrency, fanOut.Generation, encoded); err != nil {
+			if _, err := query.ExecContext(ctx, `INSERT INTO workflow_fanouts(run_id, node_id, iteration, status, max_concurrency, fail_fast, generation, snapshot_json) VALUES (?, ?, '', ?, ?, ?, ?, ?)`, fanOut.Parent.RunID, fanOut.Parent.NodeID, fanOut.Status, fanOut.MaxConcurrency, fanOut.FailFast, fanOut.Generation, encoded); err != nil {
 				return fmt.Errorf("insert replay fan-out: %w", err)
 			}
 			for _, item := range fanOut.Items {

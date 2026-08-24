@@ -40,6 +40,26 @@ func (v *validator) validateStructure() {
 		if node.Finally != nil {
 			finalizers[graph.NormalizeID(node.ID)] = struct{}{}
 		}
+		if node.Service != nil {
+			if node.Service.TeardownOf == "" {
+				if len(node.Service.TeardownNodes) != 1 {
+					v.add(CodeInvalidFinally, v.nodeSource(node), fmt.Sprintf("service node %q requires exactly one generated teardown", node.ID), "Compile service source through the canonical service lowering.")
+				}
+				for _, teardownID := range node.Service.TeardownNodes {
+					index, exists := known[graph.NormalizeID(teardownID)]
+					if !exists {
+						v.add(CodeInvalidFinally, v.nodeSource(node), fmt.Sprintf("service node %q references unknown teardown %q", node.ID, teardownID), "Keep the generated service teardown node in the immutable graph.")
+						continue
+					}
+					teardown := v.graph.Nodes[index]
+					if teardown.Finally == nil || teardown.Service == nil || graph.NormalizeID(teardown.Service.TeardownOf) != graph.NormalizeID(node.ID) {
+						v.add(CodeInvalidFinally, v.nodeSource(teardown), fmt.Sprintf("service teardown %q does not exactly own %q", teardown.ID, node.ID), "Use the canonical generated service teardown node.")
+					}
+				}
+			} else if node.Finally == nil || len(node.Service.TeardownNodes) != 0 {
+				v.add(CodeInvalidFinally, v.nodeSource(node), fmt.Sprintf("service teardown %q must be an ordinary finalizer", node.ID), "Use the canonical generated service teardown shape.")
+			}
+		}
 	}
 
 	declaredNeeds := make(map[string]struct{})
@@ -252,6 +272,9 @@ func (v *validator) validateNodes() {
 			v.add(CodeUnknownStepKind, v.nodeSource(node), message, remediation)
 		} else {
 			v.validateKindConfig(node, kind, spec)
+			if spec.Lifecycle.Service != (node.Service != nil) {
+				v.add(CodeInvalidStepConfig, v.nodeSource(node), fmt.Sprintf("node %q service lifecycle marker differs from registered kind metadata", node.ID), "Use service kinds only through canonical service lowering and do not mark ordinary kinds as services.")
+			}
 		}
 		v.validatePolicies(node, spec)
 		v.diagnostics = append(v.diagnostics, verification.ValidateSpec(v.ctx, v.verifiers, node.Verification)...)
@@ -292,12 +315,30 @@ func (v *validator) validateNodeShape(node graph.Node) {
 			"Set call.mode to inline or run.",
 		)
 	}
+	if node.Call != nil && node.Call.Mode.Valid() {
+		hasStatic := !zeroDefinitionRef(node.Call.Definition)
+		hasDynamic := strings.TrimSpace(node.Call.DefinitionInput) != ""
+		if hasStatic == hasDynamic {
+			v.add(CodeInvalidCallShape, source, fmt.Sprintf("call node %q must declare exactly one definition source", node.ID), "Set either call.definition or call.definition_input.")
+		}
+		if hasDynamic {
+			if err := graph.ValidateID(node.Call.DefinitionInput); err != nil {
+				v.add(CodeInvalidCallShape, source, fmt.Sprintf("call node %q has invalid definition input %q", node.ID, node.Call.DefinitionInput), "Use a normalized input name.")
+			} else if _, exists := node.InputBindings[node.Call.DefinitionInput]; !exists {
+				v.add(CodeInvalidCallShape, source, fmt.Sprintf("call node %q does not bind definition input %q", node.ID, node.Call.DefinitionInput), "Bind the exact generated DefinitionRef through node.with.")
+			}
+		}
+	}
 	if node.ForEach != nil {
 		v.validateForEach(node, source)
 	}
 	v.validateCatch(node, source)
 	v.validateSwitch(node, source)
 	v.validateFinally(node, source)
+}
+
+func zeroDefinitionRef(ref graph.DefinitionRef) bool {
+	return ref.Authority == "" && ref.Kind == "" && ref.ID == "" && ref.Locator == "" && ref.Version == "" && ref.Digest == "" && ref.Provenance == nil
 }
 
 func (v *validator) validateCatch(node graph.Node, fallback *graph.SourceRef) {

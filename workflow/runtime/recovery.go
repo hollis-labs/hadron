@@ -193,11 +193,14 @@ type RecoveryRequest struct {
 
 type RecoveryResult struct {
 	Snapshot         RecoverySnapshot
+	Services         []ServiceReconcileResult
 	Waits            WaitRecoveryResults
 	RetryActivations []ActivateNodeRetryResult
 	Crashes          []ReconcileCrashedAttemptResult
 	ControlDecisions []ControlDecisionSnapshot
 	Progressed       []ProgressNodeResult
+	FanOuts          []CompleteFanOutResult
+	FanOutCanceled   []NodeInvocationSnapshot
 }
 
 // RecoveryCoordinator reconstructs work exclusively from durable facts. Its
@@ -224,6 +227,23 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context, request RecoveryReque
 		return RecoveryResult{}, err
 	}
 	result := RecoveryResult{}
+	// Service launch intent is persisted before a provider call. Reacquire it
+	// before generic crashed-attempt handling so a conservative repeat policy
+	// cannot terminalize the attempt and strand a provider resource between
+	// Start and reference persistence.
+	if serviceStore, ok := c.Store.(ServiceStore); ok {
+		services, serviceErr := NewServiceCoordinator(ServiceCoordinatorOptions{
+			Store: serviceStore, State: c.Store, Registry: c.Registry,
+			Plans: c.Plans, Control: c.Control, Now: func() time.Time { return request.Now.UTC() },
+		})
+		if serviceErr != nil {
+			return result, serviceErr
+		}
+		result.Services, serviceErr = services.Recover(ctx, ServiceQuery{Limit: request.Limit})
+		if serviceErr != nil {
+			return result, serviceErr
+		}
+	}
 	snapshot, err := c.Store.Recovery(ctx, RecoveryQuery{Now: request.Now, Limit: request.Limit})
 	if err != nil {
 		return result, err
@@ -300,6 +320,36 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context, request RecoveryReque
 		result.Progressed = append(result.Progressed, finalizers...)
 		if policyErr := c.restoreRunPolicy(ctx, run, plan); policyErr != nil && !recoveryConcurrentProgress(policyErr) {
 			return result, policyErr
+		}
+	}
+
+	// Reconcile fan-out aggregates after crash outcomes are durable. Fail-fast
+	// cancellation uses only the stored expansion and child states; collection
+	// then converges the parent whenever no started child remains active.
+	for _, parent := range afterCrashes.Waiting {
+		if parent.ID.Iteration != "" {
+			continue
+		}
+		fanOut, loadErr := c.Store.LoadFanOut(ctx, parent.ID)
+		if errors.Is(loadErr, ErrNotFound) {
+			continue
+		}
+		if loadErr != nil {
+			return result, loadErr
+		}
+		coordinator := FanOutCoordinator{Store: c.Store}
+		if fanOut.FailFast {
+			canceled, reconcileErr := coordinator.ReconcileFailFast(context.WithoutCancel(ctx), parent.ID, maxRecoveryTime(request.Now, fanOut.UpdatedAt))
+			if reconcileErr != nil && !recoveryConcurrentProgress(reconcileErr) {
+				return result, reconcileErr
+			}
+			result.FanOutCanceled = append(result.FanOutCanceled, canceled...)
+		}
+		completed, _, _, collectErr := coordinator.Collect(context.WithoutCancel(ctx), parent.ID, maxRecoveryTime(request.Now, fanOut.UpdatedAt))
+		if collectErr == nil {
+			result.FanOuts = append(result.FanOuts, completed)
+		} else if !errors.Is(collectErr, ErrFanOutIncomplete) && !recoveryConcurrentProgress(collectErr) {
+			return result, collectErr
 		}
 	}
 

@@ -132,6 +132,7 @@ type DispatchResult struct {
 	Outputs      *values.ValueSetRef
 	Wait         *WaitSnapshot
 	External     *ExternalOperationSnapshot
+	Service      *ServiceSnapshot
 	Verification *VerificationRecord
 	Diagnostics  []diagnostic.Diagnostic
 	Warnings     []DispatchWarning
@@ -153,6 +154,7 @@ type StepDispatcher struct {
 	pins        PinStore
 	reuse       OutputReuseStore
 	reusePolicy ReuseAuthorizer
+	services    ServiceStore
 }
 
 // DispatcherOptions supplies extraction-safe dispatcher collaborators.
@@ -227,6 +229,9 @@ func NewStepDispatcher(options DispatcherOptions) (*StepDispatcher, error) {
 			coordinator.Authorizer = options.WaitCoordinator.Authorizer
 		}
 		dispatcher.waits = &coordinator
+	}
+	if serviceStore, ok := options.Store.(ServiceStore); ok {
+		dispatcher.services = serviceStore
 	}
 	return dispatcher, nil
 }
@@ -340,11 +345,46 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 		invocation.Activity = verification.NewActivityRecorder()
 	}
 	if request.Node.Call != nil {
-		call, callErr := cloneCallInvocation(request.Node.Call, request.CallLineage)
+		callSpec, resolveErr := resolveDynamicCallSpec(request.Node.Call, inputs)
+		if resolveErr != nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, stepkind.PreparedInvocation{Invocation: invocation}, stepkind.StepResult{}, DispatchPrepare, failurePrepare, resolveErr)
+		}
+		call, callErr := cloneCallInvocation(callSpec, request.CallLineage)
 		if callErr != nil {
 			return d.finishFailure(durableCtx, request, spec, kind, result, claim, stepkind.PreparedInvocation{Invocation: invocation}, stepkind.StepResult{}, DispatchPrepare, failurePrepare, callErr)
 		}
 		invocation.Call = call
+	}
+	if request.Node.Service != nil && request.Node.Service.TeardownOf != "" {
+		if d.services == nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, stepkind.PreparedInvocation{Invocation: invocation}, stepkind.StepResult{}, DispatchPrepare, failurePrepare, errors.New("service teardown requires durable service support"))
+		}
+		startID := NodeInvocationID{RunID: started.Node.ID.RunID, NodeID: request.Node.Service.TeardownOf, Iteration: started.Node.ID.Iteration}
+		service, serviceErr := d.services.LoadService(durableCtx, startID)
+		if errors.Is(serviceErr, ErrNotFound) {
+			startNode, startErr := d.store.LoadNodeInvocation(durableCtx, startID)
+			if startErr != nil {
+				serviceErr = startErr
+			} else if startNode.LatestAttempt == 0 {
+				// Absence is a safe no-op only when durable node history proves
+				// provider Start was never issued. A missing service record after
+				// any attempt is an integrity failure, not evidence of absence.
+				invocation.Service = &stepkind.ServiceBinding{Phase: stepkind.ServiceTeardown, Absent: true}
+				serviceErr = nil
+			} else {
+				serviceErr = fmt.Errorf("%w: service start has attempt history but no durable launch intent", ErrInvalidService)
+			}
+		}
+		if serviceErr != nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, stepkind.PreparedInvocation{Invocation: invocation}, stepkind.StepResult{}, DispatchPrepare, failurePrepare, serviceErr)
+		}
+		if invocation.Service == nil {
+			invocation.Service = &stepkind.ServiceBinding{
+				Phase:           stepkind.ServiceTeardown,
+				StartInvocation: service.Invocation.Identity,
+				Ref:             cloneExternalRef(service.Ref),
+			}
+		}
 	}
 	if resumed {
 		if d.waits == nil {
@@ -382,15 +422,41 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	if contextErr := ctx.Err(); contextErr != nil {
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepkind.StepResult{}, DispatchExecute, failureExecute, contextErr)
 	}
+	serviceLaunchPending := request.Node.Service != nil && request.Node.Service.TeardownOf == ""
+	if serviceLaunchPending {
+		if d.services == nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepkind.StepResult{}, DispatchPrepare, failurePrepare, errors.New("service start requires durable service support"))
+		}
+		readyCheck, cloneErr := cloneVerificationSpec(request.Node.Service.ReadyCheck)
+		if cloneErr != nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepkind.StepResult{}, DispatchPrepare, failurePrepare, cloneErr)
+		}
+		_, prepareErr := d.services.PrepareServiceStart(durableCtx, PrepareServiceStartRequest{
+			Service:                ServiceSnapshot{Start: started.Attempt.ID, Invocation: cloneStepInvocation(prepared.Invocation), Status: ServiceLaunching, HeartbeatTimeout: request.Node.Service.HeartbeatTimeout, ReadyCheck: readyCheck},
+			ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, At: d.atOrAfter(started.Node.UpdatedAt),
+		})
+		if prepareErr != nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepkind.StepResult{}, DispatchPrepare, failurePrepare, prepareErr)
+		}
+	}
 
 	stepResult, err := kind.Execute(ctx, prepared)
 	if err != nil {
+		if serviceLaunchPending {
+			return result, dispatchError(DispatchExecute, request, err)
+		}
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchExecute, failureExecute, err)
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
+		if serviceLaunchPending {
+			return result, dispatchError(DispatchExecute, request, contextErr)
+		}
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchExecute, failureExecute, contextErr)
 	}
 	if resultErr := stepResult.Validate(); resultErr != nil {
+		if serviceLaunchPending {
+			return result, dispatchError(DispatchValidateOutput, request, resultErr)
+		}
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, resultErr)
 	}
 	if invocation.Verification != nil && (stepResult.Outcome == stepkind.StepWaiting || stepResult.Outcome == stepkind.StepExternal) {
@@ -440,6 +506,52 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	case stepkind.StepExternal:
 		if spec.Observation.Mode != stepkind.ObservationPoll {
 			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchSuspend, failureSuspend, errors.New("step kind does not advertise external observation"))
+		}
+		if request.Node.Service != nil {
+			if d.services == nil {
+				return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchSuspend, failureSuspend, errors.New("service node requires durable service support"))
+			}
+			if request.Node.Service.TeardownOf == "" {
+				readyCheck, cloneErr := cloneVerificationSpec(request.Node.Service.ReadyCheck)
+				if cloneErr != nil {
+					return result, dispatchError(DispatchSuspend, request, cloneErr)
+				}
+				suspended, suspendErr := d.services.SuspendServiceStart(durableCtx, SuspendServiceStartRequest{
+					Service:                ServiceSnapshot{Start: started.Attempt.ID, Invocation: cloneStepInvocation(prepared.Invocation), Ref: cloneExternalRef(*stepResult.External), Status: ServiceStarting, HeartbeatTimeout: request.Node.Service.HeartbeatTimeout, ReadyCheck: readyCheck},
+					ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: claim, At: d.atOrAfter(started.Node.UpdatedAt),
+				})
+				if suspendErr != nil {
+					// Provider Start has already returned successfully and durable
+					// launch intent predates that call. Preserve the running attempt
+					// for same-key recovery; terminalizing it here could leak the
+					// provider resource behind an ambiguous persistence failure.
+					return result, dispatchError(DispatchSuspend, request, suspendErr)
+				}
+				result.Node, result.Attempt = suspended.Node, suspended.Attempt
+				service := suspended.Service
+				result.Result, result.Service = &clonedResult, &service
+				return result, nil
+			}
+			if invocation.Service == nil || !reflect.DeepEqual(cloneExternalRef(*stepResult.External), invocation.Service.Ref) {
+				return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchSuspend, failureSuspend, errors.New("service teardown returned a reference different from the durable start"))
+			}
+			startID := NodeInvocationID{RunID: started.Node.ID.RunID, NodeID: request.Node.Service.TeardownOf, Iteration: started.Node.ID.Iteration}
+			service, loadErr := d.services.LoadService(durableCtx, startID)
+			if loadErr != nil {
+				return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchSuspend, failureSuspend, loadErr)
+			}
+			suspended, suspendErr := d.services.SuspendServiceTeardown(durableCtx, SuspendServiceTeardownRequest{
+				Start: startID, Teardown: started.Attempt.ID, Invocation: cloneStepInvocation(prepared.Invocation), ExpectedServiceGeneration: service.Generation,
+				ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation,
+				Claim: claim, At: d.atOrAfter(serviceTimeFloor(started.Node.UpdatedAt, service.UpdatedAt)),
+			})
+			if suspendErr != nil {
+				return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchSuspend, failureSuspend, suspendErr)
+			}
+			result.Node, result.Attempt = suspended.Node, suspended.Attempt
+			service = suspended.Service
+			result.Result, result.Service = &clonedResult, &service
+			return result, nil
 		}
 		suspended, suspendErr := d.store.SuspendExternalOperation(durableCtx, SuspendExternalOperationRequest{
 			Operation:              ExternalOperationSnapshot{Attempt: started.Attempt.ID, Ref: *stepResult.External, Invocation: invocation, Status: stepkind.ObservationPending},
@@ -510,6 +622,9 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	}
 	result.Node, result.Attempt = finished.Node, finished.Attempt
 	result.Result, result.Outputs = &clonedResult, cloneValueSetRef(&outputRef)
+	if fanOutErr := d.reconcileFanOutTerminal(durableCtx, finished.Node.ID, finished.Node.UpdatedAt); fanOutErr != nil {
+		return result, dispatchError(DispatchFinishAttempt, request, &PostCommitError{Operation: "reconcile fan-out completion", Err: fanOutErr})
+	}
 	if request.Node.Memoization != nil {
 		if warning := d.publishMemoResult(durableCtx, request, spec, inputs, finished, outputRef); warning != nil {
 			result.Warnings = append(result.Warnings, *warning)
@@ -680,12 +795,33 @@ func (d *StepDispatcher) finishFailure(
 		return result, dispatchError(DispatchFinishAttempt, request, errors.Join(cause, policyErr, finishErr))
 	}
 	result.Node, result.Attempt = finished.Node, finished.Attempt
+	if fanOutErr := d.reconcileFanOutTerminal(ctx, finished.Node.ID, finished.Node.UpdatedAt); fanOutErr != nil {
+		policyErr = errors.Join(policyErr, &PostCommitError{Operation: "reconcile fan-out completion", Err: fanOutErr})
+	}
 	d.finalize(ctx, request, kind, prepared, produced, cause, &result)
 	returnCause := errors.Join(cause, policyErr)
 	if stage == DispatchValidateOutput {
 		returnCause = errors.Join(ErrStepValidation, returnCause)
 	}
 	return result, dispatchError(stage, request, returnCause)
+}
+
+func (d *StepDispatcher) reconcileFanOutTerminal(ctx context.Context, child NodeInvocationID, at time.Time) error {
+	if child.Iteration == "" {
+		return nil
+	}
+	parent := NodeInvocationID{RunID: child.RunID, NodeID: child.NodeID}
+	coordinator := FanOutCoordinator{Store: d.store, Retention: d.retention}
+	if _, err := coordinator.ReconcileFailFast(ctx, parent, at); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if _, _, _, err := coordinator.Collect(ctx, parent, at); err != nil && !errors.Is(err, ErrFanOutIncomplete) && !errors.Is(err, ErrCASMismatch) {
+		return err
+	}
+	return nil
 }
 
 // NodeOutputValidationError preserves the graph source of one declared output
@@ -1013,6 +1149,11 @@ func cloneStepInvocation(invocation stepkind.Invocation) stepkind.Invocation {
 	cloned := stepkind.Invocation{
 		Identity: invocation.Identity, Config: config, Inputs: cloneValueSet(invocation.Inputs),
 		Activity: invocation.Activity, IdempotencyKey: invocation.IdempotencyKey, Deadline: invocation.Deadline,
+	}
+	if invocation.Service != nil {
+		service := *invocation.Service
+		service.Ref = cloneExternalRef(invocation.Service.Ref)
+		cloned.Service = &service
 	}
 	if invocation.Call != nil {
 		cloned.Call, _ = cloneCallInvocation(&invocation.Call.Spec, invocation.Call.Lineage)

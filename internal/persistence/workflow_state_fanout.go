@@ -153,7 +153,7 @@ func (s *WorkflowStateStore) ExpandFanOut(ctx context.Context, request workflowr
 		if encodeErr != nil {
 			return encodeErr
 		}
-		if _, execErr := query.ExecContext(ctx, `INSERT INTO workflow_fanouts(run_id, node_id, iteration, status, max_concurrency, generation, snapshot_json) VALUES (?, ?, '', ?, ?, ?, ?)`, fanOut.Parent.RunID, fanOut.Parent.NodeID, fanOut.Status, fanOut.MaxConcurrency, fanOut.Generation, encoded); execErr != nil {
+		if _, execErr := query.ExecContext(ctx, `INSERT INTO workflow_fanouts(run_id, node_id, iteration, status, max_concurrency, fail_fast, generation, snapshot_json) VALUES (?, ?, '', ?, ?, ?, ?, ?)`, fanOut.Parent.RunID, fanOut.Parent.NodeID, fanOut.Status, fanOut.MaxConcurrency, fanOut.FailFast, fanOut.Generation, encoded); execErr != nil {
 			return fmt.Errorf("insert workflow fan-out: %w", execErr)
 		}
 		for _, binding := range fanOut.Items {
@@ -310,28 +310,37 @@ func workflowFanOutClaimEligible(ctx context.Context, query workflowSQL, node wo
 	}
 	parent := workflowruntime.NodeInvocationID{RunID: node.ID.RunID, NodeID: node.ID.NodeID}
 	fanOut, err := loadWorkflowFanOut(ctx, query, parent)
-	if errors.Is(err, workflowruntime.ErrNotFound) || fanOut.MaxConcurrency == 0 {
+	if errors.Is(err, workflowruntime.ErrNotFound) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
 	member, occupied := false, 0
+	children := make([]workflowruntime.NodeInvocationSnapshot, 0, len(fanOut.Items))
 	for _, binding := range fanOut.Items {
 		if binding.Invocation == node.ID {
 			member = true
 			continue
 		}
-		child, err := loadWorkflowNode(ctx, query, binding.Invocation)
-		if err != nil {
-			return false, err
+		child, childErr := loadWorkflowNode(ctx, query, binding.Invocation)
+		if childErr != nil {
+			return false, childErr
 		}
+		children = append(children, child)
 		if child.Status.Terminal() {
 			continue
 		}
 		if child.LatestAttempt > 0 || child.Lease != nil && child.Lease.ExpiresAt.After(now) {
 			occupied++
 		}
+	}
+	allowed, err := workflowruntime.FanOutFailFastAdmissionAllowed(fanOut, children)
+	if err != nil || member && !allowed {
+		return false, err
+	}
+	if fanOut.MaxConcurrency == 0 {
+		return true, nil
 	}
 	return !member || occupied < fanOut.MaxConcurrency, nil
 }

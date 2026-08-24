@@ -141,6 +141,11 @@ func (i Invocation) Validate() error {
 			return fmt.Errorf("invocation continuation: %w", err)
 		}
 	}
+	if i.Service != nil {
+		if err := i.Service.Validate(); err != nil {
+			return fmt.Errorf("invocation service binding: %w", err)
+		}
+	}
 	if i.Verification != nil {
 		if err := validateRuntimeJSON(i.Verification); err != nil {
 			return fmt.Errorf("invocation verification must be JSON-compatible: %w", err)

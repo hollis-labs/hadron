@@ -425,9 +425,9 @@ func (s *WorkflowStateStore) CompleteTerminalIntent(ctx context.Context, request
 				to, cleanupFailure = workflowruntime.RunFailed, node.ID.NodeID
 			}
 		}
-		cancellations, err := listWorkflowCancellationIntents(ctx, query, run.ID)
-		if err != nil {
-			return err
+		cancellations, cancellationErr := listWorkflowCancellationIntents(ctx, query, run.ID)
+		if cancellationErr != nil {
+			return cancellationErr
 		}
 		for _, cancellation := range cancellations {
 			if cancellation.Status == workflowruntime.CancellationPending {
