@@ -18,3 +18,4 @@
 | 14 | W01-T05 | `29121b6` | `7eea197` | Hadron | accepted with dependency-graph-only allowance for the adopted schema validator's transitive `x/text` closure |
 | 15 | W02-T04 | `1bc4de0` | `2caeb82` | Hadron | accepted after immutable run-plan/wait-invocation and semantic time-equality hardening |
 | 16 | W02-T07 | `b579713` | `f990807` | Hadron | accepted after scoped root-map and same-endpoint control/data edge hardening |
+| 17 | W03-T01 | `fe9de95` | `67f97c8` | Hadron | accepted after lease-releasing wait and claimed-resume lifecycle hardening |

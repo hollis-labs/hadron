@@ -393,3 +393,30 @@ Amended source commit `b579713` was integrated as `f990807`.
 | integration `f990807` | `go test ./workflow/...` | pass |
 | integration `f990807` | `go vet ./workflow/...` | pass |
 | integration `f990807` | `go test ./...` | pass |
+
+## W03-T01
+
+Reviewed the complete run/node transition model, atomic attempt lifecycle,
+claim fencing, append-only lifecycle events, lifecycle-bypass protection, and
+recovery classification. Review required waiting nodes to release leases,
+resumed attempts to acquire a fresh live claim, and attempt completion to occur
+only after the node returns to `running`. Amended source commit `fe9de95` was
+integrated as `67f97c8`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `fe9de95` | focused wait/resume and attempt-history tests, `-count=30` | pass |
+| source worktree `fe9de95` | `go test ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| source worktree `fe9de95` | `go test -race ./workflow/runtime/...` | pass |
+| source worktree `fe9de95` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `fe9de95` | `go test ./workflow/...` | pass |
+| source worktree `fe9de95` | `go vet ./workflow/...` | pass |
+| source worktree `fe9de95` | `go test ./...` | pass |
+| integration `67f97c8` | focused wait/resume and attempt-history tests, `-count=30` | pass |
+| integration `67f97c8` | `go test ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| integration `67f97c8` | `go test -race ./workflow/runtime/...` | pass |
+| integration `67f97c8` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `67f97c8` | `go test ./workflow/...` | pass |
+| integration `67f97c8` | `go vet ./workflow/...` | pass |
+| integration `67f97c8` | `go test ./...` | pass |
+| integration `67f97c8` | `git diff --check` | pass |
