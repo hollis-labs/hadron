@@ -422,3 +422,15 @@
   declarations cannot erase source effects.
 
   Vanta revision: `01M0TQTDCZ1W4KR4BDBM7ZHRV6`.
+
+- W05-T04 separates mutable activation projections from immutable activation
+  facts. Registrations, schedules, fires, dispatch status, and callback
+  consumption advance through generation/status CAS, while fire attempts,
+  attempt results, external-delivery identities, and observer events are
+  append-only. A scheduler delivery attempt is operational history only and is
+  excluded from activation expression input, so retry cannot change the
+  logical run identity selected by the stable fire and authored deduplication
+  policy. Callback delivery similarly binds idempotency to the exact typed
+  payload digest before resuming the canonical core wait.
+
+  Vanta revision: `01M0TTKAXCDH6HFCK3CEW3JDJ3`.

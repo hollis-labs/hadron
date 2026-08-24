@@ -4,16 +4,6 @@ No execution findings have been deferred.
 
 ## Known limitations
 
-- W00-T07 intentionally leaves stale-claim recovery policy outside
-  `go-scheduler`: a process failure after `ClaimFire` and before a terminal or
-  retry transition can leave a fire in `claimed`. Hadron's later scheduler and
-  recovery binding must define lease/reclaim policy without weakening stable
-  fire identity or per-attempt CAS guarantees. This does not block W00-T07's
-  accepted contract, but must be reconciled before W05-T04/W03-T06 integration
-  is considered durable.
-
-  Vanta revision: `01M0RY570D54BHGAMK62VXGMW4`.
-
 - W02-T05 keeps `PRAGMA foreign_keys=OFF` on Hadron's shared SQLite store
   because enabling it breaks supported legacy pipeline-stage CRUD. The
   graph-native adapter enforces its owned parent relationships inside the same
@@ -148,14 +138,6 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0SSDAAJ7T6Q6FJ6Z9VENBRG`.
 
-- W05-T04 still owns production scheduler registration and version policy.
-  The host continues to fail closed when a required scheduler binding is not
-  configured; neither scope facts nor a target identity implicitly authorize
-  activation registration.
-
-  Vanta revision: `01M0TP5RZS4YTEVT69023297S1` (supersedes
-  `01M0SXD683VSN9V6HNDCK1SARF`).
-
 - W05-T03's compiled-plan/source caches and graph-native `WorkflowIndex` are
   process-local. Durable source/plan snapshots and publishing remain W05-T05
   and W05-T07 responsibilities; callers cannot treat these caches as restart
@@ -252,6 +234,23 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0TSSF037DPN0K2SJYYNRNDQ`.
 
+- W05-T04 consumes the authorized go-scheduler contract through a repository-
+  local replacement pinned to sibling commit `51ebe8a`. This is consistent
+  with Hadron's existing monorepo-local dependency model, but a standalone
+  checkout cannot build that activation path until the scheduler commit is
+  published and the replacement is advanced to an immutable module version.
+
+  Vanta revision: `01M0TTMZ8WJWQYXPCXBD39VA8D`.
+
+- The legacy file-watch tests in `internal/trigger/trigger_test.go` read their
+  asynchronous mock runner/store state without synchronization. The race is
+  reproducible on integration revisions before W05-T04 and is unrelated to the
+  new credential-free activation trigger manager; activation-specific race
+  suites pass. Repair the legacy test doubles when that package's archived
+  trigger path is next maintained.
+
+  Vanta revision: `01M0TTMZH7BNKCS8JW98QQJ7SZ`.
+
 ## Resolved follow-ups
 
 - W05-T02 resolved the temporary W05-T01 identity strings with durable,
@@ -259,10 +258,20 @@ No execution findings have been deferred.
   `300257b`; graph-native public and journal JSON contains no `workspace_id`.
   W05-T03 had already resolved the same deferred record's production
   definition resolution and child graph materialization in `c950291`.
+  W05-T04 now resolves its remaining production scheduler-registration
+  boundary in `c68a38a`; scope and target facts remain non-authorizing inputs
+  to the registration's exact principal/exposure binding.
 
-  Vanta resolution revision: `01M0TP5RZS4YTEVT69023297S1` (supersedes
-  `01M0SXD683VSN9V6HNDCK1SARF`; the remaining W05-T04 scheduler boundary is
-  retained above).
+  Vanta resolution revision: `01M0TTNJV2YE5D3K5RZR0ZSK7Y` (supersedes
+  `01M0TP5RZS4YTEVT69023297S1`).
+
+- W05-T04 resolves W00-T07's deliberately host-owned stale-claim policy with
+  durable claim expiry, transactional reclaim, immutable per-attempt results,
+  stable fire identity, and CAS that rejects the old claimant both before and
+  after another worker reclaims the fire.
+
+  Vanta resolution revision: `01M0TTNJTXN9PKN2BKF1KB5FFS` (supersedes
+  `01M0RY570D54BHGAMK62VXGMW4`).
 
 - W05-T07's canonical runner exposed an ordinary-runtime completion gap for a
   workflow that has both declared outputs and finalizers. W03-T08-H1 resolved

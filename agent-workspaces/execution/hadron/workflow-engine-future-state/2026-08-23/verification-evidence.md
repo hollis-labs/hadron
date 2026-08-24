@@ -1112,3 +1112,21 @@ accepted MCP/LLM exception and remote observation carried the bound profile.
 | source worktree `6348a06` | real generated CLI, stdio MCP, bound MCP/LLM, arbitrary-CWD atomic rebuild, and remote-wait kill/restart fixtures | pass |
 | independent source review `6348a06` | `go test -count=1 ./...`; committed diff and worktree checks | pass; clean |
 | integration `4d9c2c7` plus tracking/dispatch `210b0e5` | focused offline/build/compiler suite and `go test -count=1 ./...` | pass; initial full-suite attempt hit the unrelated timing-sensitive agentsubstrate outbox fixture, which passed at `-count=3` before the complete rerun passed |
+
+## W05-T04
+
+Reviewed exact activation registrations, scheduler/external fire dispatch,
+stable retry identity, leased stale-claim recovery, overlap and run-ID reuse,
+canonical source-local input materialization, callback-to-wait binding, safe
+observer history, and the quarantined legacy scheduler adapter. Source commit
+`bb2a55a` was integrated as `c68a38a` with migration 0023 after identity,
+claim-expiry, retry-attempt, replacement-finalizer, payload-collision,
+callback-replay, and projection-CAS hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `bb2a55a` | focused activation/appworkflow/persistence/scheduler/trigger suites, including repeated `-count=10`; go-scheduler focused and race suites | pass |
+| independent source review `bb2a55a` | focused packages at `-count=3`; activation-specific persistence/appworkflow/hoststate/trigger race tests; diff checks | pass |
+| source worktree `bb2a55a` | import guard, vet, targeted golangci, hooks, and module-tidy review | pass; zero issues; intended local scheduler replace only |
+| independent source review `bb2a55a` | `go test -count=1 ./...` | all task-affected and remaining packages pass; unrelated agentsubstrate outbox timing fixture failed once and passed separately at `-count=3` |
+| integration environment | Go build-cache cleanup before the final branch gate | reclaimed 71 GB of disposable cache after a prior linker/SQLite temp-space failure; no repository or module-download data removed |
