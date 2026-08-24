@@ -3,6 +3,6 @@
 //
 // It is extraction-ready test support. Imports are limited to the standard
 // library and explicitly adopted extraction-safe dependencies; Hadron internal
-// packages are forbidden. Its public API is unstable until the conformance
-// contracts are defined.
+// packages are forbidden. Suite entry points and fixture names are stable;
+// semantic assertions expand as their production contracts land.
 package conformance
