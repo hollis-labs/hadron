@@ -719,3 +719,23 @@ kind schema.
 | integration `b8ee57d` | `go test -count=1 ./workflow/adapters/transform/... ./workflow/values/... ./workflow/stepkind/... ./workflow/runtime/...` | pass |
 | integration `b8ee57d` | `go test -race -count=1 ./workflow/adapters/transform/...` | pass |
 | integration `b8ee57d` | `go test -v ./workflow/internal/importguard/...` and `go vet ./workflow/adapters/transform/...` | pass |
+
+## W04-T05
+
+Reviewed the SDK-neutral MCP client, descriptor, artifact, content, transport,
+and structured-error contracts; conservative registry metadata; trusted and
+coherent annotation refinement; config validation; immediate-boundary secret
+resolution; recursive result and metadata masking; bounded inline/artifact
+mapping; expected-shape enforcement; exact-number conversion; defensive
+copies; and the Hadron `InternalCaller` bridge. Workflow reconnect is fenced
+by a non-empty idempotency key while legacy caller behavior is preserved.
+Source commit `41a5057` was integrated as `5f0c1aa`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `41a5057` | `go test -count=30 ./workflow/adapters/mcp/... ./internal/mcpadapter/...` | pass |
+| source worktree `41a5057` | `go test -race ./workflow/adapters/mcp/... ./internal/mcpadapter/...` | pass |
+| source worktree `41a5057` | import guard, workflow tests/vet, targeted golangci/staticcheck, full `go test ./...`, and diff check | pass; zero adapter issues |
+| integration `5f0c1aa` | `go test -count=1 ./workflow/adapters/mcp/... ./workflow/adapters/transform/... ./internal/mcpadapter/... ./workflow/stepkind/... ./workflow/runtime/...` | pass |
+| integration `5f0c1aa` | `go test -race -count=1 ./workflow/adapters/mcp/... ./internal/mcpadapter/...` | pass |
+| integration `5f0c1aa` | `go test -v ./workflow/internal/importguard/...`, focused vet, and commit diff check | pass |

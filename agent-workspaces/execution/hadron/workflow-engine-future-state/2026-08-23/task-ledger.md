@@ -40,7 +40,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W04-T02 | W02-T02, W04-T01 | integrated | `b8ee57d` |
 | W04-T03 | W02-T01, W04-T01 | dispatched | |
 | W04-T04 | W02-T01, W04-T01 | eligible | |
-| W04-T05 | W02-T01, W04-T01 | dispatched | |
+| W04-T05 | W02-T01, W04-T01 | integrated | `5f0c1aa` |
 | W04-T06 | W01-T04, W03-T02, W04-T01 | eligible | |
 | W04-T07 | W03-T05, W04-T01 | eligible | |
 | W04-T08 | W02-T02, W03-T08, W04-T01 | blocked | |

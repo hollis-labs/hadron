@@ -89,7 +89,7 @@ superseded requirements are not mistaken for omissions.
 | W04-T02 | Implement `transform` executor | 04 | W02-T02, W04-T01 | [x] |
 | W04-T03 | Implement `cmd` executor | 04 | W02-T01, W04-T01 | [ ] |
 | W04-T04 | Implement `http` executor | 04 | W02-T01, W04-T01 | [ ] |
-| W04-T05 | Implement `mcp` executor | 04 | W02-T01, W04-T01 | [ ] |
+| W04-T05 | Implement `mcp` executor | 04 | W02-T01, W04-T01 | [x] |
 | W04-T06 | Implement `call` executor | 04 | W01-T04, W03-T02, W04-T01 | [ ] |
 | W04-T07 | Implement wait-backed executor set | 04 | W03-T05, W04-T01 | [ ] |
 | W04-T08 | Implement node verification modifier | 04 | W02-T02, W03-T08, W04-T01 | [ ] |

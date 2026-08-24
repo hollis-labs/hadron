@@ -71,3 +71,11 @@ No execution findings have been deferred.
   contract is justified.
 
   Vanta revision: `01M0SH6BPGHX161GR17XA43W5B`.
+
+- W04-T05 exposes MCP tool annotations before execution but the built-in
+  Hadron bridge intentionally does not trust server-self-asserted hints. Until
+  W05 host composition supplies an independently approved descriptor wrapper,
+  validation and policy may conservatively overstate a tool's blast radius;
+  execution remains safe and functional.
+
+  Vanta revision: `01M0SHQ180CB53GWHWCG4FAHPK`.

@@ -84,3 +84,17 @@
   metadata.
 
   Vanta revision for both W04-T02 decisions: `01M0SH6C50DB0QPBQ13ZYD52DZ`.
+
+- W04-T05 keeps `mcp@v1` SDK-neutral and declares the conservative possible
+  effect set, keyed idempotency capability, and retry-requires-idempotency in
+  immutable registry metadata. Its exported pre-execution `DescribeConfig`
+  projection may narrow effects or retry hints only for independently trusted,
+  coherent tool annotations; missing, untrusted, partial, or conflicting hints
+  stay fail-closed.
+
+- The Hadron `InternalCaller` bridge treats server-self-asserted annotations as
+  untrusted. Workflow transport reconnect may repeat `CallTool` only when the
+  invocation carries a non-empty idempotency key; the pre-existing legacy
+  `CallTool` retry behavior remains unchanged for compatibility.
+
+  Vanta revision for both W04-T05 decisions: `01M0SHQ1FXVFMQTN6YQ8XHR2QB`.
