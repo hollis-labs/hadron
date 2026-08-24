@@ -1,0 +1,83 @@
+workflow:
+  name: Torque Task Bulk Create
+  namespace: torque
+  version: 1.0.0
+  metadata:
+    description: Contract fixture for typed bounded fan-out over Torque task creation.
+
+inputs:
+  - name: project-id
+    description: Torque project receiving the tasks.
+    type: string
+    required: true
+  - name: tasks
+    description: Task records to create.
+    schema:
+      type: array
+      items:
+        type: object
+        required: [title]
+        properties:
+          title: {type: string}
+          description: {type: string}
+    required: true
+
+steps:
+  - id: create
+    display_name: Create Torque tasks
+    for_each: inputs.tasks
+    concurrency: 4
+    mcp_call:
+      server: torque
+      tool: torque_task_create
+      arguments:
+        project_id: "{{ inputs['project-id'] }}"
+        title: "{{ item.title }}"
+        description: "{{ item.description }}"
+    with:
+      project-id: inputs["project-id"]
+      title: item.title
+      description: item.description
+    outputs:
+      result-json:
+        type: object
+      task-id:
+        type: string
+        value: outputs["result-json"].id
+    effects: [mutate]
+    retry:
+      attempts: 3
+      backoff: exponential
+      on: [timeout, rate_limited]
+      idempotency_key: inputs["project-id"] + ":" + item.title
+
+  - id: summarize
+    display_name: Summarize task creation
+    needs: [create]
+    transform:
+      created: map(steps.create.items, .outputs["result-json"].id)
+      failed: filter(steps.create.items, .status == "failed")
+      count: len(steps.create.items)
+    outputs:
+      created:
+        type: array
+        items_type: string
+      failed:
+        type: array
+        items_type: object
+      count:
+        type: integer
+    effects: [compute]
+
+outputs:
+  created:
+    type: array
+    items_type: string
+    value: steps.summarize.outputs.created
+  failed:
+    type: array
+    items_type: object
+    value: steps.summarize.outputs.failed
+  count:
+    type: integer
+    value: steps.summarize.outputs.count

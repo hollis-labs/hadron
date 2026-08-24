@@ -1,0 +1,771 @@
+{
+  "schema_version": "1",
+  "id": "http-command-transform",
+  "digest": "sha256:874da76dd87f52046d814d9b1dafebf2ec404fcdba63fc4b76516cfcebed6b98",
+  "definition": {
+    "kind": "workflow",
+    "id": "http-command-transform",
+    "version": "1.0.0",
+    "digest": "sha256:3d7bfb955706735a18e0a0e62eb8144cc7605ed21de22b1caf450bddd64d0e24"
+  },
+  "provenance": {
+    "origin": "workflow-source",
+    "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+    "digest": "sha256:3d7bfb955706735a18e0a0e62eb8144cc7605ed21de22b1caf450bddd64d0e24"
+  },
+  "source_digests": [
+    {
+      "format": "workflow",
+      "digest": "sha256:3d7bfb955706735a18e0a0e62eb8144cc7605ed21de22b1caf450bddd64d0e24"
+    }
+  ],
+  "graph": {
+    "id": "http-command-transform",
+    "version": "1.0.0",
+    "digest": "sha256:ce6039d0ecd53d608d0f989e3f58e4f0e4ea0b4c1079859de92b73b29ac9c7b9",
+    "provenance": {
+      "origin": "workflow-source",
+      "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+      "digest": "sha256:3d7bfb955706735a18e0a0e62eb8144cc7605ed21de22b1caf450bddd64d0e24"
+    },
+    "inputs": [
+      {
+        "name": "url",
+        "schema": {
+          "type": "string"
+        },
+        "required": true,
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 8,
+          "start_column": 5,
+          "path": [
+            "inputs",
+            "0"
+          ]
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "name": "count",
+        "schema": {
+          "type": "integer"
+        },
+        "value": {
+          "kind": "expression",
+          "expression": {
+            "text": "steps.summarize.outputs.count",
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 59,
+              "start_column": 12,
+              "path": [
+                "outputs",
+                "count",
+                "value"
+              ]
+            }
+          },
+          "source": {
+            "format": "workflow",
+            "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+            "start_line": 59,
+            "start_column": 12,
+            "path": [
+              "outputs",
+              "count",
+              "value"
+            ]
+          }
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 58,
+          "start_column": 5,
+          "path": [
+            "outputs",
+            "count"
+          ]
+        }
+      },
+      {
+        "name": "status",
+        "schema": {
+          "type": "integer"
+        },
+        "value": {
+          "kind": "expression",
+          "expression": {
+            "text": "steps.summarize.outputs.status",
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 62,
+              "start_column": 12,
+              "path": [
+                "outputs",
+                "status",
+                "value"
+              ]
+            }
+          },
+          "source": {
+            "format": "workflow",
+            "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+            "start_line": 62,
+            "start_column": 12,
+            "path": [
+              "outputs",
+              "status",
+              "value"
+            ]
+          }
+        },
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 61,
+          "start_column": 5,
+          "path": [
+            "outputs",
+            "status"
+          ]
+        }
+      }
+    ],
+    "nodes": [
+      {
+        "id": "fetch",
+        "display_name": "Fetch JSON document",
+        "kind": "http",
+        "config": {
+          "method": "GET",
+          "url": "{{ inputs.url }}"
+        },
+        "outputs": [
+          {
+            "name": "body",
+            "schema": {
+              "type": "object"
+            },
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 20,
+              "start_column": 9,
+              "path": [
+                "steps",
+                "0",
+                "outputs",
+                "body"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "schema": {
+              "type": "integer"
+            },
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 22,
+              "start_column": 9,
+              "path": [
+                "steps",
+                "0",
+                "outputs",
+                "status"
+              ]
+            }
+          }
+        ],
+        "effects": [
+          "read"
+        ],
+        "execution_target": {},
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 13,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "0"
+          ]
+        },
+        "provenance": {}
+      },
+      {
+        "id": "extract",
+        "display_name": "Extract records with jq",
+        "kind": "cmd",
+        "needs": [
+          {
+            "node": "fetch",
+            "kind": "control",
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 27,
+              "start_column": 13,
+              "path": [
+                "steps",
+                "1",
+                "needs",
+                "0"
+              ]
+            }
+          }
+        ],
+        "config": {
+          "arguments": [
+            ".items"
+          ],
+          "capture": {
+            "stdout": {
+              "name": "records",
+              "parse": "json"
+            }
+          },
+          "command": "jq"
+        },
+        "with": {
+          "payload": {
+            "kind": "expression",
+            "expression": {
+              "text": "steps.fetch.outputs.body",
+              "source": {
+                "format": "workflow",
+                "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+                "start_line": 36,
+                "start_column": 16,
+                "path": [
+                  "steps",
+                  "1",
+                  "with",
+                  "payload"
+                ]
+              }
+            },
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 36,
+              "start_column": 16,
+              "path": [
+                "steps",
+                "1",
+                "with",
+                "payload"
+              ]
+            }
+          }
+        },
+        "outputs": [
+          {
+            "name": "records",
+            "schema": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 39,
+              "start_column": 9,
+              "path": [
+                "steps",
+                "1",
+                "outputs",
+                "records"
+              ]
+            }
+          }
+        ],
+        "effects": [
+          "compute"
+        ],
+        "execution_target": {},
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 25,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "1"
+          ]
+        },
+        "provenance": {}
+      },
+      {
+        "id": "summarize",
+        "display_name": "Summarize records",
+        "kind": "transform",
+        "needs": [
+          {
+            "node": "extract",
+            "kind": "control",
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 45,
+              "start_column": 13,
+              "path": [
+                "steps",
+                "2",
+                "needs",
+                "0"
+              ]
+            }
+          }
+        ],
+        "config": {
+          "count": "len(steps.extract.outputs.records)",
+          "status": "steps.fetch.outputs.status"
+        },
+        "outputs": [
+          {
+            "name": "count",
+            "schema": {
+              "type": "integer"
+            },
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 51,
+              "start_column": 9,
+              "path": [
+                "steps",
+                "2",
+                "outputs",
+                "count"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "schema": {
+              "type": "integer"
+            },
+            "source": {
+              "format": "workflow",
+              "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+              "start_line": 53,
+              "start_column": 9,
+              "path": [
+                "steps",
+                "2",
+                "outputs",
+                "status"
+              ]
+            }
+          }
+        ],
+        "effects": [
+          "compute"
+        ],
+        "execution_target": {},
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 43,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "2"
+          ]
+        },
+        "provenance": {}
+      }
+    ],
+    "edges": [
+      {
+        "from": "fetch",
+        "to": "extract",
+        "kind": "control",
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 27,
+          "start_column": 13,
+          "path": [
+            "steps",
+            "1",
+            "needs",
+            "0"
+          ]
+        }
+      },
+      {
+        "from": "extract",
+        "to": "summarize",
+        "kind": "control",
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 45,
+          "start_column": 13,
+          "path": [
+            "steps",
+            "2",
+            "needs",
+            "0"
+          ]
+        }
+      },
+      {
+        "from": "extract",
+        "to": "summarize",
+        "kind": "data",
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 43,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "2",
+            "config",
+            "count"
+          ]
+        }
+      },
+      {
+        "from": "fetch",
+        "to": "extract",
+        "kind": "data",
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 36,
+          "start_column": 16,
+          "path": [
+            "steps",
+            "1",
+            "with",
+            "payload"
+          ]
+        }
+      },
+      {
+        "from": "fetch",
+        "to": "summarize",
+        "kind": "data",
+        "source": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 43,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "2",
+            "config",
+            "status"
+          ]
+        }
+      }
+    ],
+    "source": {
+      "format": "workflow",
+      "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+      "start_line": 2,
+      "start_column": 3,
+      "path": [
+        "workflow"
+      ]
+    },
+    "source_map": {
+      "graph": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 2,
+        "start_column": 3,
+        "path": [
+          "workflow"
+        ]
+      },
+      "inputs": {
+        "url": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 8,
+          "start_column": 5,
+          "path": [
+            "inputs",
+            "0"
+          ]
+        }
+      },
+      "outputs": {
+        "count": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 58,
+          "start_column": 5,
+          "path": [
+            "outputs",
+            "count"
+          ]
+        },
+        "status": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 61,
+          "start_column": 5,
+          "path": [
+            "outputs",
+            "status"
+          ]
+        }
+      },
+      "nodes": {
+        "extract": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 25,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "1"
+          ]
+        },
+        "fetch": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 13,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "0"
+          ]
+        },
+        "summarize": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 43,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "2"
+          ]
+        }
+      },
+      "edges": {
+        "extract-\u003esummarize:control": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 45,
+          "start_column": 13,
+          "path": [
+            "steps",
+            "2",
+            "needs",
+            "0"
+          ]
+        },
+        "extract-\u003esummarize:data": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 43,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "2",
+            "config",
+            "count"
+          ]
+        },
+        "fetch-\u003eextract:control": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 27,
+          "start_column": 13,
+          "path": [
+            "steps",
+            "1",
+            "needs",
+            "0"
+          ]
+        },
+        "fetch-\u003eextract:data": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 36,
+          "start_column": 16,
+          "path": [
+            "steps",
+            "1",
+            "with",
+            "payload"
+          ]
+        },
+        "fetch-\u003esummarize:data": {
+          "format": "workflow",
+          "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+          "start_line": 43,
+          "start_column": 5,
+          "path": [
+            "steps",
+            "2",
+            "config",
+            "status"
+          ]
+        }
+      }
+    },
+    "concurrency": {
+      "extension": {}
+    },
+    "execution_target": {},
+    "metadata": {
+      "description": "Contract fixture for typed HTTP, command, and transform data flow."
+    }
+  },
+  "source_map": {
+    "graph": {
+      "format": "workflow",
+      "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+      "start_line": 2,
+      "start_column": 3,
+      "path": [
+        "workflow"
+      ]
+    },
+    "inputs": {
+      "url": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 8,
+        "start_column": 5,
+        "path": [
+          "inputs",
+          "0"
+        ]
+      }
+    },
+    "outputs": {
+      "count": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 58,
+        "start_column": 5,
+        "path": [
+          "outputs",
+          "count"
+        ]
+      },
+      "status": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 61,
+        "start_column": 5,
+        "path": [
+          "outputs",
+          "status"
+        ]
+      }
+    },
+    "nodes": {
+      "extract": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 25,
+        "start_column": 5,
+        "path": [
+          "steps",
+          "1"
+        ]
+      },
+      "fetch": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 13,
+        "start_column": 5,
+        "path": [
+          "steps",
+          "0"
+        ]
+      },
+      "summarize": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 43,
+        "start_column": 5,
+        "path": [
+          "steps",
+          "2"
+        ]
+      }
+    },
+    "edges": {
+      "extract-\u003esummarize:control": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 45,
+        "start_column": 13,
+        "path": [
+          "steps",
+          "2",
+          "needs",
+          "0"
+        ]
+      },
+      "extract-\u003esummarize:data": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 43,
+        "start_column": 5,
+        "path": [
+          "steps",
+          "2",
+          "config",
+          "count"
+        ]
+      },
+      "fetch-\u003eextract:control": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 27,
+        "start_column": 13,
+        "path": [
+          "steps",
+          "1",
+          "needs",
+          "0"
+        ]
+      },
+      "fetch-\u003eextract:data": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 36,
+        "start_column": 16,
+        "path": [
+          "steps",
+          "1",
+          "with",
+          "payload"
+        ]
+      },
+      "fetch-\u003esummarize:data": {
+        "format": "workflow",
+        "locator": "examples/workflow/http-cmd-transform.workflow.yaml",
+        "start_line": 43,
+        "start_column": 5,
+        "path": [
+          "steps",
+          "2",
+          "config",
+          "status"
+        ]
+      }
+    }
+  }
+}

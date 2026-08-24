@@ -231,6 +231,13 @@ instead of exposing only a compiled node ID.
 
 The Torque bulk-create acceptance case becomes a graph-native workflow:
 
+The production-compiled version is
+[`examples/workflow/torque-task-bulk-create.workflow.yaml`](../../../examples/workflow/torque-task-bulk-create.workflow.yaml).
+The other active source-contract examples cover a
+[`release approval gate`](../../../examples/workflow/release-approval-gate.workflow.yaml)
+and an
+[`HTTP → command → transform flow`](../../../examples/workflow/http-cmd-transform.workflow.yaml).
+
 ```yaml
 workflow:
   name: torque-task-bulk-create

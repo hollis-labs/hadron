@@ -1,0 +1,55 @@
+workflow:
+  name: Release Approval Gate
+  version: 1.0.0
+  metadata:
+    description: Contract fixture for a durable gate and typed downstream decision.
+
+inputs:
+  - name: version
+    type: string
+    required: true
+  - name: environment
+    type: string
+    required: true
+
+steps:
+  - id: approval
+    display_name: Wait for release approval
+    human_gate:
+      environment: "{{ inputs.environment }}"
+      prompt: "Release {{ inputs.version }}?"
+      options:
+        - id: approve
+          label: Approve
+        - id: reject
+          label: Reject
+      timeout: 24h
+    outputs:
+      decision:
+        schema:
+          type: string
+          enum: [approve, reject]
+    effects: [read]
+
+  - id: decide
+    display_name: Bind approval decision
+    needs: [approval]
+    with:
+      decision: steps.approval.outputs.decision
+    transform:
+      decision: steps.approval.outputs.decision
+      approved: steps.approval.outputs.decision == "approve"
+    outputs:
+      decision:
+        type: string
+      approved:
+        type: boolean
+    effects: [compute]
+
+outputs:
+  decision:
+    type: string
+    value: steps.decide.outputs.decision
+  approved:
+    type: boolean
+    value: steps.decide.outputs.approved

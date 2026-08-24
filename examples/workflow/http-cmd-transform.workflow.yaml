@@ -1,0 +1,62 @@
+workflow:
+  name: HTTP Command Transform
+  version: 1.0.0
+  metadata:
+    description: Contract fixture for typed HTTP, command, and transform data flow.
+
+inputs:
+  - name: url
+    type: string
+    required: true
+
+steps:
+  - id: fetch
+    display_name: Fetch JSON document
+    http_call:
+      method: GET
+      url: "{{ inputs.url }}"
+    outputs:
+      body:
+        type: object
+      status:
+        type: integer
+    effects: [read]
+
+  - id: extract
+    display_name: Extract records with jq
+    needs: [fetch]
+    cmd:
+      command: jq
+      arguments: [".items"]
+      capture:
+        stdout:
+          name: records
+          parse: json
+    with:
+      payload: steps.fetch.outputs.body
+    outputs:
+      records:
+        type: array
+        items_type: object
+    effects: [compute]
+
+  - id: summarize
+    display_name: Summarize records
+    needs: [extract]
+    transform:
+      count: len(steps.extract.outputs.records)
+      status: steps.fetch.outputs.status
+    outputs:
+      count:
+        type: integer
+      status:
+        type: integer
+    effects: [compute]
+
+outputs:
+  count:
+    type: integer
+    value: steps.summarize.outputs.count
+  status:
+    type: integer
+    value: steps.summarize.outputs.status

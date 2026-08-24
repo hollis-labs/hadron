@@ -91,3 +91,15 @@ input, output, and node identities. Edge map keys use
 
 Compilation does not evaluate expressions, resolve child definitions, infer
 dependencies, query registries, validate kinds, or run topology/policy checks.
+
+## Active contract examples
+
+The repository's active graph-native examples are:
+
+- [Torque task bulk create](../../examples/workflow/torque-task-bulk-create.workflow.yaml)
+- [Release approval gate](../../examples/workflow/release-approval-gate.workflow.yaml)
+- [HTTP, command, and transform](../../examples/workflow/http-cmd-transform.workflow.yaml)
+
+Acceptance tests run these examples through compilation, the separate value
+dependency pass, and validation. Their registered step kinds are test doubles;
+runtime and concrete executor support remains later-wave work.

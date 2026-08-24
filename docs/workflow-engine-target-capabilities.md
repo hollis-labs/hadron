@@ -368,6 +368,11 @@ deterministic job), or hand-unrolling N `mcp_call` steps (not reusable).
 Expression-typed fields (`if`, `for_each`, `transform`, `outputs`) take bare
 expressions; string fields interpolate with `{{ }}`.
 
+The active graph-native form, compiled in repository acceptance tests, is
+[`examples/workflow/torque-task-bulk-create.workflow.yaml`](../examples/workflow/torque-task-bulk-create.workflow.yaml).
+The older illustrative block below is retained as design-history context, not
+as active source.
+
 ```yaml
 blueprint:
   name: torque-task-bulk-create

@@ -1,0 +1,22 @@
+[
+  {
+    "severity": "error",
+    "code": "HADR-SOURCE-012",
+    "message": "source field \"depends_on\" is not supported at steps.1",
+    "source": {
+      "format": "workflow",
+      "locator": "testdata/acceptance-invalid.workflow.yaml",
+      "start_line": 12,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "1",
+        "depends_on"
+      ]
+    },
+    "remediation": {
+      "message": "Remove the field or express it through a supported graph-native field.",
+      "documentation": "docs/architecture/workflow-engine-future-state/02-graph-ir-source-formats.md"
+    }
+  }
+]

@@ -1,0 +1,103 @@
+{
+  "graph": {
+    "format": "workflow",
+    "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+    "start_line": 2,
+    "start_column": 3,
+    "path": [
+      "workflow"
+    ]
+  },
+  "inputs": {
+    "environment": {
+      "format": "workflow",
+      "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+      "start_line": 11,
+      "start_column": 5,
+      "path": [
+        "inputs",
+        "1"
+      ]
+    },
+    "version": {
+      "format": "workflow",
+      "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+      "start_line": 8,
+      "start_column": 5,
+      "path": [
+        "inputs",
+        "0"
+      ]
+    }
+  },
+  "outputs": {
+    "approved": {
+      "format": "workflow",
+      "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+      "start_line": 54,
+      "start_column": 5,
+      "path": [
+        "outputs",
+        "approved"
+      ]
+    },
+    "decision": {
+      "format": "workflow",
+      "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+      "start_line": 51,
+      "start_column": 5,
+      "path": [
+        "outputs",
+        "decision"
+      ]
+    }
+  },
+  "nodes": {
+    "approval": {
+      "format": "workflow",
+      "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+      "start_line": 16,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "0"
+      ]
+    },
+    "decide": {
+      "format": "workflow",
+      "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+      "start_line": 34,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "1"
+      ]
+    }
+  },
+  "edges": {
+    "approval-\u003edecide:control": {
+      "format": "workflow",
+      "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+      "start_line": 36,
+      "start_column": 13,
+      "path": [
+        "steps",
+        "1",
+        "needs",
+        "0"
+      ]
+    },
+    "approval-\u003edecide:data": {
+      "format": "workflow",
+      "locator": "examples/workflow/release-approval-gate.workflow.yaml",
+      "start_line": 34,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "1",
+        "config",
+        "approved"
+      ]
+    }
+  }
+}
