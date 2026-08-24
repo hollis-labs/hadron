@@ -476,3 +476,32 @@ integrated as `cb96ee1`.
 | integration `cb96ee1` | `go vet ./workflow/...` | pass |
 | integration `cb96ee1` | `go test ./...` | pass |
 | integration `cb96ee1` | `git diff --check` | pass |
+
+## W01-T06
+
+Reviewed all active graph-native examples, production compiler/inference/
+validation execution, deterministic execution-plan and source-map snapshots,
+and exact structured invalid-source diagnostics. The fixtures use registered
+test doubles only for executor kinds and make no claim of later-wave runtime
+support. Source commit `e5d3c38` was integrated as `88fb4cf`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `e5d3c38` | focused five-test acceptance suite, `-count=30` | pass |
+| source worktree `e5d3c38` | `UPDATE_WORKFLOW_SNAPSHOTS=1 go test -count=1 ./workflow/compile/...` plus `git diff --exit-code` | pass; snapshots byte-stable |
+| source worktree `e5d3c38` | `go test -count=1 ./workflow/compile/... ./workflow/conformance/...` | pass |
+| source worktree `e5d3c38` | `go test -race ./workflow/compile/... ./workflow/conformance/...` | pass |
+| source worktree `e5d3c38` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `e5d3c38` | `go test -count=1 ./workflow/...` | pass |
+| source worktree `e5d3c38` | `go vet ./workflow/...` | pass |
+| source worktree `e5d3c38` | `go test ./...` | pass |
+| source worktree `e5d3c38` | `git diff --check 1285639..e5d3c38` | pass |
+| integration `88fb4cf` | focused five-test acceptance suite, `-count=30` | pass |
+| integration `88fb4cf` | `UPDATE_WORKFLOW_SNAPSHOTS=1 go test -count=1 ./workflow/compile/...` plus `git diff --exit-code` | pass; snapshots byte-stable |
+| integration `88fb4cf` | `go test -count=1 ./workflow/compile/... ./workflow/conformance/...` | pass |
+| integration `88fb4cf` | `go test -race ./workflow/compile/... ./workflow/conformance/...` | pass |
+| integration `88fb4cf` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `88fb4cf` | `go test -count=1 ./workflow/...` | pass |
+| integration `88fb4cf` | `go vet ./workflow/...` | pass |
+| integration `88fb4cf` | `go test ./...` | pass |
+| integration `88fb4cf` | `git diff --check HEAD^..HEAD` | pass |

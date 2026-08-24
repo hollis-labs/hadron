@@ -21,3 +21,4 @@
 | 17 | W03-T01 | `fe9de95` | `67f97c8` | Hadron | accepted after lease-releasing wait and claimed-resume lifecycle hardening |
 | 18 | W01-T07 | `eb6d4e9` | `1285639` | Hadron | accepted after activation vocabulary, file-path, and operational-state hardening |
 | 19 | W03-T02 | `f0a8abb` | `cb96ee1` | Hadron | accepted after durable replay, claim-generation fencing, and leased-ready recovery hardening |
+| 20 | W01-T06 | `e5d3c38` | `88fb4cf` | Hadron | accepted with production compiler, inference, validation, source-map, and diagnostic fixture coverage |
