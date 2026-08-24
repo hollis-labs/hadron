@@ -54,21 +54,21 @@ superseded requirements are not mistaken for omissions.
 
 | ID | Task | Wave | Depends On | Track |
 | --- | --- | --- | --- | --- |
-| W00-T01 | Archive legacy blueprint and pipeline examples | 00 | none | [ ] |
-| W00-T02 | Scaffold extraction-ready workflow package family | 00 | none | [ ] |
-| W00-T03 | Add dependency and import guardrails | 00 | W00-T02 | [ ] |
-| W00-T04 | Create conformance harness skeleton | 00 | W00-T02 | [ ] |
-| W00-T05 | Establish diagnostics and error-code conventions | 00 | W00-T02, W01-T01 | [ ] |
+| W00-T01 | Archive legacy blueprint and pipeline examples | 00 | none | [x] |
+| W00-T02 | Scaffold extraction-ready workflow package family | 00 | none | [x] |
+| W00-T03 | Add dependency and import guardrails | 00 | W00-T02 | [x] |
+| W00-T04 | Create conformance harness skeleton | 00 | W00-T02 | [x] |
+| W00-T05 | Establish diagnostics and error-code conventions | 00 | W00-T02, W01-T01 | [x] |
 | W00-T06 | Define step-kind contract skeleton | 00 | W00-T02, W00-T05, W01-T01 | [ ] |
-| W00-T07 | Standardize timed activation contracts in `go-scheduler` | 00 | none | [ ] |
-| W01-T01 | Define graph IR Go types | 01 | W00-T02 | [ ] |
-| W01-T02 | Generate graph IR JSON Schema | 01 | W01-T01 | [ ] |
-| W01-T03 | Implement workflow source loader | 01 | W01-T01, W00-T05 | [ ] |
+| W00-T07 | Standardize timed activation contracts in `go-scheduler` | 00 | none | [x] |
+| W01-T01 | Define graph IR Go types | 01 | W00-T02 | [x] |
+| W01-T02 | Generate graph IR JSON Schema | 01 | W01-T01 | [x] |
+| W01-T03 | Implement workflow source loader | 01 | W01-T01, W00-T05 | [x] |
 | W01-T04 | Compile source to execution plan with source maps | 01 | W01-T01, W01-T02, W01-T03 | [ ] |
 | W01-T05 | Implement validation passes | 01 | W01-T04, W00-T06 | [ ] |
 | W01-T06 | Add greenfield acceptance fixtures | 01 | W01-T04 | [ ] |
 | W01-T07 | Compile workflow activation declarations | 01 | W01-T03, W01-T04 | [ ] |
-| W02-T01 | Implement typed `Value` and `ArtifactRef` model | 02 | W01-T01 | [ ] |
+| W02-T01 | Implement typed `Value` and `ArtifactRef` model | 02 | W01-T01 | [x] |
 | W02-T02 | Add expression and interpolation engine | 02 | W02-T01, W00-T05 | [ ] |
 | W02-T03 | Bind workflow inputs and outputs | 02 | W02-T01, W02-T02, W02-T04 | [ ] |
 | W02-T04 | Define runtime state-store interface | 02 | W01-T04, W02-T01 | [ ] |
