@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/hadron/workflow/conformance"
+	"github.com/hollis-labs/hadron/workflow/stepkind"
 )
 
 type fakeHost struct {
@@ -37,6 +38,17 @@ func (h fakeHost) StepKindRegistryFactory() conformance.Factory {
 func (h fakeHost) factory() conformance.Factory {
 	return func() (conformance.Runner, error) {
 		return conformance.RunnerFunc(func(_ context.Context, fixture conformance.Fixture) error {
+			if fixture.Set == conformance.ExecutorMetadataFixtures {
+				var input struct {
+					Spec stepkind.StepKindSpec `json:"spec"`
+				}
+				if err := json.Unmarshal(fixture.Input, &input); err != nil {
+					return fmt.Errorf("decode step-kind metadata input: %w", err)
+				}
+				(*h.calls)++
+				return stepkind.ValidateSpec(input.Spec)
+			}
+
 			var input struct {
 				Accepted bool `json:"accepted"`
 			}

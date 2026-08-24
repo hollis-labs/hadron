@@ -2,7 +2,7 @@
 // executor contracts.
 //
 // It is extraction-ready engine core. Imports are limited to the standard
-// library and explicitly adopted extraction-safe dependencies; Hadron internal
-// packages are forbidden. Its public API is unstable until the step-kind
-// contracts are defined.
+// library and other workflow core packages; Hadron internal packages and
+// concrete adapters are forbidden. Executors advertise immutable metadata at
+// registration and implement only the lifecycle capabilities they declare.
 package stepkind

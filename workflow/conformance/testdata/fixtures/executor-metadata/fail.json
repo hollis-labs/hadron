@@ -2,6 +2,16 @@
   "name": "minimal-fail",
   "expect": "fail",
   "input": {
-    "accepted": false
+    "spec": {
+      "name": "broken kind",
+      "version": "",
+      "config_schema": {},
+      "input_schema": {},
+      "effects": ["unknown"],
+      "idempotency": "automatic",
+      "retry_safety": "sometimes",
+      "cancellation": {"mode": "signal"},
+      "observation": {"mode": "push"}
+    }
   }
 }
