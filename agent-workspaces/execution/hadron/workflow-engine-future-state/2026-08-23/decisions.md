@@ -185,3 +185,20 @@
   heap-limit setting or claim hostile-tenant process isolation.
 
   Vanta revision for both W07-T02 decisions: `01M0SRTJX81SHA01FAG7E1C7G4`.
+
+- W04-T06 pins a logical call site by parent run, node, iteration, and the
+  requested definition reference, excluding both attempt number and the
+  resolver's answer. The first durable record fixes the exact child digest,
+  provenance, effective-input digest, and lineage; retries or recovery must
+  replay that record exactly and reject resolver drift. Inline and child-run
+  operation identities are therefore stable across ambiguous retries.
+
+- Child input precedence is declaration default, then resolver/import partial
+  binding, then the node-local already-evaluated input. Inline calls remain in
+  the parent run and return only declared typed outputs. Run-mode calls create
+  a separate stable child identity and return typed status, events,
+  cancellation, and output references while the existing `ChildRunLink`
+  remains authoritative for `cancel`, `abandon`, and `request_cancel` parent
+  closure behavior.
+
+  Vanta revision for both W04-T06 decisions: `01M0SSDA2YJ5JJ919KTS8DX7J2`.

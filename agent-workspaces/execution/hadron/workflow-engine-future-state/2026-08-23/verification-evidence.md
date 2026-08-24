@@ -835,3 +835,21 @@ Source commit `25dabcf` was integrated as `9e52e0a`.
 | source worktree `25dabcf` | import guard, workflow and adapter vet, targeted golangci, pre-commit hooks, and diff checks | pass; zero new issues |
 | source worktree `25dabcf` | `go test -count=1 ./...` | pass on clean rerun; one earlier concurrent run had an unrelated `internal/agentsubstrate` timeout, whose isolated rerun passed |
 | source and integration | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |
+
+## W04-T06
+
+Reviewed the graph-native `call@v1` contract, definition resolution and
+provenance normalization, layered typed input binding, durable resolution
+journal, attempt-independent replay identity, authoritative lineage and cycle
+checks, inline declared outputs, asynchronous child handles, parent-close
+policy propagation, compiler shape rejection, and nested real-runtime fixtures.
+Source commit `d7c312f` was integrated as `8ac8dbe`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `d7c312f` | `go test -count=20 ./workflow/adapters/call/... ./workflow/runtime/... ./workflow/compile/...` | pass |
+| source worktree `d7c312f` | `go test -race -count=1 ./workflow/adapters/call/... ./workflow/runtime/... ./workflow/compile/...` | pass |
+| source worktree `d7c312f` | import guard, workflow vet, targeted golangci, hooks, and diff checks | pass; zero new issues |
+| source worktree `d7c312f` | `go test -count=1 ./...` | pass |
+| integration `8ac8dbe` | `go test -count=1 ./workflow/adapters/call/... ./workflow/adapters/script/... ./workflow/runtime/... ./workflow/compile/...` | pass |
+| source | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |

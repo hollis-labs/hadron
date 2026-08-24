@@ -139,3 +139,11 @@ No execution findings have been deferred.
   stronger sandbox claim.
 
   Vanta revision: `01M0SRTJXJ4Q1FKHD6CENSK6V0`.
+
+- W04-T06 defines extraction-safe ports and a restart-serializable reference
+  journal for exact call-resolution replay, but intentionally does not bind
+  them to Hadron's production SQLite store or application child-run launcher.
+  W05-T01 and W05-T03 own those host bindings and must preserve atomic parent
+  resolution events plus exact Run/ChildRunLink/input/event replay semantics.
+
+  Vanta revision: `01M0SSDAAJ7T6Q6FJ6Z9VENBRG`.

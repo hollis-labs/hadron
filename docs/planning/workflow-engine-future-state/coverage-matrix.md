@@ -40,7 +40,7 @@ or the detailed architecture made a later choice. In particular:
 | One semantic graph across embedded, CLI, HTTP, MCP, A2A, UI, and offline doors | Planned | W01-T01, W05-T01, W06-T01 through W06-T06, W07-T05 |
 | Blueprint/pipeline compatibility loaders and public sugar | Superseded | W00-T01, W01-T03, W06-T06 |
 | Stable IDs, version, digest, provenance, schemas, source refs/maps | Planned | W01-T01 through W01-T05, W05-T05 |
-| `call.mode: inline | run`, child outputs, target and parent-close policy | Planned | W01-T01, W04-T06 |
+| `call.mode: inline | run`, child outputs, target and parent-close policy | Implemented | W01-T01, W04-T06 |
 | Source `on:` declarations lowered to operational activations | Planned | W01-T07, W05-T04, W05-T08 |
 | Go structs as IR authority plus deterministic JSON Schema | Planned | W01-T01, W01-T02 |
 | SDK, UI, and agent-emitted inputs remain views over the IR | Planned later | W07-T11 |
@@ -91,7 +91,7 @@ or the detailed architecture made a later choice. In particular:
 | Source requirement | Disposition | Owning tasks |
 | --- | --- | --- |
 | Versioned registry with config/input/output schema, effects, capabilities, idempotency, retry, cancel, observe, suspend, embedded metadata | Implemented | W00-T06, W04-T01 |
-| Initial `transform`, `cmd`, `http`, `mcp`, `call`, `sleep`, `wait_for`, `human_gate`, `message_wait` | Planned | W04-T02 through W04-T07 |
+| Initial `transform`, `cmd`, `http`, `mcp`, `call`, `sleep`, `wait_for`, `human_gate`, `message_wait` | Implemented | W04-T02 through W04-T07 |
 | `verify` modifier and literal tool-activity evidence | Planned | W04-T08 |
 | Provider-agnostic typed `llm`, restricted tools, audit records, schema repair/fail | Planned later | W07-T01 |
 | Sandboxed goja `script`, capability surface, schema inference | Implemented | W07-T02 |
