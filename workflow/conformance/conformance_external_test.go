@@ -10,7 +10,6 @@ import (
 	"github.com/hollis-labs/hadron/workflow/conformance"
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
@@ -75,32 +74,8 @@ func (h fakeHost) factory() conformance.Factory {
 				return (workflowwait.Record{Kind: input.Kind, Correlation: input.Correlation, ResumeSchema: schema, Visibility: workflowwait.VisibilityPrivate, Authority: workflowwait.ResponderAuthority{Kind: "fixture"}, WakeSource: input.WakeSource, Status: workflowwait.StatusOpen}).Validate()
 			}
 			if fixture.Set == conformance.SchedulerFixtures {
-				var input struct {
-					Rule         graph.ReadyRule                      `json:"rule"`
-					Dependencies []workflowruntime.NodeStatus         `json:"dependencies"`
-					Want         workflowruntime.ReadinessDisposition `json:"want"`
-				}
-				if err := json.Unmarshal(fixture.Input, &input); err != nil {
-					return fmt.Errorf("decode scheduler input: %w", err)
-				}
-				dependencies := make([]workflowruntime.DependencyState, len(input.Dependencies))
-				for index, status := range input.Dependencies {
-					dependencies[index] = workflowruntime.DependencyState{
-						InvocationID: workflowruntime.NodeInvocationID{
-							RunID: "fixture-run", NodeID: fmt.Sprintf("dependency-%d", index),
-						},
-						Status: status,
-					}
-				}
 				(*h.calls)++
-				evaluation, err := workflowruntime.EvaluateReadiness(input.Rule, dependencies)
-				if err != nil {
-					return err
-				}
-				if evaluation.Disposition != input.Want {
-					return fmt.Errorf("readiness disposition = %q, want %q", evaluation.Disposition, input.Want)
-				}
-				return nil
+				return runSchedulerFixture(context.Background(), fixture)
 			}
 
 			if fixture.Set == conformance.ExecutorMetadataFixtures {
@@ -193,7 +168,7 @@ func TestExternalHostRunsAllSuites(t *testing.T) {
 	calls := 0
 	conformance.RunAll(t, conformance.EmbeddedFixtures(), fakeHost{calls: &calls})
 
-	const wantCalls = 38
+	const wantCalls = 41
 	if calls != wantCalls {
 		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
 	}
@@ -222,7 +197,7 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				wantCount = 7
 			}
 			if set == conformance.SchedulerFixtures {
-				wantCount = 7
+				wantCount = 10
 			}
 			if set == conformance.WaitFixtures {
 				wantCount = 7
@@ -251,6 +226,11 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				}
 				if fixture := byName["readiness-unsupported-rule"]; fixture.Expectation != conformance.ExpectFail {
 					t.Fatalf("unsupported readiness fixture = %#v, want semantic fail fixture", fixture)
+				}
+				for _, name := range []string{"resource-cross-run", "run-policy-fail-fast", "run-policy-run-to-completion"} {
+					if fixture := byName[name]; fixture.Expectation != conformance.ExpectPass {
+						t.Fatalf("%s fixture = %#v, want scheduler policy pass fixture", name, fixture)
+					}
 				}
 				return
 			}

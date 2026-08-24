@@ -116,6 +116,7 @@ func (s *Store) SuspendNodeWait(ctx context.Context, request workflowruntime.Sus
 	if eventErr != nil {
 		return workflowruntime.SuspendWaitResult{}, eventErr
 	}
+	s.releaseSchedulerResourcesLocked(nextNode.ID)
 	s.waits[nextWait.Ref.ID] = cloneWait(nextWait)
 	s.waitAttempts[nextWait.Ref.ID] = currentAttempt.ID
 	s.nodes[nextNode.ID] = cloneNode(nextNode)
@@ -279,6 +280,7 @@ func (s *Store) ResumeNodeWait(ctx context.Context, request workflowruntime.Resu
 	if eventErr != nil {
 		return workflowruntime.ResumeWaitResult{}, eventErr
 	}
+	s.releaseSchedulerResourcesLocked(nextNode.ID)
 	s.nextValueSet++
 	s.valueSets[ref.ID] = storedValues{ref: ref, owner: workflowruntime.ValueOwner{Kind: "wait_resume", RunID: invocation.RunID, Invocation: &invocation, Attempt: &attemptID}, values: setCopy}
 	s.waits[nextWait.Ref.ID] = cloneWait(nextWait)

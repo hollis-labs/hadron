@@ -96,6 +96,9 @@ func (s *WorkflowStateStore) ClaimNode(ctx context.Context, request workflowrunt
 		if err := next.Validate(); err != nil {
 			return workflowInvalid(err)
 		}
+		if err := releaseWorkflowSchedulerResources(ctx, query, current.ID); err != nil {
+			return err
+		}
 		if err := updateWorkflowNodeCAS(ctx, query, next, current.Generation); err != nil {
 			return err
 		}

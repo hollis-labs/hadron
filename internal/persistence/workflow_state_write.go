@@ -207,7 +207,7 @@ DELETE FROM workflow_node_leases WHERE run_id = ? AND node_id = ? AND iteration 
 		); err != nil {
 			return fmt.Errorf("clear workflow node lease: %w", err)
 		}
-		return nil
+		return releaseWorkflowSchedulerResources(ctx, query, id)
 	}
 	generation, err := sqliteGeneration("lease generation", lease.Generation)
 	if err != nil {
@@ -227,7 +227,7 @@ ON CONFLICT(run_id, node_id, iteration) DO UPDATE SET
 	); err != nil {
 		return fmt.Errorf("store workflow node lease: %w", err)
 	}
-	return nil
+	return syncWorkflowSchedulerHolderLease(ctx, query, id, lease)
 }
 
 func insertWorkflowAttempt(ctx context.Context, query workflowSQL, snapshot workflowruntime.AttemptSnapshot) error {

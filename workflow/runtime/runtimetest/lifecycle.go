@@ -191,6 +191,9 @@ func (s *Store) TransitionNode(ctx context.Context, request workflowruntime.Node
 	if err != nil {
 		return workflowruntime.NodeTransitionResult{}, err
 	}
+	if next.Lease == nil {
+		s.releaseSchedulerResourcesLocked(next.ID)
+	}
 	s.nodes[next.ID] = next
 	eventCopy := cloneEvent(event)
 	return workflowruntime.NodeTransitionResult{
@@ -373,6 +376,7 @@ func (s *Store) FinishNodeAttempt(ctx context.Context, request workflowruntime.F
 	if err != nil {
 		return workflowruntime.FinishNodeAttemptResult{}, err
 	}
+	s.releaseSchedulerResourcesLocked(nextNode.ID)
 	s.nodes[nextNode.ID] = nextNode
 	s.attempts[nextAttempt.ID] = nextAttempt
 	return workflowruntime.FinishNodeAttemptResult{

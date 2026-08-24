@@ -471,7 +471,7 @@ func strictSubset(inner, outer map[string]struct{}) bool {
 }
 
 // ProgressFinally makes one finalizer eligible only after its durable scope is
-// terminal and, for cancellation, all remote cancellation intents are resolved.
+// terminal and all remote cancellation intents are resolved.
 func (c *ControlFlowCoordinator) ProgressFinally(ctx context.Context, workflow graph.Graph, invocation NodeInvocationID, expressionContext values.ExpressionContext, expressionOptions values.ExpressionOptions, at time.Time) (ProgressNodeResult, error) {
 	if err := c.validate(ctx); err != nil {
 		return ProgressNodeResult{}, err
@@ -518,15 +518,13 @@ func (c *ControlFlowCoordinator) ProgressFinally(ctx context.Context, workflow g
 			return ProgressNodeResult{}, ErrControlFlowPending
 		}
 	}
-	if intent.IntendedStatus == RunCanceled {
-		pending, recoverErr := c.Store.RecoverCancellationIntents(ctx, CancellationIntentQuery{RunID: invocation.RunID})
-		if recoverErr != nil {
-			return ProgressNodeResult{}, recoverErr
-		}
-		for _, item := range pending {
-			if item.Status == CancellationPending {
-				return ProgressNodeResult{}, ErrControlFlowPending
-			}
+	pending, recoverErr := c.Store.RecoverCancellationIntents(ctx, CancellationIntentQuery{RunID: invocation.RunID})
+	if recoverErr != nil {
+		return ProgressNodeResult{}, recoverErr
+	}
+	for _, item := range pending {
+		if item.Status == CancellationPending {
+			return ProgressNodeResult{}, ErrControlFlowPending
 		}
 	}
 	durableContext, err := BuildExpressionContext(ctx, c.Store, c.Control, workflow, invocation.RunID)

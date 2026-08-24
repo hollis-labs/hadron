@@ -103,6 +103,7 @@ func (s *Store) SuspendExternalOperation(ctx context.Context, request workflowru
 	if err != nil {
 		return workflowruntime.SuspendExternalOperationResult{}, err
 	}
+	s.releaseSchedulerResourcesLocked(node.ID)
 	s.externalOperations[operation.Attempt] = cloneExternalOperation(operation)
 	s.nodes[node.ID] = cloneNode(node)
 	return workflowruntime.SuspendExternalOperationResult{
@@ -207,8 +208,7 @@ func (s *Store) ApplyExternalOperation(ctx context.Context, request workflowrunt
 		}
 	}
 	if !s.controlAdmissionAllowedLocked(request.Attempt.Invocation) {
-		intent := s.terminalIntents[request.Attempt.Invocation.RunID]
-		if intent.IntendedStatus != workflowruntime.RunCanceled || !allowedCanceledResolution {
+		if !allowedCanceledResolution {
 			return workflowruntime.ApplyExternalOperationResult{}, invalid(errors.New("pending terminal intent fences external mutation"))
 		}
 	}
@@ -287,6 +287,7 @@ func (s *Store) ApplyExternalOperation(ctx context.Context, request workflowrunt
 	}
 	s.externalOperations[nextOperation.Attempt] = cloneExternalOperation(nextOperation)
 	if request.Status != stepkind.ObservationPending {
+		s.releaseSchedulerResourcesLocked(nextNode.ID)
 		s.nodes[nextNode.ID] = cloneNode(nextNode)
 		s.attempts[nextAttempt.ID] = cloneAttempt(nextAttempt)
 	}

@@ -1,0 +1,9 @@
+{
+  "name": "run-policy-fail-fast",
+  "expect": "pass",
+  "input": {
+    "scenario": "run_policy",
+    "completion": "fail_fast",
+    "want": "fail_fast"
+  }
+}

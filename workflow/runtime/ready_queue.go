@@ -62,14 +62,25 @@ type ReadyClaim struct {
 // ReadyQueueCoordinator discovers and claims work exclusively through a
 // StateStore. It retains no candidate or ownership state between calls.
 type ReadyQueueCoordinator struct {
-	store  StateStore
-	policy ReadyQueuePolicy
+	store     StateStore
+	policy    ReadyQueuePolicy
+	admission SchedulerAdmissionPolicy
+	resources SchedulerResourceStore
+	bounded   bool
 }
 
 // NewReadyQueueCoordinator constructs a stateless durable-ready-queue
 // coordinator. A nil policy preserves FIFO ordering.
 func NewReadyQueueCoordinator(store StateStore, policy ReadyQueuePolicy) *ReadyQueueCoordinator {
 	return &ReadyQueueCoordinator{store: store, policy: policy}
+}
+
+// NewResourceReadyQueueCoordinator constructs the bounded cross-process
+// admission path. Store must implement SchedulerResourceStore; validation is
+// deferred to ClaimNext so typed-nil collaborators fail as structured errors.
+func NewResourceReadyQueueCoordinator(store StateStore, policy ReadyQueuePolicy, admission SchedulerAdmissionPolicy) *ReadyQueueCoordinator {
+	resources, _ := store.(SchedulerResourceStore)
+	return &ReadyQueueCoordinator{store: store, policy: policy, admission: admission, resources: resources, bounded: true}
 }
 
 // ClaimNext discovers persisted ready candidates, applies FIFO and optional
@@ -84,8 +95,11 @@ func (c *ReadyQueueCoordinator) ClaimNext(ctx context.Context, request ReadyClai
 	if err := ctx.Err(); err != nil {
 		return ReadyClaim{}, false, err
 	}
-	if c == nil || c.store == nil {
+	if c == nil || nilStateStore(c.store) {
 		return ReadyClaim{}, false, fmt.Errorf("%w: ready queue store is required", ErrInvalidRecord)
+	}
+	if c.bounded && (nilSchedulerResourceStore(c.resources) || nilSchedulerAdmissionPolicy(c.admission)) {
+		return ReadyClaim{}, false, fmt.Errorf("%w: bounded ready queue requires resource store and admission policy", ErrInvalidRecord)
 	}
 	if err := validateReadyClaimRequest(request); err != nil {
 		return ReadyClaim{}, false, fmt.Errorf("%w: %w", ErrInvalidRecord, err)
@@ -107,6 +121,17 @@ func (c *ReadyQueueCoordinator) ClaimNext(ctx context.Context, request ReadyClai
 	ordered = prioritizeReplayCandidates(ordered, candidates, snapshots, request)
 	for _, id := range ordered {
 		snapshot := snapshots[id]
+		var requirements []SchedulerResourceRequirement
+		if c.bounded {
+			requirements, err = c.admission.Requirements(ctx, candidateFor(snapshot))
+			if err != nil {
+				return ReadyClaim{}, false, fmt.Errorf("ready queue admission policy: %w", err)
+			}
+			requirements = append([]SchedulerResourceRequirement(nil), requirements...)
+			if err := validateSchedulerRequirements(requirements); err != nil {
+				return ReadyClaim{}, false, err
+			}
+		}
 		expectedClaimGeneration := snapshot.ClaimGeneration
 		if snapshot.Lease != nil && snapshot.ClaimGeneration > 0 &&
 			snapshot.Lease.Owner == request.Owner && snapshot.Lease.Token == request.Token &&
@@ -115,7 +140,7 @@ func (c *ReadyQueueCoordinator) ClaimNext(ctx context.Context, request ReadyClai
 			// the store can find and replay its durable idempotency outcome.
 			expectedClaimGeneration--
 		}
-		claim, claimErr := c.store.ClaimNode(ctx, ClaimNodeRequest{
+		claimRequest := ClaimNodeRequest{
 			InvocationID:            id,
 			ExpectedClaimGeneration: expectedClaimGeneration,
 			Owner:                   request.Owner,
@@ -123,7 +148,17 @@ func (c *ReadyQueueCoordinator) ClaimNext(ctx context.Context, request ReadyClai
 			IdempotencyKey:          scopedClaimIdempotencyKey(request.IdempotencyKey, id),
 			Now:                     request.Now,
 			LeaseUntil:              request.LeaseUntil,
-		})
+		}
+		claim := ClaimResult{}
+		var claimErr error
+		if !c.bounded {
+			claim, claimErr = c.store.ClaimNode(ctx, claimRequest)
+		} else {
+			admitted, admitErr := c.resources.AdmitNode(ctx, AdmitNodeRequest{
+				Claim: claimRequest, Requirements: requirements, Priority: snapshot.Priority, EnqueuedAt: snapshot.CreatedAt,
+			})
+			claim, claimErr = admitted.Claim, admitErr
+		}
 		if errors.Is(claimErr, ErrCASMismatch) {
 			continue
 		}
@@ -156,7 +191,7 @@ func (c *ReadyQueueCoordinator) Renew(ctx context.Context, request RenewLeaseReq
 	if err := ctx.Err(); err != nil {
 		return ClaimLease{}, err
 	}
-	if c == nil || c.store == nil {
+	if c == nil || nilStateStore(c.store) {
 		return ClaimLease{}, fmt.Errorf("%w: ready queue store is required", ErrInvalidRecord)
 	}
 	return c.store.RenewNodeLease(ctx, request)
@@ -170,7 +205,7 @@ func (c *ReadyQueueCoordinator) Release(ctx context.Context, request ReleaseClai
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if c == nil || c.store == nil {
+	if c == nil || nilStateStore(c.store) {
 		return fmt.Errorf("%w: ready queue store is required", ErrInvalidRecord)
 	}
 	return c.store.ReleaseNodeClaim(ctx, request)

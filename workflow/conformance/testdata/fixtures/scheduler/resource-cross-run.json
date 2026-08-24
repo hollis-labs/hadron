@@ -1,0 +1,8 @@
+{
+  "name": "resource-cross-run",
+  "expect": "pass",
+  "input": {
+    "scenario": "resource",
+    "want": "blocked"
+  }
+}

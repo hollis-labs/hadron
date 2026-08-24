@@ -295,6 +295,7 @@ func (s *Store) cancelUnstartedNodeLocked(node workflowruntime.NodeInvocationSna
 	if err != nil {
 		return err
 	}
+	s.releaseSchedulerResourcesLocked(id)
 	s.nodes[id] = next
 	collector.nodes, collector.events = append(collector.nodes, next), append(collector.events, event)
 	return nil
@@ -351,6 +352,7 @@ func (s *Store) cancelGenericWaitLocked(node workflowruntime.NodeInvocationSnaps
 	if err != nil {
 		return err
 	}
+	s.releaseSchedulerResourcesLocked(id)
 	s.waits[nextWait.Ref.ID], s.attempts[attemptID], s.nodes[id] = nextWait, nextAttempt, nextNode
 	collector.nodes = append(collector.nodes, nextNode)
 	collector.events = append(collector.events, appended...)
@@ -381,6 +383,7 @@ func (s *Store) cancelRetryWaitingNodeLocked(node workflowruntime.NodeInvocation
 		if err != nil {
 			return true, err
 		}
+		s.releaseSchedulerResourcesLocked(node.ID)
 		s.retryActivations[id], s.nodes[node.ID] = activation, nextNode
 		collector.nodes, collector.events = append(collector.nodes, nextNode), append(collector.events, event)
 		return true, nil
@@ -418,6 +421,7 @@ func (s *Store) cancelFanOutParentLocked(node workflowruntime.NodeInvocationSnap
 	if err != nil {
 		return true, err
 	}
+	s.releaseSchedulerResourcesLocked(node.ID)
 	s.fanOuts[node.ID], s.nodes[node.ID] = fanOut, nextNode
 	collector.nodes, collector.events = append(collector.nodes, nextNode), append(collector.events, event)
 	return true, nil
@@ -540,6 +544,7 @@ func (s *Store) ResolveCancellationIntent(ctx context.Context, request workflowr
 		return workflowruntime.ResolveCancellationIntentResult{}, err
 	}
 	if result.Attempt != nil {
+		s.releaseSchedulerResourcesLocked(result.Node.ID)
 		s.attempts[result.Attempt.ID] = cloneAttempt(*result.Attempt)
 		s.nodes[result.Node.ID] = cloneNode(*result.Node)
 	}
@@ -660,6 +665,8 @@ type cancellationStateBackup struct {
 	terminalKeys        map[string]workflowruntime.RunID
 	valueSets           map[string]storedValues
 	nextValueSet        uint64
+	schedulerHolders    map[workflowruntime.SchedulerResourceID]map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceHolder
+	schedulerWaiters    map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceWaiter
 }
 
 func (s *Store) backupCancellationStateLocked() cancellationStateBackup {
@@ -678,6 +685,8 @@ func (s *Store) backupCancellationStateLocked() cancellationStateBackup {
 		terminalKeys:        make(map[string]workflowruntime.RunID, len(s.terminalKeys)),
 		valueSets:           make(map[string]storedValues, len(s.valueSets)),
 		nextValueSet:        s.nextValueSet,
+		schedulerHolders:    make(map[workflowruntime.SchedulerResourceID]map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceHolder, len(s.schedulerHolders)),
+		schedulerWaiters:    make(map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceWaiter, len(s.schedulerWaiters)),
 	}
 	for id, snapshot := range s.runs {
 		backup.runs[id] = cloneRun(snapshot)
@@ -718,6 +727,16 @@ func (s *Store) backupCancellationStateLocked() cancellationStateBackup {
 	for id, stored := range s.valueSets {
 		backup.valueSets[id] = stored
 	}
+	for resource, holders := range s.schedulerHolders {
+		cloned := make(map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceHolder, len(holders))
+		for id, holder := range holders {
+			cloned[id] = holder
+		}
+		backup.schedulerHolders[resource] = cloned
+	}
+	for id, waiter := range s.schedulerWaiters {
+		backup.schedulerWaiters[id] = cloneSchedulerWaiter(waiter)
+	}
 	return backup
 }
 
@@ -736,4 +755,6 @@ func (s *Store) restoreCancellationStateLocked(backup cancellationStateBackup) {
 	s.terminalKeys = backup.terminalKeys
 	s.valueSets = backup.valueSets
 	s.nextValueSet = backup.nextValueSet
+	s.schedulerHolders = backup.schedulerHolders
+	s.schedulerWaiters = backup.schedulerWaiters
 }

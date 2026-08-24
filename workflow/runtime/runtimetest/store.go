@@ -41,15 +41,21 @@ type Store struct {
 	terminalIntents     map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot
 	terminalKeys        map[string]workflowruntime.RunID
 	controlCancelTrees  map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest
+	runPolicyDecisions  map[workflowruntime.RunID]workflowruntime.RunPolicyDecisionSnapshot
+	runPolicyRequests   map[string]workflowruntime.ApplyRunFailurePolicyRequest
 
 	valueSets    map[string]storedValues
 	nextValueSet uint64
 	plans        map[string]workflowruntime.PlanRef
 	events       map[workflowruntime.RunID][]workflowruntime.Event
 
-	claims map[string]claimRecord
-	cache  map[string]workflowruntime.CacheEntry
-	pins   map[string]workflowruntime.PinnedValue
+	claims               map[string]claimRecord
+	schedulerDefinitions map[workflowruntime.SchedulerResourceID]int
+	schedulerHolders     map[workflowruntime.SchedulerResourceID]map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceHolder
+	schedulerWaiters     map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceWaiter
+	schedulerAdmissions  map[string]schedulerAdmissionRecord
+	cache                map[string]workflowruntime.CacheEntry
+	pins                 map[string]workflowruntime.PinnedValue
 
 	activations map[string]activationRecord
 }
@@ -85,6 +91,11 @@ type claimRecord struct {
 	result  workflowruntime.ClaimResult
 }
 
+type schedulerAdmissionRecord struct {
+	request workflowruntime.AdmitNodeRequest
+	result  workflowruntime.AdmitNodeResult
+}
+
 type activationRecord struct {
 	request workflowruntime.ExternalActivationRequest
 	result  workflowruntime.ExternalActivationSnapshot
@@ -105,34 +116,40 @@ var _ workflowruntime.StateStore = (*Store)(nil)
 // NewStore returns an empty StateStore fake.
 func NewStore() *Store {
 	return &Store{
-		runs:                make(map[workflowruntime.RunID]workflowruntime.RunSnapshot),
-		runStarts:           make(map[string]runStartRecord),
-		nodes:               make(map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot),
-		attempts:            make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
-		waits:               make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
-		waitAttempts:        make(map[workflowruntime.WaitID]workflowruntime.AttemptID),
-		suspends:            make(map[workflowruntime.WaitID]suspendRecord),
-		waitResumes:         make(map[string]waitResumeRecord),
-		waitResumeResults:   make(map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult),
-		timeouts:            make(map[string]timeoutRecord),
-		externalOperations:  make(map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot),
-		retryActivations:    make(map[string]workflowruntime.RetryActivationSnapshot),
-		retryActivationKeys: make(map[string]retryActivationRecord),
-		fanOuts:             make(map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot),
-		childRuns:           make(map[workflowruntime.RunID][]workflowruntime.ChildRunLink),
-		cancellationIntents: make(map[string]workflowruntime.CancellationIntentSnapshot),
-		cancellationKeys:    make(map[string]cancellationRecord),
-		controlDecisions:    make(map[workflowruntime.ControlDecisionID]workflowruntime.ControlDecisionSnapshot),
-		terminalIntents:     make(map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot),
-		terminalKeys:        make(map[string]workflowruntime.RunID),
-		controlCancelTrees:  make(map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest),
-		valueSets:           make(map[string]storedValues),
-		plans:               make(map[string]workflowruntime.PlanRef),
-		events:              make(map[workflowruntime.RunID][]workflowruntime.Event),
-		claims:              make(map[string]claimRecord),
-		cache:               make(map[string]workflowruntime.CacheEntry),
-		pins:                make(map[string]workflowruntime.PinnedValue),
-		activations:         make(map[string]activationRecord),
+		runs:                 make(map[workflowruntime.RunID]workflowruntime.RunSnapshot),
+		runStarts:            make(map[string]runStartRecord),
+		nodes:                make(map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot),
+		attempts:             make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
+		waits:                make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
+		waitAttempts:         make(map[workflowruntime.WaitID]workflowruntime.AttemptID),
+		suspends:             make(map[workflowruntime.WaitID]suspendRecord),
+		waitResumes:          make(map[string]waitResumeRecord),
+		waitResumeResults:    make(map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult),
+		timeouts:             make(map[string]timeoutRecord),
+		externalOperations:   make(map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot),
+		retryActivations:     make(map[string]workflowruntime.RetryActivationSnapshot),
+		retryActivationKeys:  make(map[string]retryActivationRecord),
+		fanOuts:              make(map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot),
+		childRuns:            make(map[workflowruntime.RunID][]workflowruntime.ChildRunLink),
+		cancellationIntents:  make(map[string]workflowruntime.CancellationIntentSnapshot),
+		cancellationKeys:     make(map[string]cancellationRecord),
+		controlDecisions:     make(map[workflowruntime.ControlDecisionID]workflowruntime.ControlDecisionSnapshot),
+		terminalIntents:      make(map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot),
+		terminalKeys:         make(map[string]workflowruntime.RunID),
+		controlCancelTrees:   make(map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest),
+		runPolicyDecisions:   make(map[workflowruntime.RunID]workflowruntime.RunPolicyDecisionSnapshot),
+		runPolicyRequests:    make(map[string]workflowruntime.ApplyRunFailurePolicyRequest),
+		valueSets:            make(map[string]storedValues),
+		plans:                make(map[string]workflowruntime.PlanRef),
+		events:               make(map[workflowruntime.RunID][]workflowruntime.Event),
+		claims:               make(map[string]claimRecord),
+		schedulerDefinitions: make(map[workflowruntime.SchedulerResourceID]int),
+		schedulerHolders:     make(map[workflowruntime.SchedulerResourceID]map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceHolder),
+		schedulerWaiters:     make(map[workflowruntime.NodeInvocationID]workflowruntime.SchedulerResourceWaiter),
+		schedulerAdmissions:  make(map[string]schedulerAdmissionRecord),
+		cache:                make(map[string]workflowruntime.CacheEntry),
+		pins:                 make(map[string]workflowruntime.PinnedValue),
+		activations:          make(map[string]activationRecord),
 	}
 }
 
@@ -591,6 +608,7 @@ func (s *Store) ClaimNode(ctx context.Context, request workflowruntime.ClaimNode
 	if err := current.Validate(); err != nil {
 		return workflowruntime.ClaimResult{}, invalid(err)
 	}
+	s.releaseSchedulerResourcesLocked(current.ID)
 	s.nodes[current.ID] = current
 	result := workflowruntime.ClaimResult{Acquired: true, Lease: cloneLease(current.Lease)}
 	s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
@@ -602,6 +620,7 @@ func (s *Store) RenewNodeLease(ctx context.Context, request workflowruntime.Rene
 	if err := checkContext(ctx); err != nil {
 		return workflowruntime.ClaimLease{}, err
 	}
+	request.Now, request.LeaseUntil = request.Now.UTC(), request.LeaseUntil.UTC()
 	if err := validateRenew(request); err != nil {
 		return workflowruntime.ClaimLease{}, invalid(err)
 	}
@@ -626,11 +645,15 @@ func (s *Store) RenewNodeLease(ctx context.Context, request workflowruntime.Rene
 	if !request.LeaseUntil.After(current.Lease.ExpiresAt) {
 		return workflowruntime.ClaimLease{}, invalid(errors.New("renewal must extend the current lease expiry"))
 	}
+	current = cloneNode(current)
 	current.Lease.ExpiresAt = request.LeaseUntil
 	current.Generation++
 	current.UpdatedAt = request.Now
 	if err := current.Validate(); err != nil {
 		return workflowruntime.ClaimLease{}, invalid(err)
+	}
+	if err := s.renewSchedulerResourcesLocked(current.ID, current.ClaimGeneration, request.LeaseUntil); err != nil {
+		return workflowruntime.ClaimLease{}, err
 	}
 	s.nodes[current.ID] = current
 	return *cloneLease(current.Lease), nil
@@ -641,6 +664,7 @@ func (s *Store) ReleaseNodeClaim(ctx context.Context, request workflowruntime.Re
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
+	request.Now = request.Now.UTC()
 	if err := request.InvocationID.Validate(); err != nil {
 		return invalid(err)
 	}
@@ -668,6 +692,7 @@ func (s *Store) ReleaseNodeClaim(ctx context.Context, request workflowruntime.Re
 	if err := current.Validate(); err != nil {
 		return invalid(err)
 	}
+	s.releaseSchedulerResourcesLocked(current.ID)
 	s.nodes[current.ID] = current
 	return nil
 }

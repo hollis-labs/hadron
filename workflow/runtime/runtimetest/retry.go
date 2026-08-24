@@ -128,6 +128,7 @@ func (s *Store) ScheduleNodeRetry(ctx context.Context, request workflowruntime.S
 	if err != nil {
 		return workflowruntime.ScheduleNodeRetryResult{}, err
 	}
+	s.releaseSchedulerResourcesLocked(nextNode.ID)
 	s.nodes[nextNode.ID] = nextNode
 	s.attempts[nextAttempt.ID] = nextAttempt
 	s.retryActivations[activation.ID] = activation

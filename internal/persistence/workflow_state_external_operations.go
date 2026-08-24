@@ -229,11 +229,7 @@ func (s *WorkflowStateStore) ApplyExternalOperation(ctx context.Context, request
 			return err
 		}
 		if !allowed {
-			intent, err := loadWorkflowTerminalIntent(ctx, query, request.Attempt.Invocation.RunID)
-			if err != nil {
-				return err
-			}
-			if intent.IntendedStatus != workflowruntime.RunCanceled || !allowedCanceledResolution {
+			if !allowedCanceledResolution {
 				return workflowInvalid(errors.New("pending terminal intent fences external mutation"))
 			}
 		}

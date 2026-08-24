@@ -211,6 +211,9 @@ func (s *WorkflowStateStore) LoadTerminalIntent(ctx context.Context, runID workf
 
 func (s *WorkflowStateStore) BeginTerminalIntent(ctx context.Context, request workflowruntime.BeginTerminalIntentRequest) (workflowruntime.BeginTerminalIntentResult, error) {
 	request.At = request.At.UTC()
+	if len(request.Finalizers) == 0 {
+		return workflowruntime.BeginTerminalIntentResult{}, workflowInvalid(errors.New("public terminal intent requires at least one finalizer"))
+	}
 	var result workflowruntime.BeginTerminalIntentResult
 	writeErr := s.write(ctx, "begin workflow terminal intent", func(query workflowSQL) error {
 		var beginErr error
@@ -413,6 +416,15 @@ func (s *WorkflowStateStore) CompleteTerminalIntent(ctx context.Context, request
 			}
 			if workflowHardFailure(node.Status) {
 				to, cleanupFailure = workflowruntime.RunFailed, node.ID.NodeID
+			}
+		}
+		cancellations, err := listWorkflowCancellationIntents(ctx, query, run.ID)
+		if err != nil {
+			return err
+		}
+		for _, cancellation := range cancellations {
+			if cancellation.Status == workflowruntime.CancellationPending {
+				return workflowruntime.ErrControlFlowPending
 			}
 		}
 		if err := workflowruntime.ValidateRunStatusTransition(run.Status, to); err != nil {

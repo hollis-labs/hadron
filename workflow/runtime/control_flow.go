@@ -209,7 +209,9 @@ const (
 
 // TerminalIntentSnapshot is the immutable intended outcome plus mutable CAS
 // completion state. Finalizer ordering and typed originating error are fixed at
-// creation and never inferred from events or timestamps.
+// creation and never inferred from events or timestamps. A zero-finalizer
+// snapshot is reserved for the atomic fail-fast policy operation; the public
+// BeginTerminalIntent contract continues to require declared cleanup.
 type TerminalIntentSnapshot struct {
 	RunID          RunID                `json:"run_id"`
 	IntendedStatus RunStatus            `json:"intended_status"`
@@ -250,8 +252,8 @@ func (s TerminalIntentSnapshot) Validate() error {
 	if err := validateRequiredText("terminal intent idempotency key", s.IdempotencyKey); err != nil {
 		return err
 	}
-	if len(s.Finalizers) == 0 || s.Generation == 0 || s.CreatedAt.IsZero() || s.UpdatedAt.Before(s.CreatedAt) {
-		return fmt.Errorf("terminal intent requires finalizers, generation, and ordered timestamps")
+	if s.Generation == 0 || s.CreatedAt.IsZero() || s.UpdatedAt.Before(s.CreatedAt) {
+		return fmt.Errorf("terminal intent requires generation and ordered timestamps")
 	}
 	seen := make(map[NodeInvocationID]struct{}, len(s.Finalizers))
 	lastOrder := -1

@@ -1,0 +1,9 @@
+{
+  "name": "run-policy-run-to-completion",
+  "expect": "pass",
+  "input": {
+    "scenario": "run_policy",
+    "completion": "run_to_completion",
+    "want": "continue"
+  }
+}

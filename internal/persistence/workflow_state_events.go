@@ -175,12 +175,13 @@ func cloneWorkflowAttemptID(id *workflowruntime.AttemptID) *workflowruntime.Atte
 
 func loadWorkflowIdempotency(ctx context.Context, query workflowSQL, table, key string) (string, string, bool, error) {
 	allowed := map[string]bool{
-		"workflow_run_start_idempotency":        true,
-		"workflow_wait_resume_idempotency":      true,
-		"workflow_claim_idempotency":            true,
-		"workflow_external_activations":         true,
-		"workflow_retry_activation_idempotency": true,
-		"workflow_run_cancellation_idempotency": true,
+		"workflow_run_start_idempotency":           true,
+		"workflow_wait_resume_idempotency":         true,
+		"workflow_claim_idempotency":               true,
+		"workflow_external_activations":            true,
+		"workflow_retry_activation_idempotency":    true,
+		"workflow_run_cancellation_idempotency":    true,
+		"workflow_scheduler_admission_idempotency": true,
 	}
 	if !allowed[table] {
 		return "", "", false, workflowInvalid(fmt.Errorf("unsupported idempotency table %q", table))

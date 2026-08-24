@@ -260,6 +260,9 @@ func (s *Store) BeginTerminalIntent(ctx context.Context, request workflowruntime
 		return workflowruntime.BeginTerminalIntentResult{}, err
 	}
 	request.At = request.At.UTC()
+	if len(request.Finalizers) == 0 {
+		return workflowruntime.BeginTerminalIntentResult{}, invalid(errors.New("public terminal intent requires at least one finalizer"))
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.beginTerminalIntentLocked(request)
@@ -527,6 +530,11 @@ func (s *Store) CompleteTerminalIntent(ctx context.Context, request workflowrunt
 		}
 		if hardFailureStatus(node.Status) {
 			to, cleanupFailure = workflowruntime.RunFailed, node.ID.NodeID
+		}
+	}
+	for _, cancellation := range s.cancellationIntents {
+		if cancellation.RunID == run.ID && cancellation.Status == workflowruntime.CancellationPending {
+			return workflowruntime.CompleteTerminalIntentResult{}, workflowruntime.ErrControlFlowPending
 		}
 	}
 	if err := workflowruntime.ValidateRunStatusTransition(run.Status, to); err != nil {

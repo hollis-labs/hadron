@@ -185,6 +185,7 @@ func (s *Store) TimeoutWait(ctx context.Context, request workflowruntime.Timeout
 		events = append(events, event)
 	}
 
+	s.releaseSchedulerResourcesLocked(nextNode.ID)
 	s.waits[nextWait.Ref.ID] = nextWait
 	s.nodes[nextNode.ID] = nextNode
 	s.attempts[nextAttempt.ID] = nextAttempt
