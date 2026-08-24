@@ -96,3 +96,28 @@ integrated it as `8a2ec65`.
 | integration `8a2ec65` | `go test ./workflow/...` | pass |
 | integration `8a2ec65` | `make test` | pass |
 | integration `8a2ec65` | `go test ./...` | pass |
+
+## W01-T01
+
+Reviewed the complete Graph IR source commit and requested a hardening pass for
+nested `SourceRef` validation and deterministic map-backed error ordering. The
+amended source commit `3a0c0c4` was integrated as `7b6e712`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `3a0c0c4` | `git diff --check 873d1fc..3a0c0c4` | pass |
+| source worktree `3a0c0c4` | `go test ./workflow/graph/...` | pass |
+| source worktree `3a0c0c4` | `go test -race ./workflow/graph/...` | pass |
+| source worktree `3a0c0c4` | `go test ./workflow/...` | pass |
+| source worktree `3a0c0c4` | `go vet ./workflow/...` | pass |
+| source worktree `3a0c0c4` | `go test ./...` | pass |
+| source worktree `3a0c0c4` | `go list -deps ./workflow/graph/...` | pass; standard library only |
+| source worktree `3a0c0c4` | W00-T03 import-guard package | not present on the task's declared dependency base; rerun after integration |
+| integration `7b6e712` | `git diff --check HEAD^..HEAD` | pass |
+| integration `7b6e712` | `go test ./workflow/graph/...` | pass |
+| integration `7b6e712` | `go test -race ./workflow/graph/...` | pass |
+| integration `7b6e712` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `7b6e712` | `go test ./workflow/...` | pass |
+| integration `7b6e712` | `go vet ./workflow/...` | pass |
+| integration `7b6e712` | `make test` | pass |
+| integration `7b6e712` | `go test ./...` | pass |
