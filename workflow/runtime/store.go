@@ -133,9 +133,11 @@ type EventQuery struct {
 	Limit         int
 }
 
-// ClaimNodeRequest atomically acquires a lease only when
-// ExpectedClaimGeneration matches. Now is caller-supplied for deterministic
-// storage adapters and tests; LeaseUntil must be later than Now.
+// ClaimNodeRequest atomically attempts to acquire a ready node only when
+// ExpectedClaimGeneration matches. A matching request against a non-ready node
+// or a live lease durably returns Acquired false; an expired ready lease may be
+// replaced. Now is caller-supplied for deterministic storage adapters and
+// tests; LeaseUntil must be later than Now.
 type ClaimNodeRequest struct {
 	InvocationID            NodeInvocationID
 	ExpectedClaimGeneration uint64
@@ -202,8 +204,9 @@ type RecoveryQuery struct {
 	Limit int
 }
 
-// RecoverySnapshot contains only persisted candidates; it does not schedule or
-// transition them.
+// RecoverySnapshot contains only persisted candidates; category membership may
+// overlap. Ready is a storage candidate set whose order is not a scheduling
+// contract. Recovery does not schedule or transition records.
 type RecoverySnapshot struct {
 	ActiveRuns    []RunSnapshot
 	Ready         []NodeInvocationSnapshot

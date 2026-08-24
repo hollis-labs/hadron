@@ -513,7 +513,9 @@ func (s *Store) ListEvents(ctx context.Context, query workflowruntime.EventQuery
 	return result, nil
 }
 
-// ClaimNode atomically acquires a lease under claim-generation CAS.
+// ClaimNode atomically attempts to acquire a ready node under
+// claim-generation CAS. Non-ready nodes and live leases produce replayable
+// negative results without exposing another owner's lease.
 func (s *Store) ClaimNode(ctx context.Context, request workflowruntime.ClaimNodeRequest) (workflowruntime.ClaimResult, error) {
 	if err := checkContext(ctx); err != nil {
 		return workflowruntime.ClaimResult{}, err
@@ -537,6 +539,11 @@ func (s *Store) ClaimNode(ctx context.Context, request workflowruntime.ClaimNode
 	}
 	if current.ClaimGeneration != request.ExpectedClaimGeneration {
 		return workflowruntime.ClaimResult{}, casMismatch("node claim", request.ExpectedClaimGeneration, current.ClaimGeneration)
+	}
+	if current.Status != workflowruntime.NodeReady {
+		result := workflowruntime.ClaimResult{Acquired: false}
+		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
+		return result, nil
 	}
 	if current.Lease != nil && current.Lease.ExpiresAt.After(request.Now) {
 		result := workflowruntime.ClaimResult{Acquired: false}
