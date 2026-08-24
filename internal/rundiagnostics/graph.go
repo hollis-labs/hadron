@@ -2,8 +2,10 @@ package rundiagnostics
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"reflect"
 	"sort"
@@ -135,6 +137,7 @@ type Capabilities struct {
 // the returned projection is complete.
 type Truncation struct {
 	Nodes       bool `json:"nodes,omitempty"`
+	Edges       bool `json:"edges,omitempty"`
 	Attempts    bool `json:"attempts,omitempty"`
 	Events      bool `json:"events,omitempty"`
 	Values      bool `json:"values,omitempty"`
@@ -156,6 +159,7 @@ type Result struct {
 	Replay          *ReplayDiagnostic               `json:"replay,omitempty"`
 	Resources       *ResourceDiagnostic             `json:"resources,omitempty"`
 	StartActivation *StartActivationDiagnostic      `json:"start_activation,omitempty"`
+	StartPolicy     *StartPolicyDiagnostic          `json:"start_policy,omitempty"`
 	Activations     []ActivationFireAttempt         `json:"activation_attempts,omitempty"`
 	Capabilities    Capabilities                    `json:"capabilities"`
 	Omissions       []string                        `json:"omissions,omitempty"`
@@ -184,6 +188,7 @@ type PlanDiagnostic struct {
 	SourceDigests []SourceDigestDiagnostic   `json:"source_digests"`
 	Source        *SourceDiagnostic          `json:"source,omitempty"`
 	Nodes         []PlanNodeDiagnostic       `json:"nodes"`
+	Edges         []PlanEdgeDiagnostic       `json:"edges,omitempty"`
 	Activations   []PlanActivationDiagnostic `json:"activations,omitempty"`
 }
 
@@ -230,17 +235,60 @@ type SourceDiagnostic struct {
 }
 
 type PlanNodeDiagnostic struct {
-	ID            string            `json:"id"`
-	DisplayName   string            `json:"display_name,omitempty"`
-	Kind          string            `json:"kind"`
-	KindVersion   string            `json:"kind_version,omitempty"`
-	ReadyWhen     graph.ReadyRule   `json:"ready_when"`
-	Needs         []string          `json:"needs,omitempty"`
-	Effects       graph.EffectSet   `json:"declared_effects,omitempty"`
-	Finally       bool              `json:"finally,omitempty"`
-	CatchTargets  []string          `json:"catch_targets,omitempty"`
-	SwitchTargets []string          `json:"switch_targets,omitempty"`
-	Source        *SourceDiagnostic `json:"source,omitempty"`
+	ID            string              `json:"id"`
+	DisplayName   string              `json:"display_name,omitempty"`
+	Kind          string              `json:"kind"`
+	KindVersion   string              `json:"kind_version,omitempty"`
+	ReadyWhen     graph.ReadyRule     `json:"ready_when"`
+	Needs         []string            `json:"needs,omitempty"`
+	Effects       graph.EffectSet     `json:"declared_effects,omitempty"`
+	Finally       bool                `json:"finally,omitempty"`
+	CatchTargets  []string            `json:"catch_targets,omitempty"`
+	SwitchTargets []string            `json:"switch_targets,omitempty"`
+	Position      *PositionDiagnostic `json:"position,omitempty"`
+	Retry         *RetryDiagnostic    `json:"retry,omitempty"`
+	Source        *SourceDiagnostic   `json:"source,omitempty"`
+}
+
+// PositionDiagnostic is the only graph metadata projected to transports. It
+// accepts canonical finite x/y coordinates and never forwards arbitrary node
+// metadata into an operator surface.
+type PositionDiagnostic struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// RetryDiagnostic contains declaration-only scheduling facts. Runtime retry
+// state remains represented by NodeDiagnostic.Attempts.
+type RetryDiagnostic struct {
+	Attempts     int                   `json:"attempts"`
+	Strategy     graph.BackoffStrategy `json:"strategy,omitempty"`
+	InitialDelay graph.Duration        `json:"initial_delay,omitempty"`
+	MaxDelay     graph.Duration        `json:"max_delay,omitempty"`
+}
+
+// PlanEdgeDiagnostic is the safe graph-IR edge projection used by every
+// transport. Edge metadata is deliberately excluded.
+type PlanEdgeDiagnostic struct {
+	From      string                   `json:"from"`
+	To        string                   `json:"to"`
+	Kind      graph.EdgeKind           `json:"kind"`
+	Source    *SourceDiagnostic        `json:"source,omitempty"`
+	ValueFlow *EdgeValueFlowDiagnostic `json:"value_flow,omitempty"`
+}
+
+// EdgeValueFlowDiagnostic associates one data edge with the already-rendered,
+// bounded value sets at its source and target invocations. Refs are emitted
+// only when the corresponding ValueSetDiagnostic is present in Result.Values.
+type EdgeValueFlowDiagnostic struct {
+	SourceOutputs []InvocationValueDiagnostic `json:"source_outputs,omitempty"`
+	TargetInputs  []InvocationValueDiagnostic `json:"target_inputs,omitempty"`
+	ValuesOmitted bool                        `json:"values_omitted,omitempty"`
+}
+
+type InvocationValueDiagnostic struct {
+	Invocation workflowruntime.NodeInvocationID `json:"invocation"`
+	Values     values.ValueSetRef               `json:"values"`
 }
 
 type PlanActivationDiagnostic struct {
@@ -440,6 +488,21 @@ type StartActivationDiagnostic struct {
 	OccurredAt         time.Time `json:"occurred_at"`
 }
 
+// StartPolicyDiagnostic is a deliberately narrow projection of immutable
+// host start facts. Identity, grants, trust, target handles, policy attributes,
+// and request material never cross this boundary.
+type StartPolicyDiagnostic struct {
+	Effects              graph.EffectSet         `json:"declared_effects"`
+	RequiredCapabilities []string                `json:"required_capabilities,omitempty"`
+	BlastRadius          map[string]int          `json:"blast_radius"`
+	NodeCount            int                     `json:"node_count"`
+	DryRunAvailable      bool                    `json:"dry_run_available"`
+	ConfirmationAdvised  bool                    `json:"confirmation_advised"`
+	Decision             hoststate.PolicyOutcome `json:"decision"`
+	ExposureRef          string                  `json:"exposure_ref,omitempty"`
+	ExposureMasked       bool                    `json:"exposure_masked,omitempty"`
+}
+
 // ActivationFireAttempt is a credential-free projection of a stable schedule
 // firing. ScheduledAt and FiredAt remain intentionally distinct.
 type ActivationFireAttempt struct {
@@ -534,6 +597,62 @@ func safeSource(input *graph.SourceRef) *SourceDiagnostic {
 		return nil
 	}
 	return &SourceDiagnostic{Format: input.Format, Locator: safeLocator(input.Locator), StartLine: input.StartLine, StartColumn: input.StartColumn, EndLine: input.EndLine, EndColumn: input.EndColumn, Section: input.Section, StepName: input.StepName, StageName: input.StageName, Path: append([]string(nil), input.Path...)}
+}
+
+func safePosition(metadata graph.Metadata) *PositionDiagnostic {
+	raw, exists := metadata["position"]
+	if !exists {
+		return nil
+	}
+	position, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	x, xOK := finiteCoordinate(position["x"])
+	y, yOK := finiteCoordinate(position["y"])
+	if !xOK || !yOK {
+		return nil
+	}
+	return &PositionDiagnostic{X: x, Y: y}
+}
+
+func finiteCoordinate(input any) (float64, bool) {
+	var value float64
+	switch typed := input.(type) {
+	case float64:
+		value = typed
+	case float32:
+		value = float64(typed)
+	case int:
+		value = float64(typed)
+	case int8:
+		value = float64(typed)
+	case int16:
+		value = float64(typed)
+	case int32:
+		value = float64(typed)
+	case int64:
+		value = float64(typed)
+	case uint:
+		value = float64(typed)
+	case uint8:
+		value = float64(typed)
+	case uint16:
+		value = float64(typed)
+	case uint32:
+		value = float64(typed)
+	case uint64:
+		value = float64(typed)
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return 0, false
+		}
+		value = parsed
+	default:
+		return 0, false
+	}
+	return value, !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func safeLocator(input string) string {

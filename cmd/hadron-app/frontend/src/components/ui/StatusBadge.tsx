@@ -9,18 +9,36 @@ type StatusVariant = Extract<
 
 const STATUS_VARIANT: Record<string, StatusVariant> = {
   success: 'success',
+  succeeded: 'success',
   running: 'running',
+  claimed: 'running',
+  ready: 'running',
+  waiting: 'running',
   failed: 'failed',
+  crashed: 'failed',
+  timed_out: 'failed',
   queued: 'queued',
+  pending: 'queued',
+  blocked: 'queued',
+  skipped: 'queued',
   canceled: 'canceled',
   cancelled: 'canceled',
 }
 
 const STATUS_LABELS: Record<string, string> = {
   success: 'Success',
+  succeeded: 'Succeeded',
   running: 'Running',
+  claimed: 'Claimed',
+  ready: 'Ready',
+  waiting: 'Waiting',
   failed: 'Failed',
+  crashed: 'Crashed',
+  timed_out: 'Timed out',
   queued: 'Queued',
+  pending: 'Pending',
+  blocked: 'Blocked',
+  skipped: 'Skipped',
   canceled: 'Canceled',
   cancelled: 'Canceled',
 }

@@ -319,6 +319,361 @@ export interface FileEntry {
   isDir: boolean;
 }
 
+// ── Graph-native workflow diagnostics (shared rundiagnostics JSON) ────
+
+export interface WorkflowValueSetRef {
+  id: string;
+  digest: string;
+}
+
+export interface WorkflowNodeInvocationID {
+  run_id: string;
+  node_id: string;
+  iteration?: number;
+}
+
+export interface WorkflowAttemptID {
+  invocation: WorkflowNodeInvocationID;
+  number: number;
+}
+
+export interface WorkflowSourceDiagnostic {
+  format: string;
+  locator: string;
+  start_line?: number;
+  start_column?: number;
+  end_line?: number;
+  end_column?: number;
+  path?: string[];
+}
+
+export interface WorkflowPositionDiagnostic {
+  x: number;
+  y: number;
+}
+
+export interface WorkflowRetryDiagnostic {
+  attempts: number;
+  strategy?: string;
+  initial_delay?: string;
+  max_delay?: string;
+}
+
+export interface WorkflowPlanNodeDiagnostic {
+  id: string;
+  display_name?: string;
+  kind: string;
+  kind_version?: string;
+  ready_when: string;
+  needs?: string[];
+  declared_effects?: string[];
+  finally?: boolean;
+  catch_targets?: string[];
+  switch_targets?: string[];
+  position?: WorkflowPositionDiagnostic;
+  retry?: WorkflowRetryDiagnostic;
+  source?: WorkflowSourceDiagnostic;
+}
+
+export interface WorkflowInvocationValueDiagnostic {
+  invocation: WorkflowNodeInvocationID;
+  values: WorkflowValueSetRef;
+}
+
+export interface WorkflowEdgeValueFlowDiagnostic {
+  source_outputs?: WorkflowInvocationValueDiagnostic[];
+  target_inputs?: WorkflowInvocationValueDiagnostic[];
+  values_omitted?: boolean;
+}
+
+export interface WorkflowPlanEdgeDiagnostic {
+  from: string;
+  to: string;
+  kind: 'control' | 'data' | string;
+  source?: WorkflowSourceDiagnostic;
+  value_flow?: WorkflowEdgeValueFlowDiagnostic;
+}
+
+export interface WorkflowPlanDiagnostic {
+  id: string;
+  version: string;
+  digest: string;
+  schema_version: string;
+  graph_digest: string;
+  definition: {
+    authority?: string;
+    kind?: string;
+    id?: string;
+    locator?: string;
+    version?: string;
+    digest?: string;
+  };
+  provenance: {
+    authority?: string;
+    origin?: string;
+    locator?: string;
+    revision?: string;
+    digest?: string;
+  };
+  source_digests?: { format: string; digest: string }[];
+  source?: WorkflowSourceDiagnostic;
+  nodes: WorkflowPlanNodeDiagnostic[];
+  edges?: WorkflowPlanEdgeDiagnostic[];
+  activations?: { id: string; kind: string; source?: WorkflowSourceDiagnostic }[];
+}
+
+export interface WorkflowFailureDiagnostic {
+  code: string;
+  message: string;
+  retryable?: boolean;
+  details?: Record<string, string>;
+  masked?: boolean;
+}
+
+export interface WorkflowAttemptDiagnostic {
+  number: number;
+  status: string;
+  executor: {
+    kind: string;
+    version: string;
+    target?: string;
+    attributes?: Record<string, string>;
+    masked?: boolean;
+  };
+  inputs?: WorkflowValueSetRef;
+  outputs?: WorkflowValueSetRef;
+  failure?: WorkflowFailureDiagnostic;
+  started_at: string;
+  finished_at?: string;
+  generation: number;
+}
+
+export interface WorkflowWaitDiagnostic {
+  id: string;
+  kind: string;
+  status: string;
+  wake_source: string;
+  visibility: string;
+  wake_at?: string;
+  deadline?: string;
+  payload?: WorkflowValueSetRef;
+  resume_values?: WorkflowValueSetRef;
+  resolution?: {
+    source: string;
+    responder_kind: string;
+    payload_digest?: string;
+    resolved_at: string;
+  };
+  generation: number;
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string;
+}
+
+export interface WorkflowNodeDiagnostic {
+  id: WorkflowNodeInvocationID;
+  status: string;
+  origin?: string;
+  memo_key_digest?: string;
+  inputs?: WorkflowValueSetRef;
+  outputs?: WorkflowValueSetRef;
+  latest_attempt?: number;
+  priority?: number;
+  claim_generation: number;
+  generation: number;
+  created_at: string;
+  updated_at: string;
+  source?: WorkflowSourceDiagnostic;
+  definition: WorkflowPlanNodeDiagnostic;
+  attempts?: WorkflowAttemptDiagnostic[];
+  wait?: WorkflowWaitDiagnostic;
+  explanation: {
+    code: string;
+    message: string;
+    dependencies?: WorkflowNodeInvocationID[];
+    details?: Record<string, string>;
+    failure?: WorkflowFailureDiagnostic;
+    masked?: boolean;
+  };
+  upstream?: { node_id: string; invocations?: { id: WorkflowNodeInvocationID; status: string }[] }[];
+  downstream?: { node_id: string; declared_effects?: string[]; source?: WorkflowSourceDiagnostic }[];
+  pin?: {
+    outputs: WorkflowValueSetRef;
+    source: WorkflowNodeInvocationID;
+    source_plan_digest: string;
+    source_origin: string;
+    output_schema_digest: string;
+    policy_code: string;
+    policy_reason: string;
+    bound_at: string;
+  };
+  resources: WorkflowNodeResourceDiagnostic;
+  attempts_truncated?: boolean;
+}
+
+export interface WorkflowSchedulerResourceID {
+  kind: string;
+  name?: string;
+  run_id?: string;
+  node_id?: string;
+}
+
+export interface WorkflowSchedulerResourceRequirement {
+  resource: WorkflowSchedulerResourceID;
+  units: number;
+  limit: number;
+}
+
+export interface WorkflowSchedulerResourceHolder {
+  resource: WorkflowSchedulerResourceID;
+  invocation: WorkflowNodeInvocationID;
+  units: number;
+  claim_generation: number;
+  owner: string;
+  acquired_at: string;
+  expires_at: string;
+}
+
+export interface WorkflowSchedulerResourceWaiter {
+  invocation: WorkflowNodeInvocationID;
+  requirements: WorkflowSchedulerResourceRequirement[];
+  blocked: WorkflowSchedulerResourceID[];
+  priority?: number;
+  enqueued_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowNodeResourceDiagnostic {
+  holders?: WorkflowSchedulerResourceHolder[];
+  waiter?: WorkflowSchedulerResourceWaiter;
+}
+
+export interface WorkflowRenderedValue {
+  type: string;
+  payload: unknown;
+  producer: { kind: string; reference: string; output?: string };
+  media_type: string;
+  digest: string;
+  redaction: 'public' | 'private' | 'secret' | string;
+  retention: string;
+  masked: boolean;
+}
+
+export interface WorkflowValueSetDiagnostic {
+  ref: WorkflowValueSetRef;
+  roles: string[];
+  values: Record<string, WorkflowRenderedValue>;
+}
+
+export interface WorkflowControlDecisionDiagnostic {
+  source: WorkflowNodeInvocationID;
+  kind: string;
+  outcome: string;
+  rule_index?: number;
+  targets?: WorkflowNodeInvocationID[];
+  bind_as?: string;
+  error?: WorkflowValueSetRef;
+  generation: number;
+  created_at: string;
+}
+
+export interface WorkflowRenderedEvent {
+  sequence: number;
+  run_id: string;
+  invocation?: WorkflowNodeInvocationID;
+  attempt?: WorkflowAttemptID;
+  type: string;
+  occurred_at: string;
+  attributes?: Record<string, string>;
+  values?: WorkflowValueSetRef;
+  redaction: string;
+  retention: string;
+  masked: boolean;
+}
+
+export interface WorkflowStartPolicyDiagnostic {
+  declared_effects: string[];
+  required_capabilities?: string[];
+  blast_radius: Record<string, number>;
+  node_count: number;
+  dry_run_available: boolean;
+  confirmation_advised: boolean;
+  decision: string;
+  exposure_ref?: string;
+  exposure_masked?: boolean;
+}
+
+export interface WorkflowGraphDiagnostic {
+  schema_version: string;
+  run: {
+    id: string;
+    plan: { id: string; version: string; digest: string; schema_version: string };
+    status: string;
+    inputs?: WorkflowValueSetRef;
+    outputs?: WorkflowValueSetRef;
+    generation: number;
+    created_at: string;
+    updated_at: string;
+  };
+  plan: WorkflowPlanDiagnostic;
+  nodes: WorkflowNodeDiagnostic[];
+  values?: WorkflowValueSetDiagnostic[];
+  events?: WorkflowRenderedEvent[];
+  control: {
+    decisions?: WorkflowControlDecisionDiagnostic[];
+    terminal_intent?: {
+      intended_status: string;
+      reason?: WorkflowFailureDiagnostic;
+      status: string;
+      finalizers?: { invocation: WorkflowNodeInvocationID; scope?: WorkflowNodeInvocationID[]; order: number }[];
+    };
+  };
+  replay?: {
+    source_run_id: string;
+    from_node_id: string;
+    plan_digest: string;
+    created_at: string;
+    policy?: { invocation: WorkflowNodeInvocationID; attempt?: WorkflowAttemptID; allow: boolean; code: string; reason: string }[];
+  };
+  resources?: {
+    holders: WorkflowSchedulerResourceHolder[];
+    waiters: WorkflowSchedulerResourceWaiter[];
+  };
+  start_activation?: { activation_id: string; fire_identity_digest: string; occurred_at: string };
+  start_policy?: WorkflowStartPolicyDiagnostic;
+  activation_attempts?: unknown[];
+  capabilities: Record<string, boolean>;
+  omissions?: string[];
+  truncated: Record<string, boolean>;
+}
+
+export interface WorkflowResumeRequest {
+  run_id: string;
+  identity: { source_authority: string };
+  wait_id: string;
+  correlation: string;
+  token: string;
+  wake_source: string;
+  payload: {
+    type: string;
+    inline: unknown;
+    producer: { kind: string; reference: string; output: string };
+    media_type: string;
+    digest: string;
+    redaction: string;
+    retention: string;
+  };
+  idempotency_key: string;
+}
+
+export interface WorkflowResumeResult {
+  outcome: string;
+  wait?: { id: string; status: string };
+  node?: { id: WorkflowNodeInvocationID; status: string };
+  attempt?: { id: WorkflowAttemptID; status: string };
+  values?: WorkflowValueSetRef;
+}
+
 export interface ValidateResult {
   valid: boolean;
   error?: string;

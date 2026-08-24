@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
@@ -48,7 +50,8 @@ func (s Service) Inspect(ctx context.Context, request Query) (Result, error) {
 		return Result{}, corrupt("pinned plan", errors.New("identity differs from run"))
 	}
 
-	result := Result{SchemaVersion: graphDiagnosticSchemaVersion, Run: projectRun(run), Plan: projectPlan(pinned.Plan, query.NodeLimit)}
+	projectedPlan, edgesTruncated := projectPlan(pinned.Plan, query.NodeLimit)
+	result := Result{SchemaVersion: graphDiagnosticSchemaVersion, Run: projectRun(run), Plan: projectedPlan}
 	result.Capabilities = Capabilities{
 		ControlDecisions: !typedNil(s.Control), ReplayProvenance: !typedNil(s.Replay),
 		PinBindings: !typedNil(s.Pins), ConcurrencyState: !typedNil(s.Resources),
@@ -58,6 +61,7 @@ func (s Service) Inspect(ctx context.Context, request Query) (Result, error) {
 	if len(pinned.Plan.Graph.Nodes) > query.NodeLimit {
 		result.Truncated.Nodes = true
 	}
+	result.Truncated.Edges = edgesTruncated
 
 	events, eventsTruncated, loadEventsErr := s.loadEvents(ctx, query)
 	if loadEventsErr != nil {
@@ -134,8 +138,9 @@ func (s Service) Inspect(ctx context.Context, request Query) (Result, error) {
 	if renderValuesErr != nil {
 		return Result{}, renderValuesErr
 	}
+	result.Plan.Edges = projectEdgeValueFlows(result.Plan.Edges, result.Nodes, result.Values)
 	var startActivationErr error
-	result.StartActivation, startActivationErr = s.loadStartActivation(ctx, query.RunID)
+	result.StartActivation, result.StartPolicy, startActivationErr = s.loadStartDiagnostics(ctx, query.RunID)
 	if startActivationErr != nil {
 		return Result{}, startActivationErr
 	}
@@ -166,18 +171,49 @@ func projectRun(run workflowruntime.RunSnapshot) RunDiagnostic {
 	return RunDiagnostic{ID: run.ID, Plan: run.Plan, Status: run.Status, Inputs: cloneRef(run.Inputs), Outputs: cloneRef(run.Outputs), Generation: run.Generation, CreatedAt: run.CreatedAt.UTC(), UpdatedAt: run.UpdatedAt.UTC()}
 }
 
-func projectPlan(plan compile.ExecutionPlan, limit int) PlanDiagnostic {
+func projectPlan(plan compile.ExecutionPlan, limit int) (PlanDiagnostic, bool) {
 	result := PlanDiagnostic{ID: plan.ID, Version: plan.Graph.Version, Digest: plan.Digest, SchemaVersion: plan.SchemaVersion, GraphDigest: plan.Graph.Digest,
 		Definition: DefinitionDiagnostic{Authority: plan.Definition.Authority, Kind: plan.Definition.Kind, ID: plan.Definition.ID, Locator: safeLocator(plan.Definition.Locator), Version: plan.Definition.Version, Digest: plan.Definition.Digest},
 		Provenance: safeProvenance(plan.Provenance), Source: safeSource(plan.SourceMap.Graph)}
 	for _, digest := range plan.SourceDigests {
 		result.SourceDigests = append(result.SourceDigests, SourceDigestDiagnostic{Format: digest.Format, Digest: digest.Digest})
 	}
+	visibleNodes := make(map[string]struct{}, min(len(plan.Graph.Nodes), limit))
 	for index, node := range plan.Graph.Nodes {
 		if index >= limit {
 			break
 		}
+		visibleNodes[node.ID] = struct{}{}
 		result.Nodes = append(result.Nodes, projectPlanNode(node, plan.SourceMap.Nodes[node.ID]))
+	}
+	edgesOmittedByNodes := false
+	for _, edge := range plan.Graph.Edges {
+		if _, visible := visibleNodes[edge.From]; !visible {
+			edgesOmittedByNodes = true
+			continue
+		}
+		if _, visible := visibleNodes[edge.To]; !visible {
+			edgesOmittedByNodes = true
+			continue
+		}
+		source := edge.Source
+		if mapped, ok := plan.SourceMap.Edges[compile.EdgeSourceKey(edge.From, edge.To, edge.Kind)]; ok {
+			source = &mapped
+		}
+		result.Edges = append(result.Edges, PlanEdgeDiagnostic{From: edge.From, To: edge.To, Kind: edge.Kind, Source: safeSource(source)})
+	}
+	sort.Slice(result.Edges, func(i, j int) bool {
+		if result.Edges[i].From != result.Edges[j].From {
+			return result.Edges[i].From < result.Edges[j].From
+		}
+		if result.Edges[i].To != result.Edges[j].To {
+			return result.Edges[i].To < result.Edges[j].To
+		}
+		return result.Edges[i].Kind < result.Edges[j].Kind
+	})
+	edgesTruncated := edgesOmittedByNodes || len(result.Edges) > limit
+	if len(result.Edges) > limit {
+		result.Edges = result.Edges[:limit]
 	}
 	for _, activation := range plan.Graph.Activations {
 		source, ok := plan.SourceMap.Activations[activation.ID]
@@ -187,8 +223,49 @@ func projectPlan(plan compile.ExecutionPlan, limit int) PlanDiagnostic {
 		result.Activations = append(result.Activations, PlanActivationDiagnostic{ID: activation.ID, Kind: activation.Kind, Source: safeSource(optionalSource(source))})
 	}
 	sort.Slice(result.Activations, func(i, j int) bool { return result.Activations[i].ID < result.Activations[j].ID })
+	return result, edgesTruncated
+}
+
+func projectEdgeValueFlows(edges []PlanEdgeDiagnostic, nodes []NodeDiagnostic, rendered []ValueSetDiagnostic) []PlanEdgeDiagnostic {
+	available := make(map[string]struct{}, len(rendered))
+	for _, set := range rendered {
+		available[valueRefKey(set.Ref)] = struct{}{}
+	}
+	result := append([]PlanEdgeDiagnostic(nil), edges...)
+	for index := range result {
+		edge := &result[index]
+		if edge.Kind != graph.EdgeData {
+			continue
+		}
+		flow := &EdgeValueFlowDiagnostic{}
+		for _, node := range nodes {
+			if node.ID.NodeID == edge.From && node.Outputs != nil {
+				if _, ok := available[valueRefKey(*node.Outputs)]; ok {
+					flow.SourceOutputs = append(flow.SourceOutputs, InvocationValueDiagnostic{Invocation: node.ID, Values: *node.Outputs})
+				} else {
+					flow.ValuesOmitted = true
+				}
+			}
+			if node.ID.NodeID == edge.To && node.Inputs != nil {
+				if _, ok := available[valueRefKey(*node.Inputs)]; ok {
+					flow.TargetInputs = append(flow.TargetInputs, InvocationValueDiagnostic{Invocation: node.ID, Values: *node.Inputs})
+				} else {
+					flow.ValuesOmitted = true
+				}
+			}
+		}
+		sort.Slice(flow.SourceOutputs, func(i, j int) bool {
+			return invocationLess(flow.SourceOutputs[i].Invocation, flow.SourceOutputs[j].Invocation)
+		})
+		sort.Slice(flow.TargetInputs, func(i, j int) bool {
+			return invocationLess(flow.TargetInputs[i].Invocation, flow.TargetInputs[j].Invocation)
+		})
+		edge.ValueFlow = flow
+	}
 	return result
 }
+
+func valueRefKey(ref values.ValueSetRef) string { return ref.ID + "\x00" + ref.Digest }
 
 func projectPlanNode(node graph.Node, mapped graph.SourceRef) PlanNodeDiagnostic {
 	ready := node.ReadyWhen
@@ -214,9 +291,13 @@ func projectPlanNode(node graph.Node, mapped graph.SourceRef) PlanNodeDiagnostic
 	if mapped.Locator != "" {
 		source = &mapped
 	}
-	return PlanNodeDiagnostic{ID: node.ID, DisplayName: node.DisplayName, Kind: node.Kind, KindVersion: node.KindVersion, ReadyWhen: ready,
+	result := PlanNodeDiagnostic{ID: node.ID, DisplayName: node.DisplayName, Kind: node.Kind, KindVersion: node.KindVersion, ReadyWhen: ready,
 		Needs: canonicalIDs(needs), Effects: append(graph.EffectSet(nil), node.Effects...), Finally: node.Finally != nil,
-		CatchTargets: canonicalIDs(catchTargets), SwitchTargets: canonicalIDs(switchTargets), Source: safeSource(source)}
+		CatchTargets: canonicalIDs(catchTargets), SwitchTargets: canonicalIDs(switchTargets), Position: safePosition(node.Metadata), Source: safeSource(source)}
+	if node.Retry != nil {
+		result.Retry = &RetryDiagnostic{Attempts: node.Retry.Attempts, Strategy: node.Retry.Backoff.Strategy, InitialDelay: node.Retry.Backoff.InitialDelay, MaxDelay: node.Retry.Backoff.MaxDelay}
+	}
+	return result
 }
 
 func optionalSource(source graph.SourceRef) *graph.SourceRef {
@@ -739,31 +820,67 @@ func (s Service) loadActivations(ctx context.Context, query normalizedQuery) ([]
 	return result, truncated, nil
 }
 
-func (s Service) loadStartActivation(ctx context.Context, runID workflowruntime.RunID) (*StartActivationDiagnostic, error) {
+func (s Service) loadStartDiagnostics(ctx context.Context, runID workflowruntime.RunID) (*StartActivationDiagnostic, *StartPolicyDiagnostic, error) {
 	if typedNil(s.Starts) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	start, err := s.Starts.LoadStart(ctx, runID)
 	if errors.Is(err, workflowruntime.ErrNotFound) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := start.Validate(); err != nil || start.Record.Run.ID != runID {
 		if err == nil {
 			err = errors.New("start binding belongs to another run")
 		}
-		return nil, corrupt("start binding", err)
+		return nil, nil, corrupt("start binding", err)
+	}
+	policy, policyErr := projectStartPolicy(start.Record)
+	if policyErr != nil {
+		return nil, nil, corrupt("start policy", policyErr)
 	}
 	if start.Record.Activation == nil {
-		return nil, nil
+		return nil, policy, nil
 	}
 	binding := start.Record.Activation
 	if _, sensitive := safeDiagnosticText(binding.ActivationID); sensitive {
-		return nil, corrupt("start activation", errors.New("activation id contains credential-shaped metadata"))
+		return nil, nil, corrupt("start activation", errors.New("activation id contains credential-shaped metadata"))
 	}
-	return &StartActivationDiagnostic{ActivationID: binding.ActivationID, FireIdentityDigest: values.SHA256Digest([]byte(binding.ActivationID + "\x00" + binding.IdempotencyKey)), OccurredAt: binding.OccurredAt.UTC()}, nil
+	return &StartActivationDiagnostic{ActivationID: binding.ActivationID, FireIdentityDigest: values.SHA256Digest([]byte(binding.ActivationID + "\x00" + binding.IdempotencyKey)), OccurredAt: binding.OccurredAt.UTC()}, policy, nil
+}
+
+func projectStartPolicy(record hoststate.StartRecord) (*StartPolicyDiagnostic, error) {
+	facts := record.Facts
+	result := &StartPolicyDiagnostic{
+		Effects: append(graph.EffectSet(nil), facts.Effects...), RequiredCapabilities: append([]string(nil), facts.RequiredCapabilities...),
+		BlastRadius: make(map[string]int, len(facts.BlastRadius)), NodeCount: facts.NodeCount,
+		DryRunAvailable: facts.DryRunAvailable, ConfirmationAdvised: facts.ConfirmationAdvised, Decision: record.Decision.Outcome,
+	}
+	for _, effect := range result.Effects {
+		if !effect.Valid() {
+			return nil, errors.New("start effects contain an invalid declaration")
+		}
+	}
+	for _, capability := range result.RequiredCapabilities {
+		if hoststate.ValidatePublicText(capability, 128, true) != nil {
+			return nil, errors.New("required capabilities contain unsafe metadata")
+		}
+	}
+	for key, count := range facts.BlastRadius {
+		if hoststate.ValidatePublicText(key, 128, true) != nil || count < 0 {
+			return nil, errors.New("blast radius contains unsafe metadata")
+		}
+		result.BlastRadius[key] = count
+	}
+	if exposure := strings.TrimSpace(record.Identity.Extension["exposure_ref"]); exposure != "" {
+		if hoststate.ValidatePublicText(exposure, hoststate.MaximumActivationTextBytes, true) != nil {
+			return nil, errors.New("exposure reference contains unsafe metadata")
+		}
+		result.ExposureRef, result.ExposureMasked = safeDiagnosticText(exposure)
+	}
+	return result, nil
 }
 
 func capabilityOmissions(capabilities Capabilities) []string {

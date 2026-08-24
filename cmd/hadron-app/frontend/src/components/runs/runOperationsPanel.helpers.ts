@@ -9,7 +9,7 @@ export interface SavedOperationsPanelState {
   scrollPositions: Record<string, number>
 }
 
-export interface NormalizedOperationsPanelState extends SavedOperationsPanelState {}
+export type NormalizedOperationsPanelState = SavedOperationsPanelState
 
 export type KeyboardAction =
   | { type: 'none' }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
@@ -31,6 +32,7 @@ type diagnosticFixture struct {
 	pins        map[workflowruntime.NodeInvocationID]workflowruntime.PinBinding
 	resource    workflowruntime.SchedulerResourceState
 	activations []ActivationFireAttempt
+	start       *hoststate.StartSnapshot
 }
 
 func (f *diagnosticFixture) LoadRun(context.Context, workflowruntime.RunID) (workflowruntime.RunSnapshot, error) {
@@ -104,16 +106,25 @@ func (f *diagnosticFixture) InspectSchedulerResources(context.Context, workflowr
 func (f *diagnosticFixture) ListRunActivationAttempts(context.Context, workflowruntime.RunID, int) ([]ActivationFireAttempt, bool, error) {
 	return append([]ActivationFireAttempt(nil), f.activations...), false, nil
 }
+func (f *diagnosticFixture) LoadStart(context.Context, workflowruntime.RunID) (hoststate.StartSnapshot, error) {
+	if f.start == nil {
+		return hoststate.StartSnapshot{}, workflowruntime.ErrNotFound
+	}
+	return *f.start, nil
+}
 
 func TestGraphDiagnosticsExplainPersistedWorkflowState(t *testing.T) {
 	fixture := newDiagnosticFixture(t)
-	service := Service{State: fixture, Plans: fixture, Control: fixture, Replay: fixture, Pins: fixture, Resources: fixture, Activations: fixture}
+	service := Service{State: fixture, Plans: fixture, Control: fixture, Replay: fixture, Pins: fixture, Resources: fixture, Starts: fixture, Activations: fixture}
 	masked, err := service.Inspect(t.Context(), Query{RunID: fixture.run.ID, Now: fixture.run.UpdatedAt})
 	if err != nil {
 		t.Fatalf("Inspect(masked): %v", err)
 	}
 	if masked.SchemaVersion != "1" || masked.Plan.Source == nil || masked.Plan.Source.StartLine != 1 || masked.Plan.Source.Locator != "file:///workspace/workflow.yaml" {
 		t.Fatalf("plan diagnostics = %#v", masked.Plan)
+	}
+	if masked.StartPolicy == nil || !reflect.DeepEqual(masked.StartPolicy.Effects, graph.EffectSet{graph.EffectCompute}) || masked.StartPolicy.ExposureRef != "diagnostic-route" || !masked.StartPolicy.ConfirmationAdvised {
+		t.Fatalf("start policy diagnostics = %#v", masked.StartPolicy)
 	}
 	byID := make(map[string]NodeDiagnostic, len(masked.Nodes))
 	for _, node := range masked.Nodes {
@@ -143,7 +154,7 @@ func TestGraphDiagnosticsExplainPersistedWorkflowState(t *testing.T) {
 	if marshalErr != nil {
 		t.Fatal(marshalErr)
 	}
-	for _, credential := range []string{"lease-owner-secret", "lease-token-secret"} {
+	for _, credential := range []string{"lease-owner-secret", "lease-token-secret", "operator:private", "workflow.run", "trusted-operator"} {
 		if strings.Contains(string(encoded), credential) {
 			t.Fatalf("diagnostics serialized lease credential %q: %s", credential, encoded)
 		}
@@ -221,6 +232,116 @@ func TestGraphDiagnosticsExplainPersistedWorkflowState(t *testing.T) {
 	}
 	if reflect.DeepEqual(againByID["failed"].Definition.Effects, changedNode.Definition.Effects) || again.Values[0].Roles[0] == "changed" {
 		t.Fatal("diagnostic result was not defensively owned")
+	}
+}
+
+func TestPlanProjectionIncludesOnlyCanonicalGraphLayoutAndEdges(t *testing.T) {
+	edgeSource := graph.SourceRef{Format: graph.SourceWorkflow, Locator: "workflow.yaml", StartLine: 22}
+	plan := compile.ExecutionPlan{Graph: graph.Graph{
+		Nodes: []graph.Node{
+			{ID: "authored", Kind: "transform", Metadata: graph.Metadata{"position": map[string]any{"x": json.Number("125.5"), "y": -48}}, Retry: &graph.RetryPolicy{Attempts: 3, Backoff: graph.BackoffPolicy{Strategy: graph.BackoffExponential, InitialDelay: "1s", MaxDelay: "30s"}}},
+			{ID: "invalid", Kind: "transform", Metadata: graph.Metadata{"position": map[string]any{"x": "125", "y": 48}, "private": "not-projected"}},
+		},
+		Edges: []graph.Edge{{From: "authored", To: "invalid", Kind: graph.EdgeData, Metadata: graph.Metadata{"private": "not-projected"}}},
+	}, SourceMap: graph.SourceMap{Edges: map[string]graph.SourceRef{compile.EdgeSourceKey("authored", "invalid", graph.EdgeData): edgeSource}}}
+	projected, truncated := projectPlan(plan, 10)
+	if truncated {
+		t.Fatal("single edge was truncated")
+	}
+	if len(projected.Nodes) != 2 || projected.Nodes[0].Position == nil || projected.Nodes[0].Position.X != 125.5 || projected.Nodes[0].Position.Y != -48 || projected.Nodes[1].Position != nil {
+		t.Fatalf("positions = %#v", projected.Nodes)
+	}
+	if projected.Nodes[0].Retry == nil || projected.Nodes[0].Retry.Attempts != 3 || projected.Nodes[0].Retry.Strategy != graph.BackoffExponential {
+		t.Fatalf("retry = %#v", projected.Nodes[0].Retry)
+	}
+	if len(projected.Edges) != 1 || projected.Edges[0].From != "authored" || projected.Edges[0].To != "invalid" || projected.Edges[0].Kind != graph.EdgeData || projected.Edges[0].Source == nil || projected.Edges[0].Source.StartLine != 22 {
+		t.Fatalf("edges = %#v", projected.Edges)
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "not-projected") {
+		t.Fatalf("projection leaked arbitrary graph metadata: %s", encoded)
+	}
+}
+
+func TestPlanProjectionBoundsEdgesToVisibleNodesAndLimit(t *testing.T) {
+	plan := compile.ExecutionPlan{Graph: graph.Graph{
+		Nodes: []graph.Node{{ID: "a", Kind: "transform"}, {ID: "b", Kind: "transform"}, {ID: "c", Kind: "transform"}, {ID: "d", Kind: "transform"}},
+		Edges: []graph.Edge{
+			{From: "a", To: "b", Kind: graph.EdgeControl},
+			{From: "a", To: "b", Kind: graph.EdgeData},
+			{From: "a", To: "c", Kind: graph.EdgeControl},
+			{From: "b", To: "c", Kind: graph.EdgeData},
+			{From: "b", To: "d", Kind: graph.EdgeControl},
+		},
+	}}
+	projected, truncated := projectPlan(plan, 3)
+	if !truncated || len(projected.Edges) != 3 {
+		t.Fatalf("bounded edges = %#v, truncated=%v", projected.Edges, truncated)
+	}
+	for _, edge := range projected.Edges {
+		if edge.From == "d" || edge.To == "d" {
+			t.Fatalf("edge references omitted node: %#v", edge)
+		}
+	}
+	omittedOnly := compile.ExecutionPlan{Graph: graph.Graph{
+		Nodes: []graph.Node{{ID: "a", Kind: "transform"}, {ID: "b", Kind: "transform"}},
+		Edges: []graph.Edge{{From: "a", To: "b", Kind: graph.EdgeControl}},
+	}}
+	projected, truncated = projectPlan(omittedOnly, 1)
+	if !truncated || len(projected.Edges) != 0 {
+		t.Fatalf("endpoint omission = %#v, truncated=%v", projected.Edges, truncated)
+	}
+}
+
+func TestEdgeValueFlowUsesOnlyRenderedBoundedValueSets(t *testing.T) {
+	ref := values.ValueSetRef{ID: "visible-values", Digest: values.SHA256Digest([]byte("visible"))}
+	omitted := values.ValueSetRef{ID: "omitted-values", Digest: values.SHA256Digest([]byte("omitted"))}
+	nodes := []NodeDiagnostic{
+		{ID: workflowruntime.NodeInvocationID{RunID: "run", NodeID: "source"}, Outputs: &ref},
+		{ID: workflowruntime.NodeInvocationID{RunID: "run", NodeID: "target"}, Inputs: &omitted},
+	}
+	rendered := []ValueSetDiagnostic{{Ref: ref, Values: values.RenderedValueSet{"secret": {Payload: values.RedactedMarker, Masked: true}}}}
+	edges := projectEdgeValueFlows([]PlanEdgeDiagnostic{{From: "source", To: "target", Kind: graph.EdgeData}}, nodes, rendered)
+	if len(edges) != 1 || edges[0].ValueFlow == nil || len(edges[0].ValueFlow.SourceOutputs) != 1 || len(edges[0].ValueFlow.TargetInputs) != 0 || !edges[0].ValueFlow.ValuesOmitted {
+		t.Fatalf("edge value flow = %#v", edges)
+	}
+	encoded, err := json.Marshal(edges)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), values.RedactedMarker) || strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), omitted.ID) {
+		t.Fatalf("edge association duplicated or exposed rendered payloads: %s", encoded)
+	}
+}
+
+func TestStartPolicyProjectionIsNarrowAndRejectsUnsafeFacts(t *testing.T) {
+	record := hoststate.StartRecord{
+		Identity: hoststate.IdentityBinding{Principal: "operator:private", Trust: "trusted-operator", Grants: []string{"workflow.run"}, Extension: map[string]string{"exposure_ref": "reviewers"}},
+		Facts:    hoststate.PolicyFacts{Effects: graph.EffectSet{graph.EffectRead, graph.EffectMutate}, RequiredCapabilities: []string{"network"}, BlastRadius: map[string]int{"mutate": 2}, NodeCount: 3, DryRunAvailable: true, ConfirmationAdvised: true},
+		Decision: hoststate.PolicyDecision{Outcome: hoststate.PolicyConfirm},
+	}
+	projected, err := projectStartPolicy(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projected.ExposureRef != "reviewers" || projected.Decision != hoststate.PolicyConfirm || len(projected.RequiredCapabilities) != 1 || projected.BlastRadius["mutate"] != 2 {
+		t.Fatalf("start policy = %#v", projected)
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"operator:private", "workflow.run", "trusted-operator"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("start policy leaked %q: %s", forbidden, encoded)
+		}
+	}
+	record.Facts.RequiredCapabilities = []string{"Bearer private-token"}
+	if _, err := projectStartPolicy(record); err == nil {
+		t.Fatal("unsafe capability was accepted")
 	}
 }
 
@@ -388,5 +509,23 @@ func newDiagnosticFixture(t *testing.T) *diagnosticFixture {
 	worker := workflowruntime.SchedulerResourceID{Kind: workflowruntime.SchedulerResourceWorker, Name: "global"}
 	fixture.resource = workflowruntime.SchedulerResourceState{Waiters: []workflowruntime.SchedulerResourceWaiter{{Invocation: blocked.ID, Requirements: []workflowruntime.SchedulerResourceRequirement{{Resource: worker, Units: 1, Limit: 1}}, Blocked: []workflowruntime.SchedulerResourceID{worker}, EnqueuedAt: base, UpdatedAt: base}}}
 	fixture.activations = []ActivationFireAttempt{{FireID: "fire-nightly", ActivationID: "nightly", RunID: fixture.run.ID, ScheduledAt: base.Add(-time.Minute), FiredAt: base, Attempt: 1, Status: "succeeded", Source: "scheduler"}}
+	identity := hoststate.IdentityBinding{
+		Principal: "operator:private", SourceAuthority: "desktop", Trust: "trusted-operator", Grants: []string{"workflow.run"},
+		RunScope:  hoststate.RunScope{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "diagnostic-project"},
+		Extension: map[string]string{"exposure_ref": "diagnostic-route"},
+	}
+	facts := hoststate.PolicyFacts{
+		Operation: "start", RunID: fixture.run.ID, Plan: ref, Identity: identity, RunScope: identity.RunScope,
+		Effects: graph.EffectSet{graph.EffectCompute}, NodeCount: len(nodeDefs), BlastRadius: map[string]int{"compute": 2},
+		DryRunAvailable: true, ConfirmationAdvised: true,
+	}
+	record := hoststate.StartRecord{
+		Run:  workflowruntime.BoundRun{ID: fixture.run.ID, Plan: ref, InputsRef: setRef, CreatedAt: base, Provenance: plan.Provenance},
+		Plan: plan, Requested: plan.Definition, StartKey: "diagnostic-start", RequestDigest: values.SHA256Digest([]byte("diagnostic-start-request")),
+		CallerInputHash: values.SHA256Digest([]byte("diagnostic-start-input")), Identity: identity, Facts: facts,
+		Decision:   hoststate.PolicyDecision{ID: "diagnostic-decision", RunID: fixture.run.ID, Operation: "start", Outcome: hoststate.PolicyAllow, Reason: "allowed", DecidedAt: base},
+		RecordedAt: base,
+	}
+	fixture.start = &hoststate.StartSnapshot{Record: record, Phase: hoststate.StartRunning, Generation: 1, UpdatedAt: base}
 	return fixture
 }

@@ -46,6 +46,14 @@ export const DEMO_RUNS: Run[] = [
     workspace_id: 'default',
   },
   {
+    id: 'run-demo-waiting-r3s4t5u6',
+    status: 'waiting',
+    blueprint_path: '/workflows/release-approval.workflow.yaml',
+    created_at: minutesAgo(18),
+    started_at: minutesAgo(18),
+    workspace_id: 'default',
+  },
+  {
     id: 'run-demo-004-m3n4o5p6',
     status: 'success',
     blueprint_path: '/blueprints/db-backup.yaml',

@@ -1,6 +1,7 @@
-import type { Run, RunEvent, ListResponse, Health, EnqueueRunRequest, FileEntry, ValidateResult, Schedule, CreateScheduleRequest, BlueprintInput, ParsedBlueprint, BlueprintMetaSummary, Pipeline, PipelineStage, EnqueuePipelineRequest, Workspace, HadronSettings, TelemetryRunSummary, TelemetryLogEntry, MCPCallDiagnostic, OperationDiagnostic } from './types';
+import type { Run, RunEvent, ListResponse, Health, EnqueueRunRequest, FileEntry, ValidateResult, Schedule, CreateScheduleRequest, BlueprintInput, ParsedBlueprint, BlueprintMetaSummary, Pipeline, PipelineStage, EnqueuePipelineRequest, Workspace, HadronSettings, TelemetryRunSummary, TelemetryLogEntry, MCPCallDiagnostic, OperationDiagnostic, WorkflowGraphDiagnostic, WorkflowResumeRequest, WorkflowResumeResult } from './types';
 import { isDemoMode } from '../demo/demoMode';
 import { DEMO_RUNS, getDemoRunEvents, getDemoRunMCPCalls, getDemoRunOperations, DEMO_SCHEDULES, DEMO_PIPELINES, getDemoPipelineStages, DEMO_TELEMETRY_RUNS, getDemoTelemetryEntries, DEMO_HEALTH, DEMO_WORKSPACES } from '../demo/data';
+import { getDemoWorkflowDiagnostic } from '../demo/workflowData';
 
 // ── Base URL management ───────────────────────────────────────────────
 
@@ -74,6 +75,50 @@ export async function enqueueRun(req: EnqueueRunRequest): Promise<Run> {
 
 export async function cancelRun(id: string): Promise<void> {
   await apiFetch(`/v1/runs/${id}`, { method: 'DELETE' });
+}
+
+// ── Graph-native workflow operations ─────────────────────────────────
+
+const desktopWorkflowIdentity = { source_authority: 'desktop' } as const;
+
+export async function inspectWorkflowRun(runId: string): Promise<WorkflowGraphDiagnostic> {
+  if (isDemoMode()) return getDemoWorkflowDiagnostic(runId);
+  return apiFetch<WorkflowGraphDiagnostic>(`/v1/workflows/runs/${encodeURIComponent(runId)}/inspect`, {
+    method: 'POST',
+    body: JSON.stringify({
+      run_id: runId,
+      identity: desktopWorkflowIdentity,
+      node_limit: 500,
+      attempt_limit: 100,
+      event_limit: 1000,
+      value_limit: 1000,
+      resource_limit: 500,
+      activation_limit: 200,
+    }),
+  });
+}
+
+export async function cancelWorkflowRun(runId: string, idempotencyKey: string): Promise<void> {
+  if (isDemoMode()) return;
+  await apiFetch(`/v1/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({
+      run_id: runId,
+      identity: desktopWorkflowIdentity,
+      idempotency_key: idempotencyKey,
+      reason: 'operator requested cancellation from desktop',
+    }),
+  });
+}
+
+export async function resumeWorkflowWait(request: Omit<WorkflowResumeRequest, 'identity'>): Promise<WorkflowResumeResult> {
+  if (isDemoMode()) {
+    return { outcome: 'applied', wait: { id: request.wait_id, status: 'resolved' } };
+  }
+  return apiFetch<WorkflowResumeResult>(`/v1/workflows/runs/${encodeURIComponent(request.run_id)}/resume`, {
+    method: 'POST',
+    body: JSON.stringify({ ...request, identity: desktopWorkflowIdentity }),
+  });
 }
 
 // ── Run events ────────────────────────────────────────────────────────
