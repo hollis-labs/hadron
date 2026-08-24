@@ -113,7 +113,7 @@ superseded requirements are not mistaken for omissions.
 | W06-T10 | Move the workflow UI off legacy Wails contracts | 06 | W06-T02, W06-T05 | [ ] |
 | W07-T01 | Add provider-agnostic `llm` step kind | 07 | W04-T08, W05-T01 | [ ] |
 | W07-T02 | Add goja-backed `script` step kind | 07 | W04-T01, W02-T02 | [x] |
-| W07-T03 | Reintroduce `agent_launch` as workflow sugar | 07 | W03-T05, W04-T06 | [ ] |
+| W07-T03 | Reintroduce `agent_launch` as workflow sugar | 07 | W03-T05, W04-T06 | [x] |
 | W07-T04 | Add generated API client step families | 07 | W04-T01, W06-T02 | [ ] |
 | W07-T05 | Add compiled/offline workflow build path | 07 | W01-T02, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | [ ] |
 | W07-T06 | Finalize public engine boundary and downstream adoption kit | 07 | W00-T04, W06-T07 | [ ] |

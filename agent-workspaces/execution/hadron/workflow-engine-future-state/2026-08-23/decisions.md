@@ -273,3 +273,22 @@
   control-flow progression admits them.
 
   Vanta revision for all W05-T03 decisions: `01M0T44S9EZ9MSW3VVHVTWBCQH`.
+
+- W07-T03 keeps `agent_launch` out of the runtime primitive vocabulary. A pure,
+  named compiler expander lowers it to an exact generated child definition,
+  ordinary `call@v1`, and optional `wait_for@v1`; generated definitions are
+  serialized into the parent plan and participate in its semantic digest.
+
+- Hadron resolves generated children from the current compiled-plan cache or
+  immutable persisted host start plans. Requested authorization runs before
+  durable lookup, and resolved authorization includes the exact containing
+  `runtime.PlanRef` plus child identity and trust class; conflicts are assessed
+  only among candidates the current caller may access.
+
+- The existing agentkit launcher is exposed only through
+  `LegacyWorkflowBridge`, an explicitly compatibility-only, process-local
+  adapter. Production implementations must satisfy the durable `SessionHost`
+  launch/replay/observe/heartbeat/cancel contract rather than inheriting the
+  legacy bridge's weaker restart behavior.
+
+  Vanta revision for all W07-T03 decisions: `01M0T66FYW6HCM98J3XZ0W1NZK`.

@@ -40,3 +40,4 @@
 | 36 | W05-T01 | `a5eb3bc` | `2d14c13` | Hadron | accepted after exact authenticated start replay, append-only policy facts, convergent lifecycle recovery, bounded cancellation CAS, and atomic call/child-run SQLite binding |
 | 37 | W03-T08 | `d771e44` | `61ea279` | Hadron | accepted after recursive cancellation-tree, semantic replay, pending-child recovery ordering, terminal-intent context, and admission-fence hardening |
 | 38 | W05-T03 | `c40bf7d` | `c950291` | Hadron | accepted after canonical exact-selector, whole-stream package bound, registry response bound, cancellation-aware child materialization, and overflow hardening |
+| 39 | W07-T03 | `e5a9dc4` | `2d95b0c` | Hadron | accepted with graph-native agent sugar, durable session-host contract, container-scoped generated-bundle authorization, and restart-safe child resolution |

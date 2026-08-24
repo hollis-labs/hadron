@@ -916,3 +916,20 @@ hardening.
 | independent source review `c40bf7d` | focused race suite, import guard, focused vet, and commit diff check | pass |
 | integration `c950291` | `go test -count=1 ./...` | pass |
 | source | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/control_flow_external_test.go:498` and `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012 |
+
+## W07-T03
+
+Reviewed the extraction-ready `agent_session@v1` adapter and durable host
+contract, deterministic `agent_launch` graph expansion, ordinary correlated
+wait composition, serialized generated-child definitions, Hadron compiler
+binding, container-scoped authorization, persisted plan-bundle lookup, and the
+explicitly compatibility-only legacy agent bridge. Source commit `e5a9dc4` was
+integrated as `2d95b0c` after host-path and durable bundle hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `e5a9dc4` | focused appworkflow, persistence, agent, wait, compiler, and legacy-bridge suites at `-count=5` | pass |
+| source worktree `e5a9dc4` | focused race suite across the same packages | pass |
+| source worktree `e5a9dc4` | import guard, focused vet, generation stability, targeted golangci, hooks, and diff checks | pass; zero new issues |
+| source worktree `e5a9dc4` | `go test -count=1 ./...` | pass; one earlier timing-sensitive legacy agent test passed on isolated, package, and subsequent full reruns |
+| integration `2d95b0c` plus tracking | `go test -count=1 ./...` | pass |

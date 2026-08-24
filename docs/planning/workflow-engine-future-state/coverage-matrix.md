@@ -95,7 +95,7 @@ or the detailed architecture made a later choice. In particular:
 | `verify` modifier and literal tool-activity evidence | Planned | W04-T08 |
 | Provider-agnostic typed `llm`, restricted tools, audit records, schema repair/fail | Planned later | W07-T01 |
 | Sandboxed goja `script`, capability surface, schema inference | Implemented | W07-T02 |
-| Heavy `agent_launch` plus correlated wait sugar | Planned later | W07-T03 |
+| Heavy `agent_launch` plus correlated wait sugar | Planned later | W07-T03, W07-T08 |
 | Generated OpenAPI/AsyncAPI/gRPC/GraphQL operation families | Planned later | W07-T04 |
 | `emit` and `checkpoint` | Planned later | W07-T07 |
 | Effect-driven retry/recovery/MCP/confirmation/dry-run/blast-radius policy | Planned | W01-T05, W03-T04, W03-T07, W05-T01, W06-T01, W06-T03 |

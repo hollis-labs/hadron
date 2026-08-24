@@ -175,3 +175,20 @@ No execution findings have been deferred.
   necessarily smaller than that whole-stream bound.
 
   Vanta revision for all W05-T03 limitations: `01M0T44SS8Z3G7JYR7YMV7R7EC`.
+
+- W07-T03 defines the crash-durable `SessionHost` port and restart fixtures but
+  does not ship a default production local agent substrate. The existing
+  agentkit bridge is process-local and fails closed after restart instead of
+  claiming durability it cannot provide.
+
+- The agent wait adapter accepts the canonical child-terminal envelope, but
+  Hadron does not yet produce that wake automatically from child terminal
+  transitions. W07-T08 owns the common child completion/resume producer; the
+  heavy agent-launch coverage row remains planned until that integration lands.
+
+- Durable generated-child lookup currently scans immutable host start-plan
+  records. This preserves correctness without a schema migration; a future
+  indexed projection may optimize large journals without changing the public
+  bundle-source contract.
+
+  Vanta revision for all W07-T03 limitations: `01M0T66GDMA1FBR5Z5HG7PK398`.
