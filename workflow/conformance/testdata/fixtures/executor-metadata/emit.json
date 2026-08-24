@@ -1,0 +1,20 @@
+{
+  "name": "emit-v1-contract",
+  "expect": "pass",
+  "input": {
+    "spec": {
+      "name": "emit",
+      "version": "v1",
+      "config_schema": {},
+      "input_schema": {},
+      "output_schema": {},
+      "effects": ["mutate"],
+      "required_capabilities": ["event.publish"],
+      "idempotency": "keyed",
+      "retry_safety": "requires-idempotency",
+      "cancellation": {"mode": "context"},
+      "observation": {"mode": "none"},
+      "memoization": "disabled"
+    }
+  }
+}

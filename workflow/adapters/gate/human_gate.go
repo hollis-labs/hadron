@@ -32,7 +32,77 @@ const (
 	CodePayloadFailed   = "human_gate_payload_failed"
 	CodeContinuation    = "human_gate_continuation_invalid"
 	maximumTimeout      = 365 * 24 * time.Hour
+	maximumConfigBytes  = 64 << 10
 )
+
+// DecisionSchemaMode selects whether a shared gate profile derives its resume
+// schema from declared option IDs or requires an exact authored schema.
+type DecisionSchemaMode string
+
+const (
+	DecisionSchemaDerived    DecisionSchemaMode = "derived"
+	DecisionSchemaConfigured DecisionSchemaMode = "configured"
+)
+
+// Profile gives a named gate-like adapter its immutable step-kind vocabulary
+// while keeping parsing, suspension, continuation, timeout, and redaction in
+// one implementation. Adapter packages should publish a fixed profile rather
+// than accepting profile data from workflow authors.
+type Profile struct {
+	Name                string
+	Version             string
+	Label               string
+	RespondCapability   string
+	WaitCapability      string
+	InvalidCode         string
+	AuthorityFailedCode string
+	PayloadFailedCode   string
+	ContinuationCode    string
+	DecisionSchema      DecisionSchemaMode
+}
+
+// StepKindSpec returns the immutable static metadata described by p. Adapter
+// constructors validate profiles before execution; callers defining a custom
+// profile should use NewProfile rather than publishing unchecked metadata.
+func (p Profile) StepKindSpec() stepkind.StepKindSpec {
+	return stepkind.StepKindSpec{
+		Name: p.Name, Version: p.Version,
+		ConfigSchema: configSchema(p), InputSchema: graph.Schema{"type": "object"}, OutputSchema: outputSchema(),
+		Effects: graph.EffectSet{graph.EffectRead}, RequiredCapabilities: []string{p.RespondCapability, p.WaitCapability},
+		Idempotency: graph.IdempotencyIntrinsic, RetrySafety: stepkind.RetrySafe,
+		Cancellation: stepkind.CancellationSpec{Mode: stepkind.CancellationContext},
+		Observation:  stepkind.ObservationSpec{Mode: stepkind.ObservationNone}, Memoization: stepkind.MemoizationDisabled,
+		CanSuspend: true, EmbeddedModeSupported: false,
+	}
+}
+
+func (p Profile) validate() error {
+	if !profileIdentifier(p.Name) || !profileIdentifier(p.Version) || !profileIdentifier(p.RespondCapability) ||
+		!profileIdentifier(p.WaitCapability) || !profileIdentifier(p.InvalidCode) || !profileIdentifier(p.AuthorityFailedCode) ||
+		!profileIdentifier(p.PayloadFailedCode) || !profileIdentifier(p.ContinuationCode) {
+		return fmt.Errorf("gate profile identifiers are invalid")
+	}
+	fields := []struct{ name, value string }{
+		{"label", p.Label},
+	}
+	for _, field := range fields {
+		if !stableText(field.value, 128) {
+			return fmt.Errorf("gate profile %s is invalid", field.name)
+		}
+	}
+	if p.DecisionSchema != DecisionSchemaDerived && p.DecisionSchema != DecisionSchemaConfigured {
+		return fmt.Errorf("gate profile decision schema mode is invalid")
+	}
+	return nil
+}
+
+func humanGateProfile() Profile {
+	return Profile{
+		Name: Name, Version: Version, Label: "human gate", RespondCapability: CapabilityGate, WaitCapability: CapabilityWait,
+		InvalidCode: CodeInvalidGate, AuthorityFailedCode: CodeAuthorityFailed, PayloadFailedCode: CodePayloadFailed,
+		ContinuationCode: CodeContinuation, DecisionSchema: DecisionSchemaDerived,
+	}
+}
 
 // Options supplies application-owned gate policy, private payload storage,
 // and a deterministic clock. Authority and Payloads are required.
@@ -48,54 +118,81 @@ type Executor struct {
 	authority workflowgate.AuthorityResolver
 	payloads  workflowgate.PayloadStore
 	now       func() time.Time
+	profile   Profile
+}
+
+func (e *Executor) effectiveProfile() Profile {
+	if e == nil || e.profile.Name == "" {
+		return humanGateProfile()
+	}
+	return e.profile
 }
 
 // New constructs a fail-closed human gate executor.
 func New(options Options) (*Executor, error) {
+	return NewProfile(humanGateProfile(), options)
+}
+
+// NewProfile constructs a gate executor with one immutable adapter-owned
+// profile. The profile is copied and validated during construction.
+func NewProfile(profile Profile, options Options) (*Executor, error) {
 	if nilInterface(options.Authority) || nilInterface(options.Payloads) {
-		return nil, fmt.Errorf("human gate authority resolver and payload store are required")
+		return nil, fmt.Errorf("gate authority resolver and payload store are required")
+	}
+	if err := profile.validate(); err != nil {
+		return nil, err
 	}
 	now := options.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Executor{authority: options.Authority, payloads: options.Payloads, now: now}, nil
+	return &Executor{authority: options.Authority, payloads: options.Payloads, now: now, profile: profile}, nil
 }
 
 // Register constructs and registers human_gate@v1.
 func Register(registry stepkind.Registry, options Options) (*Executor, error) {
+	return RegisterProfile(registry, humanGateProfile(), options)
+}
+
+// RegisterProfile constructs and registers one immutable shared gate profile.
+func RegisterProfile(registry stepkind.Registry, profile Profile, options Options) (*Executor, error) {
 	if nilInterface(registry) {
 		return nil, fmt.Errorf("step-kind registry is required")
 	}
-	executor, err := New(options)
+	executor, err := NewProfile(profile, options)
 	if err != nil {
 		return nil, err
 	}
-	if err := registry.Register(executor); err != nil {
+	if err := RegisterExecutor(registry, executor); err != nil {
 		return nil, err
 	}
 	return executor, nil
 }
 
+// RegisterExecutor applies the shared typed-nil-safe registry admission used
+// by thin profiled wrappers.
+func RegisterExecutor(registry stepkind.Registry, executor stepkind.StepKind) error {
+	if nilInterface(registry) {
+		return fmt.Errorf("step-kind registry is required")
+	}
+	if nilInterface(executor) {
+		return fmt.Errorf("gate executor is required")
+	}
+	return registry.Register(executor)
+}
+
 // Spec returns immutable human_gate@v1 metadata. timed_out is const false on
 // successful continuation; runtime timeout is a typed failed attempt and never
 // fabricated as a successful adapter result.
-func (*Executor) Spec() stepkind.StepKindSpec {
-	return stepkind.StepKindSpec{
-		Name: Name, Version: Version,
-		ConfigSchema: configSchema(), InputSchema: graph.Schema{"type": "object"}, OutputSchema: outputSchema(),
-		Effects: graph.EffectSet{graph.EffectRead}, RequiredCapabilities: []string{CapabilityGate, CapabilityWait},
-		Idempotency: graph.IdempotencyIntrinsic, RetrySafety: stepkind.RetrySafe,
-		Cancellation: stepkind.CancellationSpec{Mode: stepkind.CancellationContext},
-		Observation:  stepkind.ObservationSpec{Mode: stepkind.ObservationNone}, CanSuspend: true, EmbeddedModeSupported: false,
-	}
+func (e *Executor) Spec() stepkind.StepKindSpec {
+	return e.effectiveProfile().StepKindSpec()
 }
 
 // ValidateConfig reports deterministic config paths. An optional non-blocking
 // gate is valid shared vocabulary but rejected here until W07-T09 lowers it to
 // ordinary graph readiness semantics.
-func (*Executor) ValidateConfig(_ context.Context, input graph.Config) []diagnostic.Diagnostic {
-	_, findings := parseConfig(input, "validation-placeholder")
+func (e *Executor) ValidateConfig(_ context.Context, input graph.Config) []diagnostic.Diagnostic {
+	_, findings := parseConfig(e.effectiveProfile(), input, "validation-placeholder")
 	return findings
 }
 
@@ -103,26 +200,27 @@ func (*Executor) ValidateConfig(_ context.Context, input graph.Config) []diagnos
 // and suspends initially. An accepted continuation returns typed decision and
 // resume metadata without exposing the resume credential.
 func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+	profile := e.effectiveProfile()
 	if ctx == nil {
-		return stepkind.StepResult{}, permanent(CodeInvalidGate, "human gate invocation is invalid", errors.New("context is required"))
+		return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" invocation is invalid", errors.New("context is required"))
 	}
 	if err := ctx.Err(); err != nil {
 		return stepkind.StepResult{}, err
 	}
 	if err := prepared.Invocation.Validate(); err != nil {
-		return stepkind.StepResult{}, permanent(CodeInvalidGate, "human gate invocation is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" invocation is invalid", err)
 	}
 	defaultCorrelation := invocationCorrelation(prepared.Invocation.Identity)
-	config, findings := parseConfig(prepared.Invocation.Config, defaultCorrelation)
+	config, findings := parseConfig(profile, prepared.Invocation.Config, defaultCorrelation)
 	if len(findings) != 0 {
-		return stepkind.StepResult{}, permanent(CodeInvalidGate, "human gate configuration is invalid", errors.New(findings[0].Message))
+		return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" configuration is invalid", errors.New(findings[0].Message))
 	}
-	expectedID := gateWaitID(prepared.Invocation.Identity, config.checkpoint.Correlation)
+	expectedID := gateWaitID(profile.Name, prepared.Invocation.Identity, config.checkpoint.Correlation)
 	if prepared.Invocation.Continuation != nil {
 		return e.continueGate(prepared.Invocation, config, expectedID)
 	}
 	if e == nil || nilInterface(e.authority) || nilInterface(e.payloads) || e.now == nil {
-		return stepkind.StepResult{}, permanent(CodeInvalidGate, "human gate execution boundary is unavailable", errors.New("executor is not initialized"))
+		return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" execution boundary is unavailable", errors.New("executor is not initialized"))
 	}
 	authority, err := e.authority.ResolveGateAuthority(ctx, workflowgate.AuthorizationRequest{
 		RunID: prepared.Invocation.Identity.RunID, NodeID: prepared.Invocation.Identity.NodeID,
@@ -133,14 +231,14 @@ func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvoca
 		if ctx.Err() != nil {
 			return stepkind.StepResult{}, ctx.Err()
 		}
-		return stepkind.StepResult{}, permanent(CodeAuthorityFailed, "human gate authority resolution failed", err)
+		return stepkind.StepResult{}, permanent(profile.AuthorityFailedCode, profile.Label+" authority resolution failed", err)
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return stepkind.StepResult{}, contextErr
 	}
 	authority.Attributes = cloneStringMap(authority.Attributes)
-	if validationErr := authority.Validate(); validationErr != nil {
-		return stepkind.StepResult{}, permanent(CodeAuthorityFailed, "human gate authority is invalid", validationErr)
+	if validationErr := validateSafeAuthority(authority); validationErr != nil {
+		return stepkind.StepResult{}, permanent(profile.AuthorityFailedCode, profile.Label+" authority is invalid", validationErr)
 	}
 	payload, err := e.payloads.StoreGatePayload(ctx, workflowgate.PayloadRequest{
 		RunID: prepared.Invocation.Identity.RunID, NodeID: prepared.Invocation.Identity.NodeID,
@@ -151,17 +249,17 @@ func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvoca
 		if ctx.Err() != nil {
 			return stepkind.StepResult{}, ctx.Err()
 		}
-		return stepkind.StepResult{}, retryable(CodePayloadFailed, "human gate payload storage failed", err)
+		return stepkind.StepResult{}, retryable(profile.PayloadFailedCode, profile.Label+" payload storage failed", err)
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return stepkind.StepResult{}, contextErr
 	}
 	if err := payload.Validate(); err != nil {
-		return stepkind.StepResult{}, permanent(CodePayloadFailed, "human gate payload reference is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.PayloadFailedCode, profile.Label+" payload reference is invalid", err)
 	}
 	current := e.now()
 	if current.IsZero() {
-		return stepkind.StepResult{}, permanent(CodeInvalidGate, "human gate clock is invalid", errors.New("zero time"))
+		return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" clock is invalid", errors.New("zero time"))
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return stepkind.StepResult{}, contextErr
@@ -173,7 +271,7 @@ func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvoca
 		Authority: authority, WakeSource: workflowwait.WakeGate, Status: workflowwait.StatusOpen,
 	}
 	if err := record.Validate(); err != nil {
-		return stepkind.StepResult{}, permanent(CodeInvalidGate, "human gate wait record is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.InvalidCode, profile.Label+" wait record is invalid", err)
 	}
 	return stepkind.StepResult{Outcome: stepkind.StepWaiting, Wait: &stepkind.WaitResult{ID: expectedID, Record: record}}, nil
 }
@@ -184,33 +282,34 @@ type parsedConfig struct {
 }
 
 func (e *Executor) continueGate(invocation stepkind.Invocation, config parsedConfig, expectedID string) (stepkind.StepResult, error) {
+	profile := e.effectiveProfile()
 	continuation := invocation.Continuation
 	if err := continuation.Validate(); err != nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate continuation is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" continuation is invalid", err)
 	}
 	record := continuation.Record
 	if continuation.ID != expectedID || record.Kind != workflowwait.KindGate || record.WakeSource != workflowwait.WakeGate ||
 		record.Correlation != config.checkpoint.Correlation || record.ResumeSchema.Digest != config.checkpoint.ResumeSchema.Digest || record.Payload == nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate continuation does not match invocation", errors.New("identity or immutable record mismatch"))
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" continuation does not match invocation", errors.New("identity or immutable record mismatch"))
 	}
 	payload, ok := continuation.Values["resume"]
 	if !ok || payload.Type != values.TypeObject || payload.Inline == nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate continuation payload is invalid", errors.New("resume object is required"))
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" continuation payload is invalid", errors.New("resume object is required"))
 	}
 	if payload.Redaction != values.RedactionPrivate && payload.Redaction != values.RedactionSecret ||
 		payload.Retention != values.RetentionRun && payload.Retention != values.RetentionProject && payload.Retention != values.RetentionExternal {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate continuation payload classification is invalid", errors.New("resume payload must be at least private/run classified"))
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" continuation payload classification is invalid", errors.New("resume payload must be at least private/run classified"))
 	}
 	if err := values.ValidateValueSchema(record.ResumeSchema.Schema, payload); err != nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate continuation payload schema is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" continuation payload schema is invalid", err)
 	}
 	object, ok := payload.Inline.(map[string]any)
 	if !ok {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate continuation payload is invalid", errors.New("resume value is not an object"))
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" continuation payload is invalid", errors.New("resume value is not an object"))
 	}
 	decision, ok := object["decision"].(string)
 	if !ok {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate decision is invalid", errors.New("decision is not a string"))
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" decision is invalid", errors.New("decision is not a string"))
 	}
 	optionKind := workflowgate.OptionDecision
 	found := false
@@ -224,39 +323,43 @@ func (e *Executor) continueGate(invocation stepkind.Invocation, config parsedCon
 		}
 	}
 	if !found {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate decision is invalid", errors.New("decision is not a configured option"))
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" decision is invalid", errors.New("decision is not a configured option"))
 	}
 	outputs := values.ValueSet{}
 	var err error
-	outputs["decision"], err = values.NewInline(decision, metadata(invocation.Identity, "decision"))
+	outputs["decision"], err = values.NewInline(decision, metadata(profile.Name, invocation.Identity, "decision"))
 	if err != nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate decision output is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" decision output is invalid", err)
 	}
-	outputs["skipped"], err = values.NewInline(optionKind == workflowgate.OptionSkip, metadata(invocation.Identity, "skipped"))
+	outputs["skipped"], err = values.NewInline(optionKind == workflowgate.OptionSkip, metadata(profile.Name, invocation.Identity, "skipped"))
 	if err != nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate skip output is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" skip output is invalid", err)
 	}
-	resolution := record.Resolution
-	if resolution == nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate resolution is missing", errors.New("resolution is required"))
+	if record.Resolution == nil || record.Resolution.Source != workflowwait.WakeGate {
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" resolution is invalid", errors.New("gate resolution provenance is required"))
+	}
+	resolution := *record.Resolution
+	resolution.Responder.Attributes = cloneStringMap(resolution.Responder.Attributes)
+	if responderErr := validateSafeResponder(resolution.Responder); responderErr != nil {
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" resolution responder is invalid", responderErr)
 	}
 	resume := map[string]any{
 		"wait_id": expectedID, "status": "resumed", "source": string(resolution.Source),
 		"correlation": record.Correlation, "resolved_at": resolution.ResolvedAt.UTC().Format(time.RFC3339Nano),
 		"responder": map[string]any{"kind": resolution.Responder.Kind, "reference": resolution.Responder.Reference, "attributes": cloneStringMap(resolution.Responder.Attributes)},
 	}
-	outputs["resume"], err = values.NewInline(resume, metadata(invocation.Identity, "resume"))
+	outputs["resume"], err = values.NewInline(resume, metadata(profile.Name, invocation.Identity, "resume"))
 	if err != nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate resume output is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" resume output is invalid", err)
 	}
-	outputs["timed_out"], err = values.NewInline(false, metadata(invocation.Identity, "timed_out"))
+	outputs["timed_out"], err = values.NewInline(false, metadata(profile.Name, invocation.Identity, "timed_out"))
 	if err != nil {
-		return stepkind.StepResult{}, permanent(CodeContinuation, "human gate timeout output is invalid", err)
+		return stepkind.StepResult{}, permanent(profile.ContinuationCode, profile.Label+" timeout output is invalid", err)
 	}
 	return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: outputs}, nil
 }
 
-func parseConfig(input graph.Config, defaultCorrelation string) (parsedConfig, []diagnostic.Diagnostic) {
+func parseConfig(profile Profile, input graph.Config, defaultCorrelation string) (parsedConfig, []diagnostic.Diagnostic) {
 	object, err := cloneConfig(input)
 	if err != nil {
 		return parsedConfig{}, []diagnostic.Diagnostic{finding("config", "must be a JSON-compatible object")}
@@ -266,9 +369,12 @@ func parseConfig(input graph.Config, defaultCorrelation string) (parsedConfig, [
 		"prompt": {}, "options": {}, "environment": {}, "policy_subject": {}, "correlation": {},
 		"timeout": {}, "optional": {}, "blocking": {}, "escalations": {},
 	}
+	if profile.DecisionSchema == DecisionSchemaConfigured {
+		allowed["decision_schema"] = struct{}{}
+	}
 	for _, key := range sortedKeys(object) {
 		if _, ok := allowed[key]; !ok {
-			findings = append(findings, finding("config."+key, "is not supported by human_gate@v1"))
+			findings = append(findings, finding("config."+key, "is not supported by "+profile.Name+"@"+profile.Version))
 		}
 	}
 	prompt := requiredString(object["prompt"], "config.prompt", 16<<10, &findings)
@@ -281,9 +387,29 @@ func parseConfig(input graph.Config, defaultCorrelation string) (parsedConfig, [
 	timeout := duration(object["timeout"], "config.timeout", &findings)
 	behavior := workflowgate.Behavior{Optional: boolean(object["optional"], false, "config.optional", &findings), Blocking: boolean(object["blocking"], true, "config.blocking", &findings)}
 	escalations := parseEscalations(object["escalations"], &findings)
-	resumeSchema, schemaErr := workflowwait.NewSchemaRef(decisionSchema(options))
+	resumeSchemaValue := decisionSchema(options)
+	if profile.DecisionSchema == DecisionSchemaConfigured {
+		configured, ok := object["decision_schema"].(map[string]any)
+		if !ok || configured == nil {
+			findings = append(findings, finding("config.decision_schema", "must be a local JSON Schema object"))
+		} else {
+			resumeSchemaValue = graph.Schema(configured)
+		}
+	}
+	resumeSchema, schemaErr := workflowwait.NewSchemaRef(resumeSchemaValue)
 	if schemaErr != nil {
-		findings = append(findings, finding("config.options", "cannot construct decision schema"))
+		path := "config.options"
+		if profile.DecisionSchema == DecisionSchemaConfigured {
+			path = "config.decision_schema"
+		}
+		findings = append(findings, finding(path, "cannot construct a local decision schema"))
+	}
+	if profile.DecisionSchema == DecisionSchemaConfigured && schemaErr == nil {
+		for index, option := range options {
+			if !decisionSchemaAccepts(resumeSchema.Schema, option.ID) {
+				findings = append(findings, finding(fmt.Sprintf("config.options[%d]", index), "is not represented by config.decision_schema"))
+			}
+		}
 	}
 	checkpoint := workflowgate.Checkpoint{
 		Prompt: prompt, Options: options, ResumeSchema: resumeSchema, Subject: subject,
@@ -303,8 +429,8 @@ func parseConfig(input graph.Config, defaultCorrelation string) (parsedConfig, [
 
 func parseOptions(value any, findings *[]diagnostic.Diagnostic) []workflowgate.Option {
 	raw, ok := value.([]any)
-	if !ok || len(raw) == 0 {
-		*findings = append(*findings, finding("config.options", "must be a non-empty array"))
+	if !ok || len(raw) == 0 || len(raw) > 128 {
+		*findings = append(*findings, finding("config.options", "must contain between 1 and 128 entries"))
 		return nil
 	}
 	options := make([]workflowgate.Option, 0, len(raw))
@@ -361,11 +487,16 @@ func subjectObject(value any, path string, findings *[]diagnostic.Diagnostic) wo
 	attributes := map[string]string{}
 	if raw := object["attributes"]; raw != nil {
 		attributeObject, ok := raw.(map[string]any)
-		if !ok {
-			*findings = append(*findings, finding(path+".attributes", "must be an object of strings"))
+		if !ok || len(attributeObject) > 32 {
+			*findings = append(*findings, finding(path+".attributes", "must be a bounded object of strings"))
 		} else {
+			total := 0
 			for _, key := range sortedKeys(attributeObject) {
-				attributes[key] = requiredString(attributeObject[key], path+".attributes."+key, 4096, findings)
+				attributes[key] = requiredString(attributeObject[key], path+".attributes."+key, 1024, findings)
+				total += len(key) + len(attributes[key])
+			}
+			if total > 8<<10 {
+				*findings = append(*findings, finding(path+".attributes", "exceeds its total byte limit"))
 			}
 		}
 	}
@@ -380,8 +511,8 @@ func parseEscalations(value any, findings *[]diagnostic.Diagnostic) []workflowga
 		return nil
 	}
 	raw, ok := value.([]any)
-	if !ok {
-		*findings = append(*findings, finding("config.escalations", "must be an array"))
+	if !ok || len(raw) > 32 {
+		*findings = append(*findings, finding("config.escalations", "must be an array of at most 32 entries"))
 		return nil
 	}
 	escalations := make([]workflowgate.Escalation, 0, len(raw))
@@ -418,16 +549,24 @@ func decisionSchema(options []workflowgate.Option) graph.Schema {
 	}
 }
 
-func configSchema() graph.Schema {
+func decisionSchemaAccepts(schema graph.Schema, decision string) bool {
+	value, err := values.NewInline(map[string]any{"decision": decision}, values.Metadata{
+		Producer: values.Producer{Kind: "gate_config", Reference: "decision_schema"}, MediaType: "application/json",
+		Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
+	})
+	return err == nil && values.ValidateValueSchema(schema, value) == nil
+}
+
+func configSchema(profile Profile) graph.Schema {
 	subject := map[string]any{
 		"type": "object", "additionalProperties": false, "required": []any{"kind", "reference"},
 		"properties": map[string]any{
 			"kind":       map[string]any{"type": "string", "minLength": json.Number("1")},
 			"reference":  map[string]any{"type": "string", "minLength": json.Number("1")},
-			"attributes": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			"attributes": map[string]any{"type": "object", "maxProperties": json.Number("32"), "additionalProperties": map[string]any{"type": "string", "maxLength": json.Number("1024")}},
 		},
 	}
-	return graph.Schema{
+	schema := graph.Schema{
 		"type": "object", "additionalProperties": false,
 		"required": []any{"prompt", "options", "timeout"},
 		"oneOf":    []any{map[string]any{"required": []any{"environment"}}, map[string]any{"required": []any{"policy_subject"}}},
@@ -452,6 +591,11 @@ func configSchema() graph.Schema {
 			}},
 		},
 	}
+	if profile.DecisionSchema == DecisionSchemaConfigured {
+		schema["required"] = append(schema["required"].([]any), "decision_schema")
+		schema["properties"].(map[string]any)["decision_schema"] = map[string]any{"type": "object"}
+	}
+	return schema
 }
 
 func outputSchema() graph.Schema {
@@ -515,6 +659,72 @@ func stableText(value string, maximum int) bool {
 	return true
 }
 
+func profileIdentifier(value string) bool {
+	if !stableText(value, 128) {
+		return false
+	}
+	for index, current := range value {
+		if current >= 'a' && current <= 'z' || current >= '0' && current <= '9' ||
+			index > 0 && (current == '-' || current == '_' || current == '.') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validateSafeAuthority(authority workflowwait.ResponderAuthority) error {
+	if err := authority.Validate(); err != nil {
+		return err
+	}
+	return validateSafeIdentity("authority", authority.Kind, authority.Reference, authority.Attributes)
+}
+
+func validateSafeResponder(responder workflowwait.Responder) error {
+	if err := responder.Validate(); err != nil {
+		return err
+	}
+	return validateSafeIdentity("responder", responder.Kind, responder.Reference, responder.Attributes)
+}
+
+func validateSafeIdentity(label, kind, reference string, attributes map[string]string) error {
+	if !profileIdentifier(kind) || !safeGateOpaque(kind, 128) || !safeGateOpaque(reference, 4096) {
+		return fmt.Errorf("%s identity is not safe for durable gate metadata", label)
+	}
+	if len(attributes) > 32 {
+		return fmt.Errorf("%s attributes exceed their entry limit", label)
+	}
+	keys := make([]string, 0, len(attributes))
+	for key := range attributes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	total := 0
+	for _, key := range keys {
+		if !profileIdentifier(key) || !safeGateOpaque(key, 128) || !safeGateOpaque(attributes[key], 1024) {
+			return fmt.Errorf("%s attributes are not safe for durable gate metadata", label)
+		}
+		total += len(key) + len(attributes[key])
+		if total > 8<<10 {
+			return fmt.Errorf("%s attributes exceed their byte limit", label)
+		}
+	}
+	return nil
+}
+
+func safeGateOpaque(value string, maximum int) bool {
+	if !stableText(value, maximum) || strings.Contains(value, "://") || strings.ContainsAny(value, "?#@=") {
+		return false
+	}
+	lower := strings.ToLower(value)
+	for _, marker := range []string{"secret", "token", "credential", "password", "authorization", "bearer", "cookie", "signature", "api_key", "apikey"} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
+}
+
 func cloneConfig(config graph.Config) (map[string]any, error) {
 	if config == nil {
 		return nil, errors.New("nil config")
@@ -522,6 +732,9 @@ func cloneConfig(config graph.Config) (map[string]any, error) {
 	encoded, err := json.Marshal(config)
 	if err != nil {
 		return nil, err
+	}
+	if len(encoded) > maximumConfigBytes {
+		return nil, errors.New("config exceeds its byte limit")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.UseNumber()
@@ -547,18 +760,18 @@ func invocationCorrelation(identity stepkind.InvocationIdentity) string {
 	return correlation
 }
 
-func gateWaitID(identity stepkind.InvocationIdentity, correlation string) string {
-	seed := strings.Join([]string{identity.RunID, identity.NodeID, identity.Iteration, fmt.Sprint(identity.Attempt), Name, correlation}, "\x00")
+func gateWaitID(kind string, identity stepkind.InvocationIdentity, correlation string) string {
+	seed := strings.Join([]string{identity.RunID, identity.NodeID, identity.Iteration, fmt.Sprint(identity.Attempt), kind, correlation}, "\x00")
 	return "wait-" + strings.TrimPrefix(values.SHA256Digest([]byte(seed)), "sha256:")[:32]
 }
 
-func metadata(identity stepkind.InvocationIdentity, output string) values.Metadata {
+func metadata(kind string, identity stepkind.InvocationIdentity, output string) values.Metadata {
 	reference := identity.RunID + "/" + identity.NodeID
 	if identity.Iteration != "" {
 		reference += "/" + identity.Iteration
 	}
 	reference += fmt.Sprintf("/attempt-%d", identity.Attempt)
-	return values.Metadata{Producer: values.Producer{Kind: Name, Reference: reference, Output: output}, MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun}
+	return values.Metadata{Producer: values.Producer{Kind: kind, Reference: reference, Output: output}, MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun}
 }
 
 func permanent(code, message string, cause error) error {

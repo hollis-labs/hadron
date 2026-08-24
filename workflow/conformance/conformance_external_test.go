@@ -168,7 +168,7 @@ func TestExternalHostRunsAllSuites(t *testing.T) {
 	calls := 0
 	conformance.RunAll(t, conformance.EmbeddedFixtures(), fakeHost{calls: &calls})
 
-	const wantCalls = 41
+	const wantCalls = 44
 	if calls != wantCalls {
 		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
 	}
@@ -202,10 +202,10 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				wantCount = 10
 			}
 			if set == conformance.WaitFixtures {
-				wantCount = 7
+				wantCount = 8
 			}
 			if set == conformance.ExecutorMetadataFixtures {
-				wantCount = 7
+				wantCount = 9
 			}
 			if set == conformance.ControlFlowFixtures {
 				wantCount = 6
@@ -243,7 +243,7 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				return
 			}
 			if set == conformance.WaitFixtures {
-				for _, name := range []string{"wait-gate", "wait-message", "wait-timer", "wait-callback", "wait-child-run", "wait-signal"} {
+				for _, name := range []string{"wait-gate", "wait-checkpoint-gate", "wait-message", "wait-timer", "wait-callback", "wait-child-run", "wait-signal"} {
 					if fixture := byName[name]; fixture.Expectation != conformance.ExpectPass {
 						t.Fatalf("%s fixture = %#v", name, fixture)
 					}
