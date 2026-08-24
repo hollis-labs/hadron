@@ -168,6 +168,7 @@ type WaitStore interface {
 	LoadWait(context.Context, WaitID) (WaitSnapshot, error)
 	LoadNodeInvocation(context.Context, NodeInvocationID) (NodeInvocationSnapshot, error)
 	LoadAttempt(context.Context, AttemptID) (AttemptSnapshot, error)
+	LoadWaitContinuation(context.Context, AttemptID) (WaitSnapshot, error)
 	SuspendNodeWait(context.Context, SuspendNodeWaitRequest) (SuspendWaitResult, error)
 	ResumeNodeWait(context.Context, ResumeNodeWaitRequest) (ResumeWaitResult, error)
 	TimeoutWait(context.Context, TimeoutWaitRequest) (WaitTimeoutResult, error)

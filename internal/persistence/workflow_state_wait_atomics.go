@@ -90,6 +90,9 @@ func (s *WorkflowStateStore) SuspendNodeWait(ctx context.Context, request workfl
 		if err := insertWorkflowWait(ctx, query, nextWait); err != nil {
 			return err
 		}
+		if err := insertWorkflowWaitAttemptBinding(ctx, query, nextWait.Ref.ID, attempt.ID); err != nil {
+			return err
+		}
 		if err := updateWorkflowNodeCAS(ctx, query, nextNode, currentNode.Generation); err != nil {
 			return err
 		}

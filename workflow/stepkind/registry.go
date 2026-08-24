@@ -1,6 +1,7 @@
 package stepkind
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -8,6 +9,32 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 )
+
+var (
+	// ErrUnknownStepKind identifies an unavailable exact registration.
+	ErrUnknownStepKind = errors.New("unknown step kind")
+	// ErrAmbiguousStepKind identifies an unpinned name with multiple versions.
+	ErrAmbiguousStepKind = errors.New("ambiguous step kind version")
+)
+
+// ResolutionError reports an unknown or ambiguous kind/version request.
+type ResolutionError struct {
+	Name      string
+	Version   string
+	Available []string
+	Cause     error
+}
+
+// Error implements error.
+func (e *ResolutionError) Error() string {
+	if errors.Is(e.Cause, ErrAmbiguousStepKind) {
+		return fmt.Sprintf("%s: step kind %q requires an exact version; available: %v", e.Cause, e.Name, e.Available)
+	}
+	return fmt.Sprintf("%s: step kind %q version %q", e.Cause, e.Name, e.Version)
+}
+
+// Unwrap supports errors.Is against the resolution cause.
+func (e *ResolutionError) Unwrap() error { return e.Cause }
 
 // DuplicateRegistrationError identifies an already registered name/version.
 type DuplicateRegistrationError struct {
@@ -95,6 +122,69 @@ func (r *MemoryRegistry) List() []StepKindSpec {
 		return specs[i].Name < specs[j].Name
 	})
 	return specs
+}
+
+// Resolve returns a validated registration and defensive spec for an exact
+// name/version. When version is empty, exactly one registered version may be
+// selected; Resolve never chooses a latest version from multiple candidates.
+func Resolve(registry Registry, name, version string) (StepKind, StepKindSpec, error) {
+	if isNilRegistry(registry) {
+		return nil, StepKindSpec{}, &ResolutionError{Name: name, Version: version, Cause: ErrUnknownStepKind}
+	}
+	if version != "" {
+		kind, ok := registry.Lookup(name, version)
+		if !ok || isNilStepKind(kind) {
+			return nil, StepKindSpec{}, &ResolutionError{Name: name, Version: version, Cause: ErrUnknownStepKind}
+		}
+		var matches []StepKindSpec
+		for _, candidate := range registry.List() {
+			if candidate.Name == name && candidate.Version == version {
+				matches = append(matches, candidate)
+			}
+		}
+		if len(matches) != 1 {
+			return nil, StepKindSpec{}, fmt.Errorf("step-kind registry lookup/list mismatch for %s@%s", name, version)
+		}
+		spec := matches[0]
+		if err := joinSpecErrors(ValidateSpec(spec), validateImplementation(kind, spec)); err != nil {
+			return nil, StepKindSpec{}, err
+		}
+		return kind, cloneSpec(spec), nil
+	}
+
+	var matches []StepKindSpec
+	for _, spec := range registry.List() {
+		if spec.Name == name {
+			matches = append(matches, spec)
+		}
+	}
+	if len(matches) == 0 {
+		return nil, StepKindSpec{}, &ResolutionError{Name: name, Cause: ErrUnknownStepKind}
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].Version < matches[j].Version })
+	if len(matches) != 1 {
+		versions := make([]string, len(matches))
+		for i := range matches {
+			versions[i] = matches[i].Version
+		}
+		return nil, StepKindSpec{}, &ResolutionError{
+			Name: name, Available: versions, Cause: ErrAmbiguousStepKind,
+		}
+	}
+	return Resolve(registry, name, matches[0].Version)
+}
+
+func isNilRegistry(registry Registry) bool {
+	if registry == nil {
+		return true
+	}
+	value := reflect.ValueOf(registry)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func isNilStepKind(kind StepKind) bool {

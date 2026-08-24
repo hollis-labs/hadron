@@ -8,6 +8,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
+	"github.com/hollis-labs/hadron/workflow/values"
 )
 
 // Kind is a fake implementing only the required StepKind lifecycle.
@@ -53,7 +54,7 @@ func (k *Kind) ValidateConfig(ctx context.Context, config graph.Config) []diagno
 // Execute implements stepkind.StepKind.
 func (k *Kind) Execute(ctx context.Context, invocation stepkind.PreparedInvocation) (stepkind.StepResult, error) {
 	if k.ExecuteFunc == nil {
-		return stepkind.StepResult{}, nil
+		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{}}, nil
 	}
 	return k.ExecuteFunc(ctx, invocation)
 }
@@ -61,10 +62,11 @@ func (k *Kind) Execute(ctx context.Context, invocation stepkind.PreparedInvocati
 // LifecycleKind is a fake implementing every optional lifecycle interface.
 type LifecycleKind struct {
 	*Kind
-	PrepareFunc  func(context.Context, stepkind.Invocation) (stepkind.PreparedInvocation, error)
-	ObserveFunc  func(context.Context, stepkind.ExternalOperationRef) (stepkind.Observation, error)
-	CancelFunc   func(context.Context, stepkind.ExternalOperationRef) error
-	FinalizeFunc func(context.Context, stepkind.Finalization) error
+	PrepareFunc   func(context.Context, stepkind.Invocation) (stepkind.PreparedInvocation, error)
+	ObserveFunc   func(context.Context, stepkind.ExternalOperationRef) (stepkind.Observation, error)
+	CancelFunc    func(context.Context, stepkind.ExternalOperationRef) error
+	HeartbeatFunc func(context.Context, stepkind.ExternalOperationRef) error
+	FinalizeFunc  func(context.Context, stepkind.Finalization) error
 }
 
 // NewLifecycleKind returns a no-op kind that advertises every optional hook.
@@ -73,6 +75,7 @@ func NewLifecycleKind(name, version string) *LifecycleKind {
 	required.SpecValue.Lifecycle.Prepare = true
 	required.SpecValue.Lifecycle.Finalize = true
 	required.SpecValue.Observation.Mode = stepkind.ObservationPoll
+	required.SpecValue.Observation.Heartbeat = true
 	required.SpecValue.Cancellation.Mode = stepkind.CancellationExplicit
 	return &LifecycleKind{Kind: required}
 }
@@ -88,9 +91,18 @@ func (k *LifecycleKind) Prepare(ctx context.Context, invocation stepkind.Invocat
 // Observe implements stepkind.Observer.
 func (k *LifecycleKind) Observe(ctx context.Context, ref stepkind.ExternalOperationRef) (stepkind.Observation, error) {
 	if k.ObserveFunc == nil {
-		return stepkind.Observation{Complete: true}, nil
+		result := stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{}}
+		return stepkind.Observation{State: stepkind.ObservationSucceeded, Result: &result}, nil
 	}
 	return k.ObserveFunc(ctx, ref)
+}
+
+// Heartbeat implements stepkind.Heartbeater.
+func (k *LifecycleKind) Heartbeat(ctx context.Context, ref stepkind.ExternalOperationRef) error {
+	if k.HeartbeatFunc == nil {
+		return nil
+	}
+	return k.HeartbeatFunc(ctx, ref)
 }
 
 // Cancel implements stepkind.Canceler.
@@ -110,10 +122,11 @@ func (k *LifecycleKind) Finalize(ctx context.Context, finalization stepkind.Fina
 }
 
 var (
-	_ stepkind.StepKind  = (*Kind)(nil)
-	_ stepkind.StepKind  = (*LifecycleKind)(nil)
-	_ stepkind.Preparer  = (*LifecycleKind)(nil)
-	_ stepkind.Observer  = (*LifecycleKind)(nil)
-	_ stepkind.Canceler  = (*LifecycleKind)(nil)
-	_ stepkind.Finalizer = (*LifecycleKind)(nil)
+	_ stepkind.StepKind    = (*Kind)(nil)
+	_ stepkind.StepKind    = (*LifecycleKind)(nil)
+	_ stepkind.Preparer    = (*LifecycleKind)(nil)
+	_ stepkind.Observer    = (*LifecycleKind)(nil)
+	_ stepkind.Heartbeater = (*LifecycleKind)(nil)
+	_ stepkind.Canceler    = (*LifecycleKind)(nil)
+	_ stepkind.Finalizer   = (*LifecycleKind)(nil)
 )

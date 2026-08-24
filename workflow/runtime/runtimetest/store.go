@@ -20,15 +20,17 @@ import (
 type Store struct {
 	mu sync.RWMutex
 
-	runs              map[workflowruntime.RunID]workflowruntime.RunSnapshot
-	runStarts         map[string]runStartRecord
-	nodes             map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot
-	attempts          map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
-	waits             map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
-	suspends          map[workflowruntime.WaitID]suspendRecord
-	waitResumes       map[string]waitResumeRecord
-	waitResumeResults map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult
-	timeouts          map[string]timeoutRecord
+	runs               map[workflowruntime.RunID]workflowruntime.RunSnapshot
+	runStarts          map[string]runStartRecord
+	nodes              map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot
+	attempts           map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
+	waits              map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
+	waitAttempts       map[workflowruntime.WaitID]workflowruntime.AttemptID
+	suspends           map[workflowruntime.WaitID]suspendRecord
+	waitResumes        map[string]waitResumeRecord
+	waitResumeResults  map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult
+	timeouts           map[string]timeoutRecord
+	externalOperations map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot
 
 	valueSets    map[string]storedValues
 	nextValueSet uint64
@@ -83,22 +85,24 @@ var _ workflowruntime.StateStore = (*Store)(nil)
 // NewStore returns an empty StateStore fake.
 func NewStore() *Store {
 	return &Store{
-		runs:              make(map[workflowruntime.RunID]workflowruntime.RunSnapshot),
-		runStarts:         make(map[string]runStartRecord),
-		nodes:             make(map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot),
-		attempts:          make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
-		waits:             make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
-		suspends:          make(map[workflowruntime.WaitID]suspendRecord),
-		waitResumes:       make(map[string]waitResumeRecord),
-		waitResumeResults: make(map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult),
-		timeouts:          make(map[string]timeoutRecord),
-		valueSets:         make(map[string]storedValues),
-		plans:             make(map[string]workflowruntime.PlanRef),
-		events:            make(map[workflowruntime.RunID][]workflowruntime.Event),
-		claims:            make(map[string]claimRecord),
-		cache:             make(map[string]workflowruntime.CacheEntry),
-		pins:              make(map[string]workflowruntime.PinnedValue),
-		activations:       make(map[string]activationRecord),
+		runs:               make(map[workflowruntime.RunID]workflowruntime.RunSnapshot),
+		runStarts:          make(map[string]runStartRecord),
+		nodes:              make(map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot),
+		attempts:           make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
+		waits:              make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
+		waitAttempts:       make(map[workflowruntime.WaitID]workflowruntime.AttemptID),
+		suspends:           make(map[workflowruntime.WaitID]suspendRecord),
+		waitResumes:        make(map[string]waitResumeRecord),
+		waitResumeResults:  make(map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult),
+		timeouts:           make(map[string]timeoutRecord),
+		externalOperations: make(map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot),
+		valueSets:          make(map[string]storedValues),
+		plans:              make(map[string]workflowruntime.PlanRef),
+		events:             make(map[workflowruntime.RunID][]workflowruntime.Event),
+		claims:             make(map[string]claimRecord),
+		cache:              make(map[string]workflowruntime.CacheEntry),
+		pins:               make(map[string]workflowruntime.PinnedValue),
+		activations:        make(map[string]activationRecord),
 	}
 }
 

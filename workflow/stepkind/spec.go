@@ -13,6 +13,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/hadron/workflow/values"
 )
 
 const (
@@ -48,7 +49,8 @@ func (e *SpecError) Error() string {
 }
 
 // ValidateSpec validates metadata independently of an executor implementation.
-// It does not interpret JSON Schema keywords or adapter config.
+// Schemas must compile under the core's local-only JSON Schema contract;
+// adapter-specific config validation remains owned by ValidateConfig.
 func ValidateSpec(spec StepKindSpec) error {
 	diagnostics := validateSpec(spec)
 	if len(diagnostics) == 0 {
@@ -108,6 +110,9 @@ func validateSpec(spec StepKindSpec) []diagnostic.Diagnostic {
 	}
 	if !spec.Observation.Mode.Valid() {
 		add("observation.mode", fmt.Sprintf("has unsupported value %q", spec.Observation.Mode))
+	}
+	if spec.Observation.Heartbeat && spec.Observation.Mode == ObservationNone {
+		add("observation.heartbeat", "requires polling observation")
 	}
 
 	seenCapabilities := make(map[string]struct{}, len(spec.RequiredCapabilities))
@@ -173,6 +178,10 @@ func validateImplementation(kind StepKind, spec StepKindSpec) error {
 	wantObserver := spec.Observation.Mode != ObservationNone
 	if spec.Observation.Mode.Valid() && observes != wantObserver {
 		add("observation.mode", matchOptionalInterface(wantObserver, "Observer"))
+	}
+	_, heartbeats := kind.(Heartbeater)
+	if heartbeats != spec.Observation.Heartbeat {
+		add("observation.heartbeat", matchOptionalInterface(spec.Observation.Heartbeat, "Heartbeater"))
 	}
 	_, cancels := kind.(Canceler)
 	wantCanceler := spec.Cancellation.Mode == CancellationExplicit
@@ -267,6 +276,9 @@ func validateSchema(field string, schema graph.Schema, add func(string, string))
 		add:    add,
 	}
 	validator.validate(reflect.ValueOf(schema), field)
+	if err := values.ValidateSchema(schema); err != nil {
+		add(field, fmt.Sprintf("is not a valid local JSON Schema: %v", err))
+	}
 }
 
 func (v *schemaValidator) validate(value reflect.Value, path string) {

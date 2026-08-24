@@ -8,9 +8,11 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/hadron/workflow/conformance"
+	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
+	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
@@ -88,13 +90,73 @@ func (h fakeHost) factory() conformance.Factory {
 
 			if fixture.Set == conformance.ExecutorMetadataFixtures {
 				var input struct {
-					Spec stepkind.StepKindSpec `json:"spec"`
+					Operation string                `json:"operation"`
+					Name      string                `json:"name"`
+					Version   string                `json:"version"`
+					Config    graph.Config          `json:"config"`
+					Spec      stepkind.StepKindSpec `json:"spec"`
 				}
 				if err := json.Unmarshal(fixture.Input, &input); err != nil {
 					return fmt.Errorf("decode step-kind metadata input: %w", err)
 				}
 				(*h.calls)++
-				return stepkind.ValidateSpec(input.Spec)
+				switch input.Operation {
+				case "":
+					return stepkind.ValidateSpec(input.Spec)
+				case "duplicate_registration":
+					registry := stepkind.NewRegistry()
+					if err := registry.Register(stepkindtest.NewNoopKind(input.Name, input.Version)); err != nil {
+						return err
+					}
+					return registry.Register(stepkindtest.NewNoopKind(input.Name, input.Version))
+				case "resolve":
+					_, _, err := stepkind.Resolve(stepkind.NewRegistry(), input.Name, input.Version)
+					return err
+				case "validate_config":
+					kind := stepkindtest.NewNoopKind(input.Name, input.Version)
+					kind.ValidateConfigFunc = func(_ context.Context, config graph.Config) []diagnostic.Diagnostic {
+						if accepted, _ := config["accepted"].(bool); accepted {
+							return nil
+						}
+						return []diagnostic.Diagnostic{{
+							Severity: diagnostic.SeverityError, Code: stepkind.CodeInvalidConfig,
+							Message: "config is not accepted",
+						}}
+					}
+					return errors.Join(diagnosticErrors(kind.ValidateConfig(context.Background(), input.Config))...)
+				case "optional_lifecycle":
+					kind := stepkindtest.NewLifecycleKind(input.Name, input.Version)
+					if err := stepkind.NewRegistry().Register(kind); err != nil {
+						return err
+					}
+					_, prepares := any(kind).(stepkind.Preparer)
+					_, observes := any(kind).(stepkind.Observer)
+					_, heartbeats := any(kind).(stepkind.Heartbeater)
+					_, cancels := any(kind).(stepkind.Canceler)
+					_, finalizes := any(kind).(stepkind.Finalizer)
+					if !prepares || !observes || !heartbeats || !cancels || !finalizes {
+						return errors.New("optional lifecycle is incomplete")
+					}
+					return nil
+				case "immutable_snapshot":
+					registry := stepkind.NewRegistry()
+					kind := stepkindtest.NewNoopKind(input.Name, input.Version)
+					if err := registry.Register(kind); err != nil {
+						return err
+					}
+					kind.SpecValue.Name = "mutated"
+					kind.SpecValue.OutputSchema = graph.Schema{"not": graph.Schema{}}
+					_, spec, err := stepkind.Resolve(registry, input.Name, input.Version)
+					if err != nil {
+						return err
+					}
+					if spec.Name != input.Name || len(spec.OutputSchema) != 0 {
+						return errors.New("registered metadata snapshot changed")
+					}
+					return nil
+				default:
+					return fmt.Errorf("unsupported executor metadata operation %q", input.Operation)
+				}
 			}
 
 			var input struct {
@@ -116,7 +178,7 @@ func TestExternalHostRunsAllSuites(t *testing.T) {
 	calls := 0
 	conformance.RunAll(t, conformance.EmbeddedFixtures(), fakeHost{calls: &calls})
 
-	const wantCalls = 27
+	const wantCalls = 32
 	if calls != wantCalls {
 		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
 	}
@@ -147,6 +209,9 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				wantCount = 7
 			}
 			if set == conformance.WaitFixtures {
+				wantCount = 7
+			}
+			if set == conformance.ExecutorMetadataFixtures {
 				wantCount = 7
 			}
 			if len(fixtures) != wantCount {
@@ -189,4 +254,14 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 			}
 		})
 	}
+}
+
+func diagnosticErrors(findings []diagnostic.Diagnostic) []error {
+	errs := make([]error, 0, len(findings))
+	for _, finding := range findings {
+		if finding.Severity == diagnostic.SeverityError {
+			errs = append(errs, errors.New(finding.Message))
+		}
+	}
+	return errs
 }

@@ -147,6 +147,158 @@ func TestSecretRefSchemaBoundariesAndLiteralNonMutation(t *testing.T) {
 	}
 }
 
+func TestValidateValueSetSchemaPreservesTypedIdentityAcrossRefsAndCombinators(t *testing.T) {
+	t.Parallel()
+	artifact, err := values.NewArtifact(values.ArtifactRef{
+		Store: "external", URI: "artifact://reports/run/result.json", Digest: values.SHA256Digest([]byte("result")),
+		MediaType: "application/json", SizeBytes: 6,
+		Producer:  classificationMetadata(values.RedactionPrivate, values.RetentionExternal).Producer,
+		Redaction: values.RedactionPrivate, Retention: values.RetentionExternal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretRef, _ := values.ParseSecretRef("secret://project/service#token")
+	secret, err := values.NewSecretRef(secretRef, classificationMetadata(values.RedactionSecret, values.RetentionProject))
+	if err != nil {
+		t.Fatal(err)
+	}
+	literal, err := values.NewInline(map[string]any{"type": "artifact", "label": "literal-data"}, classificationMetadata(values.RedactionPrivate, values.RetentionRun))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	schema := graph.Schema{
+		"$ref": "#/$defs/results",
+		"$defs": map[string]any{
+			"results": map[string]any{
+				"type": "object", "required": []any{"report", "credential", "literal"},
+				"properties": map[string]any{
+					"report": map[string]any{"$ref": "#/$defs/report"},
+					"credential": map[string]any{"oneOf": []any{
+						map[string]any{"type": "secret_ref", "const": string(secretRef)},
+						map[string]any{"type": "null"},
+					}},
+					"literal": map[string]any{
+						"type": "object", "required": []any{"type", "label"},
+						"properties": map[string]any{
+							"type":  map[string]any{"const": "artifact"},
+							"label": map[string]any{"enum": []any{"literal-data"}},
+						},
+					},
+				},
+				"additionalProperties": false,
+			},
+			"report": map[string]any{"allOf": []any{
+				map[string]any{"type": "artifact"},
+				map[string]any{
+					"type": "object", "required": []any{"uri"},
+					"properties": map[string]any{"uri": map[string]any{"const": "artifact://reports/run/result.json"}},
+				},
+			}},
+		},
+	}
+	wantSchema := cloneSchema(t, schema)
+	set := values.ValueSet{"report": artifact, "credential": secret, "literal": literal}
+	if validationErr := values.ValidateValueSetSchema(schema, set); validationErr != nil {
+		t.Fatalf("typed set rejected: %v", validationErr)
+	}
+	if !reflect.DeepEqual(schema, wantSchema) {
+		t.Fatalf("schema literal data mutated:\ngot  %#v\nwant %#v", schema, wantSchema)
+	}
+
+	artifactProjection, err := json.Marshal(artifact.Artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inlineProjection map[string]any
+	if unmarshalErr := json.Unmarshal(artifactProjection, &inlineProjection); unmarshalErr != nil {
+		t.Fatal(unmarshalErr)
+	}
+	masqueradingArtifact, err := values.NewInline(inlineProjection, classificationMetadata(values.RedactionPrivate, values.RetentionRun))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongArtifactSet := values.ValueSet{"report": masqueradingArtifact, "credential": secret, "literal": literal}
+	if validationErr := values.ValidateValueSetSchema(schema, wrongArtifactSet); !errors.Is(validationErr, values.ErrSchemaMismatch) {
+		t.Fatalf("inline object satisfied artifact schema: %v", validationErr)
+	}
+
+	masqueradingSecret, err := values.NewInline(string(secretRef), classificationMetadata(values.RedactionPrivate, values.RetentionRun))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongSecretSet := values.ValueSet{"report": artifact, "credential": masqueradingSecret, "literal": literal}
+	if err := values.ValidateValueSetSchema(schema, wrongSecretSet); !errors.Is(err, values.ErrSchemaMismatch) {
+		t.Fatalf("inline string satisfied secret_ref schema: %v", err)
+	}
+	if err := values.ValidateValueSetSchema(
+		graph.Schema{"type": "object", "properties": map[string]any{"report": map[string]any{"type": "object"}}},
+		values.ValueSet{"report": artifact},
+	); !errors.Is(err, values.ErrSchemaMismatch) {
+		t.Fatalf("artifact satisfied ordinary object schema: %v", err)
+	}
+}
+
+func TestValidateValueSetSchemaSpecializesRootCombinatorsAndRejectsAmbiguousPropertyRouting(t *testing.T) {
+	t.Parallel()
+	artifact, err := values.NewArtifact(values.ArtifactRef{
+		Store: "external", URI: "artifact://reports/run/root.json", Digest: values.SHA256Digest([]byte("root")),
+		MediaType: "application/json", SizeBytes: 4,
+		Producer:  classificationMetadata(values.RedactionPrivate, values.RetentionExternal).Producer,
+		Redaction: values.RedactionPrivate, Retention: values.RetentionExternal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode, _ := values.NewInline("artifact", classificationMetadata(values.RedactionPrivate, values.RetentionRun))
+	set := values.ValueSet{"report": artifact, "mode": mode}
+	artifactProperty := func() map[string]any {
+		return map[string]any{
+			"type": "object", "required": []any{"report"},
+			"properties": map[string]any{"report": map[string]any{"type": "artifact"}},
+		}
+	}
+	ordinaryAlternative := map[string]any{
+		"type": "object", "required": []any{"report"},
+		"properties": map[string]any{"report": map[string]any{"type": "string"}},
+	}
+	for name, schema := range map[string]graph.Schema{
+		"allOf": {"allOf": []any{
+			artifactProperty(),
+			map[string]any{"type": "object", "properties": map[string]any{
+				"report": map[string]any{"type": "object", "required": []any{"uri"}},
+			}},
+		}},
+		"anyOf": {"anyOf": []any{artifactProperty(), ordinaryAlternative}},
+		"oneOf": {"oneOf": []any{artifactProperty(), ordinaryAlternative}},
+		"local ref": {
+			"$ref": "#/$defs/outputs", "$defs": map[string]any{"outputs": artifactProperty()},
+		},
+	} {
+		if err := values.ValidateValueSetSchema(schema, set); err != nil {
+			t.Errorf("%s root schema rejected typed set: %v", name, err)
+		}
+	}
+
+	for name, schema := range map[string]graph.Schema{
+		"patternProperties": {
+			"type": "object", "patternProperties": map[string]any{"^report$": map[string]any{"type": "artifact"}},
+		},
+		"additionalProperties schema": {
+			"type": "object", "additionalProperties": map[string]any{"type": "artifact"},
+		},
+		"conditional": {
+			"if":   map[string]any{"properties": map[string]any{"mode": map[string]any{"const": "artifact"}}},
+			"then": artifactProperty(), "else": false,
+		},
+	} {
+		if err := values.ValidateValueSetSchema(schema, values.ValueSet{"report": artifact}); !errors.Is(err, values.ErrInvalidSchema) {
+			t.Errorf("%s ambiguity error = %v", name, err)
+		}
+	}
+}
+
 func TestResolvedSecretAndDeterministicRedactor(t *testing.T) {
 	t.Parallel()
 	ref, _ := values.ParseSecretRef("secret://project/service#token")

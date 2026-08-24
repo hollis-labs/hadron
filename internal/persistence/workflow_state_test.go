@@ -23,6 +23,7 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_run_start_idempotency": "table", "workflow_node_invocations": "table",
 		"workflow_node_leases": "table", "workflow_claim_idempotency": "table",
 		"workflow_attempts": "table", "workflow_waits": "table",
+		"workflow_wait_attempt_bindings": "table", "workflow_external_operations": "table",
 		"workflow_wait_resume_idempotency": "table", "workflow_wait_resume_results": "table",
 		"workflow_wait_suspend_idempotency": "table", "workflow_wait_timeout_idempotency": "table",
 		"workflow_value_sets":      "table",
@@ -33,10 +34,13 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"idx_workflow_node_leases_expiry": "index", "idx_workflow_attempts_invocation": "index",
 		"idx_workflow_waits_recovery": "index", "idx_workflow_waits_deadline": "index",
 		"idx_workflow_waits_correlation": "index", "idx_workflow_value_sets_digest": "index",
-		"idx_workflow_events_type": "index", "idx_workflow_cache_expiry": "index",
+		"idx_workflow_wait_attempt_lookup": "index", "idx_workflow_external_operations_recovery": "index",
+		"idx_workflow_external_operations_cancel": "index",
+		"idx_workflow_events_type":                "index", "idx_workflow_cache_expiry": "index",
 		"idx_workflow_pins_expiry": "index", "idx_workflow_activations_run": "index",
 		"idx_workflow_activations_registration": "index",
 		"workflow_events_reject_update":         "trigger", "workflow_events_reject_delete": "trigger",
+		"workflow_external_operations_immutable_binding": "trigger", "workflow_external_operations_reject_delete": "trigger",
 	}
 	for name, kind := range objects {
 		var found string
@@ -46,11 +50,11 @@ SELECT name FROM sqlite_master WHERE type = ? AND name = ?`, kind, name).Scan(&f
 		}
 	}
 	var migrations int
-	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 15`).Scan(&migrations); err != nil {
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 16`).Scan(&migrations); err != nil {
 		t.Fatalf("read migration version: %v", err)
 	}
 	if migrations != 1 {
-		t.Fatalf("migration 14 count = %d, want 1", migrations)
+		t.Fatalf("migration 16 count = %d, want 1", migrations)
 	}
 
 	var planSQL string

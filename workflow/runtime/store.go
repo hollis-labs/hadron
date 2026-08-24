@@ -197,6 +197,8 @@ type RecoverySnapshot struct {
 // Implementations must defensively isolate mutable envelopes and preserve CAS,
 // idempotency, append-only event, and recovery-query semantics.
 type StateStore interface {
+	ExternalOperationStore
+
 	CreateRun(context.Context, CreateRunRequest) (RunSnapshot, IdempotencyOutcome, error)
 	LoadRun(context.Context, RunID) (RunSnapshot, error)
 	SaveRun(context.Context, SaveRunRequest) (RunSnapshot, error)

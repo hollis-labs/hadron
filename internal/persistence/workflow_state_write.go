@@ -347,6 +347,18 @@ INSERT INTO workflow_waits(
 	return nil
 }
 
+func insertWorkflowWaitAttemptBinding(ctx context.Context, query workflowSQL, waitID workflowruntime.WaitID, attempt workflowruntime.AttemptID) error {
+	if _, err := query.ExecContext(ctx, `
+INSERT INTO workflow_wait_attempt_bindings(wait_id, run_id, node_id, iteration, attempt_number)
+VALUES (?, ?, ?, ?, ?)`, waitID, attempt.Invocation.RunID, attempt.Invocation.NodeID, attempt.Invocation.Iteration, attempt.Number); err != nil {
+		if isSQLiteConstraint(err) {
+			return workflowInvalid(fmt.Errorf("attempt already has a durable generic wait"))
+		}
+		return fmt.Errorf("bind workflow wait to attempt: %w", err)
+	}
+	return nil
+}
+
 func updateWorkflowWaitCAS(ctx context.Context, query workflowSQL, snapshot workflowruntime.WaitSnapshot, expected uint64) error {
 	recordJSON, err := encodeWorkflowJSON(snapshot.Record)
 	if err != nil {

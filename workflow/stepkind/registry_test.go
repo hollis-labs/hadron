@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
+	"github.com/hollis-labs/hadron/workflow/values"
 )
 
 func TestRegistryLookupListAndDefensiveCopies(t *testing.T) {
@@ -176,6 +177,12 @@ func TestRegistryRejectsInvalidSpecs(t *testing.T) {
 		}},
 		{"invalid UTF-8 schema value", func(spec *stepkind.StepKindSpec) { spec.ConfigSchema = graph.Schema{"title": string([]byte{0xff})} }},
 		{"invalid UTF-8 schema key", func(spec *stepkind.StepKindSpec) { spec.ConfigSchema = graph.Schema{string([]byte{0xff}): true} }},
+		{"malformed config schema", func(spec *stepkind.StepKindSpec) { spec.ConfigSchema = graph.Schema{"type": "mystery"} }},
+		{"external config schema", func(spec *stepkind.StepKindSpec) {
+			spec.ConfigSchema = graph.Schema{"$ref": "https://schemas.example.test/config.json"}
+		}},
+		{"malformed input schema", func(spec *stepkind.StepKindSpec) { spec.InputSchema = graph.Schema{"required": "value"} }},
+		{"external output schema", func(spec *stepkind.StepKindSpec) { spec.OutputSchema = graph.Schema{"$ref": "file:///tmp/output.json"} }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -309,14 +316,19 @@ func TestExternalOptionalLifecycleInvocation(t *testing.T) {
 	}
 	kind.ExecuteFunc = func(_ context.Context, _ stepkind.PreparedInvocation) (stepkind.StepResult, error) {
 		calls = append(calls, "execute")
-		return stepkind.StepResult{}, nil
+		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{}}, nil
 	}
 	kind.ObserveFunc = func(_ context.Context, ref stepkind.ExternalOperationRef) (stepkind.Observation, error) {
 		calls = append(calls, "observe:"+ref.ID)
-		return stepkind.Observation{Complete: true}, nil
+		result := stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{}}
+		return stepkind.Observation{State: stepkind.ObservationSucceeded, Result: &result}, nil
 	}
 	kind.CancelFunc = func(_ context.Context, ref stepkind.ExternalOperationRef) error {
 		calls = append(calls, "cancel:"+ref.ID)
+		return nil
+	}
+	kind.HeartbeatFunc = func(_ context.Context, ref stepkind.ExternalOperationRef) error {
+		calls = append(calls, "heartbeat:"+ref.ID)
 		return nil
 	}
 	kind.FinalizeFunc = func(_ context.Context, _ stepkind.Finalization) error {
@@ -337,10 +349,13 @@ func TestExternalOptionalLifecycleInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	ref := stepkind.ExternalOperationRef{ID: "operation-1"}
+	ref := stepkind.ExternalOperationRef{Kind: "job", ID: "operation-1"}
 	observation, err := registered.(stepkind.Observer).Observe(t.Context(), ref)
-	if err != nil || !observation.Complete {
+	if err != nil || observation.State != stepkind.ObservationSucceeded {
 		t.Fatalf("Observe() = %#v, %v; want complete, nil", observation, err)
+	}
+	if err := registered.(stepkind.Heartbeater).Heartbeat(t.Context(), ref); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
 	}
 	if err := registered.(stepkind.Canceler).Cancel(t.Context(), ref); err != nil {
 		t.Fatalf("Cancel() error = %v", err)
@@ -349,7 +364,7 @@ func TestExternalOptionalLifecycleInvocation(t *testing.T) {
 		t.Fatalf("Finalize() error = %v", err)
 	}
 
-	want := []string{"prepare", "execute", "observe:operation-1", "cancel:operation-1", "finalize"}
+	want := []string{"prepare", "execute", "observe:operation-1", "heartbeat:operation-1", "cancel:operation-1", "finalize"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("lifecycle calls = %v, want %v", calls, want)
 	}

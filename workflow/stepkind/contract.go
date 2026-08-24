@@ -2,9 +2,12 @@ package stepkind
 
 import (
 	"context"
+	"time"
 
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/hadron/workflow/values"
+	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 // RetrySafety describes when the engine may retry an invocation. It is
@@ -84,7 +87,8 @@ func (m ObservationMode) Valid() bool {
 
 // ObservationSpec advertises observation behavior.
 type ObservationSpec struct {
-	Mode ObservationMode `json:"mode"`
+	Mode      ObservationMode `json:"mode"`
+	Heartbeat bool            `json:"heartbeat,omitempty"`
 }
 
 // LifecycleSpec advertises optional lifecycle hooks not otherwise described by
@@ -118,28 +122,119 @@ type StepKindSpec struct {
 // extends it with runtime context and typed values without replacing the
 // executor interfaces.
 type Invocation struct {
-	Config graph.Config
+	Identity       InvocationIdentity `json:"identity"`
+	Config         graph.Config       `json:"config"`
+	Inputs         values.ValueSet    `json:"inputs"`
+	Continuation   *WaitContinuation  `json:"continuation,omitempty"`
+	IdempotencyKey string             `json:"idempotency_key,omitempty"`
+	Deadline       time.Time          `json:"deadline,omitempty"`
+}
+
+// WaitContinuation is the durable resolved wait delivered when the runtime
+// resumes the same logical attempt. Values are loaded from Record.ResumeValues
+// and digest-checked; the raw one-time resume token never enters this envelope.
+type WaitContinuation struct {
+	ID     string              `json:"id"`
+	Record workflowwait.Record `json:"record"`
+	Values values.ValueSet     `json:"values"`
+}
+
+// InvocationIdentity is the application-neutral execution identity visible to
+// adapters. String identities deliberately avoid coupling step kinds to a
+// runtime store's concrete ID types.
+type InvocationIdentity struct {
+	RunID     string `json:"run_id"`
+	NodeID    string `json:"node_id"`
+	Iteration string `json:"iteration,omitempty"`
+	Attempt   int    `json:"attempt"`
 }
 
 // PreparedInvocation is the required input to Execute. Runtimes wrap an
 // Invocation directly when a kind does not implement Preparer.
 type PreparedInvocation struct {
-	Invocation Invocation
+	Invocation Invocation `json:"invocation"`
+	// State is process-local adapter state. Runtimes never persist, serialize,
+	// compare, or expose it outside the adapter lifecycle.
+	State any `json:"-"`
 }
 
-// StepResult is the deliberately minimal execution result envelope. Typed
-// outputs, waits, and retry classification are W04-T01 extensions.
-type StepResult struct{}
+// StepOutcome is the closed execution handoff produced by Execute.
+type StepOutcome string
+
+const (
+	StepCompleted StepOutcome = "completed"
+	StepWaiting   StepOutcome = "waiting"
+	StepExternal  StepOutcome = "external"
+)
+
+// Valid reports whether o is a supported execution handoff.
+func (o StepOutcome) Valid() bool {
+	switch o {
+	case StepCompleted, StepWaiting, StepExternal:
+		return true
+	default:
+		return false
+	}
+}
+
+// WaitResult is the adapter-facing generic wait handoff. Record is the
+// canonical workflow/wait contract and must be open. ResumeToken is a
+// one-time process-local capability; only its matching digest enters Record.
+type WaitResult struct {
+	ID          string              `json:"id"`
+	Record      workflowwait.Record `json:"record"`
+	ResumeToken string              `json:"-"`
+}
+
+// StepResult is one mutually exclusive completed, waiting, or external
+// outcome. Completed outputs are typed and persistable. Waiting delegates to
+// the canonical generic-wait contract. External delegates to a durable
+// operation record that recovery can observe independently of worker leases.
+type StepResult struct {
+	Outcome  StepOutcome           `json:"outcome"`
+	Outputs  values.ValueSet       `json:"outputs,omitempty"`
+	Wait     *WaitResult           `json:"wait,omitempty"`
+	External *ExternalOperationRef `json:"external,omitempty"`
+}
 
 // ExternalOperationRef identifies adapter-owned work for observation or
-// cancellation. Durable reference details are W04-T01 extensions.
+// cancellation. Every field crosses the durable persistence and event
+// boundary, so Kind, ID, and Metadata must be stable non-secret identifiers
+// and metadata. They must never contain bearer tokens, credentials, or
+// resolved secret material; adapters resolve authorization separately.
 type ExternalOperationRef struct {
-	ID string
+	Kind     string            `json:"kind"`
+	ID       string            `json:"id"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// Observation is the minimal external-operation observation envelope.
+// ObservationState is the adapter-reported state of external work.
+type ObservationState string
+
+const (
+	ObservationPending   ObservationState = "pending"
+	ObservationSucceeded ObservationState = "succeeded"
+	ObservationFailed    ObservationState = "failed"
+	ObservationCanceled  ObservationState = "canceled"
+)
+
+// Valid reports whether s is a supported observation state.
+func (s ObservationState) Valid() bool {
+	switch s {
+	case ObservationPending, ObservationSucceeded, ObservationFailed, ObservationCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Observation is a typed external-operation observation envelope. Progress is
+// operational metadata, not workflow output data.
 type Observation struct {
-	Complete bool
+	State    ObservationState  `json:"state"`
+	Progress map[string]string `json:"progress,omitempty"`
+	Result   *StepResult       `json:"result,omitempty"`
+	Failure  *ExecutionError   `json:"failure,omitempty"`
 }
 
 // Finalization supplies the execution outcome to an optional Finalizer.
@@ -164,6 +259,12 @@ type Preparer interface {
 // Observer optionally polls an adapter-owned external operation.
 type Observer interface {
 	Observe(ctx context.Context, ref ExternalOperationRef) (Observation, error)
+}
+
+// Heartbeater optionally refreshes or probes an adapter-owned external
+// operation independently of the runtime's own claim lease heartbeat.
+type Heartbeater interface {
+	Heartbeat(ctx context.Context, ref ExternalOperationRef) error
 }
 
 // Canceler optionally cancels an adapter-owned external operation.

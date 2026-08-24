@@ -72,6 +72,11 @@ func (s *Store) SuspendNodeWait(ctx context.Context, request workflowruntime.Sus
 	if currentAttempt.Generation != request.ExpectedAttemptGeneration {
 		return workflowruntime.SuspendWaitResult{}, casMismatch("suspend wait attempt", request.ExpectedAttemptGeneration, currentAttempt.Generation)
 	}
+	for waitID, attemptID := range s.waitAttempts {
+		if attemptID == currentAttempt.ID {
+			return workflowruntime.SuspendWaitResult{}, invalid(fmt.Errorf("attempt already has durable wait %q", waitID))
+		}
+	}
 	if request.At.Before(currentNode.UpdatedAt) || request.At.Before(currentAttempt.UpdatedAt) {
 		return workflowruntime.SuspendWaitResult{}, invalid(errors.New("suspend time must not regress persisted state"))
 	}
@@ -103,10 +108,37 @@ func (s *Store) SuspendNodeWait(ctx context.Context, request workflowruntime.Sus
 		return workflowruntime.SuspendWaitResult{}, eventErr
 	}
 	s.waits[nextWait.Ref.ID] = cloneWait(nextWait)
+	s.waitAttempts[nextWait.Ref.ID] = currentAttempt.ID
 	s.nodes[nextNode.ID] = cloneNode(nextNode)
 	result := workflowruntime.SuspendWaitResult{Outcome: workflowruntime.IdempotencyApplied, Wait: cloneWait(nextWait), Node: cloneNode(nextNode), Attempt: cloneAttempt(*currentAttempt), Events: cloneEvents(events)}
 	s.suspends[nextWait.Ref.ID] = suspendRecord{request: cloneSuspendRequest(request), result: cloneSuspendResult(result)}
 	return result, nil
+}
+
+// LoadWaitContinuation returns the most recently resolved resumed wait bound
+// to exactly id. Open and other terminal states are never continuations.
+func (s *Store) LoadWaitContinuation(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.WaitSnapshot, error) {
+	if err := checkContext(ctx); err != nil {
+		return workflowruntime.WaitSnapshot{}, err
+	}
+	if err := id.Validate(); err != nil {
+		return workflowruntime.WaitSnapshot{}, invalid(err)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var match *workflowruntime.WaitSnapshot
+	for waitID, attemptID := range s.waitAttempts {
+		wait := s.waits[waitID]
+		if attemptID == id && wait.Status == workflowruntime.WaitResumed {
+			copyWait := cloneWait(wait)
+			match = &copyWait
+			break
+		}
+	}
+	if match == nil {
+		return workflowruntime.WaitSnapshot{}, fmt.Errorf("%w: resumed wait continuation", workflowruntime.ErrNotFound)
+	}
+	return *match, nil
 }
 
 // ResumeNodeWait is the common atomic data-plane mutation used by every wake

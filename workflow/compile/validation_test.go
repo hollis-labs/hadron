@@ -159,17 +159,14 @@ func TestValidateGraphChecksRegisteredConfigSchemaAndAdapterDiagnostics(t *testi
 		assertDiagnosticContract(t, findings[0])
 	})
 
-	t.Run("external schema resolution stays offline", func(t *testing.T) {
+	t.Run("external schema registration stays offline", func(t *testing.T) {
 		kind := stepkindtest.NewNoopKind("external-schema", "v1")
 		kind.SpecValue.ConfigSchema = graph.Schema{"$ref": "https://schemas.example.test/config.json"}
-		registry := validationRegistry(t, kind)
-		node := validationNode("external-schema", "external-schema", "v1", 11)
-		findings := workflowcompile.ValidateGraph(t.Context(), validationGraph(node), workflowcompile.ValidationOptions{StepKinds: registry})
-		assertCodes(t, findings, workflowcompile.CodeInvalidKindSchema)
-		if !strings.Contains(findings[0].Message, "daemon-independent validation") {
-			t.Fatalf("external schema diagnostic = %+v", findings[0])
+		err := stepkind.NewRegistry().Register(kind)
+		var specErr *stepkind.SpecError
+		if !errors.As(err, &specErr) || !strings.Contains(err.Error(), "external schema resource") {
+			t.Fatalf("Register(external schema) error = %T %v", err, err)
 		}
-		assertDiagnosticContract(t, findings[0])
 	})
 
 	t.Run("structured adapter diagnostic", func(t *testing.T) {

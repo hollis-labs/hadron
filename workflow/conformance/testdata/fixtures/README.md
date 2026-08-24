@@ -8,8 +8,11 @@ scope, and expression-introduced cycles. Its payloads carry Graph values,
 registered-kind inputs, and deterministic inference expectations. The
 `scheduler` set contains semantic fixtures for all six readiness rules plus an
 unsupported-rule rejection. The `waits` set contains semantic records for all
-six generic wake sources plus an unsupported-source rejection. The `executor-metadata` set contains real
-`stepkind.StepKindSpec` pass/fail cases.
+six generic wake sources plus an unsupported-source rejection. The
+`executor-metadata` set covers valid and
+missing metadata, duplicate registration, unknown exact resolution, adapter
+config rejection, optional lifecycle/interface agreement, and immutable
+registered-spec snapshots.
 
 Later implementation tasks replace or extend each payload with semantic cases
 while retaining the directory names, fixture envelope, and deterministic suite

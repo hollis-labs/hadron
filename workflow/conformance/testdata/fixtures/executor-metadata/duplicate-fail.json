@@ -1,0 +1,9 @@
+{
+  "name": "duplicate-registration-fail",
+  "expect": "fail",
+  "input": {
+    "operation": "duplicate_registration",
+    "name": "fixture",
+    "version": "v1"
+  }
+}
