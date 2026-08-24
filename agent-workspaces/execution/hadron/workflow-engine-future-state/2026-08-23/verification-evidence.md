@@ -194,3 +194,26 @@ integrated as `10e0068`.
 | integration `10e0068` | `go vet ./workflow/...` | pass |
 | integration `10e0068` | `make test` | pass |
 | integration `10e0068` | `go test ./...` | pass |
+
+## W01-T03
+
+Reviewed the source loader, raw AST boundary, location indexing, diagnostic
+ordering, and legacy-shape rejection in source commit `353c45d`, then
+integrated it as `e598e5f`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `353c45d` | `git diff --check b2e1a85..353c45d` | pass |
+| source worktree `353c45d` | `go test ./workflow/compile/...` | pass |
+| source worktree `353c45d` | `go test -race ./workflow/compile/...` | pass |
+| source worktree `353c45d` | `go test ./workflow/...` | pass |
+| source worktree `353c45d` | `go vet ./workflow/...` | pass |
+| source worktree `353c45d` | `go test ./...` | pass |
+| integration `e598e5f` | `git diff --check HEAD^..HEAD` | pass |
+| integration `e598e5f` | `go test ./workflow/compile/...` | pass |
+| integration `e598e5f` | `go test -race ./workflow/compile/...` | pass |
+| integration `e598e5f` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `e598e5f` | `go test ./workflow/...` | pass |
+| integration `e598e5f` | `go vet ./workflow/...` | pass |
+| integration `e598e5f` | `make test` | pass |
+| integration `e598e5f` | `go test ./...` | pass |

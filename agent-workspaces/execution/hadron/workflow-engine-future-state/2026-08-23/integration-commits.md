@@ -11,3 +11,4 @@
 | 7 | W00-T05 | `f56ce04` | `f0ceef1` | Hadron | accepted after source-coordinate validation hardening |
 | 8 | W01-T02 | `3babe00` | `0fd8245` | Hadron | accepted after closed-enum and structural rejection coverage |
 | 9 | W02-T01 | `9776847` | `10e0068` | Hadron | accepted after invalid UTF-8 transport hardening |
+| 10 | W01-T03 | `353c45d` | `e598e5f` | Hadron | accepted; SOURCE-001..004 and LEGACY-001 reserved |
