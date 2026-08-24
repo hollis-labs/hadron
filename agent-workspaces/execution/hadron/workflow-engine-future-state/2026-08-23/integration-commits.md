@@ -16,3 +16,4 @@
 | 12 | W02-T02 | `5fee6ec` | `985243b` | Hadron | accepted after heterogeneous-array cache-schema hardening |
 | 13 | W01-T04 | `785121b` | `ee38867` | Hadron | accepted after exact-number digest and literal-interpolation hardening |
 | 14 | W01-T05 | `29121b6` | `7eea197` | Hadron | accepted with dependency-graph-only allowance for the adopted schema validator's transitive `x/text` closure |
+| 15 | W02-T04 | `1bc4de0` | `2caeb82` | Hadron | accepted after immutable run-plan/wait-invocation and semantic time-equality hardening |

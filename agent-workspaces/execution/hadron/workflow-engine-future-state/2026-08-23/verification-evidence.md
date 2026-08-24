@@ -350,3 +350,22 @@ workflow imports. Source commit `29121b6` was integrated as `7eea197`.
 | integration `7eea197` | `go test -v ./workflow/internal/importguard/...` | pass |
 | integration `7eea197` | `go test -count=1 ./workflow/...` | pass |
 | integration `7eea197` | `go vet ./workflow/...` | pass |
+
+## W02-T04
+
+Reviewed the runtime persistence records, high-level store interface, and
+concurrent in-memory conformance fake. Review required immutable run-plan and
+wait-invocation identities plus semantic `time.Time` equality for idempotent
+replays and lease preservation. Amended source commit `1bc4de0` was integrated
+as `2caeb82`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `1bc4de0` | `git diff --check fd75e5c..1bc4de0` | pass |
+| source worktree `1bc4de0` | `go test ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| source worktree `1bc4de0` | `go test -race ./workflow/runtime/...` | pass |
+| source worktree `1bc4de0` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `2caeb82` | `go test ./workflow/...` | pass |
+| integration `2caeb82` | `go test -race ./workflow/runtime/...` | pass |
+| integration `2caeb82` | `go vet ./workflow/...` | pass |
+| integration `2caeb82` | `go test ./...` | pass |
