@@ -13,6 +13,12 @@ Allowed imports are:
 - `github.com/santhosh-tekuri/jsonschema/v6` for schema validation; and
 - `github.com/expr-lang/expr` for the expression language selected by ADR 0007.
 
+Direct workflow imports are limited to those adopted roots. The production
+dependency-graph check separately permits `golang.org/x/text` as the active
+transitive closure required by `github.com/santhosh-tekuri/jsonschema/v6`.
+Workflow source files must not import `golang.org/x/text` directly; changing
+that transitive-only allowance requires an intentional guard and policy update.
+
 No third-party test helper is currently adopted. Adding one, or adding another
 schema, expression, or extraction-safe primitive dependency, requires an
 intentional update to this allowlist and its guard tests.

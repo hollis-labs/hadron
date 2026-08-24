@@ -109,6 +109,14 @@ func CompilerSuite(t *testing.T, store FixtureStore, factory Factory) {
 	runSuite(t, "compiler", store, factory, GraphValidationFixtures, SourceMapFixtures)
 }
 
+// GraphValidationSuite runs only production graph-validation fixtures. It lets
+// external compiler implementations invoke this contract without also
+// implementing source-map fixture semantics.
+func GraphValidationSuite(t *testing.T, store FixtureStore, factory Factory) {
+	t.Helper()
+	runSuite(t, "graph-validation", store, factory, GraphValidationFixtures)
+}
+
 // StateStoreSuite runs typed-value persistence fixtures.
 func StateStoreSuite(t *testing.T, store FixtureStore, factory Factory) {
 	t.Helper()

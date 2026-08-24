@@ -28,6 +28,14 @@ var allowedExternalImports = []string{
 	"gopkg.in/yaml.v3",
 }
 
+// allowedTransitiveDependencyImports applies only to the resolved production
+// dependency graph. Workflow source files still must import an adopted root
+// from allowedExternalImports rather than importing its implementation
+// dependencies directly.
+var allowedTransitiveDependencyImports = []string{
+	"golang.org/x/text", // github.com/santhosh-tekuri/jsonschema/v6 closure
+}
+
 var siblingApplicationImports = []string{
 	"github.com/hollis-labs/cerberus",
 	"github.com/hollis-labs/nanite",
@@ -141,6 +149,7 @@ func TestImportPolicy(t *testing.T) {
 			{name: "Cerberus", imported: "github.com/hollis-labs/cerberus/pkg/auth", want: "sibling application"},
 			{name: "dotless non-standard", imported: "example/library", want: "not on the workflow core allowlist"},
 			{name: "unapproved external", imported: "example.com/library", want: "not on the workflow core allowlist"},
+			{name: "schema validator transitive", imported: "golang.org/x/text/message", want: "not on the workflow core allowlist"},
 		}
 
 		for _, tc := range cases {
@@ -152,6 +161,18 @@ func TestImportPolicy(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestDependencyGraphPolicyAllowsAdoptedTransitiveClosureOnly(t *testing.T) {
+	if reason := forbiddenDependencyReason("golang.org/x/text/message"); reason != "" {
+		t.Fatalf("schema-validator transitive dependency rejected: %s", reason)
+	}
+	if reason := forbiddenImportReason(workflowImportPath+"/compile", "golang.org/x/text/message"); reason == "" {
+		t.Fatal("direct workflow import of a transitive dependency was allowed")
+	}
+	if reason := forbiddenDependencyReason("example.com/transitive"); reason == "" {
+		t.Fatal("unapproved transitive dependency was allowed")
+	}
 }
 
 func moduleRoot(t *testing.T) string {
@@ -214,7 +235,7 @@ func validateImports(root, importRoot string, skipDir func(string, fs.DirEntry) 
 func validateDependencies(dependencies []string) error {
 	rejected := make(map[string]string)
 	for _, dependency := range dependencies {
-		if reason := forbiddenImportReason(workflowImportPath+"/dependencygraph", dependency); reason != "" {
+		if reason := forbiddenDependencyReason(dependency); reason != "" {
 			rejected[dependency] = reason
 		}
 	}
@@ -233,6 +254,15 @@ func validateDependencies(dependencies []string) error {
 		fmt.Fprintf(&findings, "\n- %s: %s", path, rejected[path])
 	}
 	return fmt.Errorf("workflow core dependency guard failed:%s", findings.String())
+}
+
+func forbiddenDependencyReason(imported string) string {
+	for _, allowed := range allowedTransitiveDependencyImports {
+		if pathWithin(imported, allowed) {
+			return ""
+		}
+	}
+	return forbiddenImportReason(workflowImportPath+"/dependencygraph", imported)
 }
 
 func scanImports(root, importRoot string, skipDir func(string, fs.DirEntry) bool) ([]violation, error) {

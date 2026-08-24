@@ -5,7 +5,9 @@
 // library and explicitly adopted extraction-safe dependencies; Hadron internal
 // packages are forbidden.
 //
-// The source loader preserves YAML authoring shape and locations without
-// evaluating expressions, resolving references, or lowering source into the
-// graph IR. Compiler contracts beyond source loading remain unstable.
+// The source loader preserves YAML authoring shape and locations. Compilation
+// lowers that shape to an immutable ExecutionPlan, and validation checks
+// explicit graph structure plus caller-supplied step-kind, policy, and
+// definition seams. None of these phases executes expressions or starts
+// runtime work.
 package compile
