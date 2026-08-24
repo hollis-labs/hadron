@@ -82,6 +82,7 @@ func TestReservedPrefixes(t *testing.T) {
 		{PrefixLegacy, DomainSourceValidation},
 		{PrefixOutput, DomainSourceValidation},
 		{PrefixValue, DomainValues},
+		{PrefixArtifact, DomainValues},
 		{PrefixPolicy, DomainPolicy},
 		{PrefixEffect, DomainEffects},
 		{PrefixWait, DomainWaits},

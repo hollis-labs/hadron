@@ -9,6 +9,7 @@
 //	LEGACY  archived source migration
 //	OUTPUT  archived output-shim migration
 //	VALUE   expression, binding, and value evaluation
+//	ARTIFACT artifact storage, authorization, verification, and retention
 //	POLICY  capability and policy enforcement
 //	EFFECT  effect, retry, and idempotency safety
 //	WAIT    wait and external-event handling

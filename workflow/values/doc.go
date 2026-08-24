@@ -6,8 +6,10 @@
 // Value fields. Secret references are validated and persistable, while resolved
 // material remains an ephemeral adapter-boundary type that cannot enter Value.
 // Shared renderers and streaming redactors fail closed for secret data;
-// concrete secret authorities, artifact storage, and cleanup remain outside
-// this package. Expressions evaluate only from explicitly supplied typed
+// concrete secret authorities and artifact storage remain outside this
+// package. Application-neutral artifact streaming, authorization, capture,
+// verification, and cleanup contracts are defined here for host adapters.
+// Expressions evaluate only from explicitly supplied typed
 // contexts and cannot derive from secret-classified values.
 //
 // Inline schemas are validated locally without resolving network or file

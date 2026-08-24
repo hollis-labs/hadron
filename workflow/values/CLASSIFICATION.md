@@ -13,6 +13,8 @@ valid because workflow state stores only immutable reference metadata; artifact
 authorization, byte access, and deletion belong to the artifact adapter. Exact
 expression passthrough preserves any secret-classified envelope, but computed,
 dynamic, and interpolated use is rejected so it cannot lose classification.
+The streaming contract, capture caps, and aggregate cleanup outcomes are
+specified in [ARTIFACTS.md](ARTIFACTS.md).
 
 Rendering defaults to masking private payloads. A caller must explicitly select
 the closed `reveal` policy to display private data. SecretRef and secret Artifact

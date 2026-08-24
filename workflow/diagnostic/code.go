@@ -28,6 +28,7 @@ const (
 	PrefixLegacy      Prefix = "LEGACY"
 	PrefixOutput      Prefix = "OUTPUT"
 	PrefixValue       Prefix = "VALUE"
+	PrefixArtifact    Prefix = "ARTIFACT"
 	PrefixPolicy      Prefix = "POLICY"
 	PrefixEffect      Prefix = "EFFECT"
 	PrefixWait        Prefix = "WAIT"
@@ -41,6 +42,7 @@ var prefixDomains = map[Prefix]Domain{
 	PrefixLegacy:      DomainSourceValidation,
 	PrefixOutput:      DomainSourceValidation,
 	PrefixValue:       DomainValues,
+	PrefixArtifact:    DomainValues,
 	PrefixPolicy:      DomainPolicy,
 	PrefixEffect:      DomainEffects,
 	PrefixWait:        DomainWaits,
