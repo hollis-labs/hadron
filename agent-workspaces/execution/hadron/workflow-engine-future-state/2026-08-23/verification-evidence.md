@@ -1111,3 +1111,4 @@ accepted MCP/LLM exception and remote observation carried the bound profile.
 | source worktree `6348a06` | focused offline/build suites at `-count=10`; compile suite; focused race suite; import guard; vet; targeted golangci; module-tidy diff; hooks | pass; zero issues |
 | source worktree `6348a06` | real generated CLI, stdio MCP, bound MCP/LLM, arbitrary-CWD atomic rebuild, and remote-wait kill/restart fixtures | pass |
 | independent source review `6348a06` | `go test -count=1 ./...`; committed diff and worktree checks | pass; clean |
+| integration `4d9c2c7` plus tracking/dispatch `210b0e5` | focused offline/build/compiler suite and `go test -count=1 ./...` | pass; initial full-suite attempt hit the unrelated timing-sensitive agentsubstrate outbox fixture, which passed at `-count=3` before the complete rerun passed |
