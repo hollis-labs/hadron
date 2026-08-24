@@ -9,3 +9,4 @@
 | 5 | W00-T04 | `a2e02ca` | `8a2ec65` | Hadron | accepted |
 | 6 | W01-T01 | `3a0c0c4` | `7b6e712` | Hadron | accepted after complete nested source-ref validation and deterministic map traversal |
 | 7 | W00-T05 | `f56ce04` | `f0ceef1` | Hadron | accepted after source-coordinate validation hardening |
+| 8 | W01-T02 | `3babe00` | `0fd8245` | Hadron | accepted after closed-enum and structural rejection coverage |

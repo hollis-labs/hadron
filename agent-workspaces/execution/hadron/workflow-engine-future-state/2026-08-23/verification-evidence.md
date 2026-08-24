@@ -144,3 +144,29 @@ orphaned source columns. The amended source commit `f56ce04` was integrated as
 | integration `f0ceef1` | `go vet ./workflow/...` | pass |
 | integration `f0ceef1` | `make test` | pass |
 | integration `f0ceef1` | `go test ./...` | pass |
+
+## W01-T02
+
+Reviewed the stdlib-only schema generator and generated artifact, then
+requested negative behavior coverage for closed enums and structural fields.
+The amended source commit `3babe00` was integrated as `0fd8245`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `3babe00` | `git diff --check 63b8246..3babe00` | pass |
+| source worktree `3babe00` | two `go generate ./workflow/graph` runs plus `git diff --exit-code` | pass; byte-stable |
+| source worktree `3babe00` | `go test ./workflow/graph/...` | pass |
+| source worktree `3babe00` | `go test -race ./workflow/graph/...` | pass |
+| source worktree `3babe00` | `go test ./workflow/...` | pass |
+| source worktree `3babe00` | `go vet ./workflow/...` | pass |
+| source worktree `3babe00` | `go test ./...` | pass |
+| source worktree `3babe00` | generated schema SHA-256 | `7206ac855c365166ceec176f7198f343a06824b050fb1838b36a49d2ae342b68` |
+| integration `0fd8245` | `git diff --check HEAD^..HEAD` | pass |
+| integration `0fd8245` | two `go generate ./workflow/graph` runs plus `git diff --exit-code` | pass; no generated drift |
+| integration `0fd8245` | `go test ./workflow/graph/...` | pass |
+| integration `0fd8245` | `go test -race ./workflow/graph/...` | pass |
+| integration `0fd8245` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `0fd8245` | `go test ./workflow/...` | pass |
+| integration `0fd8245` | `go vet ./workflow/...` | pass |
+| integration `0fd8245` | `make test` | pass |
+| integration `0fd8245` | `go test ./...` | pass |
