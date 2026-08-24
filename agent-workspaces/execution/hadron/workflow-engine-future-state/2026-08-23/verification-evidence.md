@@ -121,3 +121,26 @@ amended source commit `3a0c0c4` was integrated as `7b6e712`.
 | integration `7b6e712` | `go vet ./workflow/...` | pass |
 | integration `7b6e712` | `make test` | pass |
 | integration `7b6e712` | `go test ./...` | pass |
+
+## W00-T05
+
+Reviewed the complete diagnostic contract and requested a hardening pass for
+orphaned source columns. The amended source commit `f56ce04` was integrated as
+`f0ceef1`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `f56ce04` | `git diff --check 63b8246..f56ce04` | pass |
+| source worktree `f56ce04` | `go test ./workflow/diagnostic/...` | pass |
+| source worktree `f56ce04` | `go test -race ./workflow/diagnostic/...` | pass |
+| source worktree `f56ce04` | `go test ./workflow/...` | pass |
+| source worktree `f56ce04` | `go vet ./workflow/...` | pass |
+| source worktree `f56ce04` | `go test ./...` | pass |
+| integration `f0ceef1` | `git diff --check HEAD^..HEAD` | pass |
+| integration `f0ceef1` | `go test ./workflow/diagnostic/...` | pass |
+| integration `f0ceef1` | `go test -race ./workflow/diagnostic/...` | pass |
+| integration `f0ceef1` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `f0ceef1` | `go test ./workflow/...` | pass |
+| integration `f0ceef1` | `go vet ./workflow/...` | pass |
+| integration `f0ceef1` | `make test` | pass |
+| integration `f0ceef1` | `go test ./...` | pass |
