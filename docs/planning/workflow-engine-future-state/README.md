@@ -58,8 +58,8 @@ superseded requirements are not mistaken for omissions.
 | W00-T02 | Scaffold extraction-ready workflow package family | 00 | none | [ ] |
 | W00-T03 | Add dependency and import guardrails | 00 | W00-T02 | [ ] |
 | W00-T04 | Create conformance harness skeleton | 00 | W00-T02 | [ ] |
-| W00-T05 | Establish diagnostics and error-code conventions | 00 | W00-T02 | [ ] |
-| W00-T06 | Define step-kind contract skeleton | 00 | W00-T02, W00-T05 | [ ] |
+| W00-T05 | Establish diagnostics and error-code conventions | 00 | W00-T02, W01-T01 | [ ] |
+| W00-T06 | Define step-kind contract skeleton | 00 | W00-T02, W00-T05, W01-T01 | [ ] |
 | W00-T07 | Standardize timed activation contracts in `go-scheduler` | 00 | none | [ ] |
 | W01-T01 | Define graph IR Go types | 01 | W00-T02 | [ ] |
 | W01-T02 | Generate graph IR JSON Schema | 01 | W01-T01 | [ ] |

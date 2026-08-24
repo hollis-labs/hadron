@@ -9,8 +9,8 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W00-T02 | none | integrated | `2b9f287` |
 | W00-T03 | W00-T02 | integrated | `1fc2dbc` |
 | W00-T04 | W00-T02 | integrated | `8a2ec65` |
-| W00-T05 | W00-T02 | dispatched | |
-| W00-T06 | W00-T02, W00-T05 | blocked | |
+| W00-T05 | W00-T02, W01-T01 | dispatched | |
+| W00-T06 | W00-T02, W00-T05, W01-T01 | blocked | |
 | W00-T07 | none | integrated | `go-scheduler@51ebe8a` |
 | W01-T01 | W00-T02 | integrated | `7b6e712` |
 | W01-T02 | W01-T01 | dispatched | |
