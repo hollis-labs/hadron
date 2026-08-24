@@ -46,6 +46,7 @@ func main() {
 	root.PersistentFlags().StringVar(&globalAddr, "addr", "http://"+config.DefaultAddr, "daemon base URL")
 
 	root.AddCommand(
+		buildOfflineCmd(),
 		buildRunCmd(),
 		buildValidateCmd(),
 		buildBlueprintCmd(),

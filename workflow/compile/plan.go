@@ -111,6 +111,13 @@ func GraphDigest(value graph.Graph) (string, error) {
 	return digestGraph(value)
 }
 
+// PlanDigest recomputes the compiler's canonical relocation-stable execution
+// plan digest. It ignores exactly the provenance and source-location carriers
+// ignored when Compile originally assigns ExecutionPlan.Digest.
+func PlanDigest(value ExecutionPlan) (string, error) {
+	return digestPlan(value)
+}
+
 func digestPlan(value ExecutionPlan) (string, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
