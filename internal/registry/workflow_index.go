@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -27,13 +28,21 @@ var (
 // is the selected workflow source itself; container or publisher digests belong
 // in Provenance and never replace Digest.
 type WorkflowRecord struct {
-	Name       string
-	Version    string
-	Digest     string
-	Source     []byte
-	Authority  string
-	TrustClass string
-	Provenance graph.Provenance
+	Name                string
+	Namespace           string
+	Version             string
+	Digest              string
+	Source              []byte
+	Authority           string
+	TrustClass          string
+	Provenance          graph.Provenance
+	PlanDigest          string
+	ContractSuiteDigest string
+	ContractTestDigest  string
+	TestsPassed         bool
+	PublisherPrincipal  string
+	RegisteredAt        time.Time
+	Published           bool
 }
 
 // WorkflowQuery selects an exact version/digest or the explicitly designated
@@ -57,19 +66,26 @@ type WorkflowResolver interface {
 	ResolveWorkflow(context.Context, WorkflowQuery) (WorkflowResolution, error)
 }
 
-// WorkflowIndex is a concurrency-safe graph-native index. Durable publishing
-// remains W05-T07; this type supplies the immutable resolution contract without
-// reusing the legacy blueprint registry model.
+// WorkflowIndex is a concurrency-safe graph-native index. An index opened with
+// OpenWorkflowIndex durably persists immutable versions, exact pins, aliases,
+// and publication state without reusing the legacy blueprint registry model.
 type WorkflowIndex struct {
-	mu       sync.RWMutex
-	versions map[string]map[string]WorkflowRecord
-	current  map[string]string
+	mu           sync.RWMutex
+	versions     map[string]map[string]WorkflowRecord
+	current      map[string]string
+	pins         map[string]workflowPin
+	published    map[string]map[string]string
+	path         string
+	beforeRename func() error
+	afterRename  func() error
 }
 
 func NewWorkflowIndex() *WorkflowIndex {
 	return &WorkflowIndex{
-		versions: make(map[string]map[string]WorkflowRecord),
-		current:  make(map[string]string),
+		versions:  make(map[string]map[string]WorkflowRecord),
+		current:   make(map[string]string),
+		pins:      make(map[string]workflowPin),
+		published: make(map[string]map[string]string),
 	}
 }
 
@@ -94,23 +110,59 @@ func (i *WorkflowIndex) RegisterWorkflow(ctx context.Context, input WorkflowReco
 	if i.current == nil {
 		i.current = make(map[string]string)
 	}
+	if i.pins == nil {
+		i.pins = make(map[string]workflowPin)
+	}
+	if i.published == nil {
+		i.published = make(map[string]map[string]string)
+	}
 	byVersion := i.versions[record.Name]
 	if byVersion == nil {
 		byVersion = make(map[string]WorkflowRecord)
 		i.versions[record.Name] = byVersion
 	}
 	if prior, exists := byVersion[record.Version]; exists {
-		if !equalWorkflowRecord(prior, record) {
+		if !equalWorkflowRegistration(prior, record) {
 			return WorkflowRecord{}, fmt.Errorf("%w: %s@%s", ErrWorkflowConflict, record.Name, record.Version)
 		}
+		priorCurrent, hadCurrent := i.current[record.Name]
 		if makeCurrent {
 			i.current[record.Name] = record.Version
 		}
+		committed, persistErr := i.persistLocked()
+		if persistErr != nil {
+			if !committed && makeCurrent {
+				if hadCurrent {
+					i.current[record.Name] = priorCurrent
+				} else {
+					delete(i.current, record.Name)
+				}
+			}
+			return WorkflowRecord{}, persistErr
+		}
 		return cloneWorkflowRecord(prior), nil
 	}
+	priorCurrent, hadCurrent := i.current[record.Name]
 	byVersion[record.Version] = cloneWorkflowRecord(record)
 	if makeCurrent {
 		i.current[record.Name] = record.Version
+	}
+	committed, persistErr := i.persistLocked()
+	if persistErr != nil {
+		if !committed {
+			delete(byVersion, record.Version)
+			if len(byVersion) == 0 {
+				delete(i.versions, record.Name)
+			}
+		}
+		if !committed && makeCurrent {
+			if hadCurrent {
+				i.current[record.Name] = priorCurrent
+			} else {
+				delete(i.current, record.Name)
+			}
+		}
+		return WorkflowRecord{}, persistErr
 	}
 	return cloneWorkflowRecord(record), nil
 }
@@ -139,6 +191,10 @@ func (i *WorkflowIndex) ResolveWorkflow(ctx context.Context, query WorkflowQuery
 
 	i.mu.RLock()
 	defer i.mu.RUnlock()
+	return i.resolveWorkflowLocked(query)
+}
+
+func (i *WorkflowIndex) resolveWorkflowLocked(query WorkflowQuery) (WorkflowResolution, error) {
 	byVersion := i.versions[query.Name]
 	if byVersion == nil {
 		return WorkflowResolution{}, fmt.Errorf("%w: %s", ErrWorkflowNotFound, query.Name)
@@ -159,7 +215,7 @@ func (i *WorkflowIndex) ResolveWorkflow(ctx context.Context, query WorkflowQuery
 		if query.Digest != "" && record.Digest != query.Digest {
 			return WorkflowResolution{}, fmt.Errorf("%w: version and digest select different source", ErrWorkflowConflict)
 		}
-		return WorkflowResolution{Record: cloneWorkflowRecord(record), Movable: movable}, nil
+		return WorkflowResolution{Record: i.recordForRead(record), Movable: movable}, nil
 	}
 
 	matches := make([]WorkflowRecord, 0, 1)
@@ -175,7 +231,13 @@ func (i *WorkflowIndex) ResolveWorkflow(ctx context.Context, query WorkflowQuery
 	if len(matches) != 1 {
 		return WorkflowResolution{}, fmt.Errorf("%w: digest is registered under multiple versions", ErrWorkflowConflict)
 	}
-	return WorkflowResolution{Record: cloneWorkflowRecord(matches[0])}, nil
+	return WorkflowResolution{Record: i.recordForRead(matches[0])}, nil
+}
+
+func (i *WorkflowIndex) recordForRead(input WorkflowRecord) WorkflowRecord {
+	result := cloneWorkflowRecord(input)
+	result.Published = i.published[input.Name][input.Version] == input.Digest
+	return result
 }
 
 func canonicalWorkflowRecord(input WorkflowRecord) (WorkflowRecord, error) {
@@ -184,6 +246,11 @@ func canonicalWorkflowRecord(input WorkflowRecord) (WorkflowRecord, error) {
 	input.Digest = strings.TrimSpace(input.Digest)
 	input.Authority = strings.TrimSpace(input.Authority)
 	input.TrustClass = strings.TrimSpace(input.TrustClass)
+	input.Namespace = strings.TrimSpace(input.Namespace)
+	input.PublisherPrincipal = strings.TrimSpace(input.PublisherPrincipal)
+	if input.Published {
+		return WorkflowRecord{}, fmt.Errorf("%w: publication is operational catalog state", ErrInvalidWorkflow)
+	}
 	if err := validateRegistryName("workflow name", input.Name); err != nil {
 		return WorkflowRecord{}, err
 	}
@@ -191,10 +258,41 @@ func canonicalWorkflowRecord(input WorkflowRecord) (WorkflowRecord, error) {
 		{"workflow version", input.Version},
 		{"workflow authority", input.Authority},
 		{"workflow trust class", input.TrustClass},
+		{"workflow publisher principal", input.PublisherPrincipal},
 	} {
-		if strings.TrimSpace(field.value) == "" || !utf8.ValidString(field.value) || containsControl(field.value) {
+		if (field.name != "workflow publisher principal" || field.value != "") &&
+			(strings.TrimSpace(field.value) == "" || !utf8.ValidString(field.value) || containsControl(field.value)) {
 			return WorkflowRecord{}, fmt.Errorf("%w: %s is required and must not contain control characters", ErrInvalidWorkflow, field.name)
 		}
+	}
+	if input.Namespace != "" {
+		if err := validateRegistryName("workflow namespace", input.Namespace); err != nil {
+			return WorkflowRecord{}, err
+		}
+		if !strings.HasPrefix(input.Name, input.Namespace+"/") {
+			return WorkflowRecord{}, fmt.Errorf("%w: workflow name is outside its namespace", ErrInvalidWorkflow)
+		}
+	}
+	if input.PlanDigest != "" {
+		if err := values.ValidateDigest(input.PlanDigest); err != nil {
+			return WorkflowRecord{}, fmt.Errorf("%w: workflow plan digest: %w", ErrInvalidWorkflow, err)
+		}
+	}
+	if input.ContractTestDigest != "" {
+		if err := values.ValidateDigest(input.ContractTestDigest); err != nil {
+			return WorkflowRecord{}, fmt.Errorf("%w: workflow contract-test digest: %w", ErrInvalidWorkflow, err)
+		}
+	}
+	if input.ContractSuiteDigest != "" {
+		if err := values.ValidateDigest(input.ContractSuiteDigest); err != nil {
+			return WorkflowRecord{}, fmt.Errorf("%w: workflow contract-suite digest: %w", ErrInvalidWorkflow, err)
+		}
+	}
+	if input.TestsPassed && (input.ContractTestDigest == "" || input.ContractSuiteDigest == "") {
+		return WorkflowRecord{}, fmt.Errorf("%w: passed tests require exact suite and result digests", ErrInvalidWorkflow)
+	}
+	if !input.RegisteredAt.IsZero() {
+		input.RegisteredAt = input.RegisteredAt.UTC()
 	}
 	if len(input.Source) == 0 {
 		return WorkflowRecord{}, fmt.Errorf("%w: workflow source is required", ErrInvalidWorkflow)
@@ -272,6 +370,18 @@ func validateRegistryName(name, value string) error {
 	return nil
 }
 
+// ValidateWorkflowName validates the canonical slash-delimited identity used
+// by graph-native catalog queries without reading catalog state.
+func ValidateWorkflowName(value string) error {
+	return validateRegistryName("workflow name", strings.TrimSpace(value))
+}
+
+// ValidateWorkflowNamespace validates the canonical slash-delimited namespace
+// used by graph-native catalog searches without reading catalog state.
+func ValidateWorkflowNamespace(value string) error {
+	return validateRegistryName("workflow namespace", strings.TrimSpace(value))
+}
+
 func containsControl(value string) bool {
 	return strings.IndexFunc(value, unicode.IsControl) >= 0
 }
@@ -305,6 +415,16 @@ func equalWorkflowRecord(left, right WorkflowRecord) bool {
 	leftJSON, leftErr := json.Marshal(left)
 	rightJSON, rightErr := json.Marshal(right)
 	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
+}
+
+// equalWorkflowRegistration excludes only the catalog-assigned first
+// registration timestamp. Exact service retries preserve that original fact;
+// every source, provenance, trust, qualification, and publisher field remains
+// part of immutable replay identity.
+func equalWorkflowRegistration(left, right WorkflowRecord) bool {
+	left.RegisteredAt = time.Time{}
+	right.RegisteredAt = time.Time{}
+	return equalWorkflowRecord(left, right)
 }
 
 var _ WorkflowResolver = (*WorkflowIndex)(nil)
