@@ -25,3 +25,4 @@
 | 21 | W02-T05 | `c9497ae` | `b811d23` | Hadron | accepted after transactional integrity, append-only event, reopen, and two-handle contention hardening |
 | 22 | W03-T03 | `3321fed` | `a588285` | Hadron | accepted after SQLite skipped-explanation and blocked-refresh parity hardening |
 | 23 | W02-T03 | `9dce984` | `257a584` | Hadron | accepted after lossless artifact input, declaration-schema, local-ref artifact, and schema-literal hardening |
+| 24 | W02-T06 | `c8a951f` | `4648e0b` | Hadron | accepted after secret ArtifactRef taint preservation, canonical SecretRef identity, and SQLite prewrite enforcement |

@@ -588,3 +588,28 @@ sanitized source-mapped diagnostics. Source commit `9dce984` was integrated as
 | integration `257a584` | `go test ./...` and `make test` | pass |
 | integration `257a584` | `golangci-lint run --new --timeout 30s` | pass; zero issues |
 | integration `257a584` | `git diff --check` | pass |
+
+## W02-T06
+
+Reviewed canonical typed secret references, ephemeral adapter resolution,
+stream-safe masking, fail-closed rendering, retention planning, binding and
+expression taint, and prewrite persistence enforcement. Source commit
+`c8a951f` was integrated as `4648e0b` after secret-classified ArtifactRef
+passthrough/derivation coverage and canonical URI identity were hardened.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `c8a951f` | focused classification tests, `-count=30` | pass |
+| source worktree `c8a951f` | `go test -race ./workflow/values/... ./workflow/runtime/... ./internal/persistence/...` | pass |
+| source worktree `c8a951f` | `go test -v ./workflow/internal/importguard/...` | pass; negative fixture produced the expected boundary failure |
+| source worktree `c8a951f` | `go test ./workflow/... ./internal/...` | pass |
+| source worktree `c8a951f` | `go vet ./workflow/... ./internal/...` | pass |
+| source worktree `c8a951f` | `golangci-lint` over workflow and internal packages | pass; zero issues |
+| source worktree `c8a951f` | `make test` and `go test ./...` | pass |
+| integration `4648e0b` | `go test -count=1 ./workflow/values/... ./workflow/runtime/... ./internal/persistence/...` | pass |
+| integration `4648e0b` | `go test -race ./workflow/values/... ./workflow/runtime/... ./internal/persistence/...` | pass |
+| integration `4648e0b` | `go test -count=1 -v ./workflow/internal/importguard/...` | pass; negative fixture produced the expected boundary failure |
+| integration `4648e0b` | `go vet ./workflow/... ./internal/...` | pass |
+| integration `4648e0b` | `golangci-lint run --new --timeout 60s` | pass; zero issues |
+| integration `4648e0b` | `go test -count=1 ./...` | pass |
+| integration `4648e0b` | `git diff --check` | pass |
