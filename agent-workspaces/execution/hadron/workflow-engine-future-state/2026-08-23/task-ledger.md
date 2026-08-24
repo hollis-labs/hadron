@@ -21,7 +21,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W01-T07 | W01-T03, W01-T04 | integrated | `1285639` |
 | W02-T01 | W01-T01 | integrated | `10e0068` |
 | W02-T02 | W02-T01, W00-T05 | integrated | `985243b` |
-| W02-T03 | W02-T01, W02-T02, W02-T04 | dispatched | |
+| W02-T03 | W02-T01, W02-T02, W02-T04 | integrated | `257a584` |
 | W02-T04 | W01-T04, W02-T01 | integrated | `2caeb82` |
 | W02-T05 | W02-T04 | integrated | `b811d23` |
 | W02-T06 | W02-T01, W02-T04 | eligible | |
@@ -29,7 +29,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W02-T08 | W02-T01, W02-T04, W02-T06 | blocked | |
 | W03-T01 | W02-T04 | integrated | `67f97c8` |
 | W03-T02 | W03-T01 | integrated | `cb96ee1` |
-| W03-T03 | W02-T02, W03-T01 | dispatched | |
+| W03-T03 | W02-T02, W03-T01 | integrated | `a588285` |
 | W03-T04 | W02-T02, W02-T07, W03-T01, W03-T02, W03-T05 | blocked | |
 | W03-T05 | W03-T01, W02-T05 | eligible | |
 | W03-T06 | W03-T02, W03-T05 | blocked | |

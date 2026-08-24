@@ -538,3 +538,53 @@ commit `c9497ae` was integrated as `b811d23`.
 | integration `b811d23` | `golangci-lint run --new --timeout 30s` | pass; zero issues |
 | integration `b811d23` | `go test ./...` | pass |
 | integration `b811d23` | `git diff --check HEAD^..HEAD` | pass |
+
+## W03-T03
+
+Reviewed the six readiness truth tables, dependency identity and handled-route
+semantics, predicate ordering, durable skip explanations, blocked diagnostic
+refreshes, scheduler conformance fixtures, and atomic wait-timeout seam. Source
+commit `3321fed` was integrated as `a588285` after the Hadron SQLite adapter was
+hardened to match the in-memory lifecycle contract.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `3321fed` | focused readiness/progression/timeout tests, `-count=30` | pass |
+| source worktree `3321fed` | `go test -shuffle=on -count=20 ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| source worktree `3321fed` | `go test -race ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| source worktree `3321fed` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `3321fed` | `go vet ./workflow/...` | pass |
+| source worktree `3321fed` | `go test ./...` | pass |
+| integration `a588285` | `go test -shuffle=on -count=10 ./internal/persistence/... ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| integration `a588285` | `go test -race ./internal/persistence/... ./workflow/runtime/... ./workflow/conformance/...` | pass |
+| integration `a588285` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `a588285` | `go vet ./workflow/... ./internal/persistence/...` | pass |
+| integration `a588285` | `golangci-lint run --new --timeout 30s` | pass; zero issues |
+| integration `a588285` | `go test ./...` | pass |
+| integration `a588285` | failed agent-substrate test rerun, `-count=10`, then isolated `make test` | pass; initial parallel timeout was resource contention |
+| integration `a588285` | `git diff --check` | pass |
+
+## W02-T03
+
+Reviewed immutable bound-run identity, input/default/schema handling, lossless
+number rules, artifact and pre-enveloped inputs, expression visibility, output
+envelope passthrough, complete-set publication, replay/conflict behavior, and
+sanitized source-mapped diagnostics. Source commit `9dce984` was integrated as
+`257a584` with the W03-T03 package documentation preserved.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `9dce984` | focused binding/schema tests, `-count=30` | pass |
+| source worktree `9dce984` | `go test -race ./workflow/runtime/... ./workflow/values/...` | pass |
+| source worktree `9dce984` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `9dce984` | `go test ./workflow/...` | pass |
+| source worktree `9dce984` | `go vet ./workflow/...` | pass |
+| source worktree `9dce984` | `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0 ./workflow/...` | pass; zero issues |
+| source worktree `9dce984` | `make test` and `go test ./...` | pass |
+| integration `257a584` | `go test -shuffle=on -count=20 ./workflow/runtime/... ./workflow/values/...` | pass |
+| integration `257a584` | `go test -race ./workflow/runtime/... ./workflow/values/...` | pass |
+| integration `257a584` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `257a584` | `go vet ./workflow/... ./internal/persistence/...` | pass |
+| integration `257a584` | `go test ./...` and `make test` | pass |
+| integration `257a584` | `golangci-lint run --new --timeout 30s` | pass; zero issues |
+| integration `257a584` | `git diff --check` | pass |

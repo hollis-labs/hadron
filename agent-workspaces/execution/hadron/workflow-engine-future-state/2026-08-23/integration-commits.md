@@ -23,3 +23,5 @@
 | 19 | W03-T02 | `f0a8abb` | `cb96ee1` | Hadron | accepted after durable replay, claim-generation fencing, and leased-ready recovery hardening |
 | 20 | W01-T06 | `e5d3c38` | `88fb4cf` | Hadron | accepted with production compiler, inference, validation, source-map, and diagnostic fixture coverage |
 | 21 | W02-T05 | `c9497ae` | `b811d23` | Hadron | accepted after transactional integrity, append-only event, reopen, and two-handle contention hardening |
+| 22 | W03-T03 | `3321fed` | `a588285` | Hadron | accepted after SQLite skipped-explanation and blocked-refresh parity hardening |
+| 23 | W02-T03 | `9dce984` | `257a584` | Hadron | accepted after lossless artifact input, declaration-schema, local-ref artifact, and schema-literal hardening |

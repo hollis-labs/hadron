@@ -15,5 +15,6 @@ Files:
 - `task-ledger.md`: dependency and execution state.
 - `integration-commits.md`: accepted implementation commits and integration order.
 - `verification-evidence.md`: independently rerun commands and outcomes.
+- `decisions.md`: implementation decisions locked between real alternatives.
 - `owner-input.md`: decisions that require owner authority.
 - `deferred-findings.md`: findings deliberately deferred from an in-scope task.

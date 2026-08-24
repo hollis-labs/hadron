@@ -25,3 +25,13 @@ No execution findings have been deferred.
   persistence relationships.
 
   Vanta revision: `01M0S892FPWHRP5CC3ZS6CFTWB`.
+
+- W02-T03 supports graph-native `artifact` admission through a direct root
+  type, root-local references, and root `allOf`/`anyOf`/`oneOf` composition.
+  Conditional artifact admission through `if`/`then`/`else` is intentionally
+  unsupported. Inline JSON Schema conditionals remain available; expand the
+  artifact-specific permission vocabulary only if a concrete authoring case
+  requires it, without confusing ordinary object schemas with artifact
+  envelopes.
+
+  Vanta revision: `01M0S9GZ6QCBXJ8402PD44C4S0`.
