@@ -92,7 +92,7 @@ or the detailed architecture made a later choice. In particular:
 | --- | --- | --- |
 | Versioned registry with config/input/output schema, effects, capabilities, idempotency, retry, cancel, observe, suspend, embedded metadata | Implemented | W00-T06, W04-T01 |
 | Initial `transform`, `cmd`, `http`, `mcp`, `call`, `sleep`, `wait_for`, `human_gate`, `message_wait` | Implemented | W04-T02 through W04-T07 |
-| `verify` modifier and literal tool-activity evidence | Planned | W04-T08 |
+| `verify` modifier and literal tool-activity evidence | Implemented | W04-T08 |
 | Provider-agnostic typed `llm`, restricted tools, audit records, schema repair/fail | Planned later | W07-T01 |
 | Sandboxed goja `script`, capability surface, schema inference | Implemented | W07-T02 |
 | Heavy `agent_launch` plus correlated wait sugar | Planned later | W07-T03, W07-T08 |

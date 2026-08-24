@@ -312,3 +312,28 @@
   completion waits for all durable cancellation intents to reconcile.
 
   Vanta revision for all W03-T07 decisions: `01M0T70V133EFD45J92KDFYG3Y`.
+
+- W04-T08 freezes one exact verifier implementation/spec catalog for a
+  definition resolver and Hadron Host lifetime. The full canonical
+  `VerifierSpec` participates in semantic definition cache identity, while
+  `SemanticRevision` remains the explicit escape hatch for behavior changes
+  that preserve the advertised spec. Start validation, dispatch, and external
+  recovery consume this same catalog.
+
+- Literal verification evidence is accepted only through a runtime-issued,
+  typed activity recorder at trusted adapter boundaries; executor outputs and
+  model text cannot self-report activity. Verification runs after executor
+  output/schema validation and before node success, with distinct durable
+  decision, provider, malformed-result, and persistence failure classes.
+
+- Process-local evidence cannot silently cross a wait or external-operation
+  suspension boundary. A verified suspension with already-recorded evidence
+  fails closed, while terminal external verification is linked in the same
+  state-store transaction and compare-and-swap that closes the external
+  operation.
+
+- Registered verifier `ConfigSchema` and `RequiredEvidence` are core-enforced
+  before provider evaluation. Provider-specific config validation remains an
+  additional source-mapped check rather than the only enforcement boundary.
+
+  Vanta revision for all W04-T08 decisions: `01M0T99NG58DA4XBMGN5NFNPQV`.

@@ -204,3 +204,23 @@ No execution findings have been deferred.
   runtime store does not own a child-definition/graph resolver port.
 
   Vanta revision for all W03-T07 limitations: `01M0T70VG9WK9EA81SPMXZM35Q`.
+
+- W04-T08 keeps executor failure authoritative: failed execution activity is
+  process-local and no synthetic verification report is emitted after the
+  executor/provider boundary has already failed.
+
+- Terminal external verification currently has no durable pre-suspension
+  activity stream, so evidence-dependent checks fail closed after external
+  recovery. A future versioned durable-evidence contract is required if an
+  external adapter needs to carry literal activity across suspension.
+
+- Competing terminal external observers and partial report persistence may
+  leave unlinked immutable verification or output value sets. They never
+  create duplicate applied verification histories and remain discoverable for
+  retention or repair.
+
+- W04-T08 provides the strict, provider-neutral reviewer parser and registry
+  seam but no concrete LLM/reviewer provider. W07-T01 owns that provider-facing
+  executor integration.
+
+  Vanta revision for all W04-T08 limitations: `01M0T99MRAE1RFFEYBZZK2FEEJ`.

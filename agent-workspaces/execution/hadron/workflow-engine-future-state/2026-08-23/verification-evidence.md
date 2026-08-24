@@ -951,3 +951,25 @@ hardening.
 | source worktree `cb3e80c` | import guard, focused vet, targeted golangci, hooks, and diff checks | pass; zero new issues |
 | source worktree before tracking-only rebase | `go test -count=1 ./...` | pass |
 | integration `6c59dbf` plus tracking | `go test -count=1 ./...` | pass |
+
+## W04-T08
+
+Reviewed the extraction-safe verifier registry and built-ins, source lowering
+and diagnostics, runtime-issued literal activity recorder, post-output and
+pre-success verification boundary, durable report/event binding, external
+operation recovery and contention behavior, MCP evidence emission, and the
+Hadron resolver/Host catalog seam. Source commit `1d670de` was integrated as
+`92147ad` after registry freezing, generic config-schema enforcement,
+required-evidence enforcement, suspension fencing, and atomic external
+terminal verification hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `1d670de` | focused verification, compile, runtime, step-kind, MCP, conformance, appworkflow, and persistence suites; selected regressions and contention cases at `-count=30` | pass |
+| source worktree `1d670de` | broad relevant `go test -race -count=1` suite | pass |
+| source worktree `1d670de` | import guard, `go vet ./...`, targeted golangci, full workflow and repository suites, hooks, and diff checks | pass; zero new issues |
+| independent source review `1d670de` | `go test -count=5 ./workflow/verification/... ./workflow/compile/... ./workflow/runtime/... ./workflow/stepkind/... ./workflow/adapters/mcp/... ./workflow/conformance/... ./internal/appworkflow/... ./internal/persistence/...` | pass |
+| independent source review `1d670de` | `go test -race -count=1 ./internal/appworkflow/... ./internal/persistence/... ./workflow/verification/... ./workflow/stepkind/... ./workflow/runtime/... ./workflow/compile/... ./workflow/conformance/... ./workflow/adapters/mcp/...` | pass |
+| independent source review `1d670de` | `go test -v ./workflow/internal/importguard/...`; `go vet ./...`; `git diff --check 2953b3e..1d670de` | pass |
+| integration `92147ad` | `go test -count=1 ./...` | pass |
+| source | `make lint-go` | baseline-only failure: five unchanged `shadow` findings in `internal/persistence/workflow_state_control_flow.go:430,441,444,447,464` |
