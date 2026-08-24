@@ -12,6 +12,8 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/values"
+	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 func TestWaitTimeoutStoreConformance(t *testing.T) {
@@ -102,8 +104,9 @@ func TestTimeoutWaitBoundaryAtomicOutcomeAndUTCReplay(t *testing.T) {
 	}
 	stale := request
 	stale.IdempotencyKey = "timeout-boundary-stale"
-	if _, err = fixture.store.TimeoutWait(ctx, stale); !errors.Is(err, workflowruntime.ErrCASMismatch) {
-		t.Fatalf("stale timeout CAS = %v", err)
+	terminal, err := fixture.store.TimeoutWait(ctx, stale)
+	if err != nil || terminal.Applied || terminal.Wait.Status != workflowruntime.WaitTimedOut || terminal.Node.Status != workflowruntime.NodeTimedOut {
+		t.Fatalf("terminal timeout observation = %#v, %v", terminal, err)
 	}
 
 	handlerID := invocationID(fixture.invocation.RunID, "timeout-handler")
@@ -206,19 +209,19 @@ func TestTimeoutWaitConcurrentDistinctKeysHaveOneWinner(t *testing.T) {
 	group.Wait()
 	close(results)
 
-	applied, lostCAS := 0, 0
+	applied, observedTerminal := 0, 0
 	for call := range results {
 		switch {
 		case call.err == nil && call.result.Applied && !call.result.Replayed:
 			applied++
-		case errors.Is(call.err, workflowruntime.ErrCASMismatch):
-			lostCAS++
+		case call.err == nil && !call.result.Applied && call.result.Wait.Status == workflowruntime.WaitTimedOut && call.result.Node.Status == workflowruntime.NodeTimedOut:
+			observedTerminal++
 		default:
 			t.Fatalf("distinct-key timeout = %#v, %v", call.result, call.err)
 		}
 	}
-	if applied != 1 || lostCAS != contenders-1 {
-		t.Fatalf("applied/lost CAS = %d/%d", applied, lostCAS)
+	if applied != 1 || observedTerminal != contenders-1 {
+		t.Fatalf("applied/observed terminal = %d/%d", applied, observedTerminal)
 	}
 }
 
@@ -226,35 +229,43 @@ func TestTimeoutWaitRacesResumeWithOneDurableWinner(t *testing.T) {
 	for iteration := range 30 {
 		fixture := prepareWaitingWait(t, fmt.Sprintf("resume-race-%d", iteration), time.Date(2026, time.August, 25, 0, 0, iteration, 0, time.UTC))
 		start := make(chan struct{})
-		timeoutDone := make(chan error, 1)
-		resumeDone := make(chan error, 1)
+		timeoutDone := make(chan timeoutCall, 1)
+		resumeDone := make(chan resumeCall, 1)
 		go func() {
 			<-start
-			_, err := fixture.store.TimeoutWait(context.Background(), fixture.request)
-			timeoutDone <- err
+			result, err := fixture.store.TimeoutWait(context.Background(), fixture.request)
+			timeoutDone <- timeoutCall{result: result, err: err}
 		}()
 		go func() {
 			<-start
-			_, _, err := fixture.store.ResumeWait(context.Background(), workflowruntime.ResumeWaitRequest{
-				WaitID: fixture.request.WaitID, IdempotencyKey: fmt.Sprintf("resume-race-%d", iteration),
-				ResumedAt: fixture.request.Now,
+			payload, payloadErr := values.NewInline(nil, values.Metadata{Producer: values.Producer{Kind: "test", Reference: "resume-race"}, MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun})
+			if payloadErr != nil {
+				resumeDone <- resumeCall{err: payloadErr}
+				return
+			}
+			result, err := fixture.store.ResumeNodeWait(context.Background(), workflowruntime.ResumeNodeWaitRequest{
+				WaitID: fixture.request.WaitID, ExpectedWaitGeneration: fixture.request.ExpectedWaitGeneration,
+				ExpectedNodeGeneration: fixture.request.ExpectedNodeGeneration, ExpectedAttemptGeneration: 1,
+				Correlation: string(fixture.request.WaitID), WakeSource: workflowwait.WakeTimer,
+				Responder: workflowwait.Responder{Kind: "test", Reference: "resume-race"}, Payload: payload,
+				IdempotencyKey: fmt.Sprintf("resume-race-%d", iteration), ReceivedAt: fixture.request.Deadline.Add(-time.Nanosecond),
 			})
-			resumeDone <- err
+			resumeDone <- resumeCall{result: result, err: err}
 		}()
 		close(start)
-		timeoutErr, resumeErr := <-timeoutDone, <-resumeDone
+		timeoutResult, resumeResult := <-timeoutDone, <-resumeDone
 		wait, err := fixture.store.LoadWait(context.Background(), fixture.request.WaitID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		switch wait.Status {
 		case workflowruntime.WaitTimedOut:
-			if timeoutErr != nil || !errors.Is(resumeErr, workflowruntime.ErrAlreadyResumed) {
-				t.Fatalf("timeout winner errors = timeout:%v resume:%v", timeoutErr, resumeErr)
+			if timeoutResult.err != nil || !timeoutResult.result.Applied || !errors.Is(resumeResult.err, workflowruntime.ErrWaitClosed) || resumeResult.result.Wait.Status != wait.Status {
+				t.Fatalf("timeout winner = timeout:%#v/%v resume:%#v/%v", timeoutResult.result, timeoutResult.err, resumeResult.result, resumeResult.err)
 			}
 		case workflowruntime.WaitResumed:
-			if resumeErr != nil || !errors.Is(timeoutErr, workflowruntime.ErrCASMismatch) {
-				t.Fatalf("resume winner errors = timeout:%v resume:%v", timeoutErr, resumeErr)
+			if resumeResult.err != nil || resumeResult.result.Wait.Status != wait.Status || timeoutResult.err != nil || timeoutResult.result.Applied || timeoutResult.result.Wait.Status != wait.Status || timeoutResult.result.Node.Status != workflowruntime.NodeReady {
+				t.Fatalf("resume winner = timeout:%#v/%v resume:%#v/%v", timeoutResult.result, timeoutResult.err, resumeResult.result, resumeResult.err)
 			}
 		default:
 			t.Fatalf("race left wait in %q", wait.Status)
@@ -271,6 +282,11 @@ type waitTimeoutFixture struct {
 
 type timeoutCall struct {
 	result workflowruntime.WaitTimeoutResult
+	err    error
+}
+
+type resumeCall struct {
+	result workflowruntime.ResumeWaitResult
 	err    error
 }
 
@@ -294,25 +310,22 @@ func prepareWaitingWait(t *testing.T, suffix string, base time.Time) waitTimeout
 	if err != nil {
 		t.Fatal(err)
 	}
-	wait, err := store.CreateWait(ctx, workflowruntime.CreateWaitRequest{Snapshot: workflowruntime.WaitSnapshot{
-		Ref: workflowruntime.WaitRef{ID: waitID}, Invocation: invocation, Status: workflowruntime.WaitOpen,
-		CreatedAt: base.Add(3 * time.Second), UpdatedAt: base.Add(3 * time.Second),
-	}})
+	resumeSchema, err := workflowwait.NewSchemaRef(graph.Schema{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeWithWait := started.Node
-	nodeWithWait.Wait = &workflowruntime.WaitRef{ID: waitID}
-	nodeWithWait.UpdatedAt = base.Add(3 * time.Second)
-	nodeWithWait, err = store.SaveNodeInvocation(ctx, workflowruntime.SaveNodeInvocationRequest{
-		Snapshot: nodeWithWait, ExpectedGeneration: started.Node.Generation,
-	})
-	if err != nil {
-		t.Fatal(err)
+	deadline := base.Add(10 * time.Second)
+	waitSnapshot := workflowruntime.WaitSnapshot{
+		Ref: workflowruntime.WaitRef{ID: waitID}, Invocation: invocation, Record: workflowwait.Record{
+			Kind: workflowwait.KindTimer, Correlation: string(waitID), Deadline: deadline,
+			ResumeSchema: resumeSchema, Visibility: workflowwait.VisibilityPrivate,
+			Authority: workflowwait.ResponderAuthority{Kind: "system"}, WakeSource: workflowwait.WakeTimer,
+			Status: workflowruntime.WaitOpen,
+		},
 	}
-	waiting, err := store.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
-		InvocationID: invocation, ExpectedGeneration: nodeWithWait.Generation,
-		To: workflowruntime.NodeWaiting, Claim: &claim, At: base.Add(3 * time.Second),
+	suspended, err := store.SuspendNodeWait(ctx, workflowruntime.SuspendNodeWaitRequest{
+		Wait: waitSnapshot, ExpectedNodeGeneration: started.Node.Generation,
+		ExpectedAttemptGeneration: started.Attempt.Generation, Claim: claim, At: base.Add(3 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -320,10 +333,10 @@ func prepareWaitingWait(t *testing.T, suffix string, base time.Time) waitTimeout
 	return waitTimeoutFixture{
 		store: store, invocation: invocation, attempt: started.Attempt.ID,
 		request: workflowruntime.TimeoutWaitRequest{
-			WaitID: waitID, ExpectedWaitGeneration: wait.Generation,
-			ExpectedNodeGeneration: waiting.Snapshot.Generation,
+			WaitID: waitID, ExpectedWaitGeneration: suspended.Wait.Generation,
+			ExpectedNodeGeneration: suspended.Node.Generation,
 			IdempotencyKey:         "timeout-" + suffix,
-			Deadline:               base.Add(10 * time.Second), Now: base.Add(10 * time.Second),
+			Deadline:               deadline, Now: deadline,
 		},
 	}
 }

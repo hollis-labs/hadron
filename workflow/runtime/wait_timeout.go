@@ -7,14 +7,14 @@ import (
 	"time"
 )
 
-// EventWaitTimedOut records the wait identity and provisional deadline that
+// EventWaitTimedOut records the wait identity and persisted deadline that
 // caused an invocation attempt to time out.
 const EventWaitTimedOut = "wait.timed_out"
 
 // ErrWaitTimeoutNotDue identifies a deadline that has not arrived.
 var ErrWaitTimeoutNotDue = errors.New("workflow wait timeout is not due")
 
-// WaitTimeoutNotDueError reports a provisional deadline that has not arrived.
+// WaitTimeoutNotDueError reports a persisted deadline that has not arrived.
 type WaitTimeoutNotDueError struct {
 	Now      time.Time
 	Deadline time.Time
@@ -27,8 +27,9 @@ func (e *WaitTimeoutNotDueError) Error() string {
 func (e *WaitTimeoutNotDueError) Unwrap() error { return ErrWaitTimeoutNotDue }
 
 // TimeoutWaitRequest atomically closes one open wait and its waiting node
-// attempt under wait/node CAS. Deadline is provisional caller-derived input;
-// W03-T05 owns persisting and scheduling generic wait deadlines.
+// attempt under wait/node CAS. Deadline must exactly match the persisted wait.
+// An already-terminal wait returns its current durable wait and node without
+// applying a mutation; expected generations fence only the open mutation.
 type TimeoutWaitRequest struct {
 	WaitID                 WaitID
 	ExpectedWaitGeneration uint64
@@ -69,9 +70,7 @@ type WaitTimeoutResult struct {
 	Events   []Event
 }
 
-// WaitTimeoutStore is an optional high-level atomic persistence capability.
-// It intentionally remains outside StateStore until W03-T05 lands the full
-// generic wait/suspend/resume contract.
+// WaitTimeoutStore is the timeout portion of the atomic WaitStore contract.
 type WaitTimeoutStore interface {
 	TimeoutWait(context.Context, TimeoutWaitRequest) (WaitTimeoutResult, error)
 }

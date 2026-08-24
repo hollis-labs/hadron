@@ -317,6 +317,10 @@ WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt_number = ? AND ge
 }
 
 func insertWorkflowWait(ctx context.Context, query workflowSQL, snapshot workflowruntime.WaitSnapshot) error {
+	recordJSON, err := encodeWorkflowJSON(snapshot.Record)
+	if err != nil {
+		return err
+	}
 	resumeJSON, err := encodeOptionalWorkflowJSON(snapshot.ResumeValues)
 	if err != nil {
 		return err
@@ -328,12 +332,12 @@ func insertWorkflowWait(ctx context.Context, query workflowSQL, snapshot workflo
 	if _, err := query.ExecContext(ctx, `
 INSERT INTO workflow_waits(
     wait_id, run_id, node_id, iteration, status, resume_values_ref_json,
-    generation, created_at, updated_at, resolved_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    generation, created_at, updated_at, resolved_at, record_json, deadline
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		snapshot.Ref.ID, snapshot.Invocation.RunID, snapshot.Invocation.NodeID,
 		snapshot.Invocation.Iteration, snapshot.Status, resumeJSON, generation,
 		workflowTime(snapshot.CreatedAt), workflowTime(snapshot.UpdatedAt),
-		workflowOptionalTime(snapshot.ResolvedAt),
+		workflowOptionalTime(snapshot.ResolvedAt), recordJSON, workflowOptionalTime(snapshot.Deadline),
 	); err != nil {
 		if isSQLiteConstraint(err) {
 			return fmt.Errorf("%w: wait %q", workflowruntime.ErrAlreadyExists, snapshot.Ref.ID)
@@ -344,6 +348,10 @@ INSERT INTO workflow_waits(
 }
 
 func updateWorkflowWaitCAS(ctx context.Context, query workflowSQL, snapshot workflowruntime.WaitSnapshot, expected uint64) error {
+	recordJSON, err := encodeWorkflowJSON(snapshot.Record)
+	if err != nil {
+		return err
+	}
 	resumeJSON, err := encodeOptionalWorkflowJSON(snapshot.ResumeValues)
 	if err != nil {
 		return err
@@ -358,10 +366,10 @@ func updateWorkflowWaitCAS(ctx context.Context, query workflowSQL, snapshot work
 	}
 	result, err := query.ExecContext(ctx, `
 UPDATE workflow_waits
-SET status = ?, resume_values_ref_json = ?, generation = ?, updated_at = ?, resolved_at = ?
+SET status = ?, resume_values_ref_json = ?, generation = ?, updated_at = ?, resolved_at = ?, record_json = ?, deadline = ?
 WHERE wait_id = ? AND generation = ?`,
 		snapshot.Status, resumeJSON, generation, workflowTime(snapshot.UpdatedAt),
-		workflowOptionalTime(snapshot.ResolvedAt), snapshot.Ref.ID, expectedGeneration,
+		workflowOptionalTime(snapshot.ResolvedAt), recordJSON, workflowOptionalTime(snapshot.Deadline), snapshot.Ref.ID, expectedGeneration,
 	)
 	if err != nil {
 		return fmt.Errorf("update workflow wait: %w", err)

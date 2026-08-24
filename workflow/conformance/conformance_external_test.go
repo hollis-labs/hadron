@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
+	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 type fakeHost struct {
@@ -40,6 +41,22 @@ func (h fakeHost) StepKindRegistryFactory() conformance.Factory {
 func (h fakeHost) factory() conformance.Factory {
 	return func() (conformance.Runner, error) {
 		return conformance.RunnerFunc(func(_ context.Context, fixture conformance.Fixture) error {
+			if fixture.Set == conformance.WaitFixtures {
+				var input struct {
+					Kind        workflowwait.Kind       `json:"kind"`
+					WakeSource  workflowwait.WakeSource `json:"wake_source"`
+					Correlation string                  `json:"correlation"`
+				}
+				if err := json.Unmarshal(fixture.Input, &input); err != nil {
+					return fmt.Errorf("decode wait input: %w", err)
+				}
+				schema, err := workflowwait.NewSchemaRef(nil)
+				if err != nil {
+					return err
+				}
+				(*h.calls)++
+				return (workflowwait.Record{Kind: input.Kind, Correlation: input.Correlation, ResumeSchema: schema, Visibility: workflowwait.VisibilityPrivate, Authority: workflowwait.ResponderAuthority{Kind: "fixture"}, WakeSource: input.WakeSource, Status: workflowwait.StatusOpen}).Validate()
+			}
 			if fixture.Set == conformance.SchedulerFixtures {
 				var input struct {
 					Rule         graph.ReadyRule                      `json:"rule"`
@@ -99,7 +116,7 @@ func TestExternalHostRunsAllSuites(t *testing.T) {
 	calls := 0
 	conformance.RunAll(t, conformance.EmbeddedFixtures(), fakeHost{calls: &calls})
 
-	const wantCalls = 22
+	const wantCalls = 27
 	if calls != wantCalls {
 		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
 	}
@@ -129,6 +146,9 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 			if set == conformance.SchedulerFixtures {
 				wantCount = 7
 			}
+			if set == conformance.WaitFixtures {
+				wantCount = 7
+			}
 			if len(fixtures) != wantCount {
 				t.Fatalf("fixture count = %d, want %d", len(fixtures), wantCount)
 			}
@@ -147,6 +167,17 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				}
 				if fixture := byName["readiness-unsupported-rule"]; fixture.Expectation != conformance.ExpectFail {
 					t.Fatalf("unsupported readiness fixture = %#v, want semantic fail fixture", fixture)
+				}
+				return
+			}
+			if set == conformance.WaitFixtures {
+				for _, name := range []string{"wait-gate", "wait-message", "wait-timer", "wait-callback", "wait-child-run", "wait-signal"} {
+					if fixture := byName[name]; fixture.Expectation != conformance.ExpectPass {
+						t.Fatalf("%s fixture = %#v", name, fixture)
+					}
+				}
+				if fixture := byName["wait-unsupported-source"]; fixture.Expectation != conformance.ExpectFail {
+					t.Fatalf("unsupported wait fixture = %#v", fixture)
 				}
 				return
 			}

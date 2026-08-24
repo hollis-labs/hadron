@@ -12,6 +12,7 @@ import (
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/values"
+	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 // Store is a concurrency-safe in-memory StateStore. It implements the core
@@ -19,13 +20,15 @@ import (
 type Store struct {
 	mu sync.RWMutex
 
-	runs      map[workflowruntime.RunID]workflowruntime.RunSnapshot
-	runStarts map[string]runStartRecord
-	nodes     map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot
-	attempts  map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
-	waits     map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
-	resumes   map[string]resumeRecord
-	timeouts  map[string]timeoutRecord
+	runs              map[workflowruntime.RunID]workflowruntime.RunSnapshot
+	runStarts         map[string]runStartRecord
+	nodes             map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot
+	attempts          map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
+	waits             map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
+	suspends          map[workflowruntime.WaitID]suspendRecord
+	waitResumes       map[string]waitResumeRecord
+	waitResumeResults map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult
+	timeouts          map[string]timeoutRecord
 
 	valueSets    map[string]storedValues
 	nextValueSet uint64
@@ -44,9 +47,14 @@ type runStartRecord struct {
 	result  workflowruntime.RunSnapshot
 }
 
-type resumeRecord struct {
-	request workflowruntime.ResumeWaitRequest
-	result  workflowruntime.WaitSnapshot
+type suspendRecord struct {
+	request workflowruntime.SuspendNodeWaitRequest
+	result  workflowruntime.SuspendWaitResult
+}
+
+type waitResumeRecord struct {
+	request workflowruntime.ResumeNodeWaitRequest
+	result  workflowruntime.ResumeWaitResult
 }
 
 type timeoutRecord struct {
@@ -75,20 +83,22 @@ var _ workflowruntime.StateStore = (*Store)(nil)
 // NewStore returns an empty StateStore fake.
 func NewStore() *Store {
 	return &Store{
-		runs:        make(map[workflowruntime.RunID]workflowruntime.RunSnapshot),
-		runStarts:   make(map[string]runStartRecord),
-		nodes:       make(map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot),
-		attempts:    make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
-		waits:       make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
-		resumes:     make(map[string]resumeRecord),
-		timeouts:    make(map[string]timeoutRecord),
-		valueSets:   make(map[string]storedValues),
-		plans:       make(map[string]workflowruntime.PlanRef),
-		events:      make(map[workflowruntime.RunID][]workflowruntime.Event),
-		claims:      make(map[string]claimRecord),
-		cache:       make(map[string]workflowruntime.CacheEntry),
-		pins:        make(map[string]workflowruntime.PinnedValue),
-		activations: make(map[string]activationRecord),
+		runs:              make(map[workflowruntime.RunID]workflowruntime.RunSnapshot),
+		runStarts:         make(map[string]runStartRecord),
+		nodes:             make(map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot),
+		attempts:          make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
+		waits:             make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
+		suspends:          make(map[workflowruntime.WaitID]suspendRecord),
+		waitResumes:       make(map[string]waitResumeRecord),
+		waitResumeResults: make(map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult),
+		timeouts:          make(map[string]timeoutRecord),
+		valueSets:         make(map[string]storedValues),
+		plans:             make(map[string]workflowruntime.PlanRef),
+		events:            make(map[workflowruntime.RunID][]workflowruntime.Event),
+		claims:            make(map[string]claimRecord),
+		cache:             make(map[string]workflowruntime.CacheEntry),
+		pins:              make(map[string]workflowruntime.PinnedValue),
+		activations:       make(map[string]activationRecord),
 	}
 }
 
@@ -285,28 +295,6 @@ func (s *Store) ListAttempts(ctx context.Context, id workflowruntime.NodeInvocat
 	return result, nil
 }
 
-// CreateWait implements runtime.StateStore.
-func (s *Store) CreateWait(ctx context.Context, request workflowruntime.CreateWaitRequest) (workflowruntime.WaitSnapshot, error) {
-	if err := checkContext(ctx); err != nil {
-		return workflowruntime.WaitSnapshot{}, err
-	}
-	next := cloneWait(request.Snapshot)
-	if next.Generation != 0 || next.Status != workflowruntime.WaitOpen {
-		return workflowruntime.WaitSnapshot{}, invalid(errors.New("new wait must be open with zero generation"))
-	}
-	next.Generation = 1
-	if err := next.Validate(); err != nil {
-		return workflowruntime.WaitSnapshot{}, invalid(err)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.waits[next.Ref.ID]; ok {
-		return workflowruntime.WaitSnapshot{}, fmt.Errorf("%w: wait %q", workflowruntime.ErrAlreadyExists, next.Ref.ID)
-	}
-	s.waits[next.Ref.ID] = next
-	return cloneWait(next), nil
-}
-
 // LoadWait implements runtime.StateStore.
 func (s *Store) LoadWait(ctx context.Context, id workflowruntime.WaitID) (workflowruntime.WaitSnapshot, error) {
 	if err := checkContext(ctx); err != nil {
@@ -319,79 +307,6 @@ func (s *Store) LoadWait(ctx context.Context, id workflowruntime.WaitID) (workfl
 		return workflowruntime.WaitSnapshot{}, fmt.Errorf("%w: wait %q", workflowruntime.ErrNotFound, id)
 	}
 	return cloneWait(snapshot), nil
-}
-
-// SaveWait implements runtime.StateStore without imposing transition policy.
-func (s *Store) SaveWait(ctx context.Context, request workflowruntime.SaveWaitRequest) (workflowruntime.WaitSnapshot, error) {
-	if err := checkContext(ctx); err != nil {
-		return workflowruntime.WaitSnapshot{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current, ok := s.waits[request.Snapshot.Ref.ID]
-	if !ok {
-		return workflowruntime.WaitSnapshot{}, fmt.Errorf("%w: wait %q", workflowruntime.ErrNotFound, request.Snapshot.Ref.ID)
-	}
-	if current.Generation != request.ExpectedGeneration {
-		return workflowruntime.WaitSnapshot{}, casMismatch("wait", request.ExpectedGeneration, current.Generation)
-	}
-	if request.Snapshot.Invocation != current.Invocation {
-		return workflowruntime.WaitSnapshot{}, invalid(errors.New("wait invocation is immutable"))
-	}
-	next := cloneWait(request.Snapshot)
-	next.Generation = current.Generation + 1
-	next.CreatedAt = current.CreatedAt
-	if next.UpdatedAt.Before(current.UpdatedAt) {
-		return workflowruntime.WaitSnapshot{}, invalid(errors.New("wait updated_at must not regress"))
-	}
-	if err := next.Validate(); err != nil {
-		return workflowruntime.WaitSnapshot{}, invalid(err)
-	}
-	s.waits[next.Ref.ID] = next
-	return cloneWait(next), nil
-}
-
-// ResumeWait implements runtime.StateStore.
-func (s *Store) ResumeWait(ctx context.Context, request workflowruntime.ResumeWaitRequest) (workflowruntime.WaitSnapshot, workflowruntime.IdempotencyOutcome, error) {
-	if err := checkContext(ctx); err != nil {
-		return workflowruntime.WaitSnapshot{}, "", err
-	}
-	if err := validateResume(request); err != nil {
-		return workflowruntime.WaitSnapshot{}, "", invalid(err)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if request.IdempotencyKey != "" {
-		if prior, ok := s.resumes[request.IdempotencyKey]; ok {
-			if equalResumeWaitRequest(prior.request, request) {
-				return cloneWait(prior.result), workflowruntime.IdempotencyReplayed, nil
-			}
-			return workflowruntime.WaitSnapshot{}, "", idempotencyConflict("resume wait", request.IdempotencyKey)
-		}
-	}
-	current, ok := s.waits[request.WaitID]
-	if !ok {
-		return workflowruntime.WaitSnapshot{}, "", fmt.Errorf("%w: wait %q", workflowruntime.ErrNotFound, request.WaitID)
-	}
-	if current.Status != workflowruntime.WaitOpen {
-		return workflowruntime.WaitSnapshot{}, "", fmt.Errorf("%w: wait %q", workflowruntime.ErrAlreadyResumed, request.WaitID)
-	}
-	if request.ResumedAt.Before(current.UpdatedAt) {
-		return workflowruntime.WaitSnapshot{}, "", invalid(errors.New("wait resume time must not regress"))
-	}
-	current.Status = workflowruntime.WaitResumed
-	current.ResumeValues = cloneValueSetRef(request.Values)
-	current.ResolvedAt = request.ResumedAt
-	current.UpdatedAt = request.ResumedAt
-	current.Generation++
-	if err := current.Validate(); err != nil {
-		return workflowruntime.WaitSnapshot{}, "", invalid(err)
-	}
-	s.waits[current.Ref.ID] = current
-	if request.IdempotencyKey != "" {
-		s.resumes[request.IdempotencyKey] = resumeRecord{request: cloneResumeRequest(request), result: current}
-	}
-	return cloneWait(current), workflowruntime.IdempotencyApplied, nil
 }
 
 // SaveValues implements runtime.StateStore.
@@ -812,16 +727,6 @@ func validateCreateRun(request workflowruntime.CreateRunRequest) error {
 	return nil
 }
 
-func validateResume(request workflowruntime.ResumeWaitRequest) error {
-	if request.WaitID == "" || request.ResumedAt.IsZero() {
-		return errors.New("resume wait requires wait id and resumed_at")
-	}
-	if request.Values != nil {
-		return request.Values.Validate()
-	}
-	return nil
-}
-
 func validateClaim(request workflowruntime.ClaimNodeRequest) error {
 	if err := request.InvocationID.Validate(); err != nil {
 		return err
@@ -866,6 +771,9 @@ func matchesLease(lease *workflowruntime.ClaimLease, owner, token string, genera
 }
 
 func checkContext(ctx context.Context) error {
+	if ctx == nil {
+		return invalid(errors.New("context is required"))
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -888,11 +796,6 @@ func equalCreateRunRequest(left, right workflowruntime.CreateRunRequest) bool {
 	return left.ID == right.ID && left.Plan == right.Plan && left.Status == right.Status &&
 		equalValueSetRef(left.Inputs, right.Inputs) &&
 		left.StartIdempotencyKey == right.StartIdempotencyKey && left.CreatedAt.Equal(right.CreatedAt)
-}
-
-func equalResumeWaitRequest(left, right workflowruntime.ResumeWaitRequest) bool {
-	return left.WaitID == right.WaitID && left.IdempotencyKey == right.IdempotencyKey &&
-		equalValueSetRef(left.Values, right.Values) && left.ResumedAt.Equal(right.ResumedAt)
 }
 
 func equalClaimNodeRequest(left, right workflowruntime.ClaimNodeRequest) bool {
@@ -991,7 +894,17 @@ func cloneFailure(failure *workflowruntime.Failure) *workflowruntime.Failure {
 }
 
 func cloneWait(snapshot workflowruntime.WaitSnapshot) workflowruntime.WaitSnapshot {
+	snapshot.Payload = cloneValueSetRef(snapshot.Payload)
 	snapshot.ResumeValues = cloneValueSetRef(snapshot.ResumeValues)
+	snapshot.Authority.Attributes = cloneStringMap(snapshot.Authority.Attributes)
+	if snapshot.Resolution != nil {
+		resolution := *snapshot.Resolution
+		resolution.Responder.Attributes = cloneStringMap(snapshot.Resolution.Responder.Attributes)
+		snapshot.Resolution = &resolution
+	}
+	if schema, err := workflowwait.NewSchemaRef(snapshot.ResumeSchema.Schema); err == nil {
+		snapshot.ResumeSchema = schema
+	}
 	return snapshot
 }
 
@@ -1024,11 +937,6 @@ func cloneLease(lease *workflowruntime.ClaimLease) *workflowruntime.ClaimLease {
 func cloneClaimResult(result workflowruntime.ClaimResult) workflowruntime.ClaimResult {
 	result.Lease = cloneLease(result.Lease)
 	return result
-}
-
-func cloneResumeRequest(request workflowruntime.ResumeWaitRequest) workflowruntime.ResumeWaitRequest {
-	request.Values = cloneValueSetRef(request.Values)
-	return request
 }
 
 func cloneActivationRequest(request workflowruntime.ExternalActivationRequest) workflowruntime.ExternalActivationRequest {

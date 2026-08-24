@@ -1,7 +1,9 @@
 {
-  "name": "minimal-fail",
+  "name": "wait-unsupported-source",
   "expect": "fail",
   "input": {
-    "accepted": false
+    "kind": "signal",
+    "wake_source": "ambient_process",
+    "correlation": "invalid"
   }
 }

@@ -8,6 +8,7 @@ import (
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/values"
+	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 var _ workflowruntime.WaitTimeoutStore = (*Store)(nil)
@@ -44,15 +45,12 @@ func (s *Store) TimeoutWait(ctx context.Context, request workflowruntime.Timeout
 	if !ok {
 		return workflowruntime.WaitTimeoutResult{}, fmt.Errorf("%w: wait %q", workflowruntime.ErrNotFound, request.WaitID)
 	}
-	if currentWait.Generation != request.ExpectedWaitGeneration {
-		return workflowruntime.WaitTimeoutResult{}, casMismatch("wait timeout", request.ExpectedWaitGeneration, currentWait.Generation)
+	if currentWait.Deadline.IsZero() || !currentWait.Deadline.Equal(request.Deadline) {
+		return workflowruntime.WaitTimeoutResult{}, invalid(errors.New("timeout deadline must exactly match the persisted wait deadline"))
 	}
 	currentNode, ok := s.nodes[currentWait.Invocation]
 	if !ok {
 		return workflowruntime.WaitTimeoutResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
-	}
-	if currentNode.Generation != request.ExpectedNodeGeneration {
-		return workflowruntime.WaitTimeoutResult{}, casMismatch("wait timeout node", request.ExpectedNodeGeneration, currentNode.Generation)
 	}
 	if currentWait.Status != workflowruntime.WaitOpen {
 		result := workflowruntime.WaitTimeoutResult{
@@ -60,6 +58,12 @@ func (s *Store) TimeoutWait(ctx context.Context, request workflowruntime.Timeout
 		}
 		s.timeouts[request.IdempotencyKey] = timeoutRecord{request: request, result: cloneWaitTimeoutResult(result)}
 		return result, nil
+	}
+	if currentWait.Generation != request.ExpectedWaitGeneration {
+		return workflowruntime.WaitTimeoutResult{}, casMismatch("wait timeout", request.ExpectedWaitGeneration, currentWait.Generation)
+	}
+	if currentNode.Generation != request.ExpectedNodeGeneration {
+		return workflowruntime.WaitTimeoutResult{}, casMismatch("wait timeout node", request.ExpectedNodeGeneration, currentNode.Generation)
 	}
 	if currentNode.Status != workflowruntime.NodeWaiting {
 		return workflowruntime.WaitTimeoutResult{}, invalid(errors.New("open wait timeout requires a waiting node"))
@@ -90,6 +94,11 @@ func (s *Store) TimeoutWait(ctx context.Context, request workflowruntime.Timeout
 	failure := workflowruntime.WaitTimeoutFailure(request.Deadline)
 	nextWait := cloneWait(currentWait)
 	nextWait.Status = workflowruntime.WaitTimedOut
+	nextWait.Resolution = &workflowwait.Resolution{
+		Source:     workflowwait.WakeTimer,
+		Responder:  workflowwait.Responder{Kind: "system", Reference: "wait-timeout"},
+		ResolvedAt: request.Now,
+	}
 	nextWait.ResolvedAt = request.Now
 	nextWait.UpdatedAt = request.Now
 	nextWait.Generation++

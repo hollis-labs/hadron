@@ -180,11 +180,6 @@ func canonicalCreateRunRequest(request workflowruntime.CreateRunRequest) (string
 	return encodeWorkflowJSON(request)
 }
 
-func canonicalResumeRequest(request workflowruntime.ResumeWaitRequest) (string, error) {
-	request.ResumedAt = request.ResumedAt.UTC()
-	return encodeWorkflowJSON(request)
-}
-
 func canonicalClaimRequest(request workflowruntime.ClaimNodeRequest) (string, error) {
 	request.Now = request.Now.UTC()
 	request.LeaseUntil = request.LeaseUntil.UTC()

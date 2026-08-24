@@ -1,12 +1,15 @@
 package runtime_test
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/values"
+	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 func TestClosedStatusContracts(t *testing.T) {
@@ -98,23 +101,45 @@ func TestStructuredBlockedReasonAndReferenceValidation(t *testing.T) {
 
 func TestWaitTerminalSnapshotValidation(t *testing.T) {
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
+	schema, err := workflowwait.NewSchemaRef(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	base := workflowruntime.WaitSnapshot{
 		Ref: workflowruntime.WaitRef{ID: "wait-1"}, Invocation: invocationID("run-1", "pause"),
+		Record:     workflowwait.Record{Kind: workflowwait.KindSignal, Correlation: "correlation-1", Deadline: now.Add(time.Minute), ResumeSchema: schema, Visibility: workflowwait.VisibilityPrivate, Authority: workflowwait.ResponderAuthority{Kind: "test"}, WakeSource: workflowwait.WakeSignal},
 		Generation: 1, CreatedAt: now, UpdatedAt: now.Add(time.Minute), ResolvedAt: now.Add(time.Minute),
 	}
-	for _, status := range []workflowruntime.WaitStatus{
-		workflowruntime.WaitResumed, workflowruntime.WaitTimedOut, workflowruntime.WaitCanceled,
+	ref := values.ValueSetRef{ID: "values-1", Digest: values.SHA256Digest(nil)}
+	for _, snapshot := range []workflowruntime.WaitSnapshot{
+		func() workflowruntime.WaitSnapshot {
+			s := base
+			s.Status = workflowruntime.WaitResumed
+			s.ResumeValues = &ref
+			s.Resolution = &workflowwait.Resolution{Source: workflowwait.WakeSignal, Responder: workflowwait.Responder{Kind: "test", Reference: "person"}, PayloadDigest: ref.Digest, ResolvedAt: s.ResolvedAt}
+			return s
+		}(),
+		func() workflowruntime.WaitSnapshot {
+			s := base
+			s.Status = workflowruntime.WaitTimedOut
+			s.Resolution = &workflowwait.Resolution{Source: workflowwait.WakeTimer, Responder: workflowwait.Responder{Kind: "system", Reference: "wait-timeout"}, ResolvedAt: s.ResolvedAt}
+			return s
+		}(),
+		func() workflowruntime.WaitSnapshot {
+			s := base
+			s.Status = workflowruntime.WaitCanceled
+			s.Resolution = &workflowwait.Resolution{Source: workflowwait.WakeSignal, Responder: workflowwait.Responder{Kind: "system", Reference: "cancel"}, ResolvedAt: s.ResolvedAt}
+			return s
+		}(),
 	} {
-		snapshot := base
-		snapshot.Status = status
 		if err := snapshot.Validate(); err != nil {
-			t.Fatalf("%s terminal wait should validate: %v", status, err)
+			t.Fatalf("%s terminal wait should validate: %v", snapshot.Status, err)
 		}
 	}
 	terminal := base
 	terminal.Status = workflowruntime.WaitTimedOut
-	ref := values.ValueSetRef{ID: "values-1", Digest: values.SHA256Digest(nil)}
 	terminal.ResumeValues = &ref
+	terminal.Resolution = &workflowwait.Resolution{Source: workflowwait.WakeTimer, Responder: workflowwait.Responder{Kind: "system", Reference: "wait-timeout"}, ResolvedAt: terminal.ResolvedAt}
 	if err := terminal.Validate(); err == nil {
 		t.Fatal("timed-out wait carrying resume values should be rejected")
 	}
@@ -122,6 +147,29 @@ func TestWaitTerminalSnapshotValidation(t *testing.T) {
 	open.Status = workflowruntime.WaitOpen
 	if err := open.Validate(); err == nil {
 		t.Fatal("open wait carrying resolved_at should be rejected")
+	}
+}
+
+func TestWaitSnapshotJSONHasOneSemanticEnvelope(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	schema, err := workflowwait.NewSchemaRef(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := workflowruntime.WaitSnapshot{Ref: workflowruntime.WaitRef{ID: "wait-json"}, Invocation: invocationID("run-json", "wait"), Record: workflowwait.Record{Kind: workflowwait.KindSignal, Correlation: "correlation-json", ResumeSchema: schema, Visibility: workflowwait.VisibilityPrivate, Authority: workflowwait.ResponderAuthority{Kind: "test"}, WakeSource: workflowwait.WakeSignal, Status: workflowruntime.WaitOpen}, Generation: 1, CreatedAt: now, UpdatedAt: now}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(encoded), `"status"`) != 1 || strings.Count(string(encoded), `"resume_values"`) > 1 {
+		t.Fatalf("duplicate embedded wait fields: %s", encoded)
+	}
+	var decoded workflowruntime.WaitSnapshot
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := decoded.Validate(); err != nil || decoded.Status != workflowruntime.WaitOpen || decoded.Correlation != snapshot.Correlation {
+		t.Fatalf("decoded wait = %#v, %v", decoded, err)
 	}
 }
 

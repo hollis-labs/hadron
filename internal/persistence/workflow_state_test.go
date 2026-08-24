@@ -13,6 +13,7 @@ import (
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/values"
+	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
@@ -22,13 +23,16 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_run_start_idempotency": "table", "workflow_node_invocations": "table",
 		"workflow_node_leases": "table", "workflow_claim_idempotency": "table",
 		"workflow_attempts": "table", "workflow_waits": "table",
-		"workflow_wait_resume_idempotency": "table", "workflow_value_sets": "table",
+		"workflow_wait_resume_idempotency": "table", "workflow_wait_resume_results": "table",
+		"workflow_wait_suspend_idempotency": "table", "workflow_wait_timeout_idempotency": "table",
+		"workflow_value_sets":      "table",
 		"workflow_event_sequences": "table", "workflow_events": "table",
 		"workflow_cache_entries": "table", "workflow_pinned_values": "table",
 		"workflow_external_activations": "table",
 		"idx_workflow_runs_recovery":    "index", "idx_workflow_nodes_recovery": "index",
 		"idx_workflow_node_leases_expiry": "index", "idx_workflow_attempts_invocation": "index",
-		"idx_workflow_waits_recovery": "index", "idx_workflow_value_sets_digest": "index",
+		"idx_workflow_waits_recovery": "index", "idx_workflow_waits_deadline": "index",
+		"idx_workflow_waits_correlation": "index", "idx_workflow_value_sets_digest": "index",
 		"idx_workflow_events_type": "index", "idx_workflow_cache_expiry": "index",
 		"idx_workflow_pins_expiry": "index", "idx_workflow_activations_run": "index",
 		"idx_workflow_activations_registration": "index",
@@ -42,7 +46,7 @@ SELECT name FROM sqlite_master WHERE type = ? AND name = ?`, kind, name).Scan(&f
 		}
 	}
 	var migrations int
-	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 14`).Scan(&migrations); err != nil {
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 15`).Scan(&migrations); err != nil {
 		t.Fatalf("read migration version: %v", err)
 	}
 	if migrations != 1 {
@@ -94,12 +98,13 @@ SELECT COUNT(1) FROM workflow_node_invocations WHERE run_id = ?`, missingRunNode
 	missingNodeWait := workflowruntime.WaitSnapshot{
 		Ref:        workflowruntime.WaitRef{ID: "orphan-wait"},
 		Invocation: workflowruntime.NodeInvocationID{RunID: run.ID, NodeID: "missing-node"},
-		Status:     workflowruntime.WaitOpen, CreatedAt: base, UpdatedAt: base,
+		Record:     workflowTestOpenWaitRecord(t, "orphan-wait", "", time.Time{}),
 	}
-	if _, err := state.CreateWait(ctx, workflowruntime.CreateWaitRequest{
-		Snapshot: missingNodeWait,
+	if _, err := state.SuspendNodeWait(ctx, workflowruntime.SuspendNodeWaitRequest{
+		Wait: missingNodeWait, ExpectedNodeGeneration: 1, ExpectedAttemptGeneration: 1,
+		Claim: workflowruntime.ClaimProof{Owner: "worker", Token: "claim-token", Generation: 1}, At: base,
 	}); !errors.Is(err, workflowruntime.ErrNotFound) {
-		t.Fatalf("CreateWait missing node error = %v", err)
+		t.Fatalf("SuspendNodeWait missing node error = %v", err)
 	}
 	var waitCount int
 	if err := store.DB().QueryRow(`
@@ -596,32 +601,21 @@ func TestWorkflowStateWaitingResumeAndRecoveryOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartNodeAttempt(wait path): %v", err)
 	}
-	waiting, err := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
-		InvocationID: executing.ID, ExpectedGeneration: started.Node.Generation,
-		To: workflowruntime.NodeWaiting, Claim: &proof, At: base.Add(4 * time.Second),
-	})
-	if err != nil {
-		t.Fatalf("running->waiting: %v", err)
-	}
-	if waiting.Snapshot.Lease != nil {
-		t.Fatalf("running->waiting retained lease: %+v", waiting.Snapshot.Lease)
-	}
 	waitRef := workflowruntime.WaitRef{ID: "wait-reopen"}
-	waitingSnapshot := waiting.Snapshot
-	waitingSnapshot.Wait = &waitRef
-	waitingSnapshot.UpdatedAt = base.Add(4 * time.Second)
-	waitingSnapshot, err = state.SaveNodeInvocation(ctx, workflowruntime.SaveNodeInvocationRequest{
-		Snapshot: waitingSnapshot, ExpectedGeneration: waiting.Snapshot.Generation,
+	resumeToken := "resume-wait-reopen"
+	suspended, err := state.SuspendNodeWait(ctx, workflowruntime.SuspendNodeWaitRequest{
+		Wait: workflowruntime.WaitSnapshot{
+			Ref: waitRef, Invocation: executing.ID,
+			Record: workflowTestOpenWaitRecord(t, waitRef.ID, resumeToken, base.Add(time.Hour)),
+		},
+		ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation,
+		Claim: proof, At: base.Add(4 * time.Second),
 	})
 	if err != nil {
-		t.Fatalf("attach wait reference: %v", err)
+		t.Fatalf("SuspendNodeWait(reopen): %v", err)
 	}
-	waitSnapshot, err := state.CreateWait(ctx, workflowruntime.CreateWaitRequest{Snapshot: workflowruntime.WaitSnapshot{
-		Ref: waitRef, Invocation: executing.ID, Status: workflowruntime.WaitOpen,
-		CreatedAt: base.Add(4 * time.Second), UpdatedAt: base.Add(4 * time.Second),
-	}})
-	if err != nil {
-		t.Fatalf("CreateWait(reopen): %v", err)
+	if suspended.Node.Lease != nil {
+		t.Fatalf("suspended node retained lease: %+v", suspended.Node.Lease)
 	}
 	if closeErr := store.Close(); closeErr != nil {
 		t.Fatalf("close waiting store: %v", closeErr)
@@ -638,7 +632,7 @@ func TestWorkflowStateWaitingResumeAndRecoveryOrdering(t *testing.T) {
 		t.Fatalf("reopened unfinished attempts = (%+v, %v)", reopenedAttempts, err)
 	}
 	reopenedWait, err := state.LoadWait(ctx, waitRef.ID)
-	if err != nil || reopenedWait.Ref != waitSnapshot.Ref || reopenedWait.Status != workflowruntime.WaitOpen ||
+	if err != nil || reopenedWait.Ref != suspended.Wait.Ref || reopenedWait.Status != workflowruntime.WaitOpen ||
 		reopenedWait.Invocation != executing.ID {
 		t.Fatalf("reopened wait snapshot = (%+v, %v)", reopenedWait, err)
 	}
@@ -646,15 +640,16 @@ func TestWorkflowStateWaitingResumeAndRecoveryOrdering(t *testing.T) {
 	if err != nil || len(waitRecovery.Waiting) != 1 || len(waitRecovery.Leased) != 0 {
 		t.Fatalf("waiting recovery = %+v, %v", waitRecovery, err)
 	}
-	readyAgain, err := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
-		InvocationID: executing.ID, ExpectedGeneration: reopenedNode.Generation,
-		To: workflowruntime.NodeReady, At: base.Add(5 * time.Second),
+	resumed, err := (workflowruntime.WaitCoordinator{Store: state}).Resume(ctx, workflowruntime.ResumeCommand{
+		WaitID: waitRef.ID, Correlation: string(waitRef.ID), Token: resumeToken,
+		WakeSource: workflowwait.WakeSignal, Responder: workflowwait.Responder{Kind: "test", Reference: "recovery"},
+		Payload: workflowTestValue(t, "continued"), IdempotencyKey: "resume-wait-reopen", ReceivedAt: base.Add(5 * time.Second),
 	})
-	if err != nil {
-		t.Fatalf("waiting->ready: %v", err)
+	if err != nil || resumed.Node.Status != workflowruntime.NodeReady || resumed.Wait.Status != workflowruntime.WaitResumed {
+		t.Fatalf("Resume(reopened wait) = (%+v, %v)", resumed, err)
 	}
 	resumeClaim, err := state.ClaimNode(ctx, workflowruntime.ClaimNodeRequest{
-		InvocationID: executing.ID, ExpectedClaimGeneration: readyAgain.Snapshot.ClaimGeneration,
+		InvocationID: executing.ID, ExpectedClaimGeneration: resumed.Node.ClaimGeneration,
 		Owner: "resume-worker", Token: "resume-token", IdempotencyKey: "claim-resume-path",
 		Now: base.Add(6 * time.Second), LeaseUntil: base.Add(2 * time.Minute),
 	})
@@ -688,7 +683,7 @@ func TestWorkflowStateWaitingResumeAndRecoveryOrdering(t *testing.T) {
 	}
 }
 
-func TestWorkflowStateValuesWaitCachePinsAndActivations(t *testing.T) {
+func TestWorkflowStateValuesCachePinsAndActivations(t *testing.T) {
 	store, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "hadron.db"))
 	_ = store
 	ctx := context.Background()
@@ -714,60 +709,6 @@ func TestWorkflowStateValuesWaitCachePinsAndActivations(t *testing.T) {
 	wrongRef.Digest = values.SHA256Digest([]byte("wrong"))
 	if _, loadErr := state.LoadValues(ctx, wrongRef); !errors.Is(loadErr, workflowruntime.ErrCASMismatch) {
 		t.Fatalf("LoadValues wrong digest error = %v", loadErr)
-	}
-
-	wait, err := state.CreateWait(ctx, workflowruntime.CreateWaitRequest{Snapshot: workflowruntime.WaitSnapshot{
-		Ref: workflowruntime.WaitRef{ID: "wait-aux"}, Invocation: node.ID,
-		Status: workflowruntime.WaitOpen, CreatedAt: base, UpdatedAt: base,
-	}})
-	if err != nil {
-		t.Fatalf("CreateWait: %v", err)
-	}
-	resumeRequest := workflowruntime.ResumeWaitRequest{
-		WaitID: wait.Ref.ID, IdempotencyKey: "resume-aux", Values: &ref,
-		ResumedAt: base.Add(time.Second),
-	}
-	resumed, outcome, err := state.ResumeWait(ctx, resumeRequest)
-	if err != nil || outcome != workflowruntime.IdempotencyApplied || resumed.Status != workflowruntime.WaitResumed {
-		t.Fatalf("ResumeWait = (%+v, %q, %v)", resumed, outcome, err)
-	}
-	replayRequest := resumeRequest
-	replayRequest.ResumedAt = resumeRequest.ResumedAt.In(time.FixedZone("resume", 2*60*60))
-	_, outcome, err = state.ResumeWait(ctx, replayRequest)
-	if err != nil || outcome != workflowruntime.IdempotencyReplayed {
-		t.Fatalf("ResumeWait replay = (%q, %v)", outcome, err)
-	}
-	conflictResume := resumeRequest
-	conflictResume.ResumedAt = base.Add(2 * time.Second)
-	if _, _, conflictErr := state.ResumeWait(ctx, conflictResume); !errors.Is(conflictErr, workflowruntime.ErrIdempotencyConflict) {
-		t.Fatalf("ResumeWait conflict error = %v", conflictErr)
-	}
-	otherNode := createWorkflowTestNode(t, state, run.ID, "other-wait-node", base)
-	immutableWait := wait
-	immutableWait.Invocation = otherNode.ID
-	immutableWait.UpdatedAt = base.Add(2 * time.Second)
-	if _, saveErr := state.SaveWait(ctx, workflowruntime.SaveWaitRequest{
-		Snapshot: immutableWait, ExpectedGeneration: resumed.Generation,
-	}); !errors.Is(saveErr, workflowruntime.ErrInvalidRecord) {
-		t.Fatalf("SaveWait invocation replacement error = %v", saveErr)
-	}
-	unchangedWait, err := state.LoadWait(ctx, wait.Ref.ID)
-	if err != nil || unchangedWait.Generation != resumed.Generation || unchangedWait.Invocation != node.ID {
-		t.Fatalf("rejected SaveWait mutated identity: %+v, %v", unchangedWait, err)
-	}
-	emptyKeyWait, err := state.CreateWait(ctx, workflowruntime.CreateWaitRequest{Snapshot: workflowruntime.WaitSnapshot{
-		Ref: workflowruntime.WaitRef{ID: "wait-empty-key"}, Invocation: otherNode.ID,
-		Status: workflowruntime.WaitOpen, CreatedAt: base, UpdatedAt: base,
-	}})
-	if err != nil {
-		t.Fatalf("CreateWait(empty key): %v", err)
-	}
-	emptyRequest := workflowruntime.ResumeWaitRequest{WaitID: emptyKeyWait.Ref.ID, ResumedAt: base.Add(time.Second)}
-	if _, emptyOutcome, emptyErr := state.ResumeWait(ctx, emptyRequest); emptyErr != nil || emptyOutcome != workflowruntime.IdempotencyApplied {
-		t.Fatalf("ResumeWait(empty key) = (%q, %v)", emptyOutcome, emptyErr)
-	}
-	if _, _, duplicateErr := state.ResumeWait(ctx, emptyRequest); !errors.Is(duplicateErr, workflowruntime.ErrAlreadyResumed) {
-		t.Fatalf("duplicate empty-key ResumeWait error = %v", duplicateErr)
 	}
 
 	planDigest := run.Plan.Digest
@@ -951,6 +892,27 @@ func workflowTestValue(t *testing.T, text string) values.Value {
 		t.Fatalf("NewInline(%q): %v", text, err)
 	}
 	return value
+}
+
+func workflowTestOpenWaitRecord(t *testing.T, id workflowruntime.WaitID, token string, deadline time.Time) workflowwait.Record {
+	t.Helper()
+	schema, err := workflowwait.NewSchemaRef(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := ""
+	if token != "" {
+		digest, err = workflowwait.DigestToken(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return workflowwait.Record{
+		Kind: workflowwait.KindSignal, Correlation: string(id), Deadline: deadline,
+		ResumeSchema: schema, ResumeTokenDigest: digest, Visibility: workflowwait.VisibilityPrivate,
+		Authority: workflowwait.ResponderAuthority{Kind: "test"}, WakeSource: workflowwait.WakeSignal,
+		Status: workflowwait.StatusOpen,
+	}
 }
 
 func TestWorkflowStateEventSequenceConcurrentPerRun(t *testing.T) {

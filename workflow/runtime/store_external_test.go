@@ -78,7 +78,7 @@ func TestRunCASIdempotencyAndDefensiveCopies(t *testing.T) {
 	}
 }
 
-func TestNodeAttemptAndWaitPersistence(t *testing.T) {
+func TestNodePersistenceDefensiveCopies(t *testing.T) {
 	ctx := context.Background()
 	store := runtimetest.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
@@ -104,73 +104,6 @@ func TestNodeAttemptAndWaitPersistence(t *testing.T) {
 		t.Fatalf("node snapshot was aliased: %#v, %v", loadedNode, err)
 	}
 
-	wait, err := store.CreateWait(ctx, workflowruntime.CreateWaitRequest{Snapshot: workflowruntime.WaitSnapshot{
-		Ref: workflowruntime.WaitRef{ID: "wait-1"}, Invocation: id, Status: workflowruntime.WaitOpen,
-		CreatedAt: now, UpdatedAt: now,
-	}})
-	if err != nil || wait.Generation != 1 {
-		t.Fatalf("CreateWait = %#v, %v", wait, err)
-	}
-	resume := workflowruntime.ResumeWaitRequest{WaitID: "wait-1", IdempotencyKey: "resume-1", ResumedAt: now.Add(time.Minute)}
-	resumed, outcome, err := store.ResumeWait(ctx, resume)
-	if err != nil || outcome != workflowruntime.IdempotencyApplied || resumed.Status != workflowruntime.WaitResumed {
-		t.Fatalf("ResumeWait = %#v, %q, %v", resumed, outcome, err)
-	}
-	resumeReplay := resume
-	resumeReplay.ResumedAt = equivalentInstant(resume.ResumedAt)
-	if _, replayOutcome, replayErr := store.ResumeWait(ctx, resumeReplay); replayErr != nil || replayOutcome != workflowruntime.IdempotencyReplayed {
-		t.Fatalf("resume replay = %q, %v", replayOutcome, replayErr)
-	}
-	conflict := resume
-	conflict.ResumedAt = now.Add(2 * time.Minute)
-	if _, _, conflictErr := store.ResumeWait(ctx, conflict); !errors.Is(conflictErr, workflowruntime.ErrIdempotencyConflict) {
-		t.Fatalf("expected resume idempotency conflict, got %v", conflictErr)
-	}
-
-	wait2, err := store.CreateWait(ctx, workflowruntime.CreateWaitRequest{Snapshot: workflowruntime.WaitSnapshot{
-		Ref: workflowruntime.WaitRef{ID: "wait-2"}, Invocation: id, Status: workflowruntime.WaitOpen,
-		CreatedAt: now, UpdatedAt: now,
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wait2.Status = workflowruntime.WaitTimedOut
-	wait2.ResolvedAt = now.Add(time.Minute)
-	wait2.UpdatedAt = wait2.ResolvedAt
-	timedOut, err := store.SaveWait(ctx, workflowruntime.SaveWaitRequest{Snapshot: wait2, ExpectedGeneration: 1})
-	if err != nil || timedOut.Status != workflowruntime.WaitTimedOut || timedOut.Generation != 2 {
-		t.Fatalf("SaveWait = %#v, %v", timedOut, err)
-	}
-	reassigned := timedOut
-	reassigned.Invocation = invocationID("run-1", "other")
-	reassigned.UpdatedAt = now.Add(2 * time.Minute)
-	if _, identityErr := store.SaveWait(ctx, workflowruntime.SaveWaitRequest{Snapshot: reassigned, ExpectedGeneration: 2}); !errors.Is(identityErr, workflowruntime.ErrInvalidRecord) {
-		t.Fatalf("expected immutable wait invocation rejection, got %v", identityErr)
-	}
-	unchangedWait, err := store.LoadWait(ctx, "wait-2")
-	if err != nil || unchangedWait.Generation != 2 || unchangedWait.Invocation != id {
-		t.Fatalf("rejected wait reassignment mutated wait: %#v, %v", unchangedWait, err)
-	}
-
-	_, err = store.CreateWait(ctx, workflowruntime.CreateWaitRequest{Snapshot: workflowruntime.WaitSnapshot{
-		Ref: workflowruntime.WaitRef{ID: "wait-3"}, Invocation: id, Status: workflowruntime.WaitOpen,
-		CreatedAt: now, UpdatedAt: now,
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	emptyKeyResume := workflowruntime.ResumeWaitRequest{WaitID: "wait-3", ResumedAt: now.Add(time.Minute)}
-	withoutKey, outcome, err := store.ResumeWait(ctx, emptyKeyResume)
-	if err != nil || outcome != workflowruntime.IdempotencyApplied || withoutKey.Generation != 2 {
-		t.Fatalf("empty-key ResumeWait = %#v, %q, %v", withoutKey, outcome, err)
-	}
-	if _, _, duplicateErr := store.ResumeWait(ctx, emptyKeyResume); !errors.Is(duplicateErr, workflowruntime.ErrAlreadyResumed) {
-		t.Fatalf("expected empty-key duplicate to report already resumed, got %v", duplicateErr)
-	}
-	unchanged, err := store.LoadWait(ctx, "wait-3")
-	if err != nil || unchanged.Generation != 2 || unchanged.Status != workflowruntime.WaitResumed {
-		t.Fatalf("empty-key duplicate mutated wait: %#v, %v", unchanged, err)
-	}
 }
 
 func TestPlanCachePinsAndExternalActivation(t *testing.T) {

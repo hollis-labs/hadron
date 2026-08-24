@@ -1,0 +1,1 @@
+{"name":"wait-child-run","expect":"pass","input":{"kind":"child_run","wake_source":"child_run","correlation":"child:run-42"}}

@@ -1,0 +1,1 @@
+{"name":"wait-timer","expect":"pass","input":{"kind":"timer","wake_source":"timer","correlation":"timer:node-1"}}

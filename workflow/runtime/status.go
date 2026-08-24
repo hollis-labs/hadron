@@ -1,5 +1,7 @@
 package runtime
 
+import workflowwait "github.com/hollis-labs/hadron/workflow/wait"
+
 // RunStatus is the persisted state of a workflow run.
 type RunStatus string
 
@@ -122,23 +124,13 @@ func (s NodeStatus) CanTransitionTo(next NodeStatus) bool {
 	}
 }
 
-// WaitStatus is the minimal persistence state of a suspended invocation. Wake
-// source and correlation semantics belong to W03-T05.
-type WaitStatus string
+// WaitStatus is retained as a source-compatible alias. workflow/wait owns the
+// generic wait state model.
+type WaitStatus = workflowwait.Status
 
 const (
-	WaitOpen     WaitStatus = "open"
-	WaitResumed  WaitStatus = "resumed"
-	WaitTimedOut WaitStatus = "timed_out"
-	WaitCanceled WaitStatus = "canceled"
+	WaitOpen     = workflowwait.StatusOpen
+	WaitResumed  = workflowwait.StatusResumed
+	WaitTimedOut = workflowwait.StatusTimedOut
+	WaitCanceled = workflowwait.StatusCanceled
 )
-
-// Valid reports whether s is supported by the persistence snapshot.
-func (s WaitStatus) Valid() bool {
-	switch s {
-	case WaitOpen, WaitResumed, WaitTimedOut, WaitCanceled:
-		return true
-	default:
-		return false
-	}
-}

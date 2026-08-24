@@ -9,6 +9,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/values"
+	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 // RunID is an opaque host-independent run identifier.
@@ -359,17 +360,17 @@ type WaitRef struct {
 // Validate reports malformed wait identity.
 func (r WaitRef) Validate() error { return validateOpaqueID("wait id", string(r.ID)) }
 
-// WaitSnapshot is the minimal persistence record needed to release and resume
-// a worker. W03-T05 owns correlation, tokens, wake sources, and timeout policy.
+// WaitSnapshot adds runtime identity, CAS, and storage chronology to the
+// canonical workflow/wait Record. The anonymous record produces one flat JSON
+// envelope; it does not duplicate status or resume fields.
 type WaitSnapshot struct {
-	Ref          WaitRef             `json:"ref"`
-	Invocation   NodeInvocationID    `json:"invocation"`
-	Status       WaitStatus          `json:"status"`
-	ResumeValues *values.ValueSetRef `json:"resume_values,omitempty"`
-	Generation   uint64              `json:"generation"`
-	CreatedAt    time.Time           `json:"created_at"`
-	UpdatedAt    time.Time           `json:"updated_at"`
-	ResolvedAt   time.Time           `json:"resolved_at,omitempty"`
+	Ref        WaitRef          `json:"ref"`
+	Invocation NodeInvocationID `json:"invocation"`
+	workflowwait.Record
+	Generation uint64    `json:"generation"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	ResolvedAt time.Time `json:"resolved_at,omitempty"`
 }
 
 // Validate checks minimal wait persistence integrity.
@@ -380,31 +381,21 @@ func (s WaitSnapshot) Validate() error {
 	if err := s.Invocation.Validate(); err != nil {
 		return err
 	}
-	if !s.Status.Valid() {
-		return fmt.Errorf("unsupported wait status %q", s.Status)
+	if err := s.Record.Validate(); err != nil {
+		return err
 	}
-	if err := validateOptionalValueSetRef(s.ResumeValues); err != nil {
-		return fmt.Errorf("wait resume values: %w", err)
-	}
-	switch s.Status {
-	case WaitOpen:
-		if !s.ResolvedAt.IsZero() || s.ResumeValues != nil {
-			return fmt.Errorf("open wait must not contain a resolution outcome")
+	if s.Resolution == nil {
+		if !s.ResolvedAt.IsZero() {
+			return fmt.Errorf("unresolved wait must not contain resolved_at")
 		}
-	case WaitResumed:
-		if s.ResolvedAt.IsZero() {
-			return fmt.Errorf("resumed wait requires resolved_at")
-		}
-	case WaitTimedOut, WaitCanceled:
-		if s.ResolvedAt.IsZero() {
-			return fmt.Errorf("terminal wait requires resolved_at")
-		}
-		if s.ResumeValues != nil {
-			return fmt.Errorf("timed-out or canceled wait must not contain resume values")
-		}
+	} else if s.ResolvedAt.IsZero() || !s.ResolvedAt.Equal(s.Resolution.ResolvedAt) {
+		return fmt.Errorf("wait resolved_at must equal resolution provenance")
 	}
 	if !s.ResolvedAt.IsZero() && s.ResolvedAt.Before(s.CreatedAt) {
 		return fmt.Errorf("wait resolved_at must not precede created_at")
+	}
+	if !s.Deadline.IsZero() && s.Deadline.Before(s.CreatedAt) {
+		return fmt.Errorf("wait deadline must not precede created_at")
 	}
 	return validateSnapshotTimes(s.Generation, s.CreatedAt, s.UpdatedAt)
 }

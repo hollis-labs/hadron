@@ -1,7 +1,9 @@
 {
-  "name": "minimal-pass",
+  "name": "wait-gate",
   "expect": "pass",
   "input": {
-    "accepted": true
+    "kind": "gate",
+    "wake_source": "gate",
+    "correlation": "gate:approval"
   }
 }

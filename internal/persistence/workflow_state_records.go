@@ -35,7 +35,7 @@ FROM workflow_attempts`
 
 const workflowWaitSelect = `
 SELECT wait_id, run_id, node_id, iteration, status, resume_values_ref_json,
-       generation, created_at, updated_at, resolved_at
+       generation, created_at, updated_at, resolved_at, record_json, deadline
 FROM workflow_waits`
 
 const workflowEventSelect = `
@@ -228,25 +228,44 @@ func loadWorkflowWait(ctx context.Context, query workflowSQL, id workflowruntime
 
 func scanWorkflowWait(row workflowScanner) (workflowruntime.WaitSnapshot, error) {
 	var (
-		snapshot                     workflowruntime.WaitSnapshot
-		status, createdAt, updatedAt string
-		resumeJSON, resolvedAt       sql.NullString
-		generation                   int64
+		snapshot                                     workflowruntime.WaitSnapshot
+		status, createdAt, updatedAt                 string
+		resumeJSON, resolvedAt, recordJSON, deadline sql.NullString
+		generation                                   int64
 	)
 	if err := row.Scan(
 		&snapshot.Ref.ID, &snapshot.Invocation.RunID, &snapshot.Invocation.NodeID,
 		&snapshot.Invocation.Iteration, &status, &resumeJSON, &generation,
-		&createdAt, &updatedAt, &resolvedAt,
+		&createdAt, &updatedAt, &resolvedAt, &recordJSON, &deadline,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return workflowruntime.WaitSnapshot{}, fmt.Errorf("%w: wait %q", workflowruntime.ErrNotFound, snapshot.Ref.ID)
 		}
 		return workflowruntime.WaitSnapshot{}, fmt.Errorf("load workflow wait: %w", err)
 	}
-	snapshot.Status = workflowruntime.WaitStatus(status)
-	var err error
-	if snapshot.ResumeValues, err = decodeOptionalWorkflowJSON[values.ValueSetRef]("wait resume values", resumeJSON); err != nil {
+	if !recordJSON.Valid {
+		return workflowruntime.WaitSnapshot{}, workflowInvalid(errors.New("wait semantic record is missing"))
+	}
+	if err := decodeWorkflowJSON("wait record", recordJSON.String, &snapshot.Record); err != nil {
 		return workflowruntime.WaitSnapshot{}, err
+	}
+	if snapshot.Status != workflowruntime.WaitStatus(status) {
+		return workflowruntime.WaitSnapshot{}, workflowInvalid(errors.New("wait status column diverges from semantic record"))
+	}
+	var err error
+	resumeMirror, err := decodeOptionalWorkflowJSON[values.ValueSetRef]("wait resume values", resumeJSON)
+	if err != nil {
+		return workflowruntime.WaitSnapshot{}, err
+	}
+	if !equalWorkflowValueRef(snapshot.ResumeValues, resumeMirror) {
+		return workflowruntime.WaitSnapshot{}, workflowInvalid(errors.New("wait resume-values column diverges from semantic record"))
+	}
+	deadlineMirror, err := parseOptionalWorkflowTime("wait deadline", deadline)
+	if err != nil {
+		return workflowruntime.WaitSnapshot{}, err
+	}
+	if !snapshot.Deadline.Equal(deadlineMirror) {
+		return workflowruntime.WaitSnapshot{}, workflowInvalid(errors.New("wait deadline column diverges from semantic record"))
 	}
 	if snapshot.Generation, err = workflowGeneration("wait generation", generation); err != nil {
 		return workflowruntime.WaitSnapshot{}, err

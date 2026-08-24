@@ -1,8 +1,8 @@
-// Package wait owns application-neutral contracts for suspending, correlating,
-// and resuming workflow execution.
+// Package wait defines application-neutral durable wait, resume, and timed
+// activation contracts.
 //
-// It is extraction-ready engine core. Imports are limited to the standard
-// library and explicitly adopted extraction-safe dependencies; Hadron internal
-// packages are forbidden. Its public API is unstable until the wait contracts
-// are defined.
+// A wait is durable state rather than a blocked worker. Gate, message, timer,
+// callback, child-run, and signal adapters all converge on the same resume
+// operation. Host-specific endpoint materialization and scheduler bindings sit
+// behind the narrow interfaces in this package.
 package wait

@@ -17,7 +17,6 @@ var (
 	ErrIdempotencyConflict = errors.New("workflow idempotency conflict")
 	ErrClaimMismatch       = errors.New("workflow claim token or generation mismatch")
 	ErrLeaseExpired        = errors.New("workflow claim lease expired")
-	ErrAlreadyResumed      = errors.New("workflow wait already resumed")
 )
 
 // CASMismatchError reports the expected and current record generation.
@@ -84,27 +83,6 @@ type CreateNodeInvocationRequest struct {
 type SaveNodeInvocationRequest struct {
 	Snapshot           NodeInvocationSnapshot
 	ExpectedGeneration uint64
-}
-
-// CreateWaitRequest persists a minimal open wait snapshot.
-type CreateWaitRequest struct {
-	Snapshot WaitSnapshot
-}
-
-// SaveWaitRequest stores a new wait snapshot under record CAS. It provides a
-// persistence hook for timeout and cancellation without defining transitions.
-type SaveWaitRequest struct {
-	Snapshot           WaitSnapshot
-	ExpectedGeneration uint64
-}
-
-// ResumeWaitRequest records one wait resume outcome. IdempotencyKey is
-// optional; wait identity still prevents a second mutation when it is empty.
-type ResumeWaitRequest struct {
-	WaitID         WaitID
-	IdempotencyKey string
-	Values         *values.ValueSetRef
-	ResumedAt      time.Time
 }
 
 // SaveValuesRequest persists a defensively copied value set for an owner.
@@ -234,10 +212,7 @@ type StateStore interface {
 	LoadAttempt(context.Context, AttemptID) (AttemptSnapshot, error)
 	ListAttempts(context.Context, NodeInvocationID) ([]AttemptSnapshot, error)
 
-	CreateWait(context.Context, CreateWaitRequest) (WaitSnapshot, error)
 	LoadWait(context.Context, WaitID) (WaitSnapshot, error)
-	SaveWait(context.Context, SaveWaitRequest) (WaitSnapshot, error)
-	ResumeWait(context.Context, ResumeWaitRequest) (WaitSnapshot, IdempotencyOutcome, error)
 
 	SaveValues(context.Context, SaveValuesRequest) (values.ValueSetRef, error)
 	LoadValues(context.Context, values.ValueSetRef) (values.ValueSet, error)
