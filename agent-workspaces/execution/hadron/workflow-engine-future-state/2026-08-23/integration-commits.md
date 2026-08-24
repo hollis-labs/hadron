@@ -45,3 +45,4 @@
 | 41 | W04-T08 | `1d670de` | `92147ad` | Hadron | accepted after frozen catalog identity, schema/evidence fail-closed validation, suspension fencing, and atomic external terminal verification hardening |
 | 42 | W03-T06 | `4110fd9` | `8fb3ab0` | Hadron | accepted after exact pinned-plan recovery, compiler-scoped input binding, deterministic crash policy, replay/fan-out provenance, and readiness-fixpoint hardening |
 | 43 | W03-T09 | `1ffda24` | `ca2a7d2` | Hadron | accepted after append-order memo parity and untrusted value-record integrity hardening |
+| 44 | W05-T07 | `4a89c14` | `d717a58` | Hadron | accepted after caller-ownership, bounded-report, post-attestation, and exact namespace-authorization hardening |

@@ -99,7 +99,7 @@ superseded requirements are not mistaken for omissions.
 | W05-T04 | Bind schedules and triggers to activation registrations | 05 | W00-T07, W03-T05, W05-T03 | [ ] |
 | W05-T05 | Persist plan/source snapshots and provenance | 05 | W01-T04, W05-T03 | [ ] |
 | W05-T06 | Update run inspection and diagnostics | 05 | W03-T01, W03-T07, W05-T01 | [ ] |
-| W05-T07 | Add workflow contract-test and registration service | 05 | W03-T06, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07, W05-T01, W05-T03 | [ ] |
+| W05-T07 | Add workflow contract-test and registration service | 05 | W03-T06, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07, W05-T01, W05-T03 | [x] |
 | W05-T08 | Materialize source-declared activations | 05 | W01-T07, W05-T03, W05-T04 | [ ] |
 | W06-T01 | Add workflow CLI commands | 06 | W05-T03, W05-T06 | [ ] |
 | W06-T02 | Add HTTP workflow API surface | 06 | W05-T01, W05-T06 | [ ] |

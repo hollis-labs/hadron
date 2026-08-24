@@ -105,7 +105,7 @@ or the detailed architecture made a later choice. In particular:
 | Source requirement | Disposition | Owning tasks |
 | --- | --- | --- |
 | Registry search/version/digest/provenance/package/pin/publish | Planned | W05-T03, W05-T05, W05-T07, W06-T08 |
-| Definition-level contract tests with mocked executors | Planned | W05-T07 |
+| Definition-level contract tests with mocked executors | Implemented | W05-T07 |
 | Agent-builds-tools flow from discovery through tested pinned exposure | Planned | W05-T07, W06-T08 |
 | CLI and HTTP validate/explain/run/inspect/cancel/resume/rerun/signals | Planned | W06-T01, W06-T02 |
 | MCP meta, pinned, discoverable/lazy, hidden tiers; namespaces/budgets/catalog/list-changed | Planned | W06-T03 |

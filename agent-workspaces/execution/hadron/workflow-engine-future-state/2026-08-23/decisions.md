@@ -358,3 +358,18 @@
   fresh node passes the same non-overridable repetition-safety floor.
 
   Vanta revision for all W03-T06 decisions: `01M0TF0WH5TY4BVT6HHNZ20XA5`.
+
+- W05-T07 contract qualification executes the exact compiled plan through an
+  isolated instance of the ordinary bindings, driver, dispatcher, retry,
+  control-flow, verifier, and typed-output path. Canonical editable suites and
+  signed reports are bounded and digest-bound; the registry may index and
+  package them but does not become source authority.
+
+- Namespace operations authorize twice: first against the requested identity
+  before resolution, then against the exact resolved authority and digest.
+  Mutations freeze that authorized version/digest, closing existence and
+  authorization-to-mutation races. The Hadron catalog persists immutable
+  records and separate current, pin, and publication state by atomic private
+  file replacement.
+
+  Vanta revision for both W05-T07 decisions: `01M0TKZPPPWSSW3PYK2GKEQ3GN`.

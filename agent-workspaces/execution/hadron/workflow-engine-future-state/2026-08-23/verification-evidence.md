@@ -1010,3 +1010,21 @@ untrusted value-record integrity hardening.
 | independent source review `1ffda24` | `go test -count=10 ./workflow/runtime/... ./internal/persistence/... ./workflow/compile/... ./workflow/conformance/... ./workflow/stepkind/...` | pass |
 | independent source review `1ffda24` | `go test -race -count=2 ./workflow/runtime/... ./internal/persistence/... ./workflow/compile/... ./workflow/conformance/...`; focused vet and committed diff check | pass |
 | integration `ca2a7d2` | full repository suite, focused race suite, and import-boundary guard | pass |
+
+## W05-T07
+
+Reviewed graph-native editable suites and scaffold generation, controlled
+executor mocks, ordinary-runtime qualification, signed bounded reports,
+two-stage namespace authorization, immutable catalog versioning/pin/publish,
+source authority/provenance, and deterministic packages. Source commit
+`4a89c14` was integrated as `d717a58` after caller-ownership, defensive report
+admission, aggregate effect, and post-attestor output hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `4a89c14` | focused appworkflow, registry, and package suites at repeated counts | pass |
+| source worktree `4a89c14` | focused race suite, import guard, vet, targeted golangci, full repository suite, hooks, and diff checks | pass; zero new issues |
+| independent source review `4a89c14` | `go test -count=15 ./internal/appworkflow ./internal/registry ./internal/pack`; focused vet | pass |
+| independent source review `4a89c14` | `go test -race -count=2 ./internal/appworkflow ./internal/registry ./internal/pack`; import-boundary guard and committed diff check | pass |
+| integration `d717a58` | focused suites at `-count=10` and focused race suite | pass |
+| integration `d717a58` | `go test -count=1 ./...` | first run hit the existing timing-sensitive child-start cancellation contention test; isolated `-count=50` and immediate full repository rerun passed |
