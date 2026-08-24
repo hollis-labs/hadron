@@ -54,26 +54,26 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W05-T07 | W03-T06, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07, W05-T01, W05-T03 | integrated | `d717a58` |
 | W05-T08 | W01-T07, W05-T03, W05-T04 | integrated | `0a37129` |
 | W06-T01 | W05-T03, W05-T06 | integrated | `93ab469` |
-| W06-T02 | W05-T01, W05-T06 | dispatched | |
-| W06-T03 | W05-T03, W05-T07, W06-T02 | blocked | |
-| W06-T04 | W05-T01, W06-T02 | blocked | |
+| W06-T02 | W05-T01, W05-T06 | integrated | `cea2992` |
+| W06-T03 | W05-T03, W05-T07, W06-T02 | eligible | |
+| W06-T04 | W05-T01, W06-T02 | eligible | |
 | W06-T05 | W01-T04, W05-T06 | integrated | `0fbea80` |
 | W06-T06 | W06-T01, W06-T02, W06-T03, W06-T04, W06-T05 | blocked | |
 | W06-T07 | W06-T06, W06-T08, W06-T09, W06-T10 | blocked | |
 | W06-T08 | W05-T07, W06-T01, W06-T03, W06-T04 | blocked | |
 | W06-T09 | W03-T04, W03-T07, W03-T08, W04-T02, W04-T05, W05-T01, W05-T03, W05-T07, W06-T03 | blocked | |
-| W06-T10 | W06-T02, W06-T05 | blocked | |
+| W06-T10 | W06-T02, W06-T05 | dispatched | |
 | W07-T01 | W04-T08, W05-T01 | integrated | `377490c` |
 | W07-T02 | W04-T01, W02-T02 | integrated | `9e52e0a` |
 | W07-T03 | W03-T05, W04-T06 | integrated | `2d95b0c` |
-| W07-T04 | W04-T01, W06-T02 | blocked | |
+| W07-T04 | W04-T01, W06-T02 | dispatched | |
 | W07-T05 | W01-T02, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | integrated | `4d9c2c7` |
 | W07-T06 | W00-T04, W06-T07 | blocked | |
 | W07-T07 | W04-T01, W04-T07, W05-T01 | integrated | `9431754` |
 | W07-T08 | W00-T07, W03-T06, W04-T07, W05-T04 | dispatched | |
 | W07-T09 | W02-T07, W03-T08, W04-T07 | integrated | `94f03bb` |
 | W07-T10 | W03-T08, W04-T06, owner-approved compensation ADR | owner-gated | |
-| W07-T11 | W01-T02, W05-T03, W06-T01, W06-T02 | blocked | |
+| W07-T11 | W01-T02, W05-T03, W06-T01, W06-T02 | eligible | |
 
 W07-T09's durable service-store migration integrated as `0024` after W05-T04's
 `0023` activation migration.

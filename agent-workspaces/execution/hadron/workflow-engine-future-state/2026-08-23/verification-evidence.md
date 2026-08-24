@@ -1216,3 +1216,20 @@ claimed.
 | source worktree `d4cbb35` | Vite preview plus direct index and transformed `RunDetailPage` HTTP requests | pass |
 | independent source review `d4cbb35` | `go test -count=3 ./internal/rundiagnostics/... ./internal/api/...`; `go test -race -count=1 ./internal/rundiagnostics/...`; frontend test/typecheck/lint/build; committed security, truncation, and endpoint-contract audit | pass |
 | integration `0fbea80` | cherry-pick and committed diff check | pass |
+
+## W06-T02
+
+Reviewed the graph-native HTTP transport, shared application-service DTOs,
+authenticated caller authority, definition/run hiding boundaries, bounded and
+duplicate-safe JSON decoding, redacted read projections, exact action routing,
+CORS, safe error envelopes, and idempotent mutations. Source commit `5bfc8c2`
+was integrated as `cea2992` after cancel and rerun were hardened to reject
+missing idempotency keys at the transport boundary instead of surfacing an
+internal service error.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `5bfc8c2` | focused API/appworkflow suites at repeated counts; focused race; vet; targeted golangci; import guard; full repository suite; hooks and diff checks | pass; zero issues |
+| independent source review `5bfc8c2` | `go test -count=3 ./cmd/hadron ./internal/api ./internal/appworkflow ./internal/rundiagnostics`; API/appworkflow race suite; hidden-resource, private-display, authority, JSON-bound, exact-route, response-bound, and safe-error audit | pass |
+| independent idempotency hardening `5bfc8c2` | API at `-count=3`; API/appworkflow at `-count=10`; API/appworkflow race suite; pre-commit format/vet/golangci | pass; missing cancel/rerun keys now return structured `invalid_request` 400 responses |
+| integration `cea2992` | focused API/appworkflow/diagnostics/CLI suite at `-count=3`; `go test -count=1 ./...` | pass |

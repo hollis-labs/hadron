@@ -107,7 +107,7 @@ or the detailed architecture made a later choice. In particular:
 | Registry search/version/digest/provenance/package/pin/publish | Planned | W05-T03, W05-T05, W05-T07, W06-T08 |
 | Definition-level contract tests with mocked executors | Implemented | W05-T07 |
 | Agent-builds-tools flow from discovery through tested pinned exposure | Planned | W05-T07, W06-T08 |
-| CLI and HTTP validate/explain/run/inspect/cancel/resume/rerun/signals | Implemented for CLI; HTTP/signals planned | W06-T01, W06-T02 |
+| CLI and HTTP validate/explain/run/inspect/cancel/resume/rerun/signals | Implemented for CLI and HTTP workflow operations; named signals planned | W06-T01, W06-T02, W07-T08 |
 | MCP meta, pinned, discoverable/lazy, hidden tiers; namespaces/budgets/catalog/list-changed | Planned | W06-T03 |
 | A2A durable task correlation and schema/effect/provenance-derived cards | Planned | W06-T04 |
 | UI graph, edge values, waits, artifacts, source maps, exposure, blast radius, replay | Implemented for graph-native diagnostics and desktop views; live daemon composition and remaining legacy-Wails cleanup planned | W06-T02, W06-T05, W06-T06, W06-T10 |
