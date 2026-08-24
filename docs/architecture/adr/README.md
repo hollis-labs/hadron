@@ -11,6 +11,13 @@ implementation work.
 - [ADR 0003: Blueprint execution uses one trigger and schedule dispatch path](0003-blueprint-execution-trigger-schedule-model.md)
 - [ADR 0004: Pipelines orchestrate through the shared execution manager](0004-pipeline-orchestration-model.md)
 - [ADR 0005: Wails app keeps a frontend/backend contract boundary](0005-wails-layering-frontend-backend-contract.md)
+- [ADR 0006: Reusable workflow engine boundary](0006-reusable-workflow-engine-boundary.md)
+- [ADR 0007: Graph-native workflow source and IR](0007-graph-native-workflow-ir.md)
+- [ADR 0008: Typed values and artifacts are the workflow data plane](0008-typed-values-and-artifacts.md)
+- [ADR 0009: Durable ready-queue runtime and waits](0009-durable-ready-queue-runtime.md)
+- [ADR 0010: Step executor registry](0010-step-executor-registry.md)
+- [ADR 0011: Hadron host surfaces and exposure profiles](0011-hadron-host-surfaces-and-exposure.md)
+- [ADR 0012: RunScope and ExecutionTarget are separate concepts](0012-run-scope-and-execution-target.md)
 
 ## Format
 
