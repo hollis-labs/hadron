@@ -1180,3 +1180,20 @@ history. Source commit `dcfb868` was integrated as `0a37129` without a migration
 | source worktree `dcfb868` | focused activation lifecycle/reconciliation suites at `-count=10`; relevant packages at `-count=3`; focused race, vet, golangci, full repository, hooks, and diff checks | pass; zero task-local issues |
 | independent source review `dcfb868` | `go test -count=3 ./internal/appworkflow/... ./internal/registry/... ./internal/persistence/... ./internal/scheduler/... ./internal/trigger/...` | pass |
 | integration `0a37129` | `go test -count=1 ./...`; `go test -count=3 ./internal/agentsubstrate`; immediate `go test -count=1 ./...` rerun | first full run reached only the recorded agentsubstrate outbox timing fixture; the isolated package passed three consecutive times and the immediate complete rerun passed |
+
+## W06-T01
+
+Reviewed all seven graph-native workflow CLI commands, the shared authenticated
+application-service facade, bounded daemon client, structured diagnostics and
+redacted projections, truthful dry-run explanation, exact run authorization,
+designated-responder resume, and policy-checked pinned start lifecycle. Source
+commit `6ae32b2` was integrated as `93ab469` after rejection recovery proved
+that partially bound pins cannot leave runnable or claimable work.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `6ae32b2` | focused CLI/appworkflow/persistence suites at repeated counts; boundary cases at `-count=10`; focused race suite | pass |
+| source worktree `6ae32b2` | import guard, vet, targeted golangci, module diff, committed diff, and full repository suite | pass; zero task-local issues |
+| independent source review `6ae32b2` | `go test -count=3 ./cmd/hadron ./internal/appworkflow ./internal/persistence`; committed contract, authorization, redaction, and pin-rejection audit | pass |
+| source worktree `6ae32b2` | overlapping full/race execution followed by exact agentsubstrate fixture at `-count=10` and an uncontended full rerun | only the recorded agentsubstrate explicit-outbox timing fixture failed during overlap; isolation and the uncontended complete rerun passed |
+| integration `93ab469` | focused packages at `-count=3`; focused CLI/appworkflow race suite; integration diff check | pass |

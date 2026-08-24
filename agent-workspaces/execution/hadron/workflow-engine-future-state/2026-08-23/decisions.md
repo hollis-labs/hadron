@@ -477,3 +477,19 @@
   lifecycle schema.
 
   Vanta revision for both W05-T08 decisions: `01M0TZ5G7Z8AR6K71XA8FRQAVZ`.
+
+- W06-T01 keeps CLI commands as bounded transports over one authenticated
+  `WorkflowOperations` facade. Inspect, cancel, and rerun default to the exact
+  full immutable run-owner identity, with delegation only through an explicit
+  authorizer. Resume authenticates the actual responder and uses the canonical
+  wait authority/token contract so designated non-owners can resume without
+  accepting forged identity hints. Run IDs alone are never capabilities.
+
+- Explicit pins are canonical immutable start intent and bind after node
+  materialization but before admission. Permanent rejection uses the ordinary
+  cancellation coordinator, verifies the run and every node terminal and
+  unleased, then seals `pins_rejected`. Any earlier durable pin is retained for
+  deterministic replay but cannot make work claimable; deleting partial pins
+  or returning an error with pending runnable state were rejected.
+
+  Vanta revision for both W06-T01 decisions: `01M0V08XGXP6Q2FR4HSW1EK8RQ`.

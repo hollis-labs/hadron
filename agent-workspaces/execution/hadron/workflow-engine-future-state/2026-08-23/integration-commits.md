@@ -55,3 +55,4 @@
 | 51 | W07-T09 | `fbc877d` | `94f03bb` | Hadron | accepted after deterministic lowering, fail-fast admission fencing, launch-before-provider durability, monotonic service recovery, exact generated-child authorization, and honest optional-gate hardening |
 | 52 | W05-T06 | `c8b57bc` | `ddc2030` | Hadron | accepted after bounded durable-state projection, pinned-plan/source explanation, shared redaction, exact activation-attempt joins, and credential-shaped lease-owner hardening |
 | 53 | W05-T08 | `dcfb868` | `0a37129` | Hadron | accepted after qualified-registration ingress, exact current-alias removal, source/materialization digest fencing, reconciliation replay, and schedule-projection rollback hardening |
+| 54 | W06-T01 | `6ae32b2` | `93ab469` | Hadron | accepted after authenticated shared-service routing, safe transport projections, truthful dry-run handling, exact run authority, and terminal pre-admission pin rejection |

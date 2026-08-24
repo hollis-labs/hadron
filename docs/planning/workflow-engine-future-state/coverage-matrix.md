@@ -57,7 +57,7 @@ or the detailed architecture made a later choice. In particular:
 | Error and fan-out failure data available to expressions | Implemented | W03-T04, W03-T08 |
 | Explicit `cmd` capture (`json`, `lines`, `kv`) and scoped legacy shim | Planned | W04-T03, W06-T06 |
 | Redaction, retention, opaque secret refs, and stream masking | Planned | W02-T01, W02-T06, W04-T03 through W04-T05 |
-| Memoization by safe content key and pinned development data | Planned | W03-T09, W06-T01 |
+| Memoization by safe content key and pinned development data | Implemented | W03-T09, W06-T01 |
 
 ## Runtime And Control Flow
 
@@ -107,7 +107,7 @@ or the detailed architecture made a later choice. In particular:
 | Registry search/version/digest/provenance/package/pin/publish | Planned | W05-T03, W05-T05, W05-T07, W06-T08 |
 | Definition-level contract tests with mocked executors | Implemented | W05-T07 |
 | Agent-builds-tools flow from discovery through tested pinned exposure | Planned | W05-T07, W06-T08 |
-| CLI and HTTP validate/explain/run/inspect/cancel/resume/rerun/signals | Planned | W06-T01, W06-T02 |
+| CLI and HTTP validate/explain/run/inspect/cancel/resume/rerun/signals | Implemented for CLI; HTTP/signals planned | W06-T01, W06-T02 |
 | MCP meta, pinned, discoverable/lazy, hidden tiers; namespaces/budgets/catalog/list-changed | Planned | W06-T03 |
 | A2A durable task correlation and schema/effect/provenance-derived cards | Planned | W06-T04 |
 | UI graph, edge values, waits, artifacts, source maps, exposure, blast radius, replay | Planned | W06-T05 |
