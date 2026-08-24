@@ -447,3 +447,15 @@
   the bound parent graph.
 
   Vanta revision: `01M0TVX7V03B9YSV01SMCWG7WK`.
+
+- W05-T06 defines one bounded, read-only graph-native diagnostics service and
+  DTO family over durable state plus the exact pinned plan. Logs are not the
+  source of truth. SQL readers bound nodes, attempts, and activation history
+  and report truncation; typed values/events use their shared renderers, while
+  credential-shaped operational metadata is masked and lease tokens, resume
+  credentials, activation payloads, and raw dispatch JSON are never projected.
+  Activation attempts join `dispatch.physical_run_id` to validated fire,
+  attempt, and result facts without changing migration 0023. Transports must
+  reuse these DTOs rather than creating private workflow semantics.
+
+  Vanta revision: `01M0TW33W9B520BX7HS93CGCJW`.
