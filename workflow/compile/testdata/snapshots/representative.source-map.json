@@ -1,0 +1,157 @@
+{
+  "graph": {
+    "format": "workflow",
+    "locator": "testdata/representative.workflow.yaml",
+    "start_line": 2,
+    "start_column": 3,
+    "path": [
+      "workflow"
+    ]
+  },
+  "inputs": {
+    "project-id": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 14,
+      "start_column": 5,
+      "path": [
+        "inputs",
+        "0"
+      ]
+    },
+    "tasks": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 20,
+      "start_column": 5,
+      "path": [
+        "inputs",
+        "1"
+      ]
+    }
+  },
+  "outputs": {
+    "summary": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 27,
+      "start_column": 5,
+      "path": [
+        "outputs",
+        "summary"
+      ]
+    }
+  },
+  "nodes": {
+    "cleanup-workspace": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 131,
+      "start_column": 5,
+      "path": [
+        "finally",
+        "0"
+      ]
+    },
+    "create-items": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 46,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "1"
+      ]
+    },
+    "prepare-request": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 34,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "0"
+      ]
+    },
+    "publish-child": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 114,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "4"
+      ]
+    },
+    "recover-items": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 87,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "2"
+      ]
+    },
+    "summarize": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 93,
+      "start_column": 5,
+      "path": [
+        "steps",
+        "3"
+      ]
+    }
+  },
+  "edges": {
+    "create-items-\u003esummarize:control": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 94,
+      "start_column": 13,
+      "path": [
+        "steps",
+        "3",
+        "needs",
+        "0"
+      ]
+    },
+    "prepare-request-\u003ecreate-items:data": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 48,
+      "start_column": 9,
+      "path": [
+        "steps",
+        "1",
+        "needs",
+        "0"
+      ]
+    },
+    "publish-child-\u003ecleanup-workspace:control": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 132,
+      "start_column": 13,
+      "path": [
+        "finally",
+        "0",
+        "needs",
+        "0"
+      ]
+    },
+    "summarize-\u003epublish-child:control": {
+      "format": "workflow",
+      "locator": "testdata/representative.workflow.yaml",
+      "start_line": 117,
+      "start_column": 9,
+      "path": [
+        "steps",
+        "4",
+        "needs",
+        "0"
+      ]
+    }
+  }
+}

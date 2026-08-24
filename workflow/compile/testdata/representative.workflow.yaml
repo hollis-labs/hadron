@@ -1,0 +1,138 @@
+workflow:
+  name: Release Plan
+  namespace: Example Org
+  version: 2.1.0
+  provenance:
+    authority: project
+    revision: release-17
+    metadata:
+      channel: stable
+  metadata:
+    owner: workflow-team
+
+inputs:
+  - name: Project ID
+    description: Project receiving the tasks.
+    type: string
+    required: true
+    default:
+      literal: demo-project
+  - name: Tasks
+    type: array
+    items_type: object
+    required: true
+
+outputs:
+  summary:
+    type: object
+    value:
+      expression: steps.summarize.outputs.result
+    metadata:
+      audience: caller
+
+steps:
+  - name: Prepare Request
+    cmd: echo prepare
+    outputs:
+      stdout:
+        type: string
+    effects: [compute]
+    timeout:
+      queue: 5s
+      execution: 30s
+    metadata:
+      phase: setup
+
+  - name: Create Items
+    needs:
+      - node: Prepare Request
+        kind: data
+    ready_when: all_success
+    if: inputs["project-id"] != ""
+    for_each: inputs.tasks
+    concurrency: 4
+    mcp_call:
+      server: torque
+      tool: torque_task_create
+      arguments:
+        project_id: "{{ inputs.project-id }}"
+        title: "{{ item.title }}"
+    with:
+      project: inputs["project-id"]
+      dry-run:
+        literal: false
+      title:
+        interpolation: "Task {{ item.title }}"
+    outputs:
+      result-json:
+        type: object
+    effects: [mutate]
+    retry:
+      attempts: 3
+      backoff:
+        strategy: exponential
+        initial_delay: 1s
+        max_delay: 30s
+        multiplier: 2
+      on: [temporary]
+      idempotency_key: inputs["project-id"] + ":" + item.title
+    timeout:
+      schedule_to_close: 5m
+    catch:
+      - errors: [temporary]
+        when: item.retryable
+        targets: [Recover Items]
+        bind_as: create_error
+
+  - name: Recover Items
+    transform:
+      recovered: steps["create-items"].error
+    finally:
+      scope: [Create Items]
+
+  - name: Summarize
+    needs: [Create Items]
+    kind: custom-summary
+    config:
+      operation: aggregate
+      source: adapter-semantic-value
+    with:
+      items: steps["create-items"].items
+    outputs:
+      result:
+        schema:
+          type: object
+    idempotency:
+      mode: intrinsic
+      scope: workflow
+    switch:
+      arms:
+        - when: len(steps["create-items"].items) > 0
+          targets: [Publish Child]
+      default: [Recover Items]
+
+  - name: Publish Child
+    kind: call
+    needs:
+      - node: Summarize
+        kind: control
+    call:
+      definition:
+        authority: registry
+        kind: workflow
+        id: Publisher
+        locator: registry://workflows/publisher
+        version: 1.4.0
+        digest: sha256:child
+      mode: run
+      on_parent_close: request_cancel
+
+finally:
+  - name: Cleanup Workspace
+    needs: [Publish Child]
+    http_call:
+      method: DELETE
+      url: https://example.test/workspaces/current
+    effects: [destructive]
+    timeout:
+      execution: 20s

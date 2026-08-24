@@ -128,7 +128,9 @@ func TestGeneratedSchemaMetadataAndExtensionPoints(t *testing.T) {
 		t.Fatalf("source-authoring preferred files = %#v", source["preferredFiles"])
 	}
 	plan := object(t, boundaries, "serializedExecutionPlan")
-	if plan["component"] != "graph" || plan["schema"] != "#/$defs/Graph" {
+	if plan["component"] != "execution-plan" ||
+		plan["schema"] != "https://schemas.hollis-labs.dev/workflow/plan/v1/execution-plan.schema.json" ||
+		plan["graph"] != "#/$defs/Graph" {
 		t.Fatalf("serialized-plan boundary = %#v", plan)
 	}
 

@@ -1160,8 +1160,9 @@
   "title": "Workflow Graph IR",
   "x-workflow-boundaries": {
     "serializedExecutionPlan": {
-      "component": "graph",
-      "schema": "#/$defs/Graph"
+      "component": "execution-plan",
+      "graph": "#/$defs/Graph",
+      "schema": "https://schemas.hollis-labs.dev/workflow/plan/v1/execution-plan.schema.json"
     },
     "sourceAuthoring": {
       "format": "workflow",

@@ -20,6 +20,7 @@ import (
 const (
 	graphPackagePath = "github.com/hollis-labs/hadron/workflow/graph"
 	schemaID         = "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json"
+	planSchemaID     = "https://schemas.hollis-labs.dev/workflow/plan/v1/execution-plan.schema.json"
 )
 
 // Generate returns the deterministic JSON Schema document for graph.Graph.
@@ -49,8 +50,9 @@ func Generate() ([]byte, error) {
 				"schema":         "#/$defs/Graph",
 			},
 			"serializedExecutionPlan": map[string]any{
-				"component": "graph",
-				"schema":    "#/$defs/Graph",
+				"component": "execution-plan",
+				"schema":    planSchemaID,
+				"graph":     "#/$defs/Graph",
 			},
 		},
 		"$defs": generator.definitions,

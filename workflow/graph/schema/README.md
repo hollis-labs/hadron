@@ -14,6 +14,7 @@ and fails if the committed bytes are stale. It also compiles the document as
 JSON Schema Draft 2020-12.
 
 The root `x-workflow-boundaries` metadata identifies use at the graph-native
-source-authoring boundary and as the graph component of a serialized execution
-plan. The later execution-plan task can point that boundary at its wrapper type
-without changing the graph definitions.
+source-authoring boundary and as the graph component of the separately
+generated serialized `ExecutionPlan` schema. The plan schema references these
+definitions, so graph Go types remain authoritative without a graph-to-compiler
+import cycle.

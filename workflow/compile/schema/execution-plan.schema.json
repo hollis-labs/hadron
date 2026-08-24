@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "ExecutionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "graph": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Graph"
+        },
+        "id": {
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Provenance"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "source_digests": {
+          "items": {
+            "$ref": "#/$defs/SourceDigest"
+          },
+          "type": "array"
+        },
+        "source_map": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/SourceMap"
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "digest",
+        "definition",
+        "provenance",
+        "source_digests",
+        "graph",
+        "source_map"
+      ],
+      "type": "object"
+    },
+    "SourceDigest": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/SourceFormat"
+        }
+      },
+      "required": [
+        "format",
+        "digest"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.hollis-labs.dev/workflow/plan/v1/execution-plan.schema.json",
+  "$ref": "#/$defs/ExecutionPlan",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Immutable workflow execution-plan envelope generated from the Go compile types.",
+  "title": "Workflow Execution Plan",
+  "x-workflow-boundary": {
+    "component": "execution-plan",
+    "graphSchema": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json",
+    "version": "1"
+  }
+}
