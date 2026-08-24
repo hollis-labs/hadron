@@ -19,3 +19,4 @@
 | 15 | W02-T04 | `1bc4de0` | `2caeb82` | Hadron | accepted after immutable run-plan/wait-invocation and semantic time-equality hardening |
 | 16 | W02-T07 | `b579713` | `f990807` | Hadron | accepted after scoped root-map and same-endpoint control/data edge hardening |
 | 17 | W03-T01 | `fe9de95` | `67f97c8` | Hadron | accepted after lease-releasing wait and claimed-resume lifecycle hardening |
+| 18 | W01-T07 | `eb6d4e9` | `1285639` | Hadron | accepted after activation vocabulary, file-path, and operational-state hardening |

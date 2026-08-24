@@ -420,3 +420,30 @@ integrated as `67f97c8`.
 | integration `67f97c8` | `go vet ./workflow/...` | pass |
 | integration `67f97c8` | `go test ./...` | pass |
 | integration `67f97c8` | `git diff --check` | pass |
+
+## W01-T07
+
+Reviewed activation lowering for webhook, schedule, message, file/event, and
+one-shot declarations; immutable provenance and source maps; policy vocabulary;
+closed operational fields; relocation-safe digests; generated schemas; and
+external-package behavior. Review aligned `deduplication_key` and lower-snake
+`run_id_reuse` with the established Graph contract and rejected URI-shaped
+file activation paths. Source commit `eb6d4e9` was integrated as `1285639`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `eb6d4e9` | `go generate ./workflow/graph ./workflow/compile` twice plus `git diff --exit-code` | pass; byte-stable with no generated drift |
+| source worktree `eb6d4e9` | `go test -count=10 ./workflow/graph/... ./workflow/compile/...` | pass |
+| source worktree `eb6d4e9` | `go test -race ./workflow/graph/... ./workflow/compile/...` | pass |
+| source worktree `eb6d4e9` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `eb6d4e9` | `go test ./workflow/...` | pass |
+| source worktree `eb6d4e9` | `go vet ./workflow/...` | pass |
+| source worktree `eb6d4e9` | `go test ./...` | pass |
+| integration `1285639` | `go generate ./workflow/graph ./workflow/compile` plus `git diff --exit-code` | pass; no generated drift |
+| integration `1285639` | `go test -count=10 ./workflow/graph/... ./workflow/compile/...` | pass |
+| integration `1285639` | `go test -race ./workflow/graph/... ./workflow/compile/...` | pass |
+| integration `1285639` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `1285639` | `go test ./workflow/...` | pass |
+| integration `1285639` | `go vet ./workflow/...` | pass |
+| integration `1285639` | `go test ./...` | pass |
+| integration `1285639` | `git diff --check` | pass |
