@@ -78,7 +78,7 @@ or the detailed architecture made a later choice. In particular:
 
 | Source requirement | Disposition | Owning tasks |
 | --- | --- | --- |
-| Generic `WaitRecord`, worker release, correlated/idempotent resume | Planned | W03-T05 |
+| Generic `WaitRecord`, worker release, correlated/idempotent resume | Implemented | W03-T05 |
 | Gate, message, callback, signal, timer, event, and child-run wakes use one path | Planned | W03-T05, W04-T07, W07-T08 |
 | Shared gate/checkpoint vocabulary with product-owned authority/presentation | Planned | W04-T07, W07-T07 |
 | Environment-bound and optional/non-blocking manual gates | Planned | W04-T07, W07-T09 |
@@ -90,7 +90,7 @@ or the detailed architecture made a later choice. In particular:
 
 | Source requirement | Disposition | Owning tasks |
 | --- | --- | --- |
-| Versioned registry with config/input/output schema, effects, capabilities, idempotency, retry, cancel, observe, suspend, embedded metadata | Planned | W00-T06, W04-T01 |
+| Versioned registry with config/input/output schema, effects, capabilities, idempotency, retry, cancel, observe, suspend, embedded metadata | Implemented | W00-T06, W04-T01 |
 | Initial `transform`, `cmd`, `http`, `mcp`, `call`, `sleep`, `wait_for`, `human_gate`, `message_wait` | Planned | W04-T02 through W04-T07 |
 | `verify` modifier and literal tool-activity evidence | Planned | W04-T08 |
 | Provider-agnostic typed `llm`, restricted tools, audit records, schema repair/fail | Planned later | W07-T01 |

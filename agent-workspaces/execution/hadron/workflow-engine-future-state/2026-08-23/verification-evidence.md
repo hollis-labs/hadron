@@ -676,3 +676,26 @@ redaction/retention, opaque secret references, and the Hadron artifact adapter.
 | integration `177e0e1` | `go test -v ./workflow/internal/importguard/...` | pass |
 | integration `177e0e1` | `go vet ./workflow/... ./internal/artifacts/...` | pass |
 | integration `177e0e1` | `go test ./... -count=1` | pass |
+
+## W04-T01
+
+Reviewed the immutable exact-version registry, lifecycle metadata agreement,
+typed execution and schema-validation envelopes, registry-driven dispatcher,
+same-attempt generic-wait continuation, durable external-operation CAS model,
+SQLite migration 0016, restart recovery, cancellation intent, transient hook
+errors, finalization warnings, redaction boundaries, and exact-number fidelity.
+Source commit `c19faf7` was integrated as `f1ad5fa`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `c19faf7` | `go test ./workflow/stepkind/... ./workflow/runtime/... ./internal/persistence/... ./workflow/conformance/...` | pass |
+| source worktree `c19faf7` | `go test -count=20 ./workflow/stepkind/... ./workflow/runtime/...` | pass |
+| source worktree `c19faf7` | `go test -race ./workflow/stepkind/... ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/...` | pass |
+| source worktree `c19faf7` | import guard, workflow vet, targeted golangci, full vet/test, and diff check | pass; zero new lint issues |
+| integration `f1ad5fa` | `go test -count=1 ./workflow/stepkind/... ./workflow/runtime/... ./workflow/conformance/... ./workflow/values/... ./internal/persistence/...` | pass |
+| integration `f1ad5fa` | `go test -shuffle=on -count=10 ./workflow/stepkind/... ./workflow/runtime/... ./internal/persistence/...` | pass |
+| integration `f1ad5fa` | `go test -race -count=1 ./workflow/stepkind/... ./workflow/runtime/... ./workflow/conformance/... ./workflow/values/... ./internal/persistence/...` | pass |
+| integration `f1ad5fa` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `f1ad5fa` | `go vet ./workflow/... ./internal/persistence/...` and targeted golangci | pass; zero issues |
+| integration `f1ad5fa` | `go test -count=1 ./...` | pass |
+| source and integration | `make lint` | baseline-only failure: unchanged intentional nil-context regression calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012; golangci reports zero issues |

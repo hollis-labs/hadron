@@ -36,13 +36,13 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W03-T07 | W03-T02, W03-T04 | blocked | |
 | W03-T08 | W02-T07, W03-T03, W03-T04 | blocked | |
 | W03-T09 | W02-T04, W03-T06, W03-T08 | blocked | |
-| W04-T01 | W00-T06, W03-T01 | dispatched | |
-| W04-T02 | W02-T02, W04-T01 | blocked | |
-| W04-T03 | W02-T01, W04-T01 | blocked | |
-| W04-T04 | W02-T01, W04-T01 | blocked | |
-| W04-T05 | W02-T01, W04-T01 | blocked | |
-| W04-T06 | W01-T04, W03-T02, W04-T01 | blocked | |
-| W04-T07 | W03-T05, W04-T01 | blocked | |
+| W04-T01 | W00-T06, W03-T01 | integrated | `f1ad5fa` |
+| W04-T02 | W02-T02, W04-T01 | eligible | |
+| W04-T03 | W02-T01, W04-T01 | eligible | |
+| W04-T04 | W02-T01, W04-T01 | eligible | |
+| W04-T05 | W02-T01, W04-T01 | eligible | |
+| W04-T06 | W01-T04, W03-T02, W04-T01 | eligible | |
+| W04-T07 | W03-T05, W04-T01 | eligible | |
 | W04-T08 | W02-T02, W03-T08, W04-T01 | blocked | |
 | W05-T01 | W02-T05, W02-T08, W03-T02, W04-T01, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | blocked | |
 | W05-T02 | W05-T01 | blocked | |
@@ -63,7 +63,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W06-T09 | W03-T04, W03-T07, W03-T08, W04-T02, W04-T05, W05-T01, W05-T03, W05-T07, W06-T03 | blocked | |
 | W06-T10 | W06-T02, W06-T05 | blocked | |
 | W07-T01 | W04-T08, W05-T01 | blocked | |
-| W07-T02 | W04-T01, W02-T02 | blocked | |
+| W07-T02 | W04-T01, W02-T02 | eligible | |
 | W07-T03 | W03-T05, W04-T06 | blocked | |
 | W07-T04 | W04-T01, W06-T02 | blocked | |
 | W07-T05 | W01-T02, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | blocked | |

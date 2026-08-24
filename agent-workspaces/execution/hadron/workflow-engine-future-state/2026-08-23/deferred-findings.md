@@ -53,3 +53,12 @@ No execution findings have been deferred.
   limitation rather than permission for artifact capture to become unbounded.
 
   Vanta revision: `01M0SEA420A728STDHY9GRR83X`.
+
+- W04-T01 permits exactly one durable generic wait per logical attempt. This
+  makes continuation identity unambiguous and avoids unsafe timestamp-based
+  inference, but an executor that genuinely needs multiple suspension stages
+  must use a future explicit durable sequence contract; repeatedly returning a
+  second wait from the same attempt is intentionally rejected. The initial
+  wait-backed executors require only one suspension stage.
+
+  Vanta revision: `01M0SG27G6MHHC3Q89CV1E0JWE`.

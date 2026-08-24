@@ -53,3 +53,20 @@
   authorized again with that owner context.
 
   Vanta revision for both W02-T08 decisions: `01M0SEA3HYG29FQ1X92SJRS4M1`.
+
+- W04-T01 closes executor handoff into exactly one of `completed`, `waiting`,
+  or `external`. Registry resolution is exact by kind and version and uses the
+  immutable metadata snapshot captured at registration. Required lifecycle is
+  `Spec`, `ValidateConfig`, and `Execute`; optional lifecycle interfaces must
+  agree with advertised prepare, observe, heartbeat, cancel, and finalize
+  metadata.
+
+- A resumed generic wait continues the same unfinished attempt through an
+  exact durable attempt-to-wait binding and digest-checked typed continuation;
+  the raw resume token never enters the invocation. External work likewise
+  binds an immutable non-secret reference and invocation to the exact attempt.
+  Transient heartbeat, observe, and cancel I/O errors keep that operation
+  pending for recovery rather than re-entering `Execute`; only adapter-reported
+  terminal outcomes or irrecoverable contract mismatches close the attempt.
+
+  Vanta revision for both W04-T01 decisions: `01M0SG27S7X00HFQ74ADDPP20X`.
