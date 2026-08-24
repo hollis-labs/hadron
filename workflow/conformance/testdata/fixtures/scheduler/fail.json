@@ -1,7 +1,0 @@
-{
-  "name": "minimal-fail",
-  "expect": "fail",
-  "input": {
-    "accepted": false
-  }
-}

@@ -116,14 +116,23 @@ type RunTransitionResult struct {
 }
 
 // NodeTransitionRequest changes a non-attempt node lifecycle edge under CAS.
-// Claim is required when the node currently has a lease.
+// Claim is required when the node currently has a lease. An exact same-state
+// request is a no-op. NodeBlocked to NodeBlocked with a changed valid Blocked
+// reason and strictly later At is an applied diagnostic refresh; every other
+// changed same-state request conflicts.
 type NodeTransitionRequest struct {
 	InvocationID       NodeInvocationID
 	ExpectedGeneration uint64
 	To                 NodeStatus
 	Blocked            *BlockedReason
-	Claim              *ClaimProof
-	At                 time.Time
+	// Explanation is an application-neutral reason persisted in the atomic
+	// status event for a transition to skipped. Stores must compare it for an
+	// exact skipped replay and reject a different explanation. It is never
+	// stored on the terminal node snapshot; Blocked remains exclusive to
+	// NodeBlocked.
+	Explanation *BlockedReason
+	Claim       *ClaimProof
+	At          time.Time
 }
 
 // NodeTransitionResult is the atomic node snapshot and event outcome. Event is

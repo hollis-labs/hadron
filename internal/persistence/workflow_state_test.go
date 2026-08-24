@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -298,6 +299,107 @@ func TestWorkflowStateLifecycleAttemptsEventsAndReopenRecovery(t *testing.T) {
 	}
 	if recovery.Ready[0].ID != ready.ID || recovery.Leased[0].ID != ready.ID {
 		t.Fatalf("ready/live-lease overlap lost: %+v", recovery)
+	}
+}
+
+func TestWorkflowStateSkippedExplanationAndBlockedRefreshParity(t *testing.T) {
+	_, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "hadron.db"))
+	ctx := context.Background()
+	base := workflowTestTime()
+	run := createWorkflowTestRun(t, state, "run-progression-parity", base)
+	node := createWorkflowTestNode(t, state, run.ID, "target", base)
+
+	initialReason := &workflowruntime.BlockedReason{
+		Code: workflowruntime.ReasonReadinessWaiting, Message: "waiting for dependencies",
+		Details: map[string]string{"terminal": "0", "nonterminal": "2"},
+	}
+	blocked, err := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: node.Generation,
+		To: workflowruntime.NodeBlocked, Blocked: initialReason, At: base.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("pending->blocked: %v", err)
+	}
+	exact, err := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: blocked.Snapshot.Generation,
+		To: workflowruntime.NodeBlocked, Blocked: initialReason, At: base.Add(time.Second),
+	})
+	if err != nil || exact.Outcome != workflowruntime.TransitionNoOp || exact.Event != nil {
+		t.Fatalf("exact blocked replay = (%+v, %v)", exact, err)
+	}
+	changedReason := &workflowruntime.BlockedReason{
+		Code: workflowruntime.ReasonReadinessWaiting, Message: "waiting for dependencies",
+		Details: map[string]string{"terminal": "1", "nonterminal": "1"},
+	}
+	refreshed, err := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: blocked.Snapshot.Generation,
+		To: workflowruntime.NodeBlocked, Blocked: changedReason, At: base.Add(2 * time.Second),
+	})
+	if err != nil || refreshed.Outcome != workflowruntime.TransitionApplied ||
+		refreshed.Snapshot.Generation != blocked.Snapshot.Generation+1 {
+		t.Fatalf("blocked diagnostic refresh = (%+v, %v)", refreshed, err)
+	}
+	if _, transitionErr := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: refreshed.Snapshot.Generation,
+		To: workflowruntime.NodeBlocked, Blocked: changedReason, At: base.Add(3 * time.Second),
+	}); !errors.Is(transitionErr, workflowruntime.ErrTransitionConflict) {
+		t.Fatalf("later unchanged blocked reason = %v", transitionErr)
+	}
+
+	explanation := &workflowruntime.BlockedReason{
+		Code: workflowruntime.ReasonReadinessUnsatisfied, Message: "all_success cannot be satisfied",
+		Dependencies: []workflowruntime.NodeInvocationID{
+			{RunID: run.ID, NodeID: "z-dependency"},
+			{RunID: run.ID, NodeID: "a-dependency"},
+		},
+		Details: map[string]string{"rule": "all_success", "failed": "1"},
+	}
+	skipped, err := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: refreshed.Snapshot.Generation,
+		To: workflowruntime.NodeSkipped, Explanation: explanation, At: base.Add(3 * time.Second),
+	})
+	if err != nil || skipped.Outcome != workflowruntime.TransitionApplied || skipped.Event == nil {
+		t.Fatalf("blocked->skipped with explanation = (%+v, %v)", skipped, err)
+	}
+	if skipped.Event.Attributes["explanation_code"] != explanation.Code || skipped.Event.Attributes["explanation"] == "" {
+		t.Fatalf("skipped explanation event = %+v", skipped.Event)
+	}
+	var durableExplanation workflowruntime.BlockedReason
+	if decodeErr := json.Unmarshal([]byte(skipped.Event.Attributes["explanation"]), &durableExplanation); decodeErr != nil {
+		t.Fatalf("decode durable explanation: %v", decodeErr)
+	}
+	if len(durableExplanation.Dependencies) != 2 || durableExplanation.Dependencies[0].NodeID != "a-dependency" ||
+		durableExplanation.Dependencies[1].NodeID != "z-dependency" {
+		t.Fatalf("durable explanation dependencies are not canonical: %+v", durableExplanation.Dependencies)
+	}
+	reordered := *explanation
+	reordered.Dependencies = append([]workflowruntime.NodeInvocationID(nil), explanation.Dependencies...)
+	reordered.Dependencies[0], reordered.Dependencies[1] = reordered.Dependencies[1], reordered.Dependencies[0]
+	replayed, err := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: skipped.Snapshot.Generation,
+		To: workflowruntime.NodeSkipped, Explanation: &reordered, At: base.Add(3 * time.Second),
+	})
+	if err != nil || replayed.Outcome != workflowruntime.TransitionNoOp || replayed.Event != nil {
+		t.Fatalf("exact skipped explanation replay = (%+v, %v)", replayed, err)
+	}
+	different := *explanation
+	different.Message = "different reason"
+	if _, transitionErr := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: skipped.Snapshot.Generation,
+		To: workflowruntime.NodeSkipped, Explanation: &different, At: base.Add(3 * time.Second),
+	}); !errors.Is(transitionErr, workflowruntime.ErrTransitionConflict) {
+		t.Fatalf("different skipped explanation replay = %v", transitionErr)
+	}
+	if _, transitionErr := state.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: skipped.Snapshot.Generation,
+		To: workflowruntime.NodeCanceled, Explanation: explanation, At: base.Add(4 * time.Second),
+	}); !errors.Is(transitionErr, workflowruntime.ErrInvalidRecord) {
+		t.Fatalf("non-skipped explanation = %v", transitionErr)
+	}
+
+	events, err := state.ListEvents(ctx, workflowruntime.EventQuery{RunID: run.ID})
+	if err != nil || len(events) != 3 {
+		t.Fatalf("progression event count = %d, %v; events=%+v", len(events), err, events)
 	}
 }
 

@@ -6,7 +6,9 @@ The `graph-validation` set now also contains real value-dependency inference
 cases for inferred edges, hidden references, optional branches, fan-out item
 scope, and expression-introduced cycles. Its payloads carry Graph values,
 registered-kind inputs, and deterministic inference expectations. The
-`executor-metadata` set contains real `stepkind.StepKindSpec` pass/fail cases.
+`scheduler` set contains semantic fixtures for all six readiness rules plus an
+unsupported-rule rejection. The `executor-metadata` set contains real
+`stepkind.StepKindSpec` pass/fail cases.
 
 Later implementation tasks replace or extend each payload with semantic cases
 while retaining the directory names, fixture envelope, and deterministic suite

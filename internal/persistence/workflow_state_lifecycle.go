@@ -2,8 +2,10 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -38,15 +40,24 @@ func (s *WorkflowStateStore) TransitionNode(ctx context.Context, request workflo
 			return attemptErr
 		}
 		if current.Status == request.To {
-			if at.Equal(current.UpdatedAt) && equalWorkflowBlocked(request.Blocked, current.Blocked) {
+			explanationMatches, explanationErr := workflowTransitionExplanationMatches(
+				ctx, query, current, request.Explanation, at,
+			)
+			if explanationErr != nil {
+				return explanationErr
+			}
+			if at.Equal(current.UpdatedAt) && equalWorkflowBlocked(request.Blocked, current.Blocked) && explanationMatches {
 				result = workflowruntime.NodeTransitionResult{
 					Snapshot: current, Outcome: workflowruntime.TransitionNoOp,
 				}
 				return nil
 			}
-			return &workflowruntime.TransitionConflictError{
-				Entity: "node", ID: workflowNodeIdentity(current.ID), Status: string(current.Status),
-				Reason: "same-status request is not an exact semantic replay",
+			if current.Status != workflowruntime.NodeBlocked || request.Blocked == nil ||
+				equalWorkflowBlocked(request.Blocked, current.Blocked) || !at.After(current.UpdatedAt) {
+				return &workflowruntime.TransitionConflictError{
+					Entity: "node", ID: workflowNodeIdentity(current.ID), Status: string(current.Status),
+					Reason: "same-status request is not an exact semantic replay or a later blocked-diagnostic refresh",
+				}
 			}
 		}
 
@@ -97,6 +108,14 @@ func (s *WorkflowStateStore) TransitionNode(ctx context.Context, request workflo
 			attributes["blocked_reason"] = next.Blocked.Code
 		} else if current.Blocked != nil {
 			attributes["blocked_reason"] = current.Blocked.Code
+		}
+		if request.Explanation != nil {
+			explanation, encodeErr := encodeWorkflowTransitionExplanation(request.Explanation)
+			if encodeErr != nil {
+				return workflowInvalid(encodeErr)
+			}
+			attributes["explanation"] = explanation
+			attributes["explanation_code"] = request.Explanation.Code
 		}
 		invocation := next.ID
 		event, eventErr := appendWorkflowEvent(ctx, query, workflowruntime.AppendEventRequest{
@@ -407,6 +426,19 @@ func validateWorkflowNodeTransition(request workflowruntime.NodeTransitionReques
 	} else if request.Blocked != nil {
 		return errors.New("blocked reason requires blocked target status")
 	}
+	if request.Explanation != nil {
+		if request.To != workflowruntime.NodeSkipped {
+			return errors.New("transition explanation requires skipped target status")
+		}
+		if err := request.Explanation.Validate(); err != nil {
+			return err
+		}
+		for i, dependency := range request.Explanation.Dependencies {
+			if dependency.RunID != request.InvocationID.RunID {
+				return fmt.Errorf("explanation dependency[%d] must belong to invocation run", i)
+			}
+		}
+	}
 	if request.Claim != nil {
 		return request.Claim.Validate()
 	}
@@ -529,6 +561,67 @@ func workflowNodeIdentity(id workflowruntime.NodeInvocationID) string {
 		return string(id.RunID) + "/" + id.NodeID
 	}
 	return string(id.RunID) + "/" + id.NodeID + "[" + id.Iteration + "]"
+}
+
+func encodeWorkflowTransitionExplanation(reason *workflowruntime.BlockedReason) (string, error) {
+	canonical := cloneWorkflowBlocked(reason)
+	sort.Slice(canonical.Dependencies, func(i, j int) bool {
+		left, right := canonical.Dependencies[i], canonical.Dependencies[j]
+		if left.RunID != right.RunID {
+			return left.RunID < right.RunID
+		}
+		if left.NodeID != right.NodeID {
+			return left.NodeID < right.NodeID
+		}
+		return left.Iteration < right.Iteration
+	})
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return "", fmt.Errorf("encode transition explanation: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func workflowTransitionExplanationMatches(
+	ctx context.Context,
+	query workflowSQL,
+	node workflowruntime.NodeInvocationSnapshot,
+	explanation *workflowruntime.BlockedReason,
+	at time.Time,
+) (bool, error) {
+	if node.Status != workflowruntime.NodeSkipped {
+		return explanation == nil, nil
+	}
+	expected := ""
+	if explanation != nil {
+		encoded, err := encodeWorkflowTransitionExplanation(explanation)
+		if err != nil {
+			return false, workflowInvalid(err)
+		}
+		expected = encoded
+	}
+	rows, err := query.QueryContext(ctx, workflowEventSelect+`
+WHERE run_id = ? AND event_type = ? AND occurred_at = ?
+ORDER BY sequence DESC`, node.ID.RunID, workflowruntime.EventNodeStatusChanged, workflowTime(at))
+	if err != nil {
+		return false, fmt.Errorf("load skipped workflow transition explanation: %w", err)
+	}
+	defer closeRows(rows)
+	for rows.Next() {
+		event, scanErr := scanWorkflowEvent(rows)
+		if scanErr != nil {
+			return false, scanErr
+		}
+		if event.Invocation == nil || *event.Invocation != node.ID ||
+			event.Attributes["to_status"] != string(workflowruntime.NodeSkipped) {
+			continue
+		}
+		return event.Attributes["explanation"] == expected, nil
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("scan skipped workflow transition explanation: %w", err)
+	}
+	return expected == "", nil
 }
 
 func cloneWorkflowBlocked(reason *workflowruntime.BlockedReason) *workflowruntime.BlockedReason {

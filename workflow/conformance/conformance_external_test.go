@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/hadron/workflow/conformance"
+	"github.com/hollis-labs/hadron/workflow/graph"
+	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 )
 
@@ -38,6 +40,35 @@ func (h fakeHost) StepKindRegistryFactory() conformance.Factory {
 func (h fakeHost) factory() conformance.Factory {
 	return func() (conformance.Runner, error) {
 		return conformance.RunnerFunc(func(_ context.Context, fixture conformance.Fixture) error {
+			if fixture.Set == conformance.SchedulerFixtures {
+				var input struct {
+					Rule         graph.ReadyRule                      `json:"rule"`
+					Dependencies []workflowruntime.NodeStatus         `json:"dependencies"`
+					Want         workflowruntime.ReadinessDisposition `json:"want"`
+				}
+				if err := json.Unmarshal(fixture.Input, &input); err != nil {
+					return fmt.Errorf("decode scheduler input: %w", err)
+				}
+				dependencies := make([]workflowruntime.DependencyState, len(input.Dependencies))
+				for index, status := range input.Dependencies {
+					dependencies[index] = workflowruntime.DependencyState{
+						InvocationID: workflowruntime.NodeInvocationID{
+							RunID: "fixture-run", NodeID: fmt.Sprintf("dependency-%d", index),
+						},
+						Status: status,
+					}
+				}
+				(*h.calls)++
+				evaluation, err := workflowruntime.EvaluateReadiness(input.Rule, dependencies)
+				if err != nil {
+					return err
+				}
+				if evaluation.Disposition != input.Want {
+					return fmt.Errorf("readiness disposition = %q, want %q", evaluation.Disposition, input.Want)
+				}
+				return nil
+			}
+
 			if fixture.Set == conformance.ExecutorMetadataFixtures {
 				var input struct {
 					Spec stepkind.StepKindSpec `json:"spec"`
@@ -68,7 +99,7 @@ func TestExternalHostRunsAllSuites(t *testing.T) {
 	calls := 0
 	conformance.RunAll(t, conformance.EmbeddedFixtures(), fakeHost{calls: &calls})
 
-	const wantCalls = 17
+	const wantCalls = 22
 	if calls != wantCalls {
 		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
 	}
@@ -95,12 +126,29 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 			if set == conformance.GraphValidationFixtures {
 				wantCount = 7
 			}
+			if set == conformance.SchedulerFixtures {
+				wantCount = 7
+			}
 			if len(fixtures) != wantCount {
 				t.Fatalf("fixture count = %d, want %d", len(fixtures), wantCount)
 			}
 			byName := make(map[string]conformance.Fixture, len(fixtures))
 			for _, fixture := range fixtures {
 				byName[fixture.Name] = fixture
+			}
+			if set == conformance.SchedulerFixtures {
+				for _, name := range []string{
+					"readiness-all-success", "readiness-all-done", "readiness-one-failed",
+					"readiness-all-failed", "readiness-none-failed", "readiness-always",
+				} {
+					if fixture := byName[name]; fixture.Expectation != conformance.ExpectPass {
+						t.Fatalf("%s fixture = %#v, want semantic pass fixture", name, fixture)
+					}
+				}
+				if fixture := byName["readiness-unsupported-rule"]; fixture.Expectation != conformance.ExpectFail {
+					t.Fatalf("unsupported readiness fixture = %#v, want semantic fail fixture", fixture)
+				}
+				return
 			}
 			if fixture := byName["minimal-fail"]; fixture.Expectation != conformance.ExpectFail {
 				t.Fatalf("minimal-fail fixture = %#v, want stable fail fixture", fixture)

@@ -1,7 +1,0 @@
-{
-  "name": "minimal-pass",
-  "expect": "pass",
-  "input": {
-    "accepted": true
-  }
-}

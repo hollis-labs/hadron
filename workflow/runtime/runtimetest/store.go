@@ -25,6 +25,7 @@ type Store struct {
 	attempts  map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
 	waits     map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
 	resumes   map[string]resumeRecord
+	timeouts  map[string]timeoutRecord
 
 	valueSets    map[string]storedValues
 	nextValueSet uint64
@@ -46,6 +47,11 @@ type runStartRecord struct {
 type resumeRecord struct {
 	request workflowruntime.ResumeWaitRequest
 	result  workflowruntime.WaitSnapshot
+}
+
+type timeoutRecord struct {
+	request workflowruntime.TimeoutWaitRequest
+	result  workflowruntime.WaitTimeoutResult
 }
 
 type storedValues struct {
@@ -75,6 +81,7 @@ func NewStore() *Store {
 		attempts:    make(map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot),
 		waits:       make(map[workflowruntime.WaitID]workflowruntime.WaitSnapshot),
 		resumes:     make(map[string]resumeRecord),
+		timeouts:    make(map[string]timeoutRecord),
 		valueSets:   make(map[string]storedValues),
 		plans:       make(map[string]workflowruntime.PlanRef),
 		events:      make(map[workflowruntime.RunID][]workflowruntime.Event),

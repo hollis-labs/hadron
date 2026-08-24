@@ -1,0 +1,9 @@
+{
+  "name": "readiness-all-failed",
+  "expect": "pass",
+  "input": {
+    "rule": "all_failed",
+    "dependencies": ["failed", "crashed"],
+    "want": "ready"
+  }
+}

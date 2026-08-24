@@ -1,0 +1,9 @@
+{
+  "name": "readiness-always",
+  "expect": "pass",
+  "input": {
+    "rule": "always",
+    "dependencies": ["running", "pending"],
+    "want": "ready"
+  }
+}
