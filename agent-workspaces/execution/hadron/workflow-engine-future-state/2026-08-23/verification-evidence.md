@@ -1095,3 +1095,4 @@ and conformance fixtures. Source commit `aa01d1d` was integrated as `9431754`.
 | source worktree `aa01d1d` | focused race suite, import guard, workflow vet, targeted golangci, full repository suite, hooks, and diff checks | pass; zero issues |
 | independent source review `aa01d1d` | focused emit, checkpoint, shared-gate, wait, and conformance suites at `-count=3`; same packages under the race detector | pass |
 | integration `9431754` | focused adapter/runtime/compiler/conformance suites at `-count=3`, import guard, and committed diff check | pass |
+| integration `9431754` plus tracking `cb173aa` | `go test -count=1 ./...` after W05-T02 and W07-T07 integration | pass |
