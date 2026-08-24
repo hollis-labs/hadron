@@ -292,3 +292,23 @@
   legacy bridge's weaker restart behavior.
 
   Vanta revision for all W07-T03 decisions: `01M0T66FYW6HCM98J3XZ0W1NZK`.
+
+- W03-T07 acquires the node claim and every configured worker, per-run,
+  effect, capability, and named concurrency resource in one durable operation.
+  Holder lease renewal and release are coupled to node-lease mutation, while
+  per-node fan-out occupancy remains authoritative in the existing fan-out
+  journal and joins the same diagnostic vocabulary without duplicating capacity.
+
+- Each scheduler resource's first successful or durably blocked admission
+  fixes its database-wide limit. Later processes must present the same limit or
+  fail closed; changing live capacity requires an explicit versioned
+  reconfiguration protocol rather than competing host-local configuration.
+
+- Fail-fast records one immutable winning trigger and begins the W03-T08
+  terminal intent atomically before canceling remaining ordinary work. That
+  terminal intent is the sole admission/cleanup fence; the private fail-fast
+  operation may create it with zero finalizers, while public
+  `BeginTerminalIntent` continues to reject empty cleanup scopes. Terminal
+  completion waits for all durable cancellation intents to reconcile.
+
+  Vanta revision for all W03-T07 decisions: `01M0T70V133EFD45J92KDFYG3Y`.

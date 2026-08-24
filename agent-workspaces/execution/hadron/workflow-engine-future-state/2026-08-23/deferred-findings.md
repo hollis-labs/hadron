@@ -192,3 +192,15 @@ No execution findings have been deferred.
   bundle-source contract.
 
   Vanta revision for all W07-T03 limitations: `01M0T66GDMA1FBR5Z5HG7PK398`.
+
+- W03-T07 resource limits are immutable after first admission in one database.
+  Safe live resizing remains a future versioned, quiescence-aware host
+  configuration contract; silently changing a limit while holders exist would
+  break exact cross-process fencing.
+
+- Fail-fast creates durable cancellation intents for request-cancel child
+  boundaries, but exact direct-cancel propagation to a separately hosted child
+  remains a Hadron host recovery responsibility because the extraction-safe
+  runtime store does not own a child-definition/graph resolver port.
+
+  Vanta revision for all W03-T07 limitations: `01M0T70VG9WK9EA81SPMXZM35Q`.

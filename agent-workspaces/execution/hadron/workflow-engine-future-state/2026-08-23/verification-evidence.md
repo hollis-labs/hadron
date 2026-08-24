@@ -933,3 +933,21 @@ integrated as `2d95b0c` after host-path and durable bundle hardening.
 | source worktree `e5a9dc4` | import guard, focused vet, generation stability, targeted golangci, hooks, and diff checks | pass; zero new issues |
 | source worktree `e5a9dc4` | `go test -count=1 ./...` | pass; one earlier timing-sensitive legacy agent test passed on isolated, package, and subsequent full reruns |
 | integration `2d95b0c` plus tracking | `go test -count=1 ./...` | pass |
+
+## W03-T07
+
+Reviewed atomic bounded admission across global worker, per-run, effect,
+capability, named cross-run, and fan-out occupancy resources; lease-coupled
+holder lifecycle and diagnostics; FIFO/fairness hooks; immutable SQLite
+migration 0020; and fail-fast/run-to-completion coordination through the
+existing terminal-intent and cancellation contracts. Source commit `cb3e80c`
+was integrated as `6c59dbf` after projection-integrity and rollback-parity
+hardening.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `cb3e80c` | focused runtime, conformance, and persistence suites at `-count=5`; targeted contention, rollback, reopen, and policy suites at higher repeated counts | pass |
+| source worktree `cb3e80c` | `go test -race -count=1 ./workflow/runtime/... ./workflow/conformance/... ./internal/persistence/...` | pass |
+| source worktree `cb3e80c` | import guard, focused vet, targeted golangci, hooks, and diff checks | pass; zero new issues |
+| source worktree before tracking-only rebase | `go test -count=1 ./...` | pass |
+| integration `6c59dbf` plus tracking | `go test -count=1 ./...` | pass |

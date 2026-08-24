@@ -66,8 +66,8 @@ or the detailed architecture made a later choice. In particular:
 | Durable node/attempt/value/wait/event journal and CAS claims | Planned | W02-T04, W02-T05, W03-T01, W03-T02 |
 | Distinct failed, crashed, canceled, timed-out, waiting, skipped, and blocked states | Planned | W02-T04, W03-T01 |
 | Ready queue with no topological level barrier | Planned | W03-T02, W03-T03 |
-| Bounded pool, per-effect/capability limits, cross-run keys, fairness hooks | Planned | W03-T02, W03-T07 |
-| Fail-fast/run-to-completion and tolerated fan-out failure | Planned | W03-T04, W03-T07 |
+| Bounded pool, per-effect/capability limits, cross-run keys, fairness hooks | Implemented | W03-T02, W03-T07 |
+| Fail-fast/run-to-completion and tolerated fan-out failure | Implemented | W03-T04, W03-T07 |
 | `if`, named readiness, switch, catch, continue-on-error, finally, join | Planned | W03-T03, W03-T08, W07-T09 |
 | Runtime `for_each`, bounded fan-out, per-item attempts/output/error | Planned | W03-T04 |
 | Effect-aware retry, backoff, idempotency, cancellation, and timeout taxonomy | Planned | W01-T05, W03-T04, W04-T01 |

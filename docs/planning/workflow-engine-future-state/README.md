@@ -82,7 +82,7 @@ superseded requirements are not mistaken for omissions.
 | W03-T04 | Implement retry, backoff, cancellation, and fan-out | 03 | W02-T02, W02-T07, W03-T01, W03-T02, W03-T05 | [x] |
 | W03-T05 | Implement generic `WaitRecord` suspend/resume | 03 | W03-T01, W02-T05 | [x] |
 | W03-T06 | Implement crash recovery and replay | 03 | W03-T02, W03-T05, W03-T08 | [ ] |
-| W03-T07 | Enforce scheduler concurrency resources and run policies | 03 | W03-T02, W03-T04 | [ ] |
+| W03-T07 | Enforce scheduler concurrency resources and run policies | 03 | W03-T02, W03-T04 | [x] |
 | W03-T08 | Implement catch, finally, switch, and error-as-data semantics | 03 | W02-T07, W03-T03, W03-T04 | [x] |
 | W03-T09 | Implement memoization and pinned-value execution | 03 | W02-T04, W03-T06, W03-T08 | [ ] |
 | W04-T01 | Harden step-kind runtime integration | 04 | W00-T06, W03-T01 | [x] |
@@ -98,7 +98,7 @@ superseded requirements are not mistaken for omissions.
 | W05-T03 | Bind registry and definition resolution | 05 | W01-T04, W05-T01 | [x] |
 | W05-T04 | Bind schedules and triggers to activation registrations | 05 | W00-T07, W03-T05, W05-T03 | [ ] |
 | W05-T05 | Persist plan/source snapshots and provenance | 05 | W01-T04, W05-T03 | [ ] |
-| W05-T06 | Update run inspection and diagnostics | 05 | W03-T01, W05-T01 | [ ] |
+| W05-T06 | Update run inspection and diagnostics | 05 | W03-T01, W03-T07, W05-T01 | [ ] |
 | W05-T07 | Add workflow contract-test and registration service | 05 | W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07, W05-T01, W05-T03 | [ ] |
 | W05-T08 | Materialize source-declared activations | 05 | W01-T07, W05-T03, W05-T04 | [ ] |
 | W06-T01 | Add workflow CLI commands | 06 | W05-T03, W05-T06 | [ ] |
