@@ -87,3 +87,13 @@ No execution findings have been deferred.
   never exposes the partial artifact as a successful typed node output.
 
   Vanta revision: `01M0SKA9AZ6Y6KZ93N7V1VN31F`.
+
+- W04-T04 checks the effective operation context before and after every
+  policy, resolver, secret, transport, response, and artifact boundary, so a
+  collaborator cannot return a late success after deadline. A Go interface
+  cannot forcibly interrupt an injected collaborator that ignores context and
+  blocks forever; host implementations must honor cancellation promptly.
+  Cleanup of an artifact committed by a sink before a later failed/canceled
+  outcome remains the host retention layer's responsibility.
+
+  Vanta revision: `01M0SM44GF1ASJZKC8TVX2CXZ9`.

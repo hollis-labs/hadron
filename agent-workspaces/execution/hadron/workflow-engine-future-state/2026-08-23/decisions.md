@@ -113,3 +113,19 @@
   bytes only through the adapter's bounded redacted writers.
 
   Vanta revision for both W04-T03 decisions: `01M0SKA8ZHADZ9C97RG90GM6R1`.
+
+- W04-T04 keeps `http@v1` SDK-neutral and fail-closed. A host destination
+  policy is mandatory; every DNS answer at every hop is authorized before one
+  deterministic approved address is pinned for the actual dial. The secure
+  default ignores ambient proxies, cookies, credential stores, keepalive,
+  decompression, transparent redirects, and transport retries while preserving
+  the logical Host and TLS SNI.
+
+- HTTP configuration effects, capabilities, and idempotency are author claims.
+  Immutable kind metadata stays conservative; only a coherent independently
+  trusted policy description for a safe method may narrow effects or retry
+  behavior. Secret references resolve only at execution boundaries, and all
+  persisted outputs and observations are bounded and masked before crossing
+  their storage boundary.
+
+  Vanta revision for both W04-T04 decisions: `01M0SM4422SRHQ8AM84WXWFKMX`.

@@ -758,3 +758,24 @@ failures; and artifact-store bridge. Source commit `e508945` was integrated as
 | integration `439fafe` | `go test -count=10 ./workflow/adapters/cmd/...` and `go test -race -count=1 ./workflow/adapters/cmd/...` | pass |
 | integration `439fafe` | `go test -count=1 ./workflow/adapters/... ./workflow/values/... ./workflow/runtime/...` | pass |
 | integration `439fafe` | `go test -count=1 ./workflow/internal/importguard/...`, focused vet, commit diff check, and clean-tree check | pass |
+
+## W04-T04
+
+Reviewed the HTTP kind's closed config and output schemas; conservative static
+metadata and trusted safe-method refinement; required destination policy;
+all-answer DNS authorization and one-address pinned transport; redirect,
+credential, and method-rewrite policy; boundary-only secret resolution;
+raw/decoded reflected-secret rejection; bounded typed inline/artifact outputs;
+exact JSON and pre-redaction schema validation; and full-operation timeout and
+cancellation classification. Source commit `2e233ed` was integrated as
+`4ad4e14`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `2e233ed` | `go test ./workflow/adapters/http/... ./workflow/compile/...`, `-count=30`, and focused redirect `-count=30` | pass |
+| source worktree `2e233ed` | `go test -race ./workflow/adapters/http/...` | pass |
+| source worktree `2e233ed` | import guard, workflow vet/tests, package golangci/staticcheck, full `go test ./...`, pre-commit hooks, and diff checks | pass; zero HTTP issues |
+| source worktree `2e233ed` | `make lint-go` | baseline-only failure: unchanged intentional nil-context calls at `workflow/runtime/ready_queue_external_test.go:253,257,261` trigger standalone staticcheck SA1012 |
+| integration `4ad4e14` | `go test -count=20 ./workflow/adapters/http/...` and `go test -race ./workflow/adapters/http/...` | pass |
+| integration `4ad4e14` | `go test ./workflow/adapters/... ./workflow/compile/... ./workflow/values/...` | pass |
+| integration `4ad4e14` | `go test -v ./workflow/internal/importguard/...`, focused vet, commit diff check, and clean-tree check | pass |
