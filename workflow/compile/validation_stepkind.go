@@ -72,6 +72,7 @@ func (c kindCatalog) resolve(name, version string) (stepkind.StepKind, *stepkind
 func (v *validator) validateKindConfig(node graph.Node, kind stepkind.StepKind, spec *stepkind.StepKindSpec) {
 	if spec != nil {
 		v.validateConfigSchema(node, *spec)
+		v.validateMemoizationSafety(node, *spec)
 	}
 	config := node.Config
 	if config == nil {
@@ -85,6 +86,34 @@ func (v *validator) validateKindConfig(node graph.Node, kind stepkind.StepKind, 
 			fmt.Sprintf("step kind %q rejected config for node %q", node.Kind, node.ID),
 			"Update the node config to satisfy the registered step-kind contract.",
 		))
+	}
+}
+
+func (v *validator) validateMemoizationSafety(node graph.Node, spec stepkind.StepKindSpec) {
+	if node.Memoization == nil {
+		return
+	}
+	if spec.Memoization == stepkind.MemoizationDisabled {
+		v.add(CodeInvalidMemoization, v.nodeSource(node), fmt.Sprintf("node %q requests memoization but step kind %q disables it", node.ID, spec.Name), "Remove memoize or select an executor that truthfully supports result reuse.")
+		return
+	}
+	effects := make(map[graph.Effect]struct{}, len(node.Effects)+len(spec.Effects))
+	for _, effect := range spec.Effects {
+		effects[effect] = struct{}{}
+	}
+	for _, effect := range node.Effects {
+		effects[effect] = struct{}{}
+	}
+	if _, mutate := effects[graph.EffectMutate]; mutate {
+		v.add(CodeInvalidMemoization, v.nodeSource(node), fmt.Sprintf("node %q cannot memoize mutate effects", node.ID), "Remove memoize from mutating work.")
+		return
+	}
+	if _, destructive := effects[graph.EffectDestructive]; destructive {
+		v.add(CodeInvalidMemoization, v.nodeSource(node), fmt.Sprintf("node %q cannot memoize destructive effects", node.ID), "Remove memoize from destructive work.")
+		return
+	}
+	if _, materialize := effects[graph.EffectMaterialize]; materialize && spec.Memoization != stepkind.MemoizationApproved {
+		v.add(CodeInvalidMemoization, v.nodeSource(node), fmt.Sprintf("node %q materialize memoization lacks executor approval", node.ID), "Use a kind that explicitly approves materialized-result reuse; host policy must also approve at runtime.")
 	}
 }
 

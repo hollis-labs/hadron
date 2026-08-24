@@ -19,7 +19,7 @@ JOIN workflow_plan_refs p ON p.digest = r.plan_digest`
 
 const workflowNodeSelect = `
 SELECT n.run_id, n.node_id, n.iteration, n.status, n.blocked_json,
-       n.inputs_ref_json, n.outputs_ref_json, n.wait_id,
+       n.inputs_ref_json, n.outputs_ref_json, n.outcome_origin, n.memo_key_digest, n.wait_id,
        n.latest_attempt, n.priority, n.claim_generation, n.generation,
        n.created_at, n.updated_at,
        l.owner, l.token, l.generation, l.expires_at
@@ -97,13 +97,14 @@ func scanWorkflowNode(row workflowScanner) (workflowruntime.NodeInvocationSnapsh
 		snapshot                                     workflowruntime.NodeInvocationSnapshot
 		status, createdAt, updatedAt                 string
 		blockedJSON, inputsJSON, outputsJSON, waitID sql.NullString
+		origin, memoKeyDigest                        string
 		generation, claimGeneration                  int64
 		leaseOwner, leaseToken, leaseExpiry          sql.NullString
 		leaseGeneration                              sql.NullInt64
 	)
 	if err := row.Scan(
 		&snapshot.ID.RunID, &snapshot.ID.NodeID, &snapshot.ID.Iteration,
-		&status, &blockedJSON, &inputsJSON, &outputsJSON, &waitID,
+		&status, &blockedJSON, &inputsJSON, &outputsJSON, &origin, &memoKeyDigest, &waitID,
 		&snapshot.LatestAttempt, &snapshot.Priority, &claimGeneration, &generation,
 		&createdAt, &updatedAt, &leaseOwner, &leaseToken, &leaseGeneration, &leaseExpiry,
 	); err != nil {
@@ -113,6 +114,8 @@ func scanWorkflowNode(row workflowScanner) (workflowruntime.NodeInvocationSnapsh
 		return workflowruntime.NodeInvocationSnapshot{}, fmt.Errorf("load workflow node: %w", err)
 	}
 	snapshot.Status = workflowruntime.NodeStatus(status)
+	snapshot.Origin = workflowruntime.InvocationOrigin(origin)
+	snapshot.MemoKeyDigest = memoKeyDigest
 	var err error
 	if snapshot.Blocked, err = decodeOptionalWorkflowJSON[workflowruntime.BlockedReason]("blocked reason", blockedJSON); err != nil {
 		return workflowruntime.NodeInvocationSnapshot{}, err

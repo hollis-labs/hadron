@@ -385,6 +385,7 @@ func (s *WorkflowStateStore) TimeoutWait(ctx context.Context, request workflowru
 		nextNode.Wait = nil
 		nextNode.Lease = nil
 		nextNode.Outputs = nil
+		nextNode.Origin = workflowruntime.OriginExecuted
 		nextNode.UpdatedAt = request.Now
 		nextNode.Generation++
 		nextAttempt := cloneWorkflowAttempt(*attempt)

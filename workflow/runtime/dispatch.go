@@ -51,6 +51,8 @@ const (
 	DispatchVerify         DispatchStage = "verify"
 	DispatchPersistVerify  DispatchStage = "persist_verification"
 	DispatchPersistOutput  DispatchStage = "persist_output"
+	DispatchReuseOutput    DispatchStage = "reuse_output"
+	DispatchPublishMemo    DispatchStage = "publish_memo"
 	DispatchSuspend        DispatchStage = "suspend"
 	DispatchHeartbeat      DispatchStage = "heartbeat"
 	DispatchObserve        DispatchStage = "observe"
@@ -101,7 +103,7 @@ func (f FailureDispositionFunc) NextNodeStatus(ctx context.Context, request Fail
 }
 
 // DispatchWarning is a non-reversing lifecycle warning produced after a
-// durable terminal attempt, currently by Finalizer or warning-event storage.
+// durable terminal attempt, including finalization and memo publication.
 type DispatchWarning struct {
 	Stage   DispatchStage
 	Failure Failure
@@ -147,6 +149,10 @@ type StepDispatcher struct {
 	waits       *WaitCoordinator
 	retry       *RetryCoordinator
 	verifiers   verification.Registry
+	memo        MemoStore
+	pins        PinStore
+	reuse       OutputReuseStore
+	reusePolicy ReuseAuthorizer
 }
 
 // DispatcherOptions supplies extraction-safe dispatcher collaborators.
@@ -162,6 +168,9 @@ type DispatcherOptions struct {
 	// Verifiers defaults to the deterministic core registry when nil. A
 	// supplied typed-nil registry is rejected rather than silently defaulted.
 	Verifiers verification.Registry
+	// ReuseAuthorizer is required for pins, private cache entries, and every
+	// materialize-effect memoization decision.
+	ReuseAuthorizer ReuseAuthorizer
 }
 
 // NewStepDispatcher constructs a registry-driven dispatcher. A nil Now uses
@@ -192,6 +201,19 @@ func NewStepDispatcher(options DispatcherOptions) (*StepDispatcher, error) {
 		return nil, fmt.Errorf("%w: snapshot verification registry: %w", ErrInvalidDispatch, err)
 	}
 	dispatcher.verifiers = frozenVerifiers
+	if memo, ok := options.Store.(MemoStore); ok {
+		dispatcher.memo = memo
+	}
+	if pins, ok := options.Store.(PinStore); ok {
+		dispatcher.pins = pins
+	}
+	if reuse, ok := options.Store.(OutputReuseStore); ok {
+		dispatcher.reuse = reuse
+	}
+	if options.ReuseAuthorizer != nil && nilReflect(options.ReuseAuthorizer) {
+		return nil, fmt.Errorf("%w: reuse authorizer is typed nil", ErrInvalidDispatch)
+	}
+	dispatcher.reusePolicy = options.ReuseAuthorizer
 	if options.RetryCoordinator != nil {
 		retry := *options.RetryCoordinator
 		retry.Store = options.Store
@@ -282,6 +304,16 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	claim := ClaimProof{
 		Owner: request.Claim.Lease.Owner, Token: request.Claim.Lease.Token,
 		Generation: request.Claim.Lease.Generation,
+	}
+	reused, handled, reuseDiagnostics, reuseErr := d.tryReuseOutputs(ctx, durableCtx, request, node, spec, claim)
+	diagnostics = append(diagnostics, reuseDiagnostics...)
+	if reuseErr != nil {
+		prestart.Diagnostics = cloneDiagnostics(diagnostics)
+		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchError(DispatchReuseOutput, request, reuseErr))
+	}
+	if handled {
+		reused.Diagnostics = cloneDiagnostics(diagnostics)
+		return reused, nil
 	}
 	executor := ExecutorMetadata{
 		Kind: request.Node.Kind, Version: spec.Version, Target: request.Target,
@@ -478,6 +510,11 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	}
 	result.Node, result.Attempt = finished.Node, finished.Attempt
 	result.Result, result.Outputs = &clonedResult, cloneValueSetRef(&outputRef)
+	if request.Node.Memoization != nil {
+		if warning := d.publishMemoResult(durableCtx, request, spec, inputs, finished, outputRef); warning != nil {
+			result.Warnings = append(result.Warnings, *warning)
+		}
+	}
 	d.finalize(durableCtx, request, kind, prepared, stepResult, nil, &result)
 	return result, nil
 }

@@ -134,11 +134,11 @@ func insertWorkflowNode(ctx context.Context, query workflowSQL, snapshot workflo
 	if _, err := query.ExecContext(ctx, `
 INSERT INTO workflow_node_invocations(
     run_id, node_id, iteration, status, blocked_json, inputs_ref_json,
-    outputs_ref_json, wait_id, latest_attempt, priority, claim_generation,
-    generation, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    outputs_ref_json, outcome_origin, memo_key_digest, wait_id, latest_attempt,
+    priority, claim_generation, generation, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		snapshot.ID.RunID, snapshot.ID.NodeID, snapshot.ID.Iteration, snapshot.Status,
-		blockedJSON, inputsJSON, outputsJSON, waitID, snapshot.LatestAttempt,
+		blockedJSON, inputsJSON, outputsJSON, snapshot.Origin, snapshot.MemoKeyDigest, waitID, snapshot.LatestAttempt,
 		snapshot.Priority, claimGeneration, generation,
 		workflowTime(snapshot.CreatedAt), workflowTime(snapshot.UpdatedAt),
 	); err != nil {
@@ -182,10 +182,10 @@ func updateWorkflowNodeCAS(ctx context.Context, query workflowSQL, snapshot work
 	result, err := query.ExecContext(ctx, `
 UPDATE workflow_node_invocations
 SET status = ?, blocked_json = ?, inputs_ref_json = ?, outputs_ref_json = ?,
-    wait_id = ?, latest_attempt = ?, priority = ?, claim_generation = ?,
+    outcome_origin = ?, memo_key_digest = ?, wait_id = ?, latest_attempt = ?, priority = ?, claim_generation = ?,
     generation = ?, updated_at = ?
 WHERE run_id = ? AND node_id = ? AND iteration = ? AND generation = ?`,
-		snapshot.Status, blockedJSON, inputsJSON, outputsJSON, waitID,
+		snapshot.Status, blockedJSON, inputsJSON, outputsJSON, snapshot.Origin, snapshot.MemoKeyDigest, waitID,
 		snapshot.LatestAttempt, snapshot.Priority, claimGeneration, generation,
 		workflowTime(snapshot.UpdatedAt), snapshot.ID.RunID, snapshot.ID.NodeID,
 		snapshot.ID.Iteration, expectedGeneration,

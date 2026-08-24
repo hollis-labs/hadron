@@ -102,7 +102,7 @@ func (s *WorkflowStateStore) BindNodeInputs(ctx context.Context, request workflo
 			return insertErr
 		}
 		next := cloneWorkflowNode(node)
-		next.Inputs, next.UpdatedAt = &ref, request.At
+		next.Inputs, next.MemoKeyDigest, next.UpdatedAt = &ref, request.MemoKeyDigest, request.At
 		next.Generation++
 		if err := next.Validate(); err != nil {
 			return workflowInvalid(err)
@@ -230,6 +230,8 @@ func (s *WorkflowStateStore) ReconcileCrashedAttempt(ctx context.Context, reques
 				return fmt.Errorf("insert crash retry activation: %w", execErr)
 			}
 			activation = &candidate
+		} else {
+			nextNode.Origin = workflowruntime.OriginExecuted
 		}
 		nextNode.Generation++
 		if err := nextAttempt.Validate(); err != nil {
@@ -342,6 +344,7 @@ func (s *WorkflowStateStore) BeginReplay(ctx context.Context, request workflowru
 			next := workflowruntime.NodeInvocationSnapshot{ID: binding.Target, Status: workflowruntime.NodePending, Priority: binding.Source.Priority, Generation: 1, CreatedAt: request.Provenance.CreatedAt, UpdatedAt: request.Provenance.CreatedAt}
 			if binding.Reuse {
 				next.Status, next.Blocked, next.Inputs, next.Outputs, next.LatestAttempt = binding.Source.Status, cloneWorkflowBlocked(binding.Source.Blocked), cloneWorkflowValueRef(binding.Source.Inputs), cloneWorkflowValueRef(binding.Source.Outputs), binding.Source.LatestAttempt
+				next.Origin = workflowruntime.OriginReplayed
 				for _, sourceAttempt := range binding.Attempts {
 					persisted, err := loadWorkflowAttempt(ctx, query, sourceAttempt.ID)
 					if err != nil {
@@ -609,7 +612,7 @@ func validateWorkflowCrashResult(request workflowruntime.ReconcileCrashedAttempt
 }
 
 func equalWorkflowNodeSnapshot(a, b workflowruntime.NodeInvocationSnapshot) bool {
-	return a.ID == b.ID && a.Status == b.Status && equalWorkflowBlocked(a.Blocked, b.Blocked) && equalWorkflowValueRef(a.Inputs, b.Inputs) && equalWorkflowValueRef(a.Outputs, b.Outputs) && reflect.DeepEqual(a.Wait, b.Wait) && a.LatestAttempt == b.LatestAttempt && a.Priority == b.Priority && a.ClaimGeneration == b.ClaimGeneration && equalWorkflowLease(a.Lease, b.Lease) && a.Generation == b.Generation && a.CreatedAt.Equal(b.CreatedAt) && a.UpdatedAt.Equal(b.UpdatedAt)
+	return a.ID == b.ID && a.Status == b.Status && equalWorkflowBlocked(a.Blocked, b.Blocked) && equalWorkflowValueRef(a.Inputs, b.Inputs) && equalWorkflowValueRef(a.Outputs, b.Outputs) && a.Origin == b.Origin && a.MemoKeyDigest == b.MemoKeyDigest && reflect.DeepEqual(a.Wait, b.Wait) && a.LatestAttempt == b.LatestAttempt && a.Priority == b.Priority && a.ClaimGeneration == b.ClaimGeneration && equalWorkflowLease(a.Lease, b.Lease) && a.Generation == b.Generation && a.CreatedAt.Equal(b.CreatedAt) && a.UpdatedAt.Equal(b.UpdatedAt)
 }
 
 func equalWorkflowAttemptSnapshot(a, b workflowruntime.AttemptSnapshot) bool {

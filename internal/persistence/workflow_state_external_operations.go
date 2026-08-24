@@ -290,8 +290,10 @@ func (s *WorkflowStateStore) ApplyExternalOperation(ctx context.Context, request
 			nextNode.UpdatedAt = request.At
 			if request.NextNodeStatus == workflowruntime.NodeReady {
 				nextNode.Outputs = nil
+				nextNode.Origin = ""
 			} else {
 				nextNode.Outputs = cloneWorkflowValueRef(request.Outputs)
+				nextNode.Origin = workflowruntime.OriginExecuted
 			}
 			if err := nextAttempt.Validate(); err != nil {
 				return workflowInvalid(err)

@@ -88,7 +88,7 @@ func (s *Store) BindNodeInputs(ctx context.Context, request workflowruntime.Bind
 		return workflowruntime.BindNodeInputsResult{}, invalid(refErr)
 	}
 	next := cloneNode(node)
-	next.Inputs, next.UpdatedAt = &ref, request.At
+	next.Inputs, next.MemoKeyDigest, next.UpdatedAt = &ref, request.MemoKeyDigest, request.At
 	next.Generation++
 	if err := next.Validate(); err != nil {
 		return workflowruntime.BindNodeInputsResult{}, invalid(err)
@@ -189,6 +189,8 @@ func (s *Store) ReconcileCrashedAttempt(ctx context.Context, request workflowrun
 			return workflowruntime.ReconcileCrashedAttemptResult{}, invalid(err)
 		}
 		activation = &candidate
+	} else {
+		nextNode.Origin = workflowruntime.OriginExecuted
 	}
 	nextNode.Outputs = nil
 	nextNode.Generation++
@@ -294,6 +296,7 @@ func (s *Store) BeginReplay(ctx context.Context, request workflowruntime.BeginRe
 		next := workflowruntime.NodeInvocationSnapshot{ID: binding.Target, Status: workflowruntime.NodePending, Priority: binding.Source.Priority, Generation: 1, CreatedAt: request.Provenance.CreatedAt, UpdatedAt: request.Provenance.CreatedAt}
 		if binding.Reuse {
 			next.Status, next.Blocked, next.Inputs, next.Outputs, next.LatestAttempt = binding.Source.Status, cloneBlocked(binding.Source.Blocked), cloneValueSetRef(binding.Source.Inputs), cloneValueSetRef(binding.Source.Outputs), binding.Source.LatestAttempt
+			next.Origin = workflowruntime.OriginReplayed
 			for _, sourceAttempt := range binding.Attempts {
 				persisted, exists := s.attempts[sourceAttempt.ID]
 				if !exists || !equalAttemptSemantic(persisted, sourceAttempt) {
@@ -443,7 +446,7 @@ func cloneRetryActivationPointer(input *workflowruntime.RetryActivationSnapshot)
 }
 
 func equalNodeSemantic(a, b workflowruntime.NodeInvocationSnapshot) bool {
-	return a.ID == b.ID && a.Status == b.Status && equalBlockedReason(a.Blocked, b.Blocked) && equalValueSetRef(a.Inputs, b.Inputs) && equalValueSetRef(a.Outputs, b.Outputs) && reflect.DeepEqual(a.Wait, b.Wait) && a.LatestAttempt == b.LatestAttempt && a.Priority == b.Priority && a.ClaimGeneration == b.ClaimGeneration && equalLease(a.Lease, b.Lease) && a.Generation == b.Generation && a.CreatedAt.Equal(b.CreatedAt) && a.UpdatedAt.Equal(b.UpdatedAt)
+	return a.ID == b.ID && a.Status == b.Status && equalBlockedReason(a.Blocked, b.Blocked) && equalValueSetRef(a.Inputs, b.Inputs) && equalValueSetRef(a.Outputs, b.Outputs) && a.Origin == b.Origin && a.MemoKeyDigest == b.MemoKeyDigest && reflect.DeepEqual(a.Wait, b.Wait) && a.LatestAttempt == b.LatestAttempt && a.Priority == b.Priority && a.ClaimGeneration == b.ClaimGeneration && equalLease(a.Lease, b.Lease) && a.Generation == b.Generation && a.CreatedAt.Equal(b.CreatedAt) && a.UpdatedAt.Equal(b.UpdatedAt)
 }
 
 func equalAttemptSemantic(a, b workflowruntime.AttemptSnapshot) bool {

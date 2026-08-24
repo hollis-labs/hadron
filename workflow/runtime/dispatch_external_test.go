@@ -244,7 +244,7 @@ func TestStepDispatcherClosesEveryStartedFailureAndDefaultsTerminal(t *testing.T
 			if test.wantStage == workflowruntime.DispatchValidateOutput && !errors.Is(dispatchErr, workflowruntime.ErrStepValidation) {
 				t.Fatalf("output validation error does not unwrap ErrStepValidation: %v", dispatchErr)
 			}
-			if result.Node.Status != test.wantStatus || result.Attempt.Status != test.wantStatus ||
+			if result.Node.Status != test.wantStatus || result.Node.Origin != workflowruntime.OriginExecuted || result.Attempt.Status != test.wantStatus ||
 				result.Attempt.Failure == nil || result.Attempt.Failure.Code != test.wantCode || result.Node.Lease != nil {
 				t.Fatalf("closed failure = %#v", result)
 			}
@@ -283,7 +283,7 @@ func TestStepDispatcherInjectedDispositionCanReturnFailedAttemptToReady(t *testi
 	result, dispatchErr := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{
 		Claim: claim, Node: graph.Node{ID: node.ID.NodeID, Kind: "fixture", KindVersion: "v1", Config: graph.Config{}},
 	})
-	if dispatchErr == nil || !called || result.Node.Status != workflowruntime.NodeReady || result.Attempt.Status != workflowruntime.NodeFailed {
+	if dispatchErr == nil || !called || result.Node.Status != workflowruntime.NodeReady || result.Node.Origin != "" || result.Attempt.Status != workflowruntime.NodeFailed {
 		t.Fatalf("retry disposition = %#v, %v, called=%v", result, dispatchErr, called)
 	}
 }

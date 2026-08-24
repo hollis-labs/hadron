@@ -109,3 +109,18 @@ func TestVerificationDiagnosticCodesDoNotReuseExpansionAllocation(t *testing.T) 
 		t.Fatalf("verification diagnostic allocations = %q / %q", verification.CodeInvalidCheck, verification.CodeUnknownCheck)
 	}
 }
+
+func TestMemoizationEffectSafetyFailsClosedWithNodeSource(t *testing.T) {
+	kind := stepkindtest.NewNoopKind("writer", "v1")
+	kind.SpecValue.Effects = graph.EffectSet{graph.EffectMutate}
+	kinds := stepkind.NewRegistry()
+	if err := kinds.Register(kind); err != nil {
+		t.Fatal(err)
+	}
+	node := validationNode("write", "writer", "v1", 23)
+	node.Memoization = &graph.MemoizationSpec{Key: graph.Expression{Text: "inputs.key"}, MaxAge: "1h"}
+	findings := workflowcompile.ValidateGraph(context.Background(), validationGraph(node), workflowcompile.ValidationOptions{StepKinds: kinds, Verifiers: verification.NewDefaultRegistry()})
+	if len(findings) != 1 || findings[0].Code != workflowcompile.CodeInvalidMemoization || findings[0].Source == nil || findings[0].Source.StartLine != 23 {
+		t.Fatalf("memoization diagnostics = %#v", findings)
+	}
+}

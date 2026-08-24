@@ -99,6 +99,23 @@ type LifecycleSpec struct {
 	Finalize bool `json:"finalize,omitempty"`
 }
 
+// MemoizationSupport is an executor's immutable opt-in to result reuse.
+// Default permits the runtime's safe read/compute default. Approved is the
+// additional executor assertion required before materialize effects may be
+// reused; host policy must still approve. Disabled rejects all memoization.
+type MemoizationSupport string
+
+const (
+	MemoizationDefault  MemoizationSupport = ""
+	MemoizationApproved MemoizationSupport = "approved"
+	MemoizationDisabled MemoizationSupport = "disabled"
+)
+
+// Valid reports whether m is a supported memoization declaration.
+func (m MemoizationSupport) Valid() bool {
+	return m == MemoizationDefault || m == MemoizationApproved || m == MemoizationDisabled
+}
+
 // StepKindSpec is immutable metadata used by compilers, policy evaluators, and
 // runtimes before adapter execution. Empty schemas are valid JSON Schemas;
 // nil schemas are missing metadata.
@@ -115,6 +132,7 @@ type StepKindSpec struct {
 	Cancellation          CancellationSpec      `json:"cancellation"`
 	Observation           ObservationSpec       `json:"observation"`
 	Lifecycle             LifecycleSpec         `json:"lifecycle,omitempty"`
+	Memoization           MemoizationSupport    `json:"memoization,omitempty"`
 	CanSuspend            bool                  `json:"can_suspend,omitempty"`
 	EmbeddedModeSupported bool                  `json:"embedded_mode_supported,omitempty"`
 }

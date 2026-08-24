@@ -156,7 +156,7 @@ func TestReplayReusesUpstreamValuesCreatesFreshHistoryAndConverges(t *testing.T)
 	}
 	reused, _ := store.LoadNodeInvocation(ctx, invocationID("replay", "upstream"))
 	fresh, _ := store.LoadNodeInvocation(ctx, invocationID("replay", "downstream"))
-	if reused.Status != workflowruntime.NodeSucceeded || reused.Outputs == nil || *reused.Outputs != upstreamOutputs || reused.LatestAttempt != 1 {
+	if reused.Status != workflowruntime.NodeSucceeded || reused.Origin != workflowruntime.OriginReplayed || reused.Outputs == nil || *reused.Outputs != upstreamOutputs || reused.LatestAttempt != 1 {
 		t.Fatalf("reused upstream = %#v", reused)
 	}
 	reusedAttempts, _ := store.ListAttempts(ctx, reused.ID)

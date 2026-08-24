@@ -460,3 +460,22 @@ func TestCanonicalExtensionEnvelopesRemainApplicationNeutral(t *testing.T) {
 		t.Fatal("compensation extension envelope was not retained")
 	}
 }
+
+func TestMemoizationPolicyRequiresPositiveAgeAndCanonicalOptionalDigest(t *testing.T) {
+	t.Parallel()
+	base := Graph{ID: "memo-policy", Version: "1", Digest: "sha256:fixture", Nodes: []Node{{ID: "work", Kind: "transform", Memoization: &MemoizationSpec{Key: Expression{Text: "inputs.key"}, MaxAge: "1h", OutputDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}
+	if err := base.ValidateEnums(); err != nil {
+		t.Fatalf("valid memo policy: %v", err)
+	}
+	for _, mutate := range []func(*MemoizationSpec){func(spec *MemoizationSpec) { spec.MaxAge = "0s" }, func(spec *MemoizationSpec) { spec.MaxAge = "later" }, func(spec *MemoizationSpec) { spec.OutputDigest = "SHA256:BAD" }} {
+		candidate := base
+		node := base.Nodes[0]
+		spec := *node.Memoization
+		mutate(&spec)
+		node.Memoization = &spec
+		candidate.Nodes = []Node{node}
+		if err := candidate.ValidateEnums(); err == nil {
+			t.Fatalf("invalid memo policy accepted: %#v", spec)
+		}
+	}
+}

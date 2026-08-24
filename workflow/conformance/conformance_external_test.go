@@ -184,6 +184,7 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 		conformance.WaitFixtures,
 		conformance.ExecutorMetadataFixtures,
 		conformance.VerificationFixtures,
+		conformance.MemoizationFixtures,
 	}
 	store := conformance.EmbeddedFixtures()
 
@@ -211,6 +212,9 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 			}
 			if set == conformance.VerificationFixtures {
 				wantCount = 6
+			}
+			if set == conformance.MemoizationFixtures {
+				wantCount = 4
 			}
 			if len(fixtures) != wantCount {
 				t.Fatalf("fixture count = %d, want %d", len(fixtures), wantCount)
@@ -266,6 +270,19 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 				for _, name := range []string{"verification-deterministic-fail", "verification-missing-evidence", "verification-reviewer-malformed"} {
 					if fixture := byName[name]; fixture.Expectation != conformance.ExpectFail {
 						t.Fatalf("%s fixture = %#v", name, fixture)
+					}
+				}
+				return
+			}
+			if set == conformance.MemoizationFixtures {
+				for _, name := range []string{"memo-safe-entry", "memo-pin-binding"} {
+					if byName[name].Expectation != conformance.ExpectPass {
+						t.Fatalf("%s fixture = %#v", name, byName[name])
+					}
+				}
+				for _, name := range []string{"memo-expired", "memo-unsafe-effect"} {
+					if byName[name].Expectation != conformance.ExpectFail {
+						t.Fatalf("%s fixture = %#v", name, byName[name])
 					}
 				}
 				return

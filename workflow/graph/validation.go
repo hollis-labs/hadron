@@ -1,10 +1,12 @@
 package graph
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // MaxIDLength is the maximum normalized workflow, node, input, output, or
@@ -183,6 +185,11 @@ func (g Graph) ValidateEnums() error {
 		}
 		if node.Memoization != nil {
 			validateExpression(path+".memoize.key", &node.Memoization.Key, add)
+			maxAge, err := time.ParseDuration(string(node.Memoization.MaxAge))
+			add(path+".memoize.max_age", string(node.Memoization.MaxAge), err == nil && maxAge > 0)
+			if node.Memoization.OutputDigest != "" {
+				add(path+".memoize.output_digest", node.Memoization.OutputDigest, validSHA256Digest(node.Memoization.OutputDigest))
+			}
 			validateExtension(path+".memoize.extension", node.Memoization.Extension, add)
 		}
 		if node.Durability != nil {
@@ -200,6 +207,14 @@ func (g Graph) ValidateEnums() error {
 		validateSourceRef(path+".source", node.Source, add)
 	}
 	return errors.Join(errs...)
+}
+
+func validSHA256Digest(value string) bool {
+	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 || strings.ToLower(value) != value {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
+	return err == nil
 }
 
 func validateOptionalBinding(path string, binding *Binding, add func(string, string, bool)) {

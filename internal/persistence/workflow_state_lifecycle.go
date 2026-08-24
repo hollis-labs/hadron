@@ -309,8 +309,10 @@ func (s *WorkflowStateStore) FinishNodeAttempt(ctx context.Context, request work
 		nextNode.UpdatedAt = at
 		if request.NextNodeStatus == workflowruntime.NodeReady {
 			nextNode.Outputs = nil
+			nextNode.Origin = ""
 		} else {
 			nextNode.Outputs = cloneWorkflowValueRef(request.Outputs)
+			nextNode.Origin = workflowruntime.OriginExecuted
 		}
 		if err := nextAttempt.Validate(); err != nil {
 			return workflowInvalid(err)

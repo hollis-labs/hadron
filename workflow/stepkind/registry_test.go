@@ -27,6 +27,7 @@ func TestRegistryLookupListAndDefensiveCopies(t *testing.T) {
 	alphaV2 := stepkindtest.NewNoopKind("alpha", "v2")
 	alphaV2.SpecValue.Effects = graph.EffectSet{graph.EffectRead, graph.EffectCompute}
 	alphaV2.SpecValue.RequiredCapabilities = []string{"network", "filesystem"}
+	alphaV2.SpecValue.Memoization = stepkind.MemoizationApproved
 	alphaV2.SpecValue.ConfigSchema = graph.Schema{
 		"properties": map[string]any{"enabled": map[string]any{"type": "boolean"}},
 	}
@@ -55,6 +56,9 @@ func TestRegistryLookupListAndDefensiveCopies(t *testing.T) {
 	}
 	if got, want := listed[1].RequiredCapabilities, []string{"filesystem", "network"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("normalized capabilities = %v, want %v", got, want)
+	}
+	if listed[1].Memoization != stepkind.MemoizationApproved {
+		t.Fatalf("memoization declaration = %q", listed[1].Memoization)
 	}
 
 	alphaV2.SpecValue.ConfigSchema["mutated"] = true
@@ -158,6 +162,7 @@ func TestRegistryRejectsInvalidSpecs(t *testing.T) {
 		{"duplicate effect", func(spec *stepkind.StepKindSpec) { spec.Effects = graph.EffectSet{graph.EffectRead, graph.EffectRead} }},
 		{"invalid idempotency", func(spec *stepkind.StepKindSpec) { spec.Idempotency = "automatic" }},
 		{"invalid retry safety", func(spec *stepkind.StepKindSpec) { spec.RetrySafety = "sometimes" }},
+		{"invalid memoization", func(spec *stepkind.StepKindSpec) { spec.Memoization = "maybe" }},
 		{"invalid cancellation", func(spec *stepkind.StepKindSpec) { spec.Cancellation.Mode = "signal" }},
 		{"invalid observation", func(spec *stepkind.StepKindSpec) { spec.Observation.Mode = "push" }},
 		{"empty capability", func(spec *stepkind.StepKindSpec) { spec.RequiredCapabilities = []string{""} }},

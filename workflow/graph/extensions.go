@@ -52,8 +52,9 @@ type VerificationCheck struct {
 	Source *SourceRef `json:"source,omitempty" yaml:"source,omitempty"`
 }
 
-// MemoizationSpec reserves the accepted cache-key and freshness concepts while
-// leaving cache storage and authorization to later runtime work.
+// MemoizationSpec selects the exact cache-key, freshness bound, and optional
+// output digest enforced by the runtime. The step kind's declared output
+// schema is hashed into the compatible cache identity.
 type MemoizationSpec struct {
 	Key          Expression `json:"key" yaml:"key"`
 	MaxAge       Duration   `json:"max_age,omitempty" yaml:"max_age,omitempty"`

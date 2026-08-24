@@ -268,8 +268,10 @@ func (s *Store) ApplyExternalOperation(ctx context.Context, request workflowrunt
 		nextNode.UpdatedAt = request.At
 		if request.NextNodeStatus == workflowruntime.NodeReady {
 			nextNode.Outputs = nil
+			nextNode.Origin = ""
 		} else {
 			nextNode.Outputs = cloneValueSetRef(request.Outputs)
+			nextNode.Origin = workflowruntime.OriginExecuted
 		}
 		if err := nextAttempt.Validate(); err != nil {
 			return workflowruntime.ApplyExternalOperationResult{}, invalid(err)

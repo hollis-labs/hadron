@@ -6,7 +6,11 @@
 // durable ready-queue coordination, plan-to-run input binding, completed
 // workflow output binding, classification-safe rendering/event masking,
 // retention hook coordination, generic durable wait coordination, and atomic
-// wait timeout are core-owned. Host scheduling policy, principal and grant
+// wait timeout are core-owned. Memoized and caller-pinned outputs use the same
+// typed ValueSetRef data plane as executed/replayed outcomes: memo keys are
+// evaluated under compiler visibility, pins are installed before admission,
+// and reuse completes a claimed node atomically without a synthetic attempt.
+// Host scheduling policy, principal and grant
 // resolution, scheduler adapters, secret authorities, cleanup execution, and
 // concrete storage remain separate concerns.
 //

@@ -446,6 +446,7 @@ func cancelWorkflowGenericWait(ctx context.Context, query workflowSQL, node work
 	nextAttempt.Generation++
 	nextNode := cloneWorkflowNode(node)
 	nextNode.Status, nextNode.Wait, nextNode.Lease = workflowruntime.NodeCanceled, nil, nil
+	nextNode.Origin = workflowruntime.OriginExecuted
 	nextNode.Generation++
 	nextNode.UpdatedAt = at
 	if err := nextWait.Validate(); err != nil {
@@ -587,6 +588,7 @@ func (s *WorkflowStateStore) ResolveCancellationIntent(ctx context.Context, requ
 				nextAttempt.Generation++
 				nextNode := cloneWorkflowNode(node)
 				nextNode.Status, nextNode.Lease = workflowruntime.NodeCanceled, nil
+				nextNode.Origin = workflowruntime.OriginExecuted
 				nextNode.Generation++
 				nextNode.UpdatedAt = at
 				if validationErr := nextAttempt.Validate(); validationErr != nil {

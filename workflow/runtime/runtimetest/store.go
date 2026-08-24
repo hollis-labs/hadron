@@ -61,6 +61,11 @@ type Store struct {
 	schedulerAdmissions  map[string]schedulerAdmissionRecord
 	cache                map[string]workflowruntime.CacheEntry
 	pins                 map[string]workflowruntime.PinnedValue
+	memoEntries          map[string][]workflowruntime.MemoEntry
+	memoSources          map[workflowruntime.AttemptID]workflowruntime.MemoEntry
+	pinBindings          map[workflowruntime.NodeInvocationID]pinBindingRecord
+	pinKeys              map[string]workflowruntime.NodeInvocationID
+	reuseKeys            map[string]reuseRecord
 
 	activations map[string]activationRecord
 }
@@ -111,6 +116,16 @@ type retryActivationRecord struct {
 	result  workflowruntime.ActivateNodeRetryResult
 }
 
+type pinBindingRecord struct {
+	request workflowruntime.BindPinRequest
+	result  workflowruntime.BindPinResult
+}
+
+type reuseRecord struct {
+	request workflowruntime.ReuseNodeOutputsRequest
+	result  workflowruntime.ReuseNodeOutputsResult
+}
+
 type cancellationRecord struct {
 	request workflowruntime.RequestRunCancellationRequest
 	result  workflowruntime.RequestRunCancellationResult
@@ -159,6 +174,11 @@ func NewStore() *Store {
 		schedulerAdmissions:  make(map[string]schedulerAdmissionRecord),
 		cache:                make(map[string]workflowruntime.CacheEntry),
 		pins:                 make(map[string]workflowruntime.PinnedValue),
+		memoEntries:          make(map[string][]workflowruntime.MemoEntry),
+		memoSources:          make(map[workflowruntime.AttemptID]workflowruntime.MemoEntry),
+		pinBindings:          make(map[workflowruntime.NodeInvocationID]pinBindingRecord),
+		pinKeys:              make(map[string]workflowruntime.NodeInvocationID),
+		reuseKeys:            make(map[string]reuseRecord),
 		activations:          make(map[string]activationRecord),
 	}
 }
@@ -264,6 +284,9 @@ func (s *Store) CreateNodeInvocation(ctx context.Context, request workflowruntim
 	if next.Status != workflowruntime.NodePending || next.Blocked != nil || next.LatestAttempt != 0 {
 		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("new node must enter lifecycle as pending without attempts"))
 	}
+	if next.Origin != "" || next.MemoKeyDigest != "" {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("new node must not contain outcome origin or memo key"))
+	}
 	next.Generation = 1
 	if err := next.Validate(); err != nil {
 		return workflowruntime.NodeInvocationSnapshot{}, invalid(err)
@@ -323,6 +346,9 @@ func (s *Store) SaveNodeInvocation(ctx context.Context, request workflowruntime.
 	}
 	if request.Snapshot.LatestAttempt != current.LatestAttempt {
 		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("latest attempt is lifecycle-managed"))
+	}
+	if request.Snapshot.Origin != current.Origin || request.Snapshot.MemoKeyDigest != current.MemoKeyDigest {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("node outcome origin and memo key are atomically managed"))
 	}
 	if !equalValueSetRef(request.Snapshot.Inputs, current.Inputs) ||
 		!equalValueSetRef(request.Snapshot.Outputs, current.Outputs) {

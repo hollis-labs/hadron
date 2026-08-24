@@ -253,6 +253,9 @@ func (s *WorkflowStateStore) CreateNodeInvocation(ctx context.Context, request w
 	if next.Status != workflowruntime.NodePending || next.Blocked != nil || next.LatestAttempt != 0 {
 		return workflowruntime.NodeInvocationSnapshot{}, workflowInvalid(errors.New("new node must enter lifecycle as pending without attempts"))
 	}
+	if next.Origin != "" || next.MemoKeyDigest != "" {
+		return workflowruntime.NodeInvocationSnapshot{}, workflowInvalid(errors.New("new node must not contain outcome origin or memo key"))
+	}
 	next.Generation = 1
 	next.CreatedAt = next.CreatedAt.UTC()
 	next.UpdatedAt = next.UpdatedAt.UTC()
@@ -314,6 +317,9 @@ func (s *WorkflowStateStore) SaveNodeInvocation(ctx context.Context, request wor
 		}
 		if request.Snapshot.LatestAttempt != current.LatestAttempt {
 			return workflowInvalid(errors.New("latest attempt is lifecycle-managed"))
+		}
+		if request.Snapshot.Origin != current.Origin || request.Snapshot.MemoKeyDigest != current.MemoKeyDigest {
+			return workflowInvalid(errors.New("node outcome origin and memo key are atomically managed"))
 		}
 		if !equalWorkflowValueRef(request.Snapshot.Inputs, current.Inputs) ||
 			!equalWorkflowValueRef(request.Snapshot.Outputs, current.Outputs) {

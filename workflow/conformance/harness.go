@@ -38,6 +38,8 @@ const (
 	ExecutorMetadataFixtures FixtureSet = "executor-metadata"
 	// VerificationFixtures contains post-execution verification/evidence cases.
 	VerificationFixtures FixtureSet = "verification"
+	// MemoizationFixtures contains memo/pin provenance and safety cases.
+	MemoizationFixtures FixtureSet = "memoization"
 )
 
 // Fixture is a conformance-only test case. Input remains opaque to the harness
@@ -161,6 +163,13 @@ func StepKindRegistrySuite(t *testing.T, store FixtureStore, factory Factory) {
 func VerificationSuite(t *testing.T, store FixtureStore, factory Factory) {
 	t.Helper()
 	runSuite(t, "verification", store, factory, VerificationFixtures)
+}
+
+// MemoizationSuite runs production memo entry, pin binding, expiry, and effect
+// safety fixtures without adding a transport-specific Host method.
+func MemoizationSuite(t *testing.T, store FixtureStore, factory Factory) {
+	t.Helper()
+	runSuite(t, "memoization", store, factory, MemoizationFixtures)
 }
 
 func runSuite(t *testing.T, suite string, store FixtureStore, factory Factory, sets ...FixtureSet) {

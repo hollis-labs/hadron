@@ -111,6 +111,7 @@ func (s *Store) TimeoutWait(ctx context.Context, request workflowruntime.Timeout
 	nextNode.Wait = nil
 	nextNode.Lease = nil
 	nextNode.Outputs = nil
+	nextNode.Origin = workflowruntime.OriginExecuted
 	nextNode.UpdatedAt = request.Now
 	nextNode.Generation++
 	nextAttempt := cloneAttempt(*unfinished)

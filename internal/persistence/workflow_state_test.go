@@ -34,7 +34,9 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_scheduler_waiters": "table", "workflow_scheduler_admission_idempotency": "table",
 		"workflow_run_policy_decisions":       "table",
 		"workflow_crash_recovery_idempotency": "table", "workflow_replay_provenance": "table",
-		"workflow_node_input_bindings":     "table",
+		"workflow_node_input_bindings": "table",
+		"workflow_memo_entries":        "table", "workflow_pin_bindings": "table",
+		"workflow_reuse_idempotency":       "table",
 		"workflow_wait_resume_idempotency": "table", "workflow_wait_resume_results": "table",
 		"workflow_wait_suspend_idempotency": "table", "workflow_wait_timeout_idempotency": "table",
 		"workflow_value_sets":      "table",
@@ -56,6 +58,7 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"idx_workflow_scheduler_holders_capacity": "index", "idx_workflow_scheduler_holders_invocation": "index",
 		"idx_workflow_scheduler_waiters_order": "index",
 		"idx_workflow_crash_recovery_attempt":  "index", "idx_workflow_replay_source": "index",
+		"idx_workflow_memo_lookup":      "index",
 		"workflow_events_reject_update": "trigger", "workflow_events_reject_delete": "trigger",
 		"workflow_external_operations_immutable_binding": "trigger", "workflow_external_operations_reject_delete": "trigger",
 		"workflow_retry_activations_immutable_attempt": "trigger", "workflow_fanout_items_immutable": "trigger",
@@ -69,6 +72,9 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_crash_recovery_reject_update": "trigger", "workflow_crash_recovery_reject_delete": "trigger",
 		"workflow_replay_provenance_reject_update": "trigger", "workflow_replay_provenance_reject_delete": "trigger",
 		"workflow_node_input_bindings_reject_update": "trigger", "workflow_node_input_bindings_reject_delete": "trigger",
+		"workflow_memo_entries_reject_update": "trigger", "workflow_memo_entries_reject_delete": "trigger",
+		"workflow_pin_bindings_reject_update": "trigger", "workflow_pin_bindings_reject_delete": "trigger",
+		"workflow_reuse_idempotency_reject_update": "trigger", "workflow_reuse_idempotency_reject_delete": "trigger",
 	}
 	for name, kind := range objects {
 		var found string
@@ -95,6 +101,12 @@ SELECT name FROM sqlite_master WHERE type = ? AND name = ?`, kind, name).Scan(&f
 	}
 	if migrations != 1 {
 		t.Fatalf("migration 21 count = %d, want 1", migrations)
+	}
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 22`).Scan(&migrations); err != nil {
+		t.Fatalf("read migration version 22: %v", err)
+	}
+	if migrations != 1 {
+		t.Fatalf("migration 22 count = %d, want 1", migrations)
 	}
 
 	var planSQL string

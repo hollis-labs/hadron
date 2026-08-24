@@ -329,6 +329,7 @@ func (s *Store) cancelGenericWaitLocked(node workflowruntime.NodeInvocationSnaps
 	nextAttempt.Generation++
 	nextNode := cloneNode(node)
 	nextNode.Status = workflowruntime.NodeCanceled
+	nextNode.Origin = workflowruntime.OriginExecuted
 	nextNode.Wait = nil
 	nextNode.Lease = nil
 	nextNode.Generation++
@@ -502,6 +503,7 @@ func (s *Store) ResolveCancellationIntent(ctx context.Context, request workflowr
 			attempt.FinishedAt, attempt.UpdatedAt = request.At, request.At
 			attempt.Generation++
 			node.Status = workflowruntime.NodeCanceled
+			node.Origin = workflowruntime.OriginExecuted
 			node.Lease = nil
 			node.Generation++
 			node.UpdatedAt = request.At

@@ -49,6 +49,8 @@ const (
 	CodeInvalidSwitch diagnostic.Code = "HADR-SOURCE-031"
 	// CodeInvalidFinally identifies an invalid cleanup scope or node shape.
 	CodeInvalidFinally diagnostic.Code = "HADR-SOURCE-032"
+	// CodeInvalidMemoization identifies effect-unsafe or executor-denied memo policy.
+	CodeInvalidMemoization diagnostic.Code = "HADR-SOURCE-036"
 
 	// CodeUnknownDependency identifies an explicit dependency endpoint absent
 	// from the graph.

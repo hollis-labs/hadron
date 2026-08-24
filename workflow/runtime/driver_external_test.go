@@ -100,7 +100,7 @@ func TestNodeDriverBindsCompilerScopedTypedInputsAndFailsClosedOnSchema(t *testi
 	workflow := graph.Graph{ID: "plan", Version: "v1", Nodes: []graph.Node{
 		{ID: "producer", Kind: "safe", KindVersion: "v1"},
 		{ID: "hidden", Kind: "safe", KindVersion: "v1"},
-		{ID: "consumer", Kind: "safe", KindVersion: "v1", Needs: []graph.Need{{Node: "producer"}}, InputBindings: map[string]graph.Binding{"value": {Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "steps.producer.outputs.value"}}}},
+		{ID: "consumer", Kind: "safe", KindVersion: "v1", Needs: []graph.Need{{Node: "producer"}}, InputBindings: map[string]graph.Binding{"value": {Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "steps.producer.outputs.value"}}}, Memoization: &graph.MemoizationSpec{Key: graph.Expression{Text: "steps.producer.outputs.value"}, MaxAge: "1h"}},
 	}}
 	plan := driverRecoveryPlan(t, run.Snapshot, workflow)
 	expression, err := workflowruntime.BuildExpressionContext(ctx, store, store, workflow, run.Snapshot.ID)
@@ -117,6 +117,10 @@ func TestNodeDriverBindsCompilerScopedTypedInputsAndFailsClosedOnSchema(t *testi
 	result, err := (&workflowruntime.NodeDriver{Store: store, Inputs: store, Control: store, Registry: registry}).Drive(ctx, workflowruntime.DriveNodeRequest{Run: run.Snapshot, Plan: plan, InvocationID: consumerID, Node: workflow.Nodes[2], ExpressionContext: expression, At: base.Add(3 * time.Second)})
 	if err != nil || result.Binding == nil || result.Progressed.Snapshot.Status != workflowruntime.NodeReady || result.Progressed.Snapshot.Inputs == nil {
 		t.Fatalf("ready driver = %#v, %v", result, err)
+	}
+	wantMemoDigest, _ := values.DigestInline("visible")
+	if result.Progressed.Snapshot.MemoKeyDigest != wantMemoDigest || result.Binding.Node.MemoKeyDigest != wantMemoDigest {
+		t.Fatalf("memo key digest = %q/%q, want %q", result.Progressed.Snapshot.MemoKeyDigest, result.Binding.Node.MemoKeyDigest, wantMemoDigest)
 	}
 	bound, err := store.LoadValues(ctx, *result.Progressed.Snapshot.Inputs)
 	if err != nil || bound["value"].Inline != "visible" || bound["value"].Redaction != values.RedactionPrivate {

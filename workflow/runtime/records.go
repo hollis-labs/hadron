@@ -226,19 +226,25 @@ func (s RunSnapshot) Validate() error {
 // NodeInvocationSnapshot is one persisted graph-node expansion. Generation is
 // the record CAS revision; ClaimGeneration changes only on successful claims.
 type NodeInvocationSnapshot struct {
-	ID              NodeInvocationID    `json:"id"`
-	Status          NodeStatus          `json:"status"`
-	Blocked         *BlockedReason      `json:"blocked,omitempty"`
-	Inputs          *values.ValueSetRef `json:"inputs,omitempty"`
-	Outputs         *values.ValueSetRef `json:"outputs,omitempty"`
-	Wait            *WaitRef            `json:"wait,omitempty"`
-	LatestAttempt   int                 `json:"latest_attempt,omitempty"`
-	Priority        int                 `json:"priority,omitempty"`
-	ClaimGeneration uint64              `json:"claim_generation"`
-	Lease           *ClaimLease         `json:"lease,omitempty"`
-	Generation      uint64              `json:"generation"`
-	CreatedAt       time.Time           `json:"created_at"`
-	UpdatedAt       time.Time           `json:"updated_at"`
+	ID      NodeInvocationID    `json:"id"`
+	Status  NodeStatus          `json:"status"`
+	Blocked *BlockedReason      `json:"blocked,omitempty"`
+	Inputs  *values.ValueSetRef `json:"inputs,omitempty"`
+	Outputs *values.ValueSetRef `json:"outputs,omitempty"`
+	// Origin identifies how this invocation reached its durable outcome. It is
+	// empty while the invocation has no outcome.
+	Origin InvocationOrigin `json:"origin,omitempty"`
+	// MemoKeyDigest is the digest of the compiler-scoped memo key evaluation.
+	// The raw key is never persisted because it may contain sensitive data.
+	MemoKeyDigest   string      `json:"memo_key_digest,omitempty"`
+	Wait            *WaitRef    `json:"wait,omitempty"`
+	LatestAttempt   int         `json:"latest_attempt,omitempty"`
+	Priority        int         `json:"priority,omitempty"`
+	ClaimGeneration uint64      `json:"claim_generation"`
+	Lease           *ClaimLease `json:"lease,omitempty"`
+	Generation      uint64      `json:"generation"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
 // Validate checks record integrity without enforcing lifecycle transitions.
@@ -264,6 +270,14 @@ func (s NodeInvocationSnapshot) Validate() error {
 	}
 	if err := validateOptionalValueSetRef(s.Outputs); err != nil {
 		return fmt.Errorf("node outputs: %w", err)
+	}
+	if err := validateInvocationOrigin(s.Status, s.Origin, s.Outputs); err != nil {
+		return err
+	}
+	if s.MemoKeyDigest != "" {
+		if err := values.ValidateDigest(s.MemoKeyDigest); err != nil {
+			return fmt.Errorf("memo key digest: %w", err)
+		}
 	}
 	if s.Wait != nil {
 		if err := s.Wait.Validate(); err != nil {

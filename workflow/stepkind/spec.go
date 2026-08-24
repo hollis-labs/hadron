@@ -105,6 +105,9 @@ func validateSpec(spec StepKindSpec) []diagnostic.Diagnostic {
 	if !spec.RetrySafety.Valid() {
 		add("retry_safety", fmt.Sprintf("has unsupported value %q", spec.RetrySafety))
 	}
+	if !spec.Memoization.Valid() {
+		add("memoization", fmt.Sprintf("has unsupported value %q", spec.Memoization))
+	}
 	if !spec.Cancellation.Mode.Valid() {
 		add("cancellation.mode", fmt.Sprintf("has unsupported value %q", spec.Cancellation.Mode))
 	}

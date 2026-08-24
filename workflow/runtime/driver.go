@@ -22,6 +22,7 @@ type BindNodeInputsRequest struct {
 	ExpectedGeneration uint64           `json:"expected_generation"`
 	IdempotencyKey     string           `json:"idempotency_key"`
 	Values             values.ValueSet  `json:"values"`
+	MemoKeyDigest      string           `json:"memo_key_digest,omitempty"`
 	At                 time.Time        `json:"at"`
 }
 
@@ -34,6 +35,11 @@ func (r BindNodeInputsRequest) Validate() error {
 	}
 	if err := validateRequiredText("input binding idempotency key", r.IdempotencyKey); err != nil {
 		return err
+	}
+	if r.MemoKeyDigest != "" {
+		if err := values.ValidateDigest(r.MemoKeyDigest); err != nil {
+			return fmt.Errorf("memo key digest: %w", err)
+		}
 	}
 	return values.ValidatePersistableSet(r.Values)
 }
@@ -166,10 +172,14 @@ func (d *NodeDriver) Drive(ctx context.Context, request DriveNodeRequest) (Drive
 		if schemaErr := values.ValidateValueSetSchema(spec.InputSchema, bound); schemaErr != nil {
 			return result, schemaErr
 		}
+		memoKeyDigest, memoErr := evaluateMemoKey(request.Node.Memoization, progressContext, scopedOptions)
+		if memoErr != nil {
+			return result, memoErr
+		}
 		binding, persistErr := d.Inputs.BindNodeInputs(context.WithoutCancel(ctx), BindNodeInputsRequest{
 			InvocationID: id, ExpectedGeneration: node.Generation,
 			IdempotencyKey: nodeInputBindingKey(id), Values: bound,
-			At: maxRecoveryTime(request.At, node.UpdatedAt),
+			MemoKeyDigest: memoKeyDigest, At: maxRecoveryTime(request.At, node.UpdatedAt),
 		})
 		if persistErr != nil {
 			return result, persistErr
@@ -177,6 +187,9 @@ func (d *NodeDriver) Drive(ctx context.Context, request DriveNodeRequest) (Drive
 		result.Binding = &binding
 		node = binding.Node
 	} else {
+		if request.Node.Memoization != nil && node.MemoKeyDigest == "" {
+			return result, fmt.Errorf("%w: memoized node is missing its durable key digest", ErrRecoveryConflict)
+		}
 		inputs, loadErr := d.Store.LoadValues(ctx, *node.Inputs)
 		if loadErr != nil {
 			return result, loadErr
@@ -270,13 +283,20 @@ func (d *NodeDriver) DriveFinally(ctx context.Context, request DriveNodeRequest)
 		if schemaErr := values.ValidateValueSetSchema(spec.InputSchema, bound); schemaErr != nil {
 			return result, schemaErr
 		}
-		binding, persistErr := d.Inputs.BindNodeInputs(context.WithoutCancel(ctx), BindNodeInputsRequest{InvocationID: request.InvocationID, ExpectedGeneration: node.Generation, IdempotencyKey: nodeInputBindingKey(request.InvocationID), Values: bound, At: maxRecoveryTime(request.At, node.UpdatedAt)})
+		memoKeyDigest, memoErr := evaluateMemoKey(request.Node.Memoization, scoped, options)
+		if memoErr != nil {
+			return result, memoErr
+		}
+		binding, persistErr := d.Inputs.BindNodeInputs(context.WithoutCancel(ctx), BindNodeInputsRequest{InvocationID: request.InvocationID, ExpectedGeneration: node.Generation, IdempotencyKey: nodeInputBindingKey(request.InvocationID), Values: bound, MemoKeyDigest: memoKeyDigest, At: maxRecoveryTime(request.At, node.UpdatedAt)})
 		if persistErr != nil {
 			return result, persistErr
 		}
 		result.Binding = &binding
 		node = binding.Node
 	} else {
+		if request.Node.Memoization != nil && node.MemoKeyDigest == "" {
+			return result, fmt.Errorf("%w: memoized finalizer is missing its durable key digest", ErrRecoveryConflict)
+		}
 		inputs, loadErr := d.Store.LoadValues(ctx, *node.Inputs)
 		if loadErr != nil {
 			return result, loadErr
@@ -317,13 +337,28 @@ func nodeInputBindingKey(id NodeInvocationID) string {
 	return "node-inputs:" + controlIdentity(id)
 }
 
+func evaluateMemoKey(spec *graph.MemoizationSpec, context values.ExpressionContext, options values.ExpressionOptions) (string, error) {
+	if spec == nil {
+		return "", nil
+	}
+	result, err := values.NewExpressionEngine().EvaluateRaw(spec.Key, context, options)
+	if err != nil {
+		return "", fmt.Errorf("%w: evaluate memoization key: %w", ErrInvalidRecovery, err)
+	}
+	digest, err := values.DigestInline(result)
+	if err != nil {
+		return "", fmt.Errorf("%w: digest memoization key: %w", ErrInvalidRecovery, err)
+	}
+	return digest, nil
+}
+
 func nilNodeInputStore(store NodeInputStore) bool { return nilReflect(store) }
 
 // SemanticallyEqualNodeInputRequest compares the immutable binding intent;
 // generation and timestamp are fencing/application facts and are ignored on
 // replay after the first transaction advanced the node.
 func SemanticallyEqualNodeInputRequest(left, right BindNodeInputsRequest) bool {
-	if left.InvocationID != right.InvocationID || left.IdempotencyKey != right.IdempotencyKey {
+	if left.InvocationID != right.InvocationID || left.IdempotencyKey != right.IdempotencyKey || left.MemoKeyDigest != right.MemoKeyDigest {
 		return false
 	}
 	leftDigest, leftErr := values.DigestValueSet(left.Values)
