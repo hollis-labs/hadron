@@ -412,3 +412,13 @@
   a fabricated successful `timed_out:true` result.
 
   Vanta revision for both W07-T07 decisions: `01M0TP7YJ2R10HMQ4GQFEVQT0K`.
+
+- W07-T05 treats an exact, node-scoped, versioned remote binding as the
+  ADR-authorized refinement boundary for compiled MCP and LLM nodes. The
+  original conservative source spec remains visible, while the build digest
+  also binds the closed driver's narrower effective execution profile. Node
+  effects are unioned with that profile; mutate/destructive effective work is
+  rejected, and driver/catalog/profile drift fails closed. Ordinary node
+  declarations cannot erase source effects.
+
+  Vanta revision: `01M0TQTDCZ1W4KR4BDBM7ZHRV6`.
