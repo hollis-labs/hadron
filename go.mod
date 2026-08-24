@@ -8,6 +8,7 @@ require (
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/hollis-labs/agentkit v0.3.0
+	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
 	github.com/hollis-labs/go-mcp v0.1.0
 	github.com/hollis-labs/go-messaging v0.3.0
@@ -42,7 +43,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
-	github.com/hollis-labs/go-llm-contracts v0.3.0 // indirect
 	github.com/hollis-labs/go-runner v0.5.0 // indirect
 	github.com/hollis-labs/go-sandbox v0.2.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
