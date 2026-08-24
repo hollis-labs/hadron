@@ -241,6 +241,17 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0TMBNX9G3GPV39W9SAPZJ5N`.
 
+- W07-T05's generated executable uses the validated in-memory StateStore
+  implementation that currently lives in `workflow/runtime/runtimetest`.
+  Behavior is covered by parity, crash/restart, fan-out, retry, and finalizer
+  fixtures, and produced binaries are self-contained. Before the public engine
+  boundary is frozen or extracted in W07-T06, move that implementation to a
+  production-named package so generated hosts do not depend on a test-support
+  namespace. Native artifact construction also intentionally requires the
+  Hadron module source and Go toolchain at build time; execution does not.
+
+  Vanta revision: `01M0TSSF037DPN0K2SJYYNRNDQ`.
+
 ## Resolved follow-ups
 
 - W05-T02 resolved the temporary W05-T01 identity strings with durable,
