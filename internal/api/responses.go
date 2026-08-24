@@ -13,6 +13,14 @@ import (
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 )
 
+// GraphRunDiagnosticResponse is the shared graph-native diagnostic DTO. HTTP,
+// MCP, CLI, and UI handlers should serialize this contract directly rather
+// than creating transport-specific workflow state semantics.
+type GraphRunDiagnosticResponse = rundiagnostics.Result
+
+// GraphNodeDiagnosticResponse is the shared per-invocation projection.
+type GraphNodeDiagnosticResponse = rundiagnostics.NodeDiagnostic
+
 func toWorkspaceResponse(ws persistence.WorkspaceRecord) map[string]any {
 	return map[string]any{
 		"id":         ws.ID,
