@@ -1233,3 +1233,4 @@ internal service error.
 | independent source review `5bfc8c2` | `go test -count=3 ./cmd/hadron ./internal/api ./internal/appworkflow ./internal/rundiagnostics`; API/appworkflow race suite; hidden-resource, private-display, authority, JSON-bound, exact-route, response-bound, and safe-error audit | pass |
 | independent idempotency hardening `5bfc8c2` | API at `-count=3`; API/appworkflow at `-count=10`; API/appworkflow race suite; pre-commit format/vet/golangci | pass; missing cancel/rerun keys now return structured `invalid_request` 400 responses |
 | integration `cea2992` | focused API/appworkflow/diagnostics/CLI suite at `-count=3`; `go test -count=1 ./...` | pass |
+| integration hardening `99de732` | API at `-count=10`; API race suite; pre-commit format/vet/golangci | pass; escaped opaque run IDs round-trip through exact two-segment action routes |
