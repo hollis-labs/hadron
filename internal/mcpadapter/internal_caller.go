@@ -2,9 +2,11 @@ package mcpadapter
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/go-otel/propagation"
 	"github.com/hollis-labs/hadron/internal/execution"
+	workflowmcp "github.com/hollis-labs/hadron/workflow/adapters/mcp"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -27,6 +30,11 @@ type InternalCaller struct {
 	clientFactory externalClientFactory
 }
 
+var (
+	_ workflowmcp.Client     = (*InternalCaller)(nil)
+	_ workflowmcp.Descriptor = (*InternalCaller)(nil)
+)
+
 type ExternalServerConfig struct {
 	Transport      string
 	Command        string
@@ -41,6 +49,7 @@ type InternalCallerOption func(*InternalCaller)
 
 type externalClient interface {
 	CallTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error)
+	ListTools(ctx context.Context, request mcp.ListToolsRequest) (*mcp.ListToolsResult, error)
 	Ping(ctx context.Context) error
 	Close() error
 }
@@ -79,27 +88,113 @@ func NewInternalCaller(hadron *Adapter, opts ...InternalCallerOption) *InternalC
 }
 
 func (c *InternalCaller) CallTool(ctx context.Context, serverName, toolName string, arguments map[string]any) (any, error) {
-	if c == nil || c.hadron == nil {
-		return nil, fmt.Errorf("internal MCP caller is not configured")
-	}
-	if !isLocalHadronServer(serverName) {
-		return c.callExternalTool(ctx, serverName, toolName, arguments)
-	}
-	result := c.hadron.CallTool(ctx, toolName, arguments)
-	if result == nil {
-		return nil, fmt.Errorf("mcp tool %q returned no result", toolName)
+	result, metadata, err := c.callToolResult(ctx, serverName, toolName, arguments, "", true)
+	if err != nil {
+		return nil, err
 	}
 	payload, err := decodeToolResult(result)
 	if err != nil {
 		return nil, err
 	}
 	return execution.MCPToolResult{
-		Result: payload,
-		Metadata: execution.MCPCallMetadata{
-			Server:       normalizeServerName(serverName),
-			Transport:    "in_process",
-			AttemptCount: 1,
-		},
+		Result:   payload,
+		Metadata: metadata,
+	}, nil
+}
+
+// ExecuteTool implements the SDK-neutral workflow MCP client bridge while the
+// legacy CallTool method above preserves blueprint execution behavior.
+func (c *InternalCaller) ExecuteTool(ctx context.Context, request workflowmcp.CallRequest) (workflowmcp.CallResult, error) {
+	result, metadata, err := c.callToolResult(ctx, request.Server, request.Tool, request.Arguments, request.IdempotencyKey, request.IdempotencyKey != "")
+	if err != nil {
+		return workflowmcp.CallResult{}, &workflowmcp.TransportError{
+			Retryable: isRecoverableExternalClientError(err) || errors.Is(err, context.DeadlineExceeded),
+			Cause:     err,
+		}
+	}
+	converted, err := workflowCallResult(result, metadata)
+	if err != nil {
+		return workflowmcp.CallResult{}, &workflowmcp.ResultError{Cause: err}
+	}
+	return converted, nil
+}
+
+// DescribeTool implements the SDK-neutral pre-execution descriptor bridge.
+// MCP servers self-assert annotations, so this bridge never marks them trusted;
+// a host policy wrapper may do so after independent approval.
+func (c *InternalCaller) DescribeTool(ctx context.Context, serverName, toolName string) (workflowmcp.ToolDescriptor, error) {
+	if c == nil || c.hadron == nil {
+		return workflowmcp.ToolDescriptor{}, fmt.Errorf("internal MCP caller is not configured")
+	}
+	name := normalizeServerName(serverName)
+	var tool mcp.Tool
+	if isLocalHadronServer(name) {
+		registered := c.hadron.newServer().ListTools()
+		entry := registered[toolName]
+		if entry == nil {
+			return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp tool %q is not registered on server %q", toolName, name)
+		}
+		tool = entry.Tool
+	} else {
+		entry, _, err := c.externalClient(ctx, name)
+		if err != nil {
+			return workflowmcp.ToolDescriptor{}, err
+		}
+		entry, _, _, err = c.ensureHealthy(ctx, name, entry)
+		if err != nil {
+			return workflowmcp.ToolDescriptor{}, err
+		}
+		listed, err := entry.client.ListTools(ctx, mcp.ListToolsRequest{})
+		if err != nil {
+			return workflowmcp.ToolDescriptor{}, err
+		}
+		if listed == nil {
+			return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp server %q returned no tool descriptor list", name)
+		}
+		for _, candidate := range listed.Tools {
+			if candidate.Name == toolName {
+				tool = candidate
+				break
+			}
+		}
+		if tool.Name == "" {
+			return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp tool %q is not registered on server %q", toolName, name)
+		}
+	}
+	return workflowmcp.ToolDescriptor{
+		Server: serverName, Tool: tool.Name, Trusted: false,
+		Annotations: workflowToolAnnotations(tool.Annotations),
+	}, nil
+}
+
+func (c *InternalCaller) callToolResult(ctx context.Context, serverName, toolName string, arguments map[string]any, idempotencyKey string, allowRetry bool) (*mcp.CallToolResult, execution.MCPCallMetadata, error) {
+	if c == nil || c.hadron == nil {
+		return nil, execution.MCPCallMetadata{}, fmt.Errorf("internal MCP caller is not configured")
+	}
+	if !isLocalHadronServer(serverName) {
+		return c.callExternalToolResult(ctx, serverName, toolName, arguments, idempotencyKey, allowRetry)
+	}
+	request := mcp.CallToolRequest{}
+	request.Params.Name = toolName
+	request.Params.Arguments = cloneAnyMap(arguments)
+	if idempotencyKey != "" {
+		request.Params.Meta = &mcp.Meta{AdditionalFields: map[string]any{"hadron/idempotencyKey": idempotencyKey}}
+	}
+	handler := c.hadron.buildHandlerMap()[toolName]
+	if handler == nil {
+		return toolError("not_found", "unknown tool: "+toolName), execution.MCPCallMetadata{
+			Server: normalizeServerName(serverName), Transport: "in_process", AttemptCount: 1,
+		}, nil
+	}
+	result, err := handler(ctx, request)
+	if err != nil {
+		result = toolError("internal_error", err.Error())
+	}
+	if result == nil {
+		return nil, execution.MCPCallMetadata{}, fmt.Errorf("mcp tool %q returned no result", toolName)
+	}
+	return result, execution.MCPCallMetadata{
+		Server: normalizeServerName(serverName), Transport: "in_process", AttemptCount: 1,
 	}, nil
 }
 
@@ -116,11 +211,11 @@ func normalizeServerName(name string) string {
 	return strings.TrimSpace(strings.ToLower(name))
 }
 
-func (c *InternalCaller) callExternalTool(ctx context.Context, serverName, toolName string, arguments map[string]any) (any, error) {
+func (c *InternalCaller) callExternalToolResult(ctx context.Context, serverName, toolName string, arguments map[string]any, idempotencyKey string, allowRetry bool) (*mcp.CallToolResult, execution.MCPCallMetadata, error) {
 	name := normalizeServerName(serverName)
 	entry, reusedClient, err := c.externalClient(ctx, name)
 	if err != nil {
-		return nil, err
+		return nil, execution.MCPCallMetadata{}, err
 	}
 	metadata := execution.MCPCallMetadata{
 		Server:       name,
@@ -130,7 +225,7 @@ func (c *InternalCaller) callExternalTool(ctx context.Context, serverName, toolN
 	}
 	entry, healthProbed, reconnected, err := c.ensureHealthy(ctx, name, entry)
 	if err != nil {
-		return nil, fmt.Errorf("mcp_call %s.%s: %w", serverName, toolName, err)
+		return nil, metadata, fmt.Errorf("mcp_call %s.%s: %w", serverName, toolName, err)
 	}
 	metadata.HealthProbe = healthProbed
 	metadata.Reconnected = reconnected
@@ -138,36 +233,31 @@ func (c *InternalCaller) callExternalTool(ctx context.Context, serverName, toolN
 	for attempt := 0; attempt < 2; attempt++ {
 		callArguments := cloneAnyMap(arguments)
 		callArguments = propagation.InjectMCP(ctx, callArguments)
-		result, err := entry.client.CallTool(ctx, mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Name:      toolName,
-				Arguments: callArguments,
-			},
-		})
-		if err == nil {
-			payload, decodeErr := decodeToolResult(result)
-			if decodeErr != nil {
-				return nil, decodeErr
-			}
-			return execution.MCPToolResult{
-				Result:   payload,
-				Metadata: metadata,
-			}, nil
+		request := mcp.CallToolRequest{Params: mcp.CallToolParams{Name: toolName, Arguments: callArguments}}
+		if idempotencyKey != "" {
+			request.Params.Meta = &mcp.Meta{AdditionalFields: map[string]any{"hadron/idempotencyKey": idempotencyKey}}
 		}
-		if attempt == 0 && isRecoverableExternalClientError(err) && ctx.Err() == nil {
+		result, err := entry.client.CallTool(ctx, request)
+		if err == nil {
+			if result == nil {
+				return nil, metadata, fmt.Errorf("mcp tool %q returned no result", toolName)
+			}
+			return result, metadata, nil
+		}
+		if attempt == 0 && allowRetry && isRecoverableExternalClientError(err) && ctx.Err() == nil {
 			metadata.RetryCount++
 			metadata.AttemptCount++
 			metadata.Reconnected = true
 			c.invalidateExternalClient(name)
 			entry, _, err = c.externalClient(ctx, name)
 			if err != nil {
-				return nil, fmt.Errorf("mcp_call %s.%s: %w", serverName, toolName, err)
+				return nil, metadata, fmt.Errorf("mcp_call %s.%s: %w", serverName, toolName, err)
 			}
 			continue
 		}
-		return nil, fmt.Errorf("mcp_call %s.%s: %w", serverName, toolName, err)
+		return nil, metadata, fmt.Errorf("mcp_call %s.%s: %w", serverName, toolName, err)
 	}
-	return nil, fmt.Errorf("mcp_call %s.%s: exhausted retries", serverName, toolName)
+	return nil, metadata, fmt.Errorf("mcp_call %s.%s: exhausted retries", serverName, toolName)
 }
 
 func (c *InternalCaller) externalClient(ctx context.Context, name string) (*externalClientEntry, bool, error) {
@@ -459,4 +549,156 @@ func payloadErrorMessage(payload any) (string, bool) {
 		return "", false
 	}
 	return message, true
+}
+
+func workflowCallResult(result *mcp.CallToolResult, metadata execution.MCPCallMetadata) (workflowmcp.CallResult, error) {
+	if result == nil {
+		return workflowmcp.CallResult{}, fmt.Errorf("MCP tool returned no result")
+	}
+	converted := workflowmcp.CallResult{
+		IsError: result.IsError,
+		Transport: workflowmcp.TransportMetadata{
+			Transport: metadata.Transport, AttemptCount: metadata.AttemptCount,
+			RetryCount: metadata.RetryCount, Reconnected: metadata.Reconnected,
+		},
+	}
+	if result.StructuredContent != nil {
+		structured, err := workflowJSON(result.StructuredContent)
+		if err != nil {
+			return workflowmcp.CallResult{}, fmt.Errorf("MCP structured content is not JSON-compatible: %w", err)
+		}
+		converted.HasStructured = true
+		converted.Structured = structured
+	}
+	converted.Content = make([]workflowmcp.Content, 0, len(result.Content))
+	for index, content := range result.Content {
+		mapped, err := workflowContent(content)
+		if err != nil {
+			return workflowmcp.CallResult{}, fmt.Errorf("MCP content[%d]: %w", index, err)
+		}
+		converted.Content = append(converted.Content, mapped)
+	}
+	return converted, nil
+}
+
+func workflowContent(content mcp.Content) (workflowmcp.Content, error) {
+	switch current := content.(type) {
+	case mcp.TextContent:
+		return workflowmcp.Content{Kind: workflowmcp.ContentText, Text: current.Text}, nil
+	case *mcp.TextContent:
+		if current == nil {
+			return workflowmcp.Content{}, fmt.Errorf("nil text content")
+		}
+		return workflowmcp.Content{Kind: workflowmcp.ContentText, Text: current.Text}, nil
+	case mcp.ImageContent:
+		data, err := base64.StdEncoding.DecodeString(current.Data)
+		if err != nil {
+			return workflowmcp.Content{}, fmt.Errorf("decode image data: %w", err)
+		}
+		return workflowmcp.Content{Kind: workflowmcp.ContentImage, Data: data, MediaType: current.MIMEType}, nil
+	case *mcp.ImageContent:
+		if current == nil {
+			return workflowmcp.Content{}, fmt.Errorf("nil image content")
+		}
+		return workflowContent(*current)
+	case mcp.AudioContent:
+		data, err := base64.StdEncoding.DecodeString(current.Data)
+		if err != nil {
+			return workflowmcp.Content{}, fmt.Errorf("decode audio data: %w", err)
+		}
+		return workflowmcp.Content{Kind: workflowmcp.ContentAudio, Data: data, MediaType: current.MIMEType}, nil
+	case *mcp.AudioContent:
+		if current == nil {
+			return workflowmcp.Content{}, fmt.Errorf("nil audio content")
+		}
+		return workflowContent(*current)
+	case mcp.ResourceLink:
+		return workflowmcp.Content{
+			Kind: workflowmcp.ContentResourceLink, URI: current.URI, Name: current.Name,
+			Description: current.Description, MediaType: current.MIMEType,
+		}, nil
+	case *mcp.ResourceLink:
+		if current == nil {
+			return workflowmcp.Content{}, fmt.Errorf("nil resource link")
+		}
+		return workflowContent(*current)
+	case mcp.EmbeddedResource:
+		return workflowResource(current.Resource)
+	case *mcp.EmbeddedResource:
+		if current == nil {
+			return workflowmcp.Content{}, fmt.Errorf("nil embedded resource")
+		}
+		return workflowResource(current.Resource)
+	default:
+		return workflowmcp.Content{}, fmt.Errorf("unsupported content type %T", content)
+	}
+}
+
+func workflowResource(resource mcp.ResourceContents) (workflowmcp.Content, error) {
+	switch current := resource.(type) {
+	case mcp.TextResourceContents:
+		return workflowmcp.Content{
+			Kind: workflowmcp.ContentResourceText, URI: current.URI,
+			Text: current.Text, MediaType: current.MIMEType,
+		}, nil
+	case *mcp.TextResourceContents:
+		if current == nil {
+			return workflowmcp.Content{}, fmt.Errorf("nil text resource")
+		}
+		return workflowResource(*current)
+	case mcp.BlobResourceContents:
+		data, err := base64.StdEncoding.DecodeString(current.Blob)
+		if err != nil {
+			return workflowmcp.Content{}, fmt.Errorf("decode resource blob: %w", err)
+		}
+		return workflowmcp.Content{
+			Kind: workflowmcp.ContentResourceBlob, URI: current.URI,
+			Data: data, MediaType: current.MIMEType,
+		}, nil
+	case *mcp.BlobResourceContents:
+		if current == nil {
+			return workflowmcp.Content{}, fmt.Errorf("nil blob resource")
+		}
+		return workflowResource(*current)
+	default:
+		return workflowmcp.Content{}, fmt.Errorf("unsupported resource type %T", resource)
+	}
+}
+
+func workflowJSON(input any) (any, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+	decoder.UseNumber()
+	var output any
+	if err := decoder.Decode(&output); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, fmt.Errorf("multiple JSON documents")
+		}
+		return nil, err
+	}
+	return output, nil
+}
+
+func workflowToolAnnotations(input mcp.ToolAnnotation) workflowmcp.ToolAnnotations {
+	return workflowmcp.ToolAnnotations{
+		Title: input.Title, ReadOnlyHint: cloneBoolPointer(input.ReadOnlyHint),
+		DestructiveHint: cloneBoolPointer(input.DestructiveHint),
+		IdempotentHint:  cloneBoolPointer(input.IdempotentHint),
+		OpenWorldHint:   cloneBoolPointer(input.OpenWorldHint),
+	}
+}
+
+func cloneBoolPointer(input *bool) *bool {
+	if input == nil {
+		return nil
+	}
+	output := *input
+	return &output
 }
