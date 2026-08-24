@@ -14,3 +14,4 @@
 | 10 | W01-T03 | `353c45d` | `e598e5f` | Hadron | accepted; SOURCE-001..004 and LEGACY-001 reserved |
 | 11 | W00-T06 | `c8349c1` | `0983086` | Hadron | accepted after diagnostic-code allocation and recursive schema hardening |
 | 12 | W02-T02 | `5fee6ec` | `985243b` | Hadron | accepted after heterogeneous-array cache-schema hardening |
+| 13 | W01-T04 | `785121b` | `ee38867` | Hadron | accepted after exact-number digest and literal-interpolation hardening |

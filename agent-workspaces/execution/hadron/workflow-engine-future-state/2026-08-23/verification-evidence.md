@@ -290,3 +290,35 @@ The amended commit was integrated as `985243b`.
 | integration `985243b` | `go vet ./workflow/...` | pass |
 | integration `985243b` | `make test` | pass |
 | integration `985243b` | `go test ./...` | pass |
+
+## W01-T04
+
+Reviewed the complete compiler, plan envelope, source maps, snapshots, and
+generated schema boundary. Review first required exact nested source carriers
+and relocation-safe recursive digest canonicalization, then found and corrected
+large-number coercion and explicit-interpolation whitespace loss. Amended source
+commit `785121b` was integrated as `ee38867`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `785121b` | `git diff --check 9c4e4cc..785121b` | pass |
+| source worktree `785121b` | `go generate ./workflow/graph ./workflow/compile` twice plus `git diff --exit-code` | pass; byte-stable with no generated drift |
+| source worktree `785121b` | `go test -count=1 ./workflow/compile/... ./workflow/graph/...` | pass |
+| source worktree `785121b` | `go test -race ./workflow/compile/...` | pass |
+| source worktree `785121b` | focused digest, exact-number, and interpolation tests, `-count=50` | pass |
+| source worktree `785121b` | `go test -v ./workflow/internal/importguard/...` | pass |
+| source worktree `785121b` | `go test ./workflow/...` | pass |
+| source worktree `785121b` | `go vet ./workflow/...` | pass |
+| source worktree `785121b` | `make test` | pass |
+| source worktree `785121b` | `go test ./...` | pass |
+| integration `ee38867` | `git diff --check HEAD^..HEAD` | pass |
+| integration `ee38867` | `go generate ./workflow/graph ./workflow/compile` plus `git diff --exit-code` | pass; no generated drift |
+| integration `ee38867` | `go test -count=1 ./workflow/compile/... ./workflow/graph/...` | pass |
+| integration `ee38867` | `go test -race ./workflow/compile/...` | pass |
+| integration `ee38867` | focused digest, exact-number, and interpolation tests, `-count=50` | pass |
+| integration `ee38867` | `go test ./workflow/values/...` | pass |
+| integration `ee38867` | `go test -v ./workflow/internal/importguard/...` | pass |
+| integration `ee38867` | `go test ./workflow/...` | pass |
+| integration `ee38867` | `go vet ./workflow/...` | pass |
+| integration `ee38867` | `make test` | pass |
+| integration `ee38867` | `go test ./...` | pass |
