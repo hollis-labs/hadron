@@ -1,0 +1,32 @@
+{
+  "severity": "error",
+  "code": "HADR-REF-001",
+  "message": "node deploy references steps.build.outputs.version without a declared dependency",
+  "source": {
+    "format": "workflow",
+    "locator": "unresolved-reference.workflow.yaml",
+    "start_line": 17,
+    "start_column": 20,
+    "end_line": 18,
+    "end_column": 25,
+    "path": ["steps", "1", "with", "build_version"]
+  },
+  "related": [
+    {
+      "message": "output is declared here",
+      "source": {
+        "format": "workflow",
+        "locator": "unresolved-reference.workflow.yaml",
+        "start_line": 8,
+        "start_column": 5,
+        "end_line": 11,
+        "end_column": 1,
+        "path": ["steps", "0", "outputs", "version"]
+      }
+    }
+  ],
+  "remediation": {
+    "message": "Declare build as a dependency before using its outputs.",
+    "suggested_syntax": "needs: [build]"
+  }
+}
