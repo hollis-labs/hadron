@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"sort"
 	"strings"
@@ -14,8 +15,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/workflow/compile"
+	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 	"gopkg.in/yaml.v3"
@@ -34,6 +38,17 @@ type definitionFlight struct {
 
 type planVariants map[string]*compile.ExecutionPlan
 
+type frozenNodeExpander struct {
+	name     string
+	expander compile.NodeExpander
+}
+
+func (e frozenNodeExpander) Name() string { return e.name }
+
+func (e frozenNodeExpander) ExpandNode(request compile.NodeExpansionRequest) (compile.NodeExpansion, bool, []diagnostic.Diagnostic) {
+	return e.expander.ExpandNode(request)
+}
+
 // DefinitionCacheStats exposes non-semantic cache telemetry for tests and
 // operations. It contains no source identity or caller information.
 type DefinitionCacheStats struct {
@@ -47,9 +62,11 @@ type DefinitionCacheStats struct {
 type DefinitionResolver struct {
 	sources      definitionSourceOptions
 	authorizer   DefinitionAuthorizer
+	bundles      hoststate.BundledDefinitionSource
 	kinds        *frozenKindLookup
 	policyHooks  []compile.PolicyHook
 	dependencies compile.DependencyOptions
+	expanders    []compile.NodeExpander
 	maxCallDepth int
 	semanticKey  string
 
@@ -99,14 +116,21 @@ func NewDefinitionResolver(options DefinitionResolverOptions) (*DefinitionResolv
 		extractorKeys = append(extractorKeys, key)
 	}
 	sort.Strings(extractorKeys)
-	semanticKey, err := semanticDefinitionKey(options.Compile.SemanticRevision, maxDepth, specs, len(hooks), extractorKeys)
+	expanders, expanderNames, err := normalizeNodeExpanders(options.Compile.NodeExpanders)
+	if err != nil {
+		return nil, invalidDefinitionOptions(err.Error())
+	}
+	if options.BundledDefinitions != nil && nilInterface(options.BundledDefinitions) {
+		return nil, invalidDefinitionOptions("bundled definition source must not be typed nil")
+	}
+	semanticKey, err := semanticDefinitionKey(options.Compile.SemanticRevision, maxDepth, specs, len(hooks), extractorKeys, expanderNames)
 	if err != nil {
 		return nil, invalidDefinitionOptions(err.Error())
 	}
 	return &DefinitionResolver{
-		sources: sources, authorizer: options.Authorizer, kinds: kinds,
+		sources: sources, authorizer: options.Authorizer, bundles: options.BundledDefinitions, kinds: kinds,
 		policyHooks: hooks, dependencies: compile.DependencyOptions{VerificationExtractors: extractors},
-		maxCallDepth: maxDepth, semanticKey: semanticKey,
+		expanders: expanders, maxCallDepth: maxDepth, semanticKey: semanticKey,
 		plans:        make(map[definitionCacheKey]*compile.ExecutionPlan),
 		planByDigest: make(map[string]planVariants),
 		exactSources: make(map[string]ResolvedSource), flights: make(map[definitionCacheKey]*definitionFlight),
@@ -115,35 +139,47 @@ func NewDefinitionResolver(options DefinitionResolverOptions) (*DefinitionResolv
 
 // ResolveSource authorizes and resolves exact source bytes without compiling.
 func (r *DefinitionResolver) ResolveSource(ctx context.Context, requested graph.DefinitionRef) (ResolvedSource, error) {
-	if ctx == nil {
-		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, ErrDefinitionUnresolved, requested.Locator, "workflow definition context is required", "Supply a live request context.")
-	}
-	if err := ctx.Err(); err != nil {
+	requested, err := r.authorizeRequested(ctx, requested)
+	if err != nil {
 		return ResolvedSource{}, err
 	}
+	return r.resolveAuthorizedSource(ctx, requested)
+}
+
+func (r *DefinitionResolver) authorizeRequested(ctx context.Context, requested graph.DefinitionRef) (graph.DefinitionRef, error) {
+	if ctx == nil {
+		return graph.DefinitionRef{}, definitionError(CodeDefinitionInvalid, ErrDefinitionUnresolved, requested.Locator, "workflow definition context is required", "Supply a live request context.")
+	}
+	if err := ctx.Err(); err != nil {
+		return graph.DefinitionRef{}, err
+	}
 	if r == nil || nilInterface(r.authorizer) || r.kinds == nil {
-		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, ErrInvalidDefinitionOptions, requested.Locator, "workflow definition resolver is not initialized", "Construct the Hadron definition resolver with all required collaborators.")
+		return graph.DefinitionRef{}, definitionError(CodeDefinitionInvalid, ErrInvalidDefinitionOptions, requested.Locator, "workflow definition resolver is not initialized", "Construct the Hadron definition resolver with all required collaborators.")
 	}
 	if err := validateDefinitionTransport(requested); err != nil {
-		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, err), requested.Locator, "workflow definition reference contains invalid transported text or metadata", "Use valid UTF-8 and JSON-compatible reference provenance.")
+		return graph.DefinitionRef{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, err), requested.Locator, "workflow definition reference contains invalid transported text or metadata", "Use valid UTF-8 and JSON-compatible reference provenance.")
 	}
 	cloned, cloneErr := cloneDefinitionReference(requested)
 	if cloneErr != nil {
-		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, cloneErr), requested.Locator, "workflow definition reference is not JSON-compatible", "Use an application-neutral DefinitionRef envelope.")
+		return graph.DefinitionRef{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, cloneErr), requested.Locator, "workflow definition reference is not JSON-compatible", "Use an application-neutral DefinitionRef envelope.")
 	}
 	requested = normalizeRequestedDefinition(cloned)
 	if validationErr := validateRequestedDefinitionReference(requested); validationErr != nil {
-		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, validationErr), requested.Locator, "workflow definition reference is invalid", "Provide one supported, unambiguous definition reference.")
+		return graph.DefinitionRef{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, validationErr), requested.Locator, "workflow definition reference is invalid", "Provide one supported, unambiguous definition reference.")
 	}
 	if authorizationErr := r.callAuthorizer(ctx, DefinitionAuthorization{Stage: AuthorizationRequested, Requested: requested}); authorizationErr != nil {
-		return ResolvedSource{}, definitionError(CodeDefinitionUnauthorized, errors.Join(ErrDefinitionUnauthorized, authorizationErr), "", "workflow definition resolution is not authorized", "Use a definition allowed for the current principal, authority, and scope.")
+		return graph.DefinitionRef{}, definitionError(CodeDefinitionUnauthorized, errors.Join(ErrDefinitionUnauthorized, authorizationErr), "", "workflow definition resolution is not authorized", "Use a definition allowed for the current principal, authority, and scope.")
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
-		return ResolvedSource{}, contextErr
+		return graph.DefinitionRef{}, contextErr
 	}
+	return requested, nil
+}
 
+func (r *DefinitionResolver) resolveAuthorizedSource(ctx context.Context, requested graph.DefinitionRef) (ResolvedSource, error) {
 	exactKey := ""
 	if exactDefinitionReference(requested) {
+		var cloneErr error
 		exactKey, cloneErr = exactSourceKey(requested)
 		if cloneErr != nil {
 			return ResolvedSource{}, cloneErr
@@ -167,7 +203,7 @@ func (r *DefinitionResolver) ResolveSource(ctx context.Context, requested graph.
 	if validationErr := validateResolvedSourceTransport(resolved); validationErr != nil {
 		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, validationErr), requested.Locator, "resolved workflow source contains invalid transported identity or provenance", "Repair the source provider so all identities are valid UTF-8 and metadata is JSON-compatible.")
 	}
-	resolved, cloneErr = cloneResolvedSource(resolved)
+	resolved, cloneErr := cloneResolvedSource(resolved)
 	if cloneErr != nil {
 		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, cloneErr), requested.Locator, "resolved workflow source is not JSON-compatible", "Use JSON-compatible provenance metadata.")
 	}
@@ -280,7 +316,16 @@ func (r *DefinitionResolver) ResolvePlan(ctx context.Context, requested graph.De
 // required by the call executor, while selected source digest remains in the
 // graph provenance metadata.
 func (r *DefinitionResolver) ResolveDefinition(ctx context.Context, requested graph.DefinitionRef) (compile.ResolvedDefinition, error) {
-	resolved, err := r.ResolveSource(ctx, requested)
+	requested, err := r.authorizeRequested(ctx, requested)
+	if err != nil {
+		return compile.ResolvedDefinition{}, err
+	}
+	if bundled, found, bundleErr := r.resolveAuthorizedBundle(ctx, requested); bundleErr != nil {
+		return compile.ResolvedDefinition{}, bundleErr
+	} else if found {
+		return bundled, nil
+	}
+	resolved, err := r.resolveAuthorizedSource(ctx, requested)
 	if err != nil {
 		return compile.ResolvedDefinition{}, err
 	}
@@ -303,6 +348,100 @@ func (r *DefinitionResolver) ResolveDefinition(ctx context.Context, requested gr
 	definition.Digest = cloned.Graph.Digest
 	definition.Provenance = &provenance
 	return compile.ResolvedDefinition{Definition: definition, Graph: cloned.Graph}, nil
+}
+
+func (r *DefinitionResolver) resolveAuthorizedBundle(ctx context.Context, requested graph.DefinitionRef) (compile.ResolvedDefinition, bool, error) {
+	if !exactDefinitionReference(requested) || requested.Digest == "" {
+		return compile.ResolvedDefinition{}, false, nil
+	}
+	candidates, err := r.localBundledDefinitions(ctx, requested)
+	if err != nil {
+		return compile.ResolvedDefinition{}, false, err
+	}
+	if r.bundles != nil {
+		persisted, sourceErr := r.bundles.FindBundledDefinitions(ctx, requested)
+		if sourceErr != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return compile.ResolvedDefinition{}, false, contextErr
+			}
+			return compile.ResolvedDefinition{}, false, definitionError(CodeDefinitionUnresolved, errors.Join(ErrDefinitionUnresolved, sourceErr), requested.Locator, "durable bundled workflow definitions could not be inspected", "Repair the durable workflow plan journal before retrying the exact call.")
+		}
+		candidates = append(candidates, persisted...)
+	}
+	if len(candidates) == 0 {
+		return compile.ResolvedDefinition{}, false, nil
+	}
+	normalized, err := normalizeBundledCandidates(ctx, requested, candidates)
+	if err != nil {
+		return compile.ResolvedDefinition{}, false, err
+	}
+	var authorized *compile.ResolvedDefinition
+	var authorizationErr error
+	for _, candidate := range normalized {
+		definition, cloneErr := cloneDefinitionReference(candidate.Definition.Definition)
+		if cloneErr != nil {
+			return compile.ResolvedDefinition{}, false, cloneErr
+		}
+		if authErr := r.callAuthorizer(ctx, DefinitionAuthorization{
+			Stage: AuthorizationResolved, Requested: requested, Resolved: &definition,
+			Container: &candidate.Container, TrustClass: candidate.TrustClass,
+		}); authErr != nil {
+			authorizationErr = authErr
+			continue
+		}
+		if contextErr := ctx.Err(); contextErr != nil {
+			return compile.ResolvedDefinition{}, false, contextErr
+		}
+		resolved := candidate.Definition
+		if authorized == nil {
+			authorized = &resolved
+			continue
+		}
+		if !equalResolvedDefinitions(*authorized, resolved) {
+			return compile.ResolvedDefinition{}, false, definitionError(CodeDefinitionPinConflict, ErrDefinitionPinConflict, requested.Locator, "authorized bundled workflow plans disagree on one immutable definition tuple", "Repair conflicting durable plan snapshots before retrying the call.")
+		}
+	}
+	if authorized == nil {
+		return compile.ResolvedDefinition{}, false, definitionError(CodeDefinitionUnauthorized, errors.Join(ErrDefinitionUnauthorized, authorizationErr), "", "resolved bundled workflow definition is not authorized", "Use a plan and generated child allowed for the current principal, authority, and trust class.")
+	}
+	cloned, cloneErr := cloneResolvedDefinition(*authorized)
+	if cloneErr != nil {
+		return compile.ResolvedDefinition{}, false, cloneErr
+	}
+	return cloned, true, nil
+}
+
+func (r *DefinitionResolver) localBundledDefinitions(ctx context.Context, requested graph.DefinitionRef) ([]hoststate.BundledDefinitionCandidate, error) {
+	r.mu.Lock()
+	plans := make([]*compile.ExecutionPlan, 0, len(r.plans))
+	for _, plan := range r.plans {
+		plans = append(plans, plan)
+	}
+	r.mu.Unlock()
+	sort.Slice(plans, func(left, right int) bool {
+		leftKey, _ := exactPlanVariantKey(plans[left])
+		rightKey, _ := exactPlanVariantKey(plans[right])
+		return leftKey < rightKey
+	})
+	result := make([]hoststate.BundledDefinitionCandidate, 0)
+	for _, plan := range plans {
+		resolver, err := compile.NewBundledDefinitionResolver(plan)
+		if err != nil {
+			return nil, definitionError(CodeDefinitionPinConflict, errors.Join(ErrDefinitionPinConflict, err), requested.Locator, "cached workflow plan contains invalid bundled definitions", "Repair the deterministic source expander or change its semantic revision.")
+		}
+		resolved, resolveErr := resolver.ResolveDefinition(ctx, requested)
+		if errors.Is(resolveErr, compile.ErrBundledDefinitionNotFound) {
+			continue
+		}
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		trustClass, _ := plan.Provenance.Metadata["trust_class"].(string)
+		result = append(result, hoststate.BundledDefinitionCandidate{
+			Definition: resolved, Container: planReference(plan), TrustClass: trustClass,
+		})
+	}
+	return result, nil
 }
 
 // LoadPlan returns an authorized defensive copy of a plan previously resolved
@@ -445,7 +584,7 @@ func (r *DefinitionResolver) compileLocalPlan(ctx context.Context, source Resolv
 	if err := bindResolvedProvenance(loaded.Source, source); err != nil {
 		return nil, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, err), source.Definition.Locator, "workflow source provenance could not be bound", "Use JSON-compatible host provenance and graph-native workflow syntax.")
 	}
-	compiled := compile.Compile(loaded.Source)
+	compiled := compile.CompileWithOptions(loaded.Source, compile.CompileOptions{NodeExpanders: r.expanders})
 	if len(compiled.Diagnostics) != 0 {
 		return nil, diagnosticsError(ErrDefinitionUnresolved, compiled.Diagnostics)
 	}
@@ -590,7 +729,7 @@ func validateRequestedDefinitionReference(input graph.DefinitionRef) error {
 	}
 	switch input.Kind {
 	case "", "workflow":
-		if (input.ID == "") == (input.Locator == "") {
+		if (input.ID == "") == (input.Locator == "") && !exactBundledDefinitionReference(input) {
 			return errors.New("generic workflow reference requires exactly one of id or locator")
 		}
 	case DefinitionKindFile:
@@ -617,6 +756,11 @@ func validateRequestedDefinitionReference(input graph.DefinitionRef) error {
 		return errors.New("definition authority differs from supplied provenance")
 	}
 	return nil
+}
+
+func exactBundledDefinitionReference(input graph.DefinitionRef) bool {
+	return input.Kind == "workflow" && input.Authority != "" && input.ID != "" && input.Locator != "" &&
+		input.Version != "" && input.Digest != "" && input.Provenance != nil && input.Provenance.Digest == input.Digest
 }
 
 func validateDefinitionTransport(input graph.DefinitionRef) error {
@@ -752,14 +896,114 @@ func resolvedSourceContextKey(input ResolvedSource) (string, error) {
 	return values.SHA256Digest(encoded), nil
 }
 
-func semanticDefinitionKey(revision string, maxDepth int, specs []stepkind.StepKindSpec, hookCount int, extractorKeys []string) (string, error) {
+func normalizeNodeExpanders(input []compile.NodeExpander) ([]compile.NodeExpander, []string, error) {
+	type named struct {
+		name     string
+		expander compile.NodeExpander
+	}
+	normalized := make([]named, 0, len(input))
+	for index, expander := range input {
+		if nilInterface(expander) {
+			return nil, nil, fmt.Errorf("node expander[%d] is nil", index)
+		}
+		name := expander.Name()
+		if strings.TrimSpace(name) == "" || name != strings.TrimSpace(name) || !utf8.ValidString(name) || containsDefinitionControl(name) {
+			return nil, nil, fmt.Errorf("node expander[%d] requires a stable non-empty name", index)
+		}
+		normalized = append(normalized, named{name: name, expander: expander})
+	}
+	sort.Slice(normalized, func(left, right int) bool { return normalized[left].name < normalized[right].name })
+	expanders := make([]compile.NodeExpander, 0, len(normalized))
+	names := make([]string, 0, len(normalized))
+	for index, item := range normalized {
+		if index > 0 && item.name == normalized[index-1].name {
+			return nil, nil, fmt.Errorf("node expander name %q is duplicated", item.name)
+		}
+		expanders = append(expanders, frozenNodeExpander(item))
+		names = append(names, item.name)
+	}
+	return expanders, names, nil
+}
+
+func normalizeBundledCandidates(ctx context.Context, requested graph.DefinitionRef, input []hoststate.BundledDefinitionCandidate) ([]hoststate.BundledDefinitionCandidate, error) {
+	result := make([]hoststate.BundledDefinitionCandidate, 0, len(input))
+	for index, candidate := range input {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(candidate.TrustClass) == "" || candidate.TrustClass != strings.TrimSpace(candidate.TrustClass) ||
+			!utf8.ValidString(candidate.TrustClass) || containsDefinitionControl(candidate.TrustClass) {
+			return nil, definitionError(CodeDefinitionInvalid, ErrDefinitionUnresolved, requested.Locator, fmt.Sprintf("bundled workflow candidate[%d] has invalid trust metadata", index), "Repair the durable containing plan provenance.")
+		}
+		if err := candidate.Container.Validate(); err != nil {
+			return nil, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, err), requested.Locator, fmt.Sprintf("bundled workflow candidate[%d] has invalid container identity", index), "Repair the durable containing plan identity.")
+		}
+		resolver, err := compile.NewBundledDefinitionResolver(&compile.ExecutionPlan{BundledDefinitions: []compile.ResolvedDefinition{candidate.Definition}})
+		if err != nil {
+			return nil, definitionError(CodeDefinitionPinConflict, errors.Join(ErrDefinitionPinConflict, err), requested.Locator, fmt.Sprintf("bundled workflow candidate[%d] is invalid", index), "Repair the immutable bundled definition in the durable plan.")
+		}
+		resolved, err := resolver.ResolveDefinition(ctx, requested)
+		if err != nil {
+			return nil, definitionError(CodeDefinitionPinConflict, errors.Join(ErrDefinitionPinConflict, err), requested.Locator, fmt.Sprintf("bundled workflow candidate[%d] does not match the requested tuple", index), "Repair the durable plan bundle index.")
+		}
+		result = append(result, hoststate.BundledDefinitionCandidate{Definition: resolved, Container: candidate.Container, TrustClass: candidate.TrustClass})
+	}
+	sort.Slice(result, func(left, right int) bool {
+		return bundledCandidateKey(result[left]) < bundledCandidateKey(result[right])
+	})
+	deduplicated := result[:0]
+	for _, candidate := range result {
+		if len(deduplicated) == 0 || bundledCandidateKey(deduplicated[len(deduplicated)-1]) != bundledCandidateKey(candidate) {
+			deduplicated = append(deduplicated, candidate)
+		}
+	}
+	return deduplicated, nil
+}
+
+func bundledCandidateKey(candidate hoststate.BundledDefinitionCandidate) string {
+	encoded, _ := json.Marshal(candidate)
+	return string(encoded)
+}
+
+func planReference(plan *compile.ExecutionPlan) runtime.PlanRef {
+	return runtime.PlanRef{
+		ID: plan.ID, Version: plan.Graph.Version, Digest: plan.Digest,
+		SchemaVersion: plan.SchemaVersion,
+	}
+}
+
+func cloneResolvedDefinition(input compile.ResolvedDefinition) (compile.ResolvedDefinition, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return compile.ResolvedDefinition{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var output compile.ResolvedDefinition
+	if err := decoder.Decode(&output); err != nil {
+		return compile.ResolvedDefinition{}, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return compile.ResolvedDefinition{}, errors.New("resolved definition contains trailing JSON")
+	}
+	return output, nil
+}
+
+func equalResolvedDefinitions(left, right compile.ResolvedDefinition) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
+}
+
+func semanticDefinitionKey(revision string, maxDepth int, specs []stepkind.StepKindSpec, hookCount int, extractorKeys, expanderNames []string) (string, error) {
 	encoded, err := json.Marshal(struct {
 		Revision     string                  `json:"revision"`
 		MaxCallDepth int                     `json:"max_call_depth"`
 		StepKinds    []stepkind.StepKindSpec `json:"step_kinds"`
 		PolicyHooks  int                     `json:"policy_hooks"`
 		Extractors   []string                `json:"verification_extractors"`
-	}{revision, maxDepth, specs, hookCount, extractorKeys})
+		Expanders    []string                `json:"node_expanders"`
+	}{revision, maxDepth, specs, hookCount, extractorKeys, expanderNames})
 	if err != nil {
 		return "", err
 	}

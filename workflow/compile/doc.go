@@ -10,5 +10,8 @@
 // parses structural expression references into data edges and a direct
 // invocation visibility plan. Validation checks graph structure plus
 // caller-supplied step-kind, policy, and definition seams. None of these phases
-// executes expressions or starts runtime work.
+// executes expressions or starts runtime work. CompileWithOptions may apply
+// pure, explicitly registered node expanders; generated child workflows are
+// serialized in ExecutionPlan.BundledDefinitions so resolution survives JSON
+// round trips and process restarts.
 package compile

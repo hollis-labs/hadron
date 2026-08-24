@@ -208,6 +208,23 @@ type StartRecord struct {
 	RecordedAt      time.Time             `json:"recorded_at"`
 }
 
+// BundledDefinitionCandidate associates one exact serialized child definition
+// with the trust class of the durable plan that contains it. Definition
+// resolution authorizes both the requested tuple and this resolved trust
+// context; stores must return defensive copies in deterministic order.
+type BundledDefinitionCandidate struct {
+	Definition compile.ResolvedDefinition `json:"definition"`
+	Container  runtime.PlanRef            `json:"container"`
+	TrustClass string                     `json:"trust_class"`
+}
+
+// BundledDefinitionSource finds exact child definitions inside durable plan
+// snapshots. An empty result means no persisted plan contains the requested
+// immutable tuple. Implementations must not perform authorization themselves.
+type BundledDefinitionSource interface {
+	FindBundledDefinitions(context.Context, graph.DefinitionRef) ([]BundledDefinitionCandidate, error)
+}
+
 func (r StartRecord) Validate() error {
 	if err := r.Run.Validate(); err != nil {
 		return err

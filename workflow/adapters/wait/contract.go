@@ -21,7 +21,38 @@ const (
 	CodeAuthorityFailed   = "wait_authority_failed"
 	CodeCallbackFailed    = "wait_callback_failed"
 	CodeContinuation      = "wait_continuation_invalid"
+	CodeChildRunFailed    = "wait_child_run_unsuccessful"
 )
+
+// ChildRunTerminalStatus is the closed status vocabulary accepted by a
+// fail-on-unsuccessful child-run wait.
+type ChildRunTerminalStatus string
+
+const (
+	ChildRunSucceeded ChildRunTerminalStatus = "succeeded"
+	ChildRunFailed    ChildRunTerminalStatus = "failed"
+	ChildRunCanceled  ChildRunTerminalStatus = "canceled"
+	ChildRunTimedOut  ChildRunTerminalStatus = "timed_out"
+	ChildRunCrashed   ChildRunTerminalStatus = "crashed"
+)
+
+// ChildRunFailure is safe terminal metadata supplied by the host wake bridge.
+// Provider causes and raw logs must not enter this envelope.
+type ChildRunFailure struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable,omitempty"`
+}
+
+// ChildRunTerminalEnvelope is the generic child-run wake payload. Successful
+// deliveries carry typed JSON outputs; unsuccessful deliveries carry only
+// safe failure metadata and are converted to ordinary step failure when the
+// wait config opts into fail_on_unsuccessful.
+type ChildRunTerminalEnvelope struct {
+	Status  ChildRunTerminalStatus `json:"status"`
+	Outputs map[string]any         `json:"outputs,omitempty"`
+	Failure *ChildRunFailure       `json:"failure,omitempty"`
+}
 
 // SourceKind is the adapter-level external wake vocabulary. Event is lowered
 // to the canonical signal wake source and tagged in durable authority metadata.

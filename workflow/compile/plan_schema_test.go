@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/compile/internal/planschema"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -44,6 +45,7 @@ func TestGeneratedPlanSchemaCompilesAndValidatesPlan(t *testing.T) {
 	}{
 		{name: "representative", plan: representativePlan(t)},
 		{name: "activations", plan: activationPlan(t, activationLocator)},
+		{name: "bundled definition", plan: bundledPlan(t)},
 	}
 	compiled := compiledPlanSchema(t)
 	for _, test := range tests {
@@ -53,6 +55,13 @@ func TestGeneratedPlanSchemaCompilesAndValidatesPlan(t *testing.T) {
 			}
 		})
 	}
+}
+
+func bundledPlan(t *testing.T) *workflowcompile.ExecutionPlan {
+	t.Helper()
+	plan := representativePlan(t)
+	plan.BundledDefinitions = []workflowcompile.ResolvedDefinition{{Definition: plan.Definition, Graph: plan.Graph}}
+	return &plan
 }
 
 func TestGeneratedPlanSchemaRejectsUndeclaredEnvelopeField(t *testing.T) {

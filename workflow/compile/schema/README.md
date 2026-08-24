@@ -4,6 +4,11 @@
 references graph-owned types in the generated workflow graph schema. Do not
 edit either generated artifact by hand.
 
+The optional `bundled_definitions` sidecar contains complete immutable child
+graphs required by generated call nodes. It is serialized with the plan so
+`compile.NewBundledDefinitionResolver` can resolve them after restart without
+a process-local compiler registry.
+
 From the repository root, regenerate both schema boundaries with:
 
 ```sh

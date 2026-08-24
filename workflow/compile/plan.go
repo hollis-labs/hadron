@@ -36,6 +36,9 @@ const (
 	// CodeUnsupportedActivationAuthority identifies an attempt by workflow
 	// source to claim host or operator ownership for an activation.
 	CodeUnsupportedActivationAuthority diagnostic.Code = "HADR-SOURCE-016"
+	// CodeNodeExpansion identifies a deterministic source-sugar expansion that
+	// could not preserve the authored node's graph semantics.
+	CodeNodeExpansion diagnostic.Code = "HADR-SOURCE-033"
 )
 
 // SourceDigest identifies immutable source content without embedding its
@@ -64,6 +67,10 @@ type ExecutionPlan struct {
 	SourceDigests []SourceDigest      `json:"source_digests"`
 	Graph         graph.Graph         `json:"graph"`
 	SourceMap     graph.SourceMap     `json:"source_map"`
+	// BundledDefinitions are immutable generated or vendored child workflows
+	// required by this plan. They make call resolution restart-safe without a
+	// process-local compiler registry.
+	BundledDefinitions []ResolvedDefinition `json:"bundled_definitions,omitempty"`
 }
 
 // CompileResult is the outcome of lowering a loaded source. Plan is present
@@ -97,6 +104,13 @@ func digestGraph(value graph.Graph) (string, error) {
 	return sourceDigest(encoded), nil
 }
 
+// GraphDigest returns the compiler's canonical, relocation-stable SHA-256
+// digest for graph semantics. Node expanders use this when constructing an
+// immutable bundled child definition before the parent plan is finalized.
+func GraphDigest(value graph.Graph) (string, error) {
+	return digestGraph(value)
+}
+
 func digestPlan(value ExecutionPlan) (string, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
@@ -112,6 +126,15 @@ func digestPlan(value ExecutionPlan) (string, error) {
 	canonical.Definition.Locator = ""
 	canonical.Definition.Provenance = nil
 	stripGraphLocations(&canonical.Graph)
+	for index := range canonical.BundledDefinitions {
+		canonical.BundledDefinitions[index].Definition.Locator = ""
+		canonical.BundledDefinitions[index].Definition.Provenance = nil
+		stripGraphLocations(&canonical.BundledDefinitions[index].Graph)
+		for name, binding := range canonical.BundledDefinitions[index].InputBindings {
+			stripBinding(&binding)
+			canonical.BundledDefinitions[index].InputBindings[name] = binding
+		}
+	}
 	encoded, err = json.Marshal(canonical)
 	if err != nil {
 		return "", fmt.Errorf("marshal execution plan for digest: %w", err)

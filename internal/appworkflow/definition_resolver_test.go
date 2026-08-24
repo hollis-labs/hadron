@@ -18,12 +18,54 @@ import (
 	"testing"
 
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
+	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
+
+func TestDefinitionResolverFreezesNodeExpanderNamesInSemanticIdentity(t *testing.T) {
+	first := &mutableNodeExpander{name: "zeta"}
+	second := &mutableNodeExpander{name: "alpha"}
+	input := []workflowcompile.NodeExpander{first, second}
+	normalized, names, err := normalizeNodeExpanders(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.name = "changed"
+	input[0] = &mutableNodeExpander{name: "replacement"}
+	if !reflect.DeepEqual(names, []string{"alpha", "zeta"}) || normalized[0].Name() != "alpha" || normalized[1].Name() != "zeta" {
+		t.Fatalf("frozen expanders = %#v / %#v", names, normalized)
+	}
+	without, err := semanticDefinitionKey("revision", 8, nil, 0, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	with, err := semanticDefinitionKey("revision", 8, nil, 0, nil, names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if with == without {
+		t.Fatal("node expander names did not change the semantic cache identity")
+	}
+	if _, _, err := normalizeNodeExpanders([]workflowcompile.NodeExpander{second, second}); err == nil {
+		t.Fatal("duplicate node expander name was accepted")
+	}
+	var typedNil *mutableNodeExpander
+	if _, _, err := normalizeNodeExpanders([]workflowcompile.NodeExpander{typedNil}); err == nil {
+		t.Fatal("typed-nil node expander was accepted")
+	}
+}
+
+type mutableNodeExpander struct{ name string }
+
+func (e *mutableNodeExpander) Name() string { return e.name }
+
+func (*mutableNodeExpander) ExpandNode(workflowcompile.NodeExpansionRequest) (workflowcompile.NodeExpansion, bool, []diagnostic.Diagnostic) {
+	return workflowcompile.NodeExpansion{}, false, nil
+}
 
 func TestDefinitionResolverSupportsFileDirectoryRegistryAndPackageSources(t *testing.T) {
 	root := t.TempDir()

@@ -151,6 +151,9 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 			"logical_agent_id": req.LogicalAgentID,
 			"provider":         binding.Provider,
 			"runtime":          string(binding.Runtime),
+			"mailbox":          mailbox,
+			"session_uri":      sessionURN(cfg.Authority, sessionID),
+			"correlation":      strings.TrimSpace(anyString(req.Metadata["correlation_id"])),
 		},
 	}); err != nil {
 		return execution.AgentLaunchResult{}, fmt.Errorf("start session: %w", err)

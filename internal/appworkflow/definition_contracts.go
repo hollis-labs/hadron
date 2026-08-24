@@ -9,10 +9,12 @@ import (
 	"io"
 	"strings"
 
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/hadron/workflow/runtime"
 )
 
 const (
@@ -45,10 +47,14 @@ const (
 
 // DefinitionAuthorization carries no source bytes. Resolved is populated only
 // after the source identity is known and before compilation/cache access.
+// Container is populated for a bundled definition and identifies the exact
+// immutable parent plan containing it, so authorization never relies on child
+// digest knowledge or trust class alone.
 type DefinitionAuthorization struct {
 	Stage      DefinitionAuthorizationStage
 	Requested  graph.DefinitionRef
 	Resolved   *graph.DefinitionRef
+	Container  *runtime.PlanRef
 	TrustClass string
 }
 
@@ -78,7 +84,11 @@ type DefinitionCompileOptions struct {
 	StepKinds         compile.StepKindLookup
 	PolicyHooks       []compile.PolicyHook
 	DependencyOptions compile.DependencyOptions
-	MaxCallDepth      int
+	// NodeExpanders are pure graph-source extensions captured by stable name
+	// when the resolver is constructed. SemanticRevision must change whenever
+	// an expander's behavior changes without changing its name.
+	NodeExpanders []compile.NodeExpander
+	MaxCallDepth  int
 	// SemanticRevision is the host's stable fingerprint for collaborator
 	// behavior that cannot be derived from interface values (notably policy
 	// hooks and verification extractors). Hosts must change it whenever those
@@ -94,7 +104,10 @@ type DefinitionResolverOptions struct {
 	PackageTrustClass string
 	Registry          hadronregistry.WorkflowResolver
 	Authorizer        DefinitionAuthorizer
-	Compile           DefinitionCompileOptions
+	// BundledDefinitions resolves exact generated children from durable plan
+	// snapshots. It is optional only for hosts that do not admit bundled calls.
+	BundledDefinitions hoststate.BundledDefinitionSource
+	Compile            DefinitionCompileOptions
 	// MaxSourceBytes bounds file and registry bytes and the complete
 	// decompressed package tar stream before compilation or caching.
 	MaxSourceBytes       int64
@@ -182,6 +195,10 @@ func cloneDefinitionAuthorization(input DefinitionAuthorization) (DefinitionAuth
 			return DefinitionAuthorization{}, err
 		}
 		input.Resolved = &resolved
+	}
+	if input.Container != nil {
+		container := *input.Container
+		input.Container = &container
 	}
 	return input, nil
 }

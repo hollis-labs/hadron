@@ -57,6 +57,14 @@ Steps accept either:
 - one recognized executor field such as `cmd`, `mcp_call`, `http_call`,
   `transform`, `sleep`, `wait_for`, `human_gate`, or `message_wait`.
 
+`agent_launch` is a recognized graph-native shorthand but requires the
+explicit extraction-safe expander supplied by `workflow/adapters/agent` (for
+example through `agent.Compile`). Core never imports adapters or performs an
+implicit global registration. Pure expanders run before graph/plan digests are
+computed. Generated child workflows are committed to the serialized plan's
+`bundled_definitions`; `compile.NewBundledDefinitionResolver` resolves only an
+exact immutable authority/kind/id/locator/version/digest tuple after restart.
+
 `mcp_call` and `http_call` normalize to the registered kinds `mcp` and `http`.
 Mapping-shaped executor values become opaque config unchanged. Scalar `cmd`
 and `sleep` values become `command` and `duration` config fields. Multiple

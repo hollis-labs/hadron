@@ -112,6 +112,133 @@ func TestWaitForBuildsTypedWakeRecordsWithoutPolling(t *testing.T) {
 	}
 }
 
+func TestWaitForResolvesTypedChildRunInputFailClosed(t *testing.T) {
+	executor, err := waitadapter.NewWaitFor(waitOptions(nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := graph.Config{"child_run": map[string]any{"input": "run-id"}, "timeout": "30m"}
+	invocation := prepared(config)
+	invocation.Invocation.Inputs["run-id"] = inline(t, "call-child-run-1", values.RedactionPrivate, values.RetentionRun)
+	result, err := executor.Execute(t.Context(), invocation)
+	if err != nil || result.Wait == nil || result.Wait.Record.Kind != workflowwait.KindChildRun ||
+		result.Wait.Record.WakeSource != workflowwait.WakeChildRun || result.Wait.Record.Correlation != "call-child-run-1" {
+		t.Fatalf("dynamic child-run wait = %#v, %v", result, err)
+	}
+
+	explicit := prepared(graph.Config{"child_run": map[string]any{"input": "run-id"}, "correlation": "parent-correlation", "timeout": "30m"})
+	explicit.Invocation.Inputs["run-id"] = inline(t, "call-child-run-1", values.RedactionPrivate, values.RetentionRun)
+	result, err = executor.Execute(t.Context(), explicit)
+	if err != nil || result.Wait.Record.Correlation != "parent-correlation" {
+		t.Fatalf("explicit dynamic correlation = %#v, %v", result, err)
+	}
+
+	artifact := values.Value{Type: values.TypeArtifact, Redaction: values.RedactionPrivate, Retention: values.RetentionRun}
+	secretRef, secretErr := values.ParseSecretRef("secret://project/agent/run")
+	if secretErr != nil {
+		t.Fatal(secretErr)
+	}
+	secret, secretErr := values.NewSecretRef(secretRef, values.Metadata{
+		Producer: values.Producer{Kind: "test", Reference: "secret"}, MediaType: "application/json",
+		Redaction: values.RedactionSecret, Retention: values.RetentionProject,
+	})
+	if secretErr != nil {
+		t.Fatal(secretErr)
+	}
+	for _, test := range []struct {
+		name  string
+		value *values.Value
+	}{
+		{name: "missing"},
+		{name: "number", value: pointerValue(inline(t, json.Number("1"), values.RedactionPrivate, values.RetentionRun))},
+		{name: "empty", value: pointerValue(inline(t, "", values.RedactionPrivate, values.RetentionRun))},
+		{name: "secret", value: &secret},
+		{name: "artifact", value: &artifact},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := prepared(config)
+			if test.value != nil {
+				candidate.Invocation.Inputs["run-id"] = *test.value
+			}
+			if _, err := executor.Execute(t.Context(), candidate); err == nil {
+				t.Fatal("unsafe dynamic child-run input accepted")
+			}
+		})
+	}
+
+	for _, invalid := range []graph.Config{
+		{"child_run": map[string]any{"run_id": "child", "input": "run-id"}, "timeout": "1m"},
+		{"child_run": map[string]any{}, "timeout": "1m"},
+		{"child_run": map[string]any{"input": "Run ID"}, "timeout": "1m"},
+		{"child_run": map[string]any{"input": 3}, "timeout": "1m"},
+	} {
+		if findings := executor.ValidateConfig(t.Context(), invalid); len(findings) == 0 {
+			t.Fatalf("ambiguous dynamic child-run config accepted: %#v", invalid)
+		}
+	}
+}
+
+func TestChildRunTerminalPolicyCompletesOnlySuccessfulTypedOutputs(t *testing.T) {
+	executor, err := waitadapter.NewWaitFor(waitOptions(nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := graph.Config{
+		"child_run": map[string]any{"run_id": "child-1", "fail_on_unsuccessful": true}, "timeout": "30m",
+		"payload_schema": graph.Schema{
+			"type": "object", "additionalProperties": false, "required": []any{"handle", "status", "result"},
+			"properties": map[string]any{"handle": map[string]any{"type": "object"}, "status": map[string]any{"const": "succeeded"}, "result": map[string]any{}},
+		},
+	}
+	initial, err := executor.Execute(t.Context(), prepared(config))
+	if err != nil || initial.Wait == nil {
+		t.Fatalf("initial Execute = %#v, %v", initial, err)
+	}
+	successOutputs := map[string]any{"handle": map[string]any{"id": "session-1"}, "status": "succeeded", "result": json.Number("9007199254740993")}
+	success := prepared(config)
+	success.Invocation.Continuation = continuation(t, initial.Wait, inline(t, map[string]any{
+		"status": "succeeded", "outputs": successOutputs,
+	}, values.RedactionPrivate, values.RetentionRun), workflowwait.Responder{Kind: "child_run", Reference: "child-1"})
+	completed, err := executor.Execute(t.Context(), success)
+	if err != nil || completed.Outcome != stepkind.StepCompleted || !reflect.DeepEqual(completed.Outputs["payload"].Inline, successOutputs) {
+		t.Fatalf("successful terminal = %#v, %v", completed, err)
+	}
+	if completed.Outputs["payload"].Redaction != values.RedactionPrivate || completed.Outputs["payload"].Retention != values.RetentionRun {
+		t.Fatalf("successful output metadata = %#v", completed.Outputs["payload"])
+	}
+
+	for _, test := range []struct {
+		status    string
+		retryable bool
+		wantClass stepkind.RetryClassification
+	}{
+		{"failed", true, stepkind.Retryable},
+		{"canceled", false, stepkind.RetryPermanent},
+		{"timed_out", false, stepkind.RetryPermanent},
+		{"crashed", false, stepkind.RetryPermanent},
+	} {
+		t.Run(test.status, func(t *testing.T) {
+			invocation := prepared(config)
+			invocation.Invocation.Continuation = continuation(t, initial.Wait, inline(t, map[string]any{
+				"status": test.status, "failure": map[string]any{"code": "child_" + test.status, "message": "child run ended", "retryable": test.retryable},
+			}, values.RedactionPrivate, values.RetentionRun), workflowwait.Responder{Kind: "child_run", Reference: "child-1"})
+			result, err := executor.Execute(t.Context(), invocation)
+			var execution *stepkind.ExecutionError
+			if result.Outcome != "" || !errors.As(err, &execution) || execution.Code != waitadapter.CodeChildRunFailed || execution.Classification != test.wantClass || strings.Contains(err.Error(), "child run ended") {
+				t.Fatalf("terminal %s = %#v, %T %v", test.status, result, err, err)
+			}
+		})
+	}
+
+	malformed := prepared(config)
+	malformed.Invocation.Continuation = continuation(t, initial.Wait, inline(t, map[string]any{
+		"status": "failed", "outputs": successOutputs,
+	}, values.RedactionPrivate, values.RetentionRun), workflowwait.Responder{Kind: "child_run", Reference: "child-1"})
+	if _, err := executor.Execute(t.Context(), malformed); err == nil || !errors.Is(err, values.ErrSchemaMismatch) {
+		t.Fatalf("ambiguous failed envelope = %v", err)
+	}
+}
+
 func TestCallbackIssuanceIsRetryStableForAnImmutableInvocation(t *testing.T) {
 	var requests []waitadapter.CallbackRequest
 	issuer := waitadapter.CallbackIssuerFunc(func(_ context.Context, request waitadapter.CallbackRequest) (waitadapter.CallbackCredential, error) {
@@ -456,6 +583,8 @@ func inline(t *testing.T, value any, redaction values.RedactionClass, retention 
 	}
 	return result
 }
+
+func pointerValue(value values.Value) *values.Value { return &value }
 
 func diagnostics(findings []diagnostic.Diagnostic) string {
 	messages := make([]string, 0, len(findings))

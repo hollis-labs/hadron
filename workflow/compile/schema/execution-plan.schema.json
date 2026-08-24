@@ -3,6 +3,12 @@
     "ExecutionPlan": {
       "additionalProperties": false,
       "properties": {
+        "bundled_definitions": {
+          "items": {
+            "$ref": "#/$defs/ResolvedDefinition"
+          },
+          "type": "array"
+        },
         "definition": {
           "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
         },
@@ -40,6 +46,28 @@
         "source_digests",
         "graph",
         "source_map"
+      ],
+      "type": "object"
+    },
+    "ResolvedDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "graph": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Graph"
+        },
+        "input_bindings": {
+          "additionalProperties": {
+            "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Binding"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "definition",
+        "graph"
       ],
       "type": "object"
     },

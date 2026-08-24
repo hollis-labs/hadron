@@ -106,9 +106,9 @@ func (f PolicyHookFunc) ValidateNode(ctx context.Context, input NodeValidation) 
 // definition's with: bindings). Call sites overlay their node-local bindings
 // after these defaults are evaluated.
 type ResolvedDefinition struct {
-	Definition    graph.DefinitionRef
-	Graph         graph.Graph
-	InputBindings map[string]graph.Binding
+	Definition    graph.DefinitionRef      `json:"definition"`
+	Graph         graph.Graph              `json:"graph"`
+	InputBindings map[string]graph.Binding `json:"input_bindings,omitempty"`
 }
 
 // DefinitionResolver resolves a child definition for call-cycle and depth

@@ -11,6 +11,13 @@ import (
 // execution plan. It does not evaluate expressions, resolve definitions,
 // infer dependencies, validate registered kinds, or perform graph validation.
 func Compile(source *Source) CompileResult {
+	return CompileWithOptions(source, CompileOptions{})
+}
+
+// CompileWithOptions lowers source and then applies registered pure node
+// expanders before graph and plan digests are computed. The same source and
+// expander set must always produce byte-identical plan semantics.
+func CompileWithOptions(source *Source, options CompileOptions) CompileResult {
 	l := &lowerer{source: source}
 	if source == nil || source.Document == nil || source.Document.Kind != yaml.DocumentNode || len(source.Document.Content) != 1 {
 		l.invalidShape(nil, nil, "a loaded single-document Source is required")
@@ -69,6 +76,12 @@ func Compile(source *Source) CompileResult {
 	if len(l.diagnostics) != 0 {
 		return CompileResult{Diagnostics: l.diagnostics}
 	}
+	bundled, expansionDiagnostics := expandGraph(compiledGraph, options)
+	if len(expansionDiagnostics) != 0 {
+		return CompileResult{Diagnostics: expansionDiagnostics}
+	}
+	compiledGraph = bundled.Graph
+	sourceMap = compiledGraph.SourceMap
 	graphDigest, err := digestGraph(compiledGraph)
 	if err != nil {
 		l.invalidShape(root, nil, err.Error())
@@ -84,13 +97,14 @@ func Compile(source *Source) CompileResult {
 		Digest:    rawDigest,
 	}
 	plan := ExecutionPlan{
-		SchemaVersion: ExecutionPlanSchemaVersion,
-		ID:            header.id,
-		Definition:    definition,
-		Provenance:    header.provenance,
-		SourceDigests: []SourceDigest{{Format: graph.SourceWorkflow, Digest: rawDigest}},
-		Graph:         compiledGraph,
-		SourceMap:     sourceMap,
+		SchemaVersion:      ExecutionPlanSchemaVersion,
+		ID:                 header.id,
+		Definition:         definition,
+		Provenance:         header.provenance,
+		SourceDigests:      []SourceDigest{{Format: graph.SourceWorkflow, Digest: rawDigest}},
+		Graph:              compiledGraph,
+		SourceMap:          sourceMap,
+		BundledDefinitions: bundled.Definitions,
 	}
 	planDigest, err := digestPlan(plan)
 	if err != nil {
