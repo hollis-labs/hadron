@@ -1197,3 +1197,4 @@ that partially bound pins cannot leave runnable or claimable work.
 | independent source review `6ae32b2` | `go test -count=3 ./cmd/hadron ./internal/appworkflow ./internal/persistence`; committed contract, authorization, redaction, and pin-rejection audit | pass |
 | source worktree `6ae32b2` | overlapping full/race execution followed by exact agentsubstrate fixture at `-count=10` and an uncontended full rerun | only the recorded agentsubstrate explicit-outbox timing fixture failed during overlap; isolation and the uncontended complete rerun passed |
 | integration `93ab469` | focused packages at `-count=3`; focused CLI/appworkflow race suite; integration diff check | pass |
+| integration `93ab469` plus tracking/dispatch `1e02394` | `go test -count=1 ./...` | pass |
