@@ -251,6 +251,16 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0TTMZH7BNKCS8JW98QQJ7SZ`.
 
+- `internal/agentsubstrate`'s explicit-reply outbox kickoff fixture remains
+  timing-sensitive under the repository-wide suite: several full runs have
+  timed out while its isolated package immediately passed three consecutive
+  executions. Workflow task-focused suites are unaffected. Stabilize the
+  fixture's asynchronous close/outbox coordination when agent-substrate tests
+  are next maintained; keep using an immediate isolated rerun to distinguish
+  this known fixture failure from workflow regressions.
+
+  Vanta revision: `01M0TVDTR35JQ92KMGBRN6K841`.
+
 ## Resolved follow-ups
 
 - W05-T02 resolved the temporary W05-T01 identity strings with durable,
