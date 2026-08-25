@@ -66,3 +66,5 @@
 | 62 | W06-T10-H2 | `2238c756` | `225d113` | Hadron | resolved the complete frontend dependency advisory set through Vite/plugin and shadcn toolchain upgrades with no overrides |
 | 63 | W06-T10-H3 | root integration review | `bc3b589` | Hadron | excluded the obsolete nested frontend bundle from Tailwind and source scans, restoring byte-stable generated assets on main |
 | 64 | W06-T03 | `f21e495` | `6a4f55f` | Hadron | accepted after durable credential/profile CAS, exact authority and source binding, session-scoped schema mounts, truthful async run handles, restart-unique invocation identity, and lossless numeric transport hardening |
+| 65 | W07-T11 | `90d722f` | `d66cc39` | Hadron | accepted with immutable Go graph authoring, committed graph/API schemas, generated TypeScript DTO/client authority, strict versioned agent ingress, bounded compact diagnostics, and non-cacheable pre-registration material |
+| 66 | W07-T11-H1 | root integration review | `a02d858` | Hadron | bound namespaced catalog records to source-local plan/definition/graph IDs plus exact source format, digest, provenance, and plan digest before exposure |

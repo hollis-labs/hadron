@@ -43,7 +43,7 @@ or the detailed architecture made a later choice. In particular:
 | `call.mode: inline | run`, child outputs, target and parent-close policy | Implemented | W01-T01, W04-T06 |
 | Source `on:` declarations lowered to operational activations | Implemented | W01-T07, W05-T04, W05-T08 |
 | Go structs as IR authority plus deterministic JSON Schema | Planned | W01-T01, W01-T02 |
-| SDK, UI, and agent-emitted inputs remain views over the IR | Planned later | W07-T11 |
+| SDK, UI, and agent-emitted inputs remain views over the IR | Implemented | W07-T11 |
 
 ## Values And Expressions
 
@@ -123,7 +123,7 @@ or the detailed architecture made a later choice. In particular:
 | Static matrices lower to fan-out | Implemented | W07-T09 |
 | Daemon/service steps with readiness and teardown | Implemented | W07-T09 |
 | Dynamic graphs use validated generated child definitions, not live mutation | Implemented | W07-T09 |
-| Fluent/Go/TypeScript/agent front ends remain views over IR | Planned later | W07-T11 |
+| Fluent/Go/TypeScript/agent front ends remain views over IR | Implemented | W07-T11 |
 | No mutable single state document, implicit per-item execution, jq language, level barriers, live plan patching, or global log output scan | Enforced negative constraints | W01-T01, W02-T01, W02-T02, W03-T02, W03-T04, W04-T03, W06-T06 |
 
 ## Consumer Boundary

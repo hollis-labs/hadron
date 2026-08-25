@@ -509,3 +509,23 @@
   coercion fails closed before canonical binding.
 
   Vanta revision for both W06-T03 decisions: `01M0V9RMZ896Y0THPNGC7HT44H`.
+
+- W07-T11 keeps every authoring front end as a view over the canonical graph
+  IR and ordinary compiler, dependency inference, validator, policy, and
+  registry contracts. Go uses an immutable value builder; TypeScript DTOs and
+  HTTP clients are generated from committed graph/API schemas with byte-stale
+  gates. A separately typed semantic fingerprint supports cross-front-end
+  comparison without weakening exact source-bound plan or definition digests.
+  Hand-maintained parallel workflow DTOs, a mutable fluent execution runtime,
+  and treating a semantic fingerprint as executable identity were rejected.
+
+- Agent-authored graph/source material enters through explicit versioned
+  envelopes and trusted host identity, then follows normal provenance,
+  contract-test, and registration admission. Pre-registration material and
+  expanded children bypass all shared source, plan, flight, and digest caches;
+  only the resulting immutable registry record may use ordinary caches.
+  Caller-supplied authority/trust/principal and process-lifetime draft caches
+  were rejected because they could forge ownership or retain unregistered
+  executable semantics.
+
+  Vanta revision for both W07-T11 decisions: `01M0VCQMBBXG15HS02WZYTRAXE`.
