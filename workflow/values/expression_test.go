@@ -261,7 +261,7 @@ func TestExpressionVisibilityDiagnosticIsDistinctFromUnresolved(t *testing.T) {
 		context,
 		ExpressionOptions{VisibleSteps: []string{"create"}},
 	)
-	requireExpressionError(t, err, CodeExpressionUnresolved)
+	assertExpressionError(t, err, CodeExpressionUnresolved)
 }
 
 func TestExpressionEnvRequiresExplicitPolicyAndValues(t *testing.T) {
@@ -293,7 +293,7 @@ func TestExpressionEnvRequiresExplicitPolicyAndValues(t *testing.T) {
 	_, err = engine.EvaluateRaw(
 		graph.Expression{Text: "env.WORKFLOW_AMBIENT_ONLY"}, context, ExpressionOptions{AllowEnv: true},
 	)
-	requireExpressionError(t, err, CodeExpressionUnresolved)
+	assertExpressionError(t, err, CodeExpressionUnresolved)
 }
 
 func TestRawExpressionRejectsInterpolationMarkers(t *testing.T) {
@@ -302,7 +302,7 @@ func TestRawExpressionRejectsInterpolationMarkers(t *testing.T) {
 	_, err := NewExpressionEngine().EvaluateRaw(
 		graph.Expression{Text: "{{ inputs.name }}"}, expressionTestContext(t), ExpressionOptions{},
 	)
-	requireExpressionError(t, err, CodeExpressionSyntax)
+	assertExpressionError(t, err, CodeExpressionSyntax)
 }
 
 func TestInterpolationMultipleSegmentsAndDeterministicConversion(t *testing.T) {
@@ -351,11 +351,11 @@ func TestInterpolationRejectsMalformedAndNonStringableResults(t *testing.T) {
 		"before {{ {{ inputs.name }} }}",
 	} {
 		_, err := engine.Interpolate(template, nil, context, ExpressionOptions{})
-		requireExpressionError(t, err, CodeInterpolation)
+		assertExpressionError(t, err, CodeInterpolation)
 	}
 
 	_, err := engine.Interpolate("tasks={{ inputs.tasks }}", nil, context, ExpressionOptions{})
-	requireExpressionError(t, err, CodeInterpolation)
+	assertExpressionError(t, err, CodeInterpolation)
 }
 
 func TestInterpolationParsesCompositeLiteralsAndQuotedMarkers(t *testing.T) {
@@ -474,12 +474,12 @@ func TestExpressionProgramCacheIsPolicyAndShapeSafeUnderConcurrency(t *testing.T
 		t.Fatalf("visible cached evaluation failed: %v", err)
 	}
 	_, err := engine.EvaluateBool(expression, context, ExpressionOptions{VisibleSteps: []string{"create"}})
-	requireExpressionError(t, err, CodeExpressionInvisibleStep)
+	assertExpressionError(t, err, CodeExpressionInvisibleStep)
 
 	stringContext := expressionTestContext(t)
 	stringContext.Inputs["enabled"] = expressionValue(t, "yes")
 	_, err = engine.EvaluateBool(expression, stringContext, ExpressionOptions{})
-	requireExpressionError(t, err, CodeExpressionType)
+	assertExpressionError(t, err, CodeExpressionType)
 }
 
 func TestExpressionProgramCacheTreatsStructurallyHeterogeneousArraysAsAny(t *testing.T) {
@@ -524,7 +524,7 @@ func TestExpressionResultRejectsUnsupportedNativeValues(t *testing.T) {
 	_, err := NewExpressionEngine().EvaluateRaw(
 		graph.Expression{Text: `date("2026-08-24")`}, expressionTestContext(t), ExpressionOptions{},
 	)
-	requireExpressionError(t, err, CodeExpressionValue)
+	assertExpressionError(t, err, CodeExpressionValue)
 }
 
 func TestExpressionEngineDisablesAmbientTimeAndProducesDeterministicResults(t *testing.T) {
@@ -533,7 +533,7 @@ func TestExpressionEngineDisablesAmbientTimeAndProducesDeterministicResults(t *t
 	engine := NewExpressionEngine()
 	context := expressionTestContext(t)
 	_, err := engine.EvaluateRaw(graph.Expression{Text: "now()"}, context, ExpressionOptions{})
-	requireExpressionError(t, err, CodeExpressionUnresolved)
+	assertExpressionError(t, err, CodeExpressionUnresolved)
 
 	expression := graph.Expression{Text: `{name: inputs.name, object: inputs.object, ids: map(inputs.tasks, .id)}`}
 	first, err := engine.EvaluateRaw(expression, context, ExpressionOptions{})
@@ -598,4 +598,9 @@ func requireExpressionError(t *testing.T, err error, code diagnostic.Code) *Expr
 		t.Fatalf("diagnostic code = %s, want %s: %v", expressionErr.Diagnostic.Code, code, err)
 	}
 	return expressionErr
+}
+
+func assertExpressionError(t *testing.T, err error, code diagnostic.Code) {
+	t.Helper()
+	_ = requireExpressionError(t, err, code)
 }

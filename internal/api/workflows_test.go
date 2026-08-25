@@ -332,7 +332,7 @@ func TestWorkflowHTTPPreservesEscapedOpaqueRunID(t *testing.T) {
 	defer server.Close()
 
 	response := workflowPOST(t, server, "/v1/workflows/runs/"+url.PathEscape(string(runID))+"/inspect", `{"run_id":"source/run one","identity":{}}`, map[string]string{"Authorization": "Bearer allowed"})
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("escaped run id status=%d body=%s", response.StatusCode, body)

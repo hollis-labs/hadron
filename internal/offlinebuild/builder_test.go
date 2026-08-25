@@ -287,7 +287,7 @@ func TestBuildExecutableRunsBoundMCPAndLLMThroughExactRemoteDriver(t *testing.T)
 	var callsMu sync.Mutex
 	calls := map[string]int{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		defer request.Body.Close()
+		defer func() { _ = request.Body.Close() }()
 		var remote struct {
 			Kind string `json:"kind"`
 		}

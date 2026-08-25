@@ -1,114 +1,98 @@
-# Hadron Safety Settings
+# Safety and trust boundaries
 
-Hadron reads `settings.json` from the data directory (`~/.hadron/settings.json`
-by default) to control what blueprints are allowed to do.
+Hadron authorizes graph-native operations at the shared application-host
+boundary. A CLI flag, HTTP body, MCP argument, task/run ID, wait ID, or
+activation registration ID is never accepted as proof of authority.
 
-## `settings.json` Location and Format
+## Identity and exposure
 
-```
-~/.hadron/settings.json
-```
+- HTTP loopback operation uses an explicit local-operator binding and rejects
+  cross-origin or DNS-rebinding-shaped requests. Durable bearer credentials
+  resolve to principal/profile records; unknown credentials fail closed.
+- MCP stores only token digests and binds each session to one durable principal
+  and exposure profile. Raw tokens are not persisted or logged.
+- A2A rewrites the already-authenticated source authority at its trusted ingress
+  and persists a full owner binding for task/run correlation.
+- Background activations execute as their immutable durable registration
+  identity, not as the delivery caller or an ambient background context.
+- Hidden definitions and runs return the same safe not-found shape as missing
+  resources. Ordinary policy denial remains a distinct safe denial.
 
-If the file does not exist, Hadron uses safe defaults (see below).
+Profiles are additive restrictions. Exact pins, search scope, namespace scope,
+denied effects, private display, collision checks, and direct-tool budgets are
+enforced before exposure changes. Session mounts reauthorize on every operation
+and reconcile when profile/catalog generations change.
 
-Full example:
+## Effects, capabilities, and confirmation
 
-```json
-{
-  "execution": {
-    "allowedCommands": [],
-    "deniedCommands": ["rm -rf /", "dd", "mkfs", "format", "shutdown", "reboot"],
-    "allowedDirs": [],
-    "deniedDirs": ["/", "/System", "/Library", "/bin", "/sbin", "/usr", "/etc"],
-    "maxConcurrentJobs": 3,
-    "defaultTimeout": 300,
-    "workers": 3
-  },
-  "safety": {
-    "requireConfirmation": true,
-    "dryRunByDefault": false,
-    "blockSudo": false,
-    "sandboxMode": false
-  },
-  "telemetry": {
-    "enabled": true,
-    "retainDays": 30
-  }
-}
-```
+Each frozen step-kind contract declares its effects, required capabilities,
+idempotency, retry safety, cancellation, and suspension behavior. Validation
+compares a graph node to that registered contract; source or runtime config
+cannot hide effects or widen the host's capability set.
 
----
+`hadron workflow explain` reports the exact policy-visible facts without
+admitting work. The production policy allows authenticated non-advised work and
+requires confirmation when the immutable facts advise it, including mutating,
+destructive, or unresolved-call effects. Invalid or unbound facts are denied.
+Execution targets are checked against the requested ID/kinds/capabilities,
+labels, and sandbox constraints.
 
-## Execution Settings
+Dry-run is truthful. If an executor cannot provide a non-effecting preview,
+Hadron fails closed and preserves the safe structured rejection. A dry-run may
+create the documented durable audit/start binding, but it admits no running
+work, nodes, or effects.
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `allowedCommands` | string[] | `[]` | If non-empty, only commands containing one of these strings are allowed |
-| `deniedCommands` | string[] | `["rm -rf /", ...]` | Commands matching any of these substrings are blocked |
-| `allowedDirs` | string[] | `[]` | If non-empty, `dir:` must be within one of these directories |
-| `deniedDirs` | string[] | `["/", "/System", ...]` | Task `dir:` values that resolve inside these paths are blocked |
-| `maxConcurrentJobs` | int | 3 | Maximum parallel runs (informational; workers is the enforced limit) |
-| `defaultTimeout` | int | 300 | Default task timeout in seconds (0 = no timeout) |
-| `workers` | int | 3 | Number of parallel worker goroutines |
+## Secrets and redaction
 
----
+Credentials enter executor contracts as `SecretRef`, never plain workflow
+input fields. The host resolves them only at a narrow adapter boundary. Secret
+references and material are masked by the value renderer, diagnostics, events,
+HTTP/MCP/A2A responses, and transport errors.
 
-## Safety Settings
+Stream-producing adapters wrap output with the workflow secret redactor before
+retention or observation. Masking handles a resolved secret split across
+multiple writes. Bounded observations and artifacts retain only the already
+redacted bytes. `--reveal-private` can reveal authorized private values, but it
+does not reveal secrets.
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `requireConfirmation` | bool | true | Reserved for interactive confirmation flows |
-| `dryRunByDefault` | bool | false | All runs are dry-runs unless `--dry-run=false` is passed |
-| `blockSudo` | bool | false | Block any command containing `sudo` |
-| `sandboxMode` | bool | false | Reserved for future process sandboxing |
+## Durable admission and replay
 
----
+- Start intent binds definition, typed inputs, scope, target, and value pins to
+  one digest and idempotency identity.
+- Pins are authorized and converged before a run becomes runnable; permanent
+  rejection terminalizes the durable run with no claimable work.
+- Workers execute nodes from the pinned recovery plan, not a mutable registry
+  locator, and resource-aware admission enforces worker and fan-out occupancy.
+- Wait resume binds the current responder and delegates token/correlation/schema
+  authority to the durable wait coordinator.
+- Source-derived activation admission is fenced against the movable registry
+  `current` alias, including reactor delivery, so stale rows cannot start a
+  superseded version.
+- Cancellation, resume, signal, task correlation, and activation delivery use
+  their documented idempotency contracts and reject changed intent.
 
-## Telemetry Settings
+## Output compatibility boundary
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | bool | true | Write JSONL telemetry to logs dir |
-| `retainDays` | int | 30 | Auto-delete JSONL files older than N days |
+Global `::set-output` scraping is removed from graph-native execution paths.
+The retained shim exists only in the embeddable `workflow/adapters/cmd`
+executor: one explicitly selected stream may use `parse: set-output` together
+with `compatibility: true`, and validation emits a deprecation warning. It is
+not enabled by the stock daemon because `cmd@v1` is outside the frozen six-kind
+production capability profile.
 
-When `enabled` is false, no `.jsonl` files are written (SQLite run events still work).
+Legacy blueprint/pipeline code remains only for archive/rewrite support behind
+an internal compatibility switch. Production CLI roots, HTTP routes, MCP
+instructions, and UI navigation do not expose it, and it carries no public
+compatibility promise.
 
----
+## Operational checks
 
-## Recommended Settings by Trust Level
-
-### Personal Development (default — trusting)
-
-```json
-{
-  "safety": { "blockSudo": false, "dryRunByDefault": false },
-  "execution": { "deniedCommands": ["rm -rf /", "dd", "mkfs"] }
-}
-```
-
-### Team / Shared Machine (moderate)
-
-```json
-{
-  "safety": { "blockSudo": true, "dryRunByDefault": false },
-  "execution": {
-    "deniedCommands": ["rm -rf /", "dd", "mkfs", "shutdown", "reboot"],
-    "deniedDirs": ["/", "/System", "/Library", "/bin", "/usr", "/etc", "/home"],
-    "defaultTimeout": 120
-  }
-}
-```
-
-### CI / Automated (strict)
-
-```json
-{
-  "safety": { "blockSudo": true, "dryRunByDefault": false, "sandboxMode": true },
-  "execution": {
-    "allowedCommands": ["make", "go ", "npm ", "yarn ", "pnpm "],
-    "deniedDirs": ["/", "/System", "/Library", "/bin", "/usr", "/etc"],
-    "defaultTimeout": 60,
-    "workers": 1
-  }
-}
-```
+- Treat `/v1/health` and `hadron daemon` as authoritative for Host startup,
+  recovery, and readiness; do not accept a hard-coded process “OK.”
+- Review `workflow explain` before confirming advised work.
+- Prefer immutable published registry refs for operational runs.
+- Inspect redacted events/values rather than raw database rows.
+- Keep data, database, attestor keys, catalog locks, and token material on
+  private host-owned paths.
+- Stop the daemon gracefully so workers and timer callbacks quiesce before
+  durable stores close.

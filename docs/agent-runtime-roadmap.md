@@ -1,5 +1,10 @@
 # Hadron Agent Runtime And Messaging Roadmap
 
+> **Historical pre-cutover roadmap.** Blueprint/pipeline examples below are
+> retained as design provenance, not active product contracts. Current
+> production behavior is documented in [Workflow authoring and
+> operations](workflows.md).
+
 **Status:** local AI workflow proof completed; hardening follow-up active  
 **Date:** 2026-05-25  
 **Audience:** Hadron implementers, agent substrate maintainers, workflow authors

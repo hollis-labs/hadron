@@ -100,14 +100,14 @@ input, output, and node identities. Edge map keys use
 Compilation does not evaluate expressions, resolve child definitions, infer
 dependencies, query registries, validate kinds, or run topology/policy checks.
 
-## Active contract examples
+## Examples and conformance fixtures
 
-The repository's active graph-native examples are:
+The stock daemon's runnable examples live in
+[`examples/workflow/production`](../../examples/workflow/production/). They use
+only the production host's frozen capability set.
 
-- [Torque task bulk create](../../examples/workflow/torque-task-bulk-create.workflow.yaml)
-- [Release approval gate](../../examples/workflow/release-approval-gate.workflow.yaml)
-- [HTTP, command, and transform](../../examples/workflow/http-cmd-transform.workflow.yaml)
-
-Acceptance tests run these examples through compilation, the separate value
-dependency pass, and validation. Their registered step kinds are test doubles;
-runtime and concrete executor support remains later-wave work.
+The three source files in the parent `examples/workflow` directory are compiler
+and adapter conformance fixtures. Acceptance tests compile them with test kind
+registries; `http_call`, `cmd`, and `mcp_call` in those fixtures are not claims
+that the stock daemon enables those kinds. See the examples README for the
+exact classification.

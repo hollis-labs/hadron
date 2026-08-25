@@ -1,146 +1,128 @@
-# Getting Started with Hadron
+# Getting started
 
-Hadron is a local-first blueprint runner with three main entry points:
+Hadron has three graph-native entry points over one durable application host:
+the `hadron workflow` CLI, the daemon-served browser UI, and `hadrond mcp`.
 
-- `hadrond` runs the daemon
-- `hadron` is the CLI client
-- `hadrond mcp` exposes Hadron to MCP-compatible agents
+## 1. Install and start the daemon
 
-This page is the shortest path from install to a working local setup.
-
-## 1. Install
-
-Pick one install path from [install.md](install.md). For most users, the
-recommended paths are:
+Install from Homebrew or build the repository:
 
 ```sh
 brew install hollis-labs/tap/hadron
+
+# Or, from a checkout:
+make build
+export PATH="$PWD/bin:$PATH"
 ```
 
-or:
+Stage the runnable example inside the daemon's bounded workflow source root,
+then start the HTTP daemon:
 
 ```sh
-curl -L -o hadron.tar.gz \
-  https://github.com/hollis-labs/hadron/releases/download/v0.4.2-beta.1/hadron_v0.4.2-beta.1_darwin_arm64.tar.gz
-tar -xzf hadron.tar.gz
-cd hadron_v0.4.2-beta.1_darwin_arm64
-install -d "$HOME/.local/bin"
-install -m 0755 hadron hadrond "$HOME/.local/bin/"
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-If you are developing Hadron itself, use a source install instead.
-
-## 2. Start The Daemon
-
-The CLI talks to a running local daemon.
-
-```sh
+install -d "$HOME/.hadron/workflows"
+install -m 0600 examples/workflow/production/hello-transform.workflow.yaml \
+  "$HOME/.hadron/workflows/hello-transform.workflow.yaml"
 hadrond serve
 ```
 
-Expected result:
-
-```text
-{"level":"info","msg":"hadron daemon starting","addr":"127.0.0.1:8095",...}
-```
-
-By default Hadron stores state under `~/.hadron/`:
-
-- database: `~/.hadron/state/hadron.db`
-- logs: `~/.hadron/logs/`
-- settings: `~/.hadron/settings.json`
-
-In a second shell, confirm the daemon is reachable:
+The defaults are `http://127.0.0.1:8095`, SQLite state under `~/.hadron`, and
+file workflow definitions under `~/.hadron/workflows`. A no-token request is
+accepted only through the loopback local-operator boundary; unknown remote
+credentials fail closed. Check host recovery and readiness with:
 
 ```sh
 hadron daemon
 ```
 
-## 3. Smoke-Test The Legacy Blueprint Runtime
+## 2. Validate without starting a run
 
-The archived inputs in this section verify the currently implemented runtime.
-They are reference material for selective rewrites, not the preferred future
-authoring format. Graph-native examples will live under `examples/workflow/`.
-
-Start with the smallest example:
+From a source checkout:
 
 ```sh
-hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
+hadron workflow validate \
+  "$HOME/.hadron/workflows/hello-transform.workflow.yaml"
 ```
 
-Typical output:
+Validation compiles the graph and returns structured diagnostics. It does not
+create or start a durable run. Add `--json` for the typed response. Use
+`hadron workflow explain` to inspect the policy-visible effects, capabilities,
+target, and blast-radius facts before admission.
+
+## 3. Start with typed input
+
+```sh
+hadron workflow run \
+  "$HOME/.hadron/workflows/hello-transform.workflow.yaml" \
+  --run-id hello-1 \
+  --idempotency-key hello-1 \
+  --input-json '{"message":"Hello, workflow"}' \
+  --json
+```
+
+`--input-json` must be one bounded JSON object. `--input <path>` reads the same
+typed object from disk (`-` reads stdin). Duplicate JSON keys and trailing JSON
+are rejected. Unknown workflow input names are reported by canonical
+application validation rather than guessed by the CLI.
+
+The returned run handle is asynchronous. Inspect it with:
+
+```sh
+hadron workflow inspect hello-1 --json
+```
+
+Values are typed and rendered through the diagnostics projection. Secret
+references remain masked. Private values require explicit authorized display;
+`--reveal-private` never reveals secret material.
+
+## 4. Use a registry definition
+
+File references are useful for local authoring. Published operation should use
+an immutable registry version:
 
 ```text
-run <id> queued
-[started]
-[log] Hello from Hadron!
-[task_success] task succeeded
-run completed successfully
+namespace/name@version#sha256:<digest>
 ```
 
-Validate a blueprint without running it:
+Search and inspect authorized records with:
 
 ```sh
-hadron validate examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
+hadron workflow catalog search --query release --json
+hadron workflow catalog inspect \
+  namespace/name@version#sha256:<digest> --json
 ```
 
-Inspect a parameterized blueprint:
+The lifecycle commands under `workflow author`, `workflow registry`, and
+`workflow exposure` distinguish the movable `current` alias, an exact qualified
+registry-version pin, and an exact exposure-profile pin. See
+[Workflow authoring and operations](workflows.md).
+
+## 5. Resume a durable wait
+
+`sleep`, `wait_for`, `message_wait`, and `human_gate` suspend as durable waits;
+they do not hold an executor goroutine. Inspect the run to obtain the safe wait
+projection, then use the wait ID and correlation returned by the host:
 
 ```sh
-hadron blueprint show examples/archive/legacy-blueprints-pipelines/parameterized.yaml
-hadron run examples/archive/legacy-blueprints-pipelines/parameterized.yaml --input app_name=demo --input worker_count=4
+hadron workflow resume hello-1 \
+  --wait <wait-id> \
+  --correlation <correlation> \
+  --source <source> \
+  --token-file <path> \
+  --payload-json '<typed-json>' \
+  --idempotency-key <key>
 ```
 
-## 4. Create A Schedule
+The authenticated responder and wait coordinator own authorization. Run IDs
+and wait IDs are not capabilities.
 
-Schedule the hello-world blueprint to run every minute:
+## 6. Open the UI or MCP adapter
+
+The browser UI at `http://127.0.0.1:8095/` exposes Registry, Workflow Graph,
+and Runs over the generated HTTP client. For an MCP client:
 
 ```sh
-hadron schedule create \
-  --blueprint examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml \
-  --cron "* * * * *" \
-  --name hello-every-minute
+hadrond mcp -token '<secret>'
 ```
 
-List schedules:
-
-```sh
-hadron schedule list
-```
-
-Disable or delete it later:
-
-```sh
-hadron schedule disable <schedule-id>
-hadron schedule delete <schedule-id>
-```
-
-## 5. Connect An Agent Over MCP
-
-Hadron can run as a stdio MCP server for agent clients:
-
-```sh
-hadrond mcp \
-  -token "my-secret-token" \
-  -token-scopes "run.write,run.cancel,schedule.write,pipeline.write,trigger.write,human_gate.write,message.write"
-```
-
-For the full MCP flow and tool model, see [mcp-setup.md](mcp-setup.md).
-
-## Common First Tasks
-
-- run a local cleanup or build blueprint
-- validate and lint a blueprint directory before committing
-- schedule recurring housekeeping jobs
-- let an MCP agent discover and run a blueprint with structured diagnostics
-
-For more concrete scenarios, see [use-cases.md](use-cases.md).
-
-## What Next
-
-- [install.md](install.md) for install and setup details
-- [cli-reference.md](cli-reference.md) for command-by-command usage
-- [mcp-setup.md](mcp-setup.md) for agent setup
-- [spec-v04.md](spec-v04.md) for the full blueprint spec
-- [safety.md](safety.md) for trust and execution controls
+Continue with [MCP setup](mcp-setup.md), [CLI reference](cli-reference.md), and
+[Safety](safety.md).

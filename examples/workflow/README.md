@@ -1,23 +1,56 @@
-# Graph-Native Workflow Examples
+# Graph-native workflow examples
 
-These are the active examples for the graph-native `workflow` source contract:
+## Runnable with the stock daemon
 
-- [`torque-task-bulk-create.workflow.yaml`](torque-task-bulk-create.workflow.yaml)
-  demonstrates typed inputs and outputs, bounded fan-out, per-item MCP calls,
-  retry idempotency, and a dependency-visible transform summary.
+The files under [`production/`](production/) use only step kinds registered by
+the production Hadron host. File definitions are confined to the daemon's
+workflow source root, so stage the examples there before starting `hadrond`:
+
+```sh
+install -d "$HOME/.hadron/workflows"
+install -m 0600 examples/workflow/production/*.workflow.yaml \
+  "$HOME/.hadron/workflows/"
+hadrond serve
+
+hadron workflow validate "$HOME/.hadron/workflows/hello-transform.workflow.yaml"
+hadron workflow run "$HOME/.hadron/workflows/hello-transform.workflow.yaml" \
+  --run-id example-hello-1 \
+  --idempotency-key example-hello-1 \
+  --input-json '{"message":"Hello, workflow"}' \
+  --json
+
+hadron workflow validate "$HOME/.hadron/workflows/normalize-script.workflow.yaml"
+hadron workflow run "$HOME/.hadron/workflows/normalize-script.workflow.yaml" \
+  --run-id example-normalize-1 \
+  --idempotency-key example-normalize-1 \
+  --input-json '{"message":"  Release READY  "}' \
+  --json
+```
+
+The stock production host exposes exactly `transform@v1`, `script@v1`,
+`sleep@v1`, `wait_for@v1`, `message_wait@v1`, and `human_gate@v1`. This is a
+host capability boundary, not a limitation of the embeddable workflow engine.
+
+## Compiler and adapter conformance fixtures
+
+The files immediately below this README exercise broader graph source and
+adapter contracts in focused tests. They are graph-native, but they are not all
+runnable by the stock daemon:
+
 - [`release-approval-gate.workflow.yaml`](release-approval-gate.workflow.yaml)
-  demonstrates a wait-like human gate, typed decision output, and downstream
-  control plus data dependency.
-- [`http-cmd-transform.workflow.yaml`](http-cmd-transform.workflow.yaml)
-  demonstrates typed HTTP, command, and transform composition with explicit
-  control dependencies and inferred data visibility.
+  uses only production kinds and documents a durable human gate.
+- [`http-cmd-transform.workflow.yaml`](http-cmd-transform.workflow.yaml) is a
+  compiler snapshot fixture. The stock daemon does not register `http@v1` or
+  `cmd@v1`.
+- [`torque-task-bulk-create.workflow.yaml`](torque-task-bulk-create.workflow.yaml)
+  is a fake-MCP integration fixture used by
+  `internal/mcpadapter/torque_bulk_create_e2e_test.go`. The stock daemon does
+  not register `mcp@v1`.
 
-Repository tests load these files through the production source loader,
-compiler, value-dependency inference, and graph validator. Test-only no-op step
-kinds stand in for executor implementations that later waves own. The examples
-therefore document and verify the plan contract; they do not yet claim
-end-to-end runtime or adapter execution.
+The wider adapter set remains available to embedders that construct and bind a
+host with an explicit capability and policy profile. It is never inferred from
+the presence of these fixtures.
 
-Files under
+Beta-era blueprint and pipeline samples remain under
 [`../archive/legacy-blueprints-pipelines/`](../archive/legacy-blueprints-pipelines/)
-remain historical rewrite references only and are not active workflow source.
+for rewrite/reference use only. They are not accepted by the active public CLI.

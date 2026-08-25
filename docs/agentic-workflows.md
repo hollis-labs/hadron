@@ -1,5 +1,10 @@
 # Agentic Workflows With Hadron
 
+> **Historical pre-cutover audit.** This document describes the retired
+> blueprint/pipeline runtime and is retained as migration evidence, not active
+> user guidance. Start with [Workflow authoring and operations](workflows.md)
+> and [MCP setup](mcp-setup.md) for the production graph-native surface.
+
 **Status:** implementation audit and operator guide  
 **Date:** 2026-05-25  
 **Audience:** Hadron users, workflow authors, and agent integrators

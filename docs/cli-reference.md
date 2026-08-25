@@ -1,308 +1,149 @@
-# Hadron CLI Reference
+# CLI reference
 
-The `hadron` CLI communicates with a running `hadrond` daemon over HTTP.
-
-This page documents the currently implemented legacy blueprint/pipeline CLI.
-Commands that need sample input use archived reference files; those files are
-not graph-native authoring guidance or public source-format commitments.
-
-## Typical Flow
-
-Most users only need four commands to get started:
-
-```sh
-hadrond serve
-hadron daemon
-hadron validate examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
-hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
-```
-
-Use `hadron blueprint ...` for local file inspection without a running daemon.
-
-## Global Flags
-
-| Flag | Default | Description |
-|---|---|---|
-| `--addr` | `http://127.0.0.1:8095` | Daemon base URL |
-
----
-
-## `hadron run`
-
-Enqueue a blueprint run and stream events until completion.
-
-```sh
-hadron run <blueprint-path> [flags]
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--input key=value` | — | Set an input value (repeatable) |
-| `--workspace` | `default` | Workspace ID |
-| `--dry-run` | `false` | Preview commands without executing |
-
-**Examples:**
-
-```sh
-hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
-hadron run examples/archive/legacy-blueprints-pipelines/parameterized.yaml --input app_name=myapp --input worker_count=4
-hadron run examples/archive/legacy-blueprints-pipelines/laravel-app.yaml --workspace production --dry-run
-```
-
-Use this when:
-
-- you want to execute a blueprint immediately
-- you want the CLI to stream the run events back to your terminal
-
----
-
-## `hadron validate`
-
-Validate a blueprint file and report errors.
-
-```sh
-hadron validate <blueprint-path>
-```
-
-Exits 0 if valid, 1 if invalid.
-
-**Example:**
-
-```sh
-hadron validate examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
-# valid
-```
-
-Use this before:
-
-- committing a new or edited blueprint
-- scheduling a blueprint
-- asking an agent to run a blueprint you just changed
-
----
-
-## `hadron lint`
-
-Lint blueprint files for errors.
-
-```sh
-hadron lint <path|dir> [flags]
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--json` | `false` | Output machine-readable JSON |
-
-Scans directories recursively for `*.yaml`, `*.yml`, `*.json`, `*.jsonc`.
-Exits 0 if all valid, 1 if any invalid.
-
-**Examples:**
-
-```sh
-hadron lint examples/archive/legacy-blueprints-pipelines/
-hadron lint examples/archive/legacy-blueprints-pipelines/ --json
-hadron lint examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
-```
-
----
-
-## `hadron fmt`
-
-Format a blueprint file to canonical YAML.
-
-```sh
-hadron fmt <path> [flags]
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--write` | `false` | Write canonical YAML back to file |
-| `--check` | `false` | Exit 1 if file would change (CI mode) |
-
-Also normalises legacy field aliases:
-- `condition:` → `if:`
-- `continueOnError:` → `continue_on_error:`
-- `retryDelay:` → `retry_delay_seconds:`
-
-**Examples:**
-
-```sh
-hadron fmt examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml              # print to stdout
-hadron fmt examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml --write      # rewrite in place
-hadron fmt examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml --check      # CI check
-```
-
----
-
-## `hadron blueprint`
-
-Local blueprint file operations (no daemon required).
-
-### `hadron blueprint list`
-
-```sh
-hadron blueprint list [--dir <dir>]
-```
-
-Lists blueprint files in a directory and whether each is valid.
-
-### `hadron blueprint show`
-
-```sh
-hadron blueprint show <path>
-```
-
-Prints a parsed blueprint summary (name, version, inputs, sections).
-
-Use these when:
-
-- you want to inspect blueprint metadata locally
-- the daemon is not running yet
-- you are editing or reviewing blueprint files directly
-
----
-
-## `hadron schedule`
-
-Manage schedules.
-
-### `hadron schedule list`
-
-```sh
-hadron schedule list [--workspace <id>]
-```
-
-### `hadron schedule create`
-
-```sh
-hadron schedule create --blueprint <path> --cron <expr> [--name <name>] [--workspace <id>]
-```
-
-| Flag | Required | Description |
-|---|---|---|
-| `--blueprint` | yes | Blueprint path |
-| `--cron` | yes | Cron expression (5-field standard) |
-| `--name` | no | Human-readable schedule name |
-| `--workspace` | no | Workspace ID (default: `default`) |
-
-**Example:**
-
-```sh
-hadron schedule create \
-  --blueprint examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml \
-  --cron "0 9 * * 1-5" \
-  --name weekday-morning
-```
-
-### `hadron schedule enable <id>`
-
-### `hadron schedule disable <id>`
-
-### `hadron schedule delete <id>`
-
-Use schedules when:
-
-- the workflow should recur on a cron cadence
-- you want the daemon to own timing and audit history
-
----
-
-## `hadron pipeline`
-
-### `hadron pipeline run`
-
-```sh
-hadron pipeline run <pipeline-path> [--workspace <id>]
-```
-
-Starts a pipeline run and returns the pipeline run ID.
-
-Use this when a workflow is already split into several blueprints with stage
-boundaries.
-
----
-
-## `hadron workspace`
-
-### `hadron workspace list`
-
-### `hadron workspace create <name>`
-
----
-
-## `hadron daemon`
-
-Check daemon connectivity and version.
-
-```sh
-hadron daemon
-# status: ok  version: 0.4.0
-```
-
-This is the fastest “is Hadron up?” check.
-
----
-
-## `hadron version`
-
-Print CLI build metadata.
-
-```sh
-hadron version
-```
-
-Example output:
+The active root command set is deliberately small:
 
 ```text
-hadron v0.4.0
-commit: abc1234
-built: 2026-05-24T22:00:00Z
+hadron build       build an offline workflow plan bundle
+hadron daemon      report daemon and workflow-host health
+hadron version     print build information
+hadron workflow    operate graph-native workflows
+hadron workspace   manage workspace metadata
 ```
 
----
+The retired root commands `run`, `validate`, `lint`, `schedule`, `pipeline`,
+and `blueprint` are unavailable. Use `hadron workflow ...` for execution and
+source-declared `on:` activations for scheduling or external ingress.
 
-## `hadrond` Daemon
+All daemon commands accept `--addr` (default `http://127.0.0.1:8095`). The
+daemon authenticates the caller; `--principal` is only an identity hint and
+cannot override authenticated context.
 
-### `hadrond serve`
+## Definition references
 
-Starts the HTTP REST API server and serves the embedded operator SPA at `/`.
-The graph-native workflow UI uses the same-origin `/v1/workflows/*` routes; API
-404s are never hidden by the SPA fallback.
+A command accepting `<file|registry-ref>` takes either a supplied file path or
+an exact registry reference. Lifecycle commands always require the exact form:
+
+```text
+namespace/name@version#sha256:<hex-digest>
+```
+
+The parser keeps the full namespace/name, version, and digest. It does not
+derive semantic identity from a filename or accept an ambiguous current alias
+where an exact mutation is required.
+
+## Validate and explain
 
 ```sh
-hadrond serve [flags]
+hadron workflow validate <file|registry-ref> [--json]
+hadron workflow explain <file|registry-ref> \
+  [--input <file|-> | --input-json <object>] [--confirm] [--json]
 ```
 
-| Flag | Default | Description |
-|---|---|---|
-| `-addr` | `127.0.0.1:8095` | Listen address |
-| `-db` | `~/.hadron/state/hadron.db` | SQLite database path |
-| `-logs` | `~/.hadron/logs` | Run log directory |
-| `-data` | `~/.hadron` | Data directory (for settings.json) |
+`validate` never starts a run. `explain` performs the same application-level
+resolution and authorization and reports effects, capabilities, target, and
+blast-radius facts. Explain/dry-run are truthful: unsupported non-effecting
+preview fails closed, and any durable audit/binding record is reported rather
+than described as “no record.” Neither operation admits runnable nodes.
 
-### `hadrond mcp`
-
-Starts the MCP stdio adapter for MCP client integration.
+## Run and inspect
 
 ```sh
-hadrond mcp [flags]
+hadron workflow run <file|registry-ref> \
+  --run-id <id> --idempotency-key <key> \
+  [--input <file|-> | --input-json <object>] \
+  [--pin 'node={"id":"...","digest":"..."}'] \
+  [--dry-run] [--confirm] [--json]
+
+hadron workflow inspect <run-id> [--reveal-private] [--json]
 ```
 
-| Flag | Default | Description |
-|---|---|---|
-| `-db` | `~/.hadron/state/hadron.db` | SQLite database path |
-| `-logs` | `~/.hadron/logs` | Run log directory |
-| `-data` | `~/.hadron` | Data directory |
-| `-token` | — | Bearer token for mutating tools |
-| `-token-scopes` | — | Comma-separated scopes (e.g. `run.write,pipeline.write`) |
+Inputs are bounded typed JSON. Duplicate keys, trailing JSON, malformed values,
+and oversized files are rejected. Pins are authorized immutable value
+references and are bound before a run becomes runnable. Permanent pin rejection
+leaves a terminal, inspectable run with no admitted work.
 
-Use `hadrond mcp` when you want an MCP client or agent to discover and run
-Hadron workflows. See [mcp-setup.md](mcp-setup.md) for the actual tool model.
+The start result is asynchronous. `inspect` returns safe run/node/wait/value
+diagnostics. `--reveal-private` requires display authority; secret values stay
+masked.
 
-### `hadrond version`
-
-Print daemon build metadata.
+## Cancel, resume, and rerun
 
 ```sh
-hadrond version
+hadron workflow cancel <run-id> \
+  --idempotency-key <key> [--reason <text>] [--json]
+
+hadron workflow resume <run-id> \
+  --wait <wait-id> --correlation <value> --source <source> \
+  --token-file <path> \
+  [--payload <file|-> | --payload-json <typed-value>] \
+  [--idempotency-key <key>] [--json]
+
+hadron workflow rerun <source-run-id> --from <node-id> \
+  --run-id <new-id> --idempotency-key <key> [--json]
 ```
+
+Cancel and rerun use the authenticated run-operation authority. Resume binds
+the current responder, proves the wait belongs to the run, and delegates token,
+schema, correlation, and responder authorization to the wait coordinator. A
+run ID or wait ID is never a bearer capability.
+
+## Scope and execution target
+
+Validate, explain, run, inspect, cancel, resume, rerun, and lifecycle commands
+share these selectors:
+
+```text
+--scope-kind project|account|session|team|user
+--scope-id <id>
+--target-id <id>
+--target-kind <kind>                 repeatable
+--target-capability <capability>     repeatable
+--target-sandbox <mode>              repeatable
+--target-label key=value             repeatable
+```
+
+They are policy inputs, not authorization assertions. The application host
+binds them to the authenticated identity and fails closed on a mismatch.
+
+## Catalog and lifecycle
+
+```text
+hadron workflow catalog search [query] [--namespace <name>] [--limit 1..100]
+hadron workflow catalog inspect <exact-ref>
+
+hadron workflow author validate <authoring-envelope.json> --id --version --namespace
+hadron workflow author scaffold <authoring-envelope.json> --id --version --namespace
+hadron workflow author test <authoring-envelope.json> --id --version --namespace --suite <json>
+hadron workflow author register <authoring-envelope.json> --id --version --namespace --suite <json> [--make-current]
+
+hadron workflow registry package <exact-ref> --suite <json>
+hadron workflow registry pin-version <exact-ref>
+hadron workflow registry unpin-version <exact-ref>
+hadron workflow registry publish <exact-ref>
+hadron workflow registry clear-current <exact-ref>
+
+hadron workflow exposure inspect <profile-id>
+hadron workflow exposure pin-definition <profile-id> <exact-ref> --expected-generation <n>
+hadron workflow exposure unpin-definition <profile-id> <exact-ref> --expected-generation <n>
+```
+
+These expose three independent states honestly:
+
+- `current` is a movable catalog alias changed by qualified register or exact
+  clear-current.
+- registry-version pin is exact qualification/publication state owned by the
+  registration service.
+- exposure-profile pin is exact tool visibility, mutated by profile-generation
+  CAS after policy, effect, collision, and direct-tool-budget preflight.
+
+Failed validation/tests, unauthorized namespaces, stale generations/digests,
+and failed preflight do not partially mutate state.
+
+## Output and errors
+
+Use `--json` for stable typed DTOs. Nonzero operations may still write a safe
+structured result before the concise stderr error—for example unsupported
+dry-run or rejected pins. Transport errors and internal causes are redacted;
+diagnostics contain bounded codes, paths, and safe messages.
+
+Run `hadron <command> --help` for the executable's exact flags.

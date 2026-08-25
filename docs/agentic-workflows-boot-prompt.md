@@ -1,5 +1,10 @@
 # Agentic Workflows Boot / Handoff
 
+> **Historical session handoff.** Its blueprint/pipeline commands and local
+> paths are preserved as implementation evidence and are not current operator
+> instructions. Use [Workflow development](workflow-development.md) for the
+> graph-native development boundary.
+
 **Date:** 2026-05-25  
 **Branch:** `main`  
 **Context:** beta-release hardening, AI-native blueprint workflows

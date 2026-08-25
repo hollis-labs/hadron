@@ -30,32 +30,9 @@ var (
 	hadronBin           string
 	validWorkflowPath   string
 	invalidWorkflowPath string
+	productionExamples  map[string]string
 	workspaceSequence   atomic.Uint64
 )
-
-const validWorkflowSource = `workflow:
-  id: e2e-transform
-  version: v1
-inputs:
-  - name: message
-    type: string
-    required: true
-steps:
-  - id: echo
-    kind_version: v1
-    transform:
-      result: inputs.message
-    with:
-      message: inputs.message
-    outputs:
-      result:
-        type: string
-    effects: [compute]
-outputs:
-  result:
-    type: string
-    value: steps.echo.outputs.result
-`
 
 const invalidWorkflowSource = `workflow:
   id: e2e-invalid
@@ -111,11 +88,25 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "e2e: create workflow dir:", err)
 		os.Exit(1)
 	}
-	validWorkflowPath = filepath.Join(workflowDir, "e2e-transform.workflow.yaml")
+	validWorkflowPath = filepath.Join(workflowDir, "hello-transform.workflow.yaml")
 	invalidWorkflowPath = filepath.Join(workflowDir, "e2e-invalid.workflow.yaml")
-	for path, source := range map[string]string{
-		validWorkflowPath: validWorkflowSource, invalidWorkflowPath: invalidWorkflowSource,
-	} {
+	productionExamples = map[string]string{
+		"hello-transform":  validWorkflowPath,
+		"normalize-script": filepath.Join(workflowDir, "normalize-script.workflow.yaml"),
+	}
+	for name, destination := range productionExamples {
+		sourcePath := filepath.Join(repoRoot, "examples", "workflow", "production", name+".workflow.yaml")
+		source, readErr := os.ReadFile(sourcePath)
+		if readErr != nil {
+			fmt.Fprintln(os.Stderr, "e2e: read production workflow example:", readErr)
+			os.Exit(1)
+		}
+		if writeErr := os.WriteFile(destination, source, 0o600); writeErr != nil {
+			fmt.Fprintln(os.Stderr, "e2e: write production workflow example:", writeErr)
+			os.Exit(1)
+		}
+	}
+	for path, source := range map[string]string{invalidWorkflowPath: invalidWorkflowSource} {
 		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, "e2e: write workflow fixture:", err)
 			os.Exit(1)
@@ -246,7 +237,7 @@ func TestWorkflowValidate(t *testing.T) {
 		Diagnostics []json.RawMessage `json:"diagnostics"`
 	}
 	decodeJSONOutput(t, output, &result)
-	if result.Plan == nil || result.Plan.ID != "e2e-transform" || result.Plan.Version != "v1" || result.Plan.Digest == "" {
+	if result.Plan == nil || result.Plan.ID != "hello-transform" || result.Plan.Version != "v1" || result.Plan.Digest == "" {
 		t.Fatalf("unexpected validated plan: %#v", result.Plan)
 	}
 	if len(result.Diagnostics) != 0 {
@@ -302,9 +293,40 @@ func TestWorkflowRunWithTypedJSONInputAndOutput(t *testing.T) {
 		t.Fatalf("workflow run was not admitted cleanly: %s", output)
 	}
 
+	awaitWorkflowRunSucceeded(t, result.Run.ID)
+}
+
+func TestProductionExamplesValidateAndRun(t *testing.T) {
+	for name, path := range productionExamples {
+		if name == "hello-transform" {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			output, code := hadron("workflow", "validate", path, "--json")
+			if code != 0 {
+				t.Fatalf("workflow validate exited %d: %s", code, output)
+			}
+			runID := "e2e-example-" + name
+			output, code = hadron(
+				"workflow", "run", path,
+				"--run-id", runID,
+				"--idempotency-key", runID,
+				"--input-json", `{"message":"  Release READY  "}`,
+				"--json",
+			)
+			if code != 0 {
+				t.Fatalf("workflow run exited %d: %s", code, output)
+			}
+			awaitWorkflowRunSucceeded(t, runID)
+		})
+	}
+}
+
+func awaitWorkflowRunSucceeded(t *testing.T, runID string) {
+	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		inspectionOutput, inspectionCode := hadron("workflow", "inspect", result.Run.ID, "--json")
+		inspectionOutput, inspectionCode := hadron("workflow", "inspect", runID, "--json")
 		if inspectionCode != 0 {
 			t.Fatalf("workflow inspect exited %d: %s", inspectionCode, inspectionOutput)
 		}

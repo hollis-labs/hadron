@@ -1,0 +1,27 @@
+workflow:
+  id: hello-transform
+  version: v1
+  metadata:
+    description: Minimal production workflow using the transform executor.
+
+inputs:
+  - name: message
+    type: string
+    required: true
+
+steps:
+  - id: echo
+    kind_version: v1
+    transform:
+      result: inputs.message
+    with:
+      message: inputs.message
+    outputs:
+      result:
+        type: string
+    effects: [compute]
+
+outputs:
+  result:
+    type: string
+    value: steps.echo.outputs.result

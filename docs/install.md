@@ -11,7 +11,7 @@ Hadron is distributed during beta as:
 
 - macOS or Linux
 - no separate database dependency; Hadron uses local SQLite
-- if building from source: Go `1.26.3+`, Node.js `24+`, npm, and `make`
+- if building from source: Go `1.26.6+`, Node.js `24+`, npm, and `make`
 
 ## Recommended Paths
 
@@ -124,20 +124,28 @@ hadrond serve
 By default Hadron stores state under `~/.hadron/`:
 
 - database: `~/.hadron/state/hadron.db`
-- logs: `~/.hadron/logs/`
+- run logs: `~/.hadron/logs/runs/`
 - settings: `~/.hadron/settings.json`
 
 Validate the install:
 
 ```sh
+install -d "$HOME/.hadron/workflows"
+install -m 0600 examples/workflow/production/hello-transform.workflow.yaml \
+  "$HOME/.hadron/workflows/hello-transform.workflow.yaml"
 hadron daemon
-hadron validate examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
-hadron run examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml
+hadron workflow validate "$HOME/.hadron/workflows/hello-transform.workflow.yaml"
+hadron workflow run "$HOME/.hadron/workflows/hello-transform.workflow.yaml" \
+  --run-id install-smoke-1 \
+  --idempotency-key install-smoke-1 \
+  --input-json '{"message":"installed"}' \
+  --json
 ```
 
-The blueprint above is an archived legacy reference used only to smoke-test the
-current runtime. It is not graph-native authoring guidance; new examples will
-live under `examples/workflow/`.
+The copy command requires a source checkout. For packaged installs, place a
+graph-native workflow under `~/.hadron/workflows` and pass that file path. The
+retired blueprint/pipeline root commands are not installed as compatibility
+surfaces.
 
 ## Daemon And MCP Modes
 
@@ -147,7 +155,7 @@ Hadron has two different runtime modes:
   - runs the local HTTP daemon used by the CLI and serves the operator UI at
     `http://127.0.0.1:8095/`
 - `hadrond mcp`
-  - runs a stdio MCP server for agent clients
+  - runs a stdio MCP server for agent clients and requires `-token`
 
 They can point at the same `~/.hadron` data directory and SQLite database.
 

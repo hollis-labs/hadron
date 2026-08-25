@@ -1,111 +1,65 @@
-# Sample Use Cases
+# Workflow use cases
 
-This page shows the kinds of workflows Hadron is already good at during the
-public beta period.
+These use cases describe the active graph-native host. Runnable stock-daemon
+workflows must use its six registered kinds; broader adapters require an
+explicit embedding and host capability profile.
 
-The blueprint and pipeline material below documents the current legacy runtime.
-Its files are archived rewrite references, not preferred future authoring
-formats. Graph-native examples will live under `examples/workflow/`.
+## Typed local transformation
 
-## 1. Local Developer Automation
+Use `transform@v1` for deterministic expression projection and `script@v1` for
+bounded JavaScript with explicit input/output schemas. These are useful for
+normalization, typed decision records, and preparing data between durable
+waits. Start with the runnable files under
+[`examples/workflow/production`](../examples/workflow/production/).
 
-Use Hadron when you want repeatable local workflows with validation and an
-audit trail instead of ad hoc shell scripts.
+## Durable time and callback coordination
 
-Examples:
+Use `sleep@v1` when progress should survive daemon restart without holding a
+worker. Use `wait_for@v1` for a typed external continuation. Both persist the
+wait before suspension, release executor capacity, and resume through the same
+coordinator and replay rules.
 
-- clean build artifacts across a repo
-- run multi-step release prep
-- scaffold or patch project files
-- standardize recurring setup tasks for a team
+Schedules and external inputs belong in source `on:` declarations. Publishing
+a current workflow materializes registrations bound to its exact registry
+definition. External callers fire only payload-ingress registrations returned
+by authorized lifecycle inspection; timer and schedule IDs are not generic
+HTTP triggers.
 
-Archived reference examples:
+## Human approval and correlated messages
 
-- `examples/archive/legacy-blueprints-pipelines/hello-hadron.yaml`
-- `examples/archive/legacy-blueprints-pipelines/dev-cleanup.yaml`
-- `examples/archive/legacy-blueprints-pipelines/hooks-demo.yaml`
+`human_gate@v1` exposes a typed decision schema and responder authority.
+`message_wait@v1` waits for a correlated typed message. MCP gate/message aliases
+and the CLI `workflow resume` command use the same durable wait contract; they
+do not create private transport state.
 
-## 2. Scheduled Housekeeping
+The compiler conformance fixture
+[`release-approval-gate.workflow.yaml`](../examples/workflow/release-approval-gate.workflow.yaml)
+shows a human gate feeding a typed transform.
 
-Use Hadron when a task should run locally on a recurring schedule and you want
-it represented as a blueprint instead of hidden in cron shell fragments.
+## Agent workflow discovery and invocation
 
-Examples:
+An MCP agent can search its exposure scope, inspect an exact schema/effect
+contract, lazy-load the selected definition, start its generated asynchronous
+tool, and inspect redacted typed outputs. Exact profile pins become direct
+tools; discoverable namespaces do not eagerly consume the direct-tool budget.
 
-- daily repo maintenance
-- periodic report generation
-- cleanup tasks for local environments
+The authoring flywheel is available through the shared lifecycle service:
+catalog search, bounded graph-native draft, validation, scaffold, deterministic
+contract tests, authorized registration, package/qualification/publication,
+and exact exposure pinning. Failed tests or policy/CAS/budget failures mutate
+nothing.
 
-Relevant commands:
+## A2A task projection
 
-```sh
-hadron schedule create --blueprint <path> --cron "<expr>" --name <name>
-hadron schedule list
-```
+Published exact workflow records become bounded A2A agent-card skills derived
+from canonical schemas, effects, digest, and provenance. Task submit maps to a
+durable workflow run; task status, waits, cancellation, resume, redacted events
+and values, and allowed typed outputs remain projections of shared workflow
+operations. Task IDs are not capabilities and correlation survives restart.
 
-## 3. Multi-Stage Pipelines
+## What is not an active use case
 
-Use Hadron pipelines when a workflow is better expressed as several blueprints
-with clear stage boundaries.
-
-Examples:
-
-- build -> verify -> package
-- collect -> analyze -> report
-- stage a deploy, then run post-checks
-
-Archived reference:
-
-- `examples/archive/legacy-blueprints-pipelines/pipeline-demo/`
-
-## 4. Agent-Driven Workflow Execution
-
-Use Hadron as an MCP-connected execution substrate when an agent should:
-
-- discover a workflow
-- inspect its input contract
-- enqueue a run
-- inspect structured diagnostics after execution
-
-Recommended tool flow:
-
-1. `hadron_skills`
-2. `hadron_blueprint_broker`
-3. `hadron_blueprint_schema`
-4. `hadron_run_enqueue`
-5. `hadron_run_operations`
-
-Relevant docs:
-
-- [mcp-setup.md](mcp-setup.md)
-- [docs/mcp-skills/start-here.md](mcp-skills/start-here.md)
-
-## 5. Agent-To-Agent Coordination
-
-Hadron’s structured agentic steps let a blueprint coordinate local launched
-agents, message passing, and human checkpoints.
-
-Examples:
-
-- launch an agent to perform a subtask, then wait for a reply
-- send or wait on a local message thread
-- pause for a human approval step before continuing
-
-Archived reference examples:
-
-- `examples/archive/legacy-blueprints-pipelines/agentic-message-wait-local.yaml`
-- `examples/archive/legacy-blueprints-pipelines/agentic-launch-and-wait.yaml`
-
-Reference:
-
-- [agentic-workflows.md](agentic-workflows.md)
-
-## 6. Beta-Era What Not To Assume
-
-Hadron is already useful, but it is still beta. Do not assume yet that it is:
-
-- a fully managed remote workflow platform
-- a polished public blueprint marketplace
-- a stable 1.0 API surface
-
-Those are future directions, not current guarantees.
+Legacy blueprint files, pipeline DAGs, global shell-output scraping, and the
+retired root commands are archive/rewrite material only. The Torque fake-MCP
+workflow and HTTP/cmd workflow under `examples/workflow` are integration and
+compiler fixtures, not stock-daemon recipes.

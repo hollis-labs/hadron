@@ -36,8 +36,8 @@ func buildOfflineCmd() *cobra.Command {
 			if len(result.Diagnostics) != 0 {
 				return offlineBuildDiagnosticError(result.Diagnostics)
 			}
-			fmt.Fprintf(command.OutOrStdout(), "built %s (%s)\n", result.OutputPath, result.Manifest.BuildDigest)
-			return nil
+			_, err = fmt.Fprintf(command.OutOrStdout(), "built %s (%s)\n", result.OutputPath, result.Manifest.BuildDigest)
+			return err
 		},
 	}
 	command.Flags().StringVarP(&output, "output", "o", "", "output executable path (required)")

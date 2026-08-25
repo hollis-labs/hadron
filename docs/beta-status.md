@@ -1,49 +1,37 @@
-# Beta Status
+# Beta status
 
-Hadron by Hollis Labs is in active public beta development.
+Hadron's active product contract is graph-native. One durable application host
+backs CLI, HTTP, browser UI, MCP, A2A, schedules, and external activations.
 
-## What Is Ready
+Implemented today:
 
-- daemon-backed blueprint execution
-- validation and linting
-- schedules and pipelines
-- REST API and MCP adapter
-- structured `http_call`, `mcp_call`, `message_wait`, `agent_launch`, and `human_gate` steps
-- local-first SQLite-backed persistence and audit trail
+- graph YAML compilation, generated schema, diagnostics, exact immutable plans,
+  typed inputs/outputs, values, artifacts, and visibility-aware rendering;
+- policy-checked validate/explain/run, truthful dry-run, inspect, cancel,
+  authorized wait resume, downstream rerun, events, and subscription;
+- SQLite durability, recovery, resource-aware scheduling, fan-out occupancy,
+  lease renewal, and graceful worker/timer shutdown;
+- registry qualification/publication/current state, deterministic contract-test
+  evidence, lifecycle authoring, exact exposure-profile pins, and source
+  activation materialization;
+- session-isolated MCP discovery/lazy mounts/direct tools, A2A task/run
+  correlation, generated workflow HTTP/TypeScript clients, and graph-native UI;
+- production host support for `transform@v1`, `script@v1`, `sleep@v1`,
+  `wait_for@v1`, `message_wait@v1`, and `human_gate@v1`.
 
-## What Still Needs Hardening
+Beta constraints:
 
-- release and install ergonomics beyond the current beta paths
-- race-condition cleanup in file-watch trigger handling
-- continued docs and operator ergonomics cleanup
-- broader release-readiness testing across the desktop app and MCP workflows
+- public contracts and authoring ergonomics can still evolve;
+- the stock daemon capability profile is intentionally narrower than the
+  repository's embeddable adapter catalog;
+- packaging and installation UX are still being refined;
+- browser and agent-client interoperability continues to receive hardening;
+- examples outside `examples/workflow/production` may be compiler or adapter
+  conformance fixtures rather than stock-daemon runnable workflows.
 
-## Release Position
+The beta-era blueprint and pipeline runtime is retired from production roots,
+routes, MCP instructions, and UI navigation. Retained implementation and sample
+files are archive/rewrite-only and have no public compatibility promise.
 
-Hadron is not yet positioned as a stable 1.0 automation platform.
-
-It is positioned as:
-
-- open source
-- MIT licensed
-- usable for early adopters
-- built in the open from this point forward
-
-## Recommended Expectations
-
-Use Hadron beta when you want:
-
-- a local daemon for deterministic workflow execution
-- inspectable automation with a persistent audit trail
-- a platform to evaluate or build agent-aware automation patterns
-
-Expect ongoing changes in:
-
-- docs
-- packaging
-- workflow ergonomics
-- some runtime surfaces that are newly landed
-
-## Captured For Later
-
-- a public blueprint marketplace/discovery surface for sharing reusable Hadron blueprints
+Before filing an issue, compare behavior with [Workflow authoring and
+operations](workflows.md), [Safety](safety.md), and the executable command help.
