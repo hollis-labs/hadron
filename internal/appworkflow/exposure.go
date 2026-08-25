@@ -857,6 +857,9 @@ func exactExposurePlan(record registry.WorkflowRecord, plan *compile.ExecutionPl
 		return errors.New("resolved workflow does not match its immutable catalog definition")
 	}
 	expectedProvenance := record.Provenance
+	if expectedProvenance.Authority == "" {
+		expectedProvenance.Authority = record.Authority
+	}
 	expectedProvenance.Metadata = make(graph.Metadata, len(record.Provenance.Metadata)+1)
 	for key, value := range record.Provenance.Metadata {
 		expectedProvenance.Metadata[key] = value

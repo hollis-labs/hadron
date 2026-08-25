@@ -414,6 +414,42 @@ func TestDefinitionResolverReauthorizesMovableRefsPinsExactBytesAndDefensivelyCo
 	}
 }
 
+func TestDefinitionResolverCapturesPlanSourceAndCompileSnapshotInOneResolution(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "snapshot.workflow.yaml")
+	first := testWorkflowSource("snapshot", "1.0.0", "noop")
+	second := bytes.Replace(first, []byte("kind: noop"), []byte("kind: alternative"), 1)
+	if err := os.WriteFile(path, first, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver := newTestDefinitionResolverWithKinds(t, root, nil, DefinitionAuthorizerFunc(allowDefinitions), "noop", "alternative")
+	requested := graph.DefinitionRef{Kind: DefinitionKindFile, ID: "snapshot", Locator: "snapshot.workflow.yaml", Version: "1.0.0"}
+	initial, err := resolver.ResolvePlanSnapshot(t.Context(), requested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.Source == nil || !bytes.Equal(initial.Source.Content, first) || initial.Source.Digest != values.SHA256Digest(first) || !initial.Compile.Available || initial.Compile.SemanticRevision != "definition-tests-v1" || initial.Digest == initial.Plan.Digest {
+		t.Fatalf("resolved snapshot = %#v", initial)
+	}
+	initial.Source.Content[0] = 'X'
+	initial.Compile.StepKinds[0].Name = "mutated"
+	if writeErr := os.WriteFile(path, second, 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	refreshed, err := resolver.ResolvePlanSnapshot(t.Context(), requested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(refreshed.Source.Content, second) || refreshed.Source.Content[0] == 'X' || refreshed.Compile.StepKinds[0].Name == "mutated" || refreshed.Digest == initial.Digest {
+		t.Fatalf("snapshot was not exact and defensive: %#v", refreshed)
+	}
+	tampered := refreshed
+	tampered.Digest = initial.Digest
+	if tampered.Validate() == nil {
+		t.Fatal("snapshot accepted a digest from different exact material")
+	}
+}
+
 func TestDefinitionResolverReresolvesRegistryAliasWhileExactDigestStaysReproducible(t *testing.T) {
 	root := t.TempDir()
 	index := hadronregistry.NewWorkflowIndex()

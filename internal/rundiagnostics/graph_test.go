@@ -113,6 +113,22 @@ func (f *diagnosticFixture) LoadStart(context.Context, workflowruntime.RunID) (h
 	return *f.start, nil
 }
 
+func TestSafeLocatorUsesSharedCredentialFailClosedProjection(t *testing.T) {
+	tests := map[string]string{
+		"https://user:password@example.test/workflow.yaml?token=secret#fragment": "https://example.test/workflow.yaml",
+		"//user:password@example.test/workflow.yaml?token=secret#fragment":       "//example.test/workflow.yaml",
+		"workflow.yaml?token=secret#fragment":                                    "workflow.yaml",
+		"user:opaque-secret@example.test/path":                                   "user:<redacted-locator>",
+		"SeCrEt://vault/private-reference":                                       values.RedactedMarker,
+		"%zz-malformed-secret":                                                   "<invalid-locator>",
+	}
+	for input, want := range tests {
+		if got := safeLocator(input); got != want {
+			t.Fatalf("safeLocator(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestGraphDiagnosticsExplainPersistedWorkflowState(t *testing.T) {
 	fixture := newDiagnosticFixture(t)
 	service := Service{State: fixture, Plans: fixture, Control: fixture, Replay: fixture, Pins: fixture, Resources: fixture, Starts: fixture, Activations: fixture}

@@ -98,9 +98,21 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 	if expectedIdentity != nil && !sameIdentity(identity, expectedIdentity.Clone()) {
 		return StartRunResult{}, fmt.Errorf("%w: activation identity does not match its immutable scope and execution target binding", ErrPolicyDenied)
 	}
-	resolvedPlan, err := h.definitions.ResolvePlan(ctx, request.Definition)
-	if err != nil {
-		return StartRunResult{}, fmt.Errorf("resolve workflow definition: %w", err)
+	var resolvedPlan *compile.ExecutionPlan
+	var planSnapshot *hoststate.PlanSnapshot
+	if provider, ok := h.definitions.(DefinitionSnapshotProvider); ok && !nilInterface(provider) {
+		resolved, resolveErr := provider.ResolvePlanSnapshot(ctx, request.Definition)
+		if resolveErr != nil {
+			return StartRunResult{}, fmt.Errorf("resolve workflow definition snapshot: %w", resolveErr)
+		}
+		resolvedPlan = &resolved.Plan
+		planSnapshot = &resolved
+	} else {
+		resolved, resolveErr := h.definitions.ResolvePlan(ctx, request.Definition)
+		if resolveErr != nil {
+			return StartRunResult{}, fmt.Errorf("resolve workflow definition: %w", resolveErr)
+		}
+		resolvedPlan = resolved
 	}
 	plan, err := cloneExecutionPlan(resolvedPlan)
 	if err != nil {
@@ -113,6 +125,17 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 	findings := compile.ValidatePlan(ctx, plan, validationOptions)
 	if len(findings) != 0 {
 		return StartRunResult{Diagnostics: findings}, nil
+	}
+	if planSnapshot == nil {
+		sealed, sealErr := hoststate.SealPlanSnapshot(hoststate.PlanSnapshot{
+			SchemaVersion: hoststate.PlanSnapshotSchemaVersion, Plan: *plan,
+			SourceMap: plan.SourceMap,
+			Compile:   hoststate.UnavailableCompileDescriptor("definition provider does not expose deterministic compile metadata or exact source material"),
+		})
+		if sealErr != nil {
+			return StartRunResult{}, fmt.Errorf("seal workflow plan snapshot: %w", sealErr)
+		}
+		planSnapshot = &sealed
 	}
 
 	var facts hoststate.PolicyFacts
@@ -191,6 +214,7 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 		StartKey: request.IdempotencyKey, RequestDigest: requestDigest, CallerInputHash: inputHash,
 		Identity: facts.Identity, Facts: facts, Decision: decision,
 		Activation: request.Activation, Pins: request.Pins, DryRun: request.DryRun, RecordedAt: h.now(),
+		Snapshot: planSnapshot,
 	}
 	snapshot, outcome, err := h.journal.RecordStart(context.WithoutCancel(ctx), record)
 	if err != nil {
@@ -731,7 +755,17 @@ func (h *Host) InspectRun(ctx context.Context, runID runtime.RunID) (InspectRunR
 	if err != nil {
 		return InspectRunResult{}, err
 	}
-	return InspectRunResult{Run: run, Binding: binding, Nodes: nodes, Events: events, Decisions: decisions}, nil
+	if binding.Record.Snapshot == nil {
+		return InspectRunResult{}, errors.New("inspect workflow run: durable plan snapshot is unavailable")
+	}
+	planMetadata, err := binding.Record.Snapshot.Metadata()
+	if err != nil {
+		return InspectRunResult{}, fmt.Errorf("inspect workflow plan snapshot: %w", err)
+	}
+	// Raw exact source remains journal-internal. Ordinary inspection receives
+	// only the safe metadata projection above.
+	binding.Record.Snapshot = nil
+	return InspectRunResult{Run: run, Binding: binding, Plan: planMetadata, Nodes: nodes, Events: events, Decisions: decisions}, nil
 }
 
 func (h *Host) CancelRun(ctx context.Context, request CancelRunRequest) (runtime.RequestRunCancellationResult, []error, error) {
@@ -898,7 +932,7 @@ func (h *Host) ExplainRun(ctx context.Context, runID runtime.RunID) (ExplainRunR
 	if inspected.Binding.Record.Facts.DryRunAvailable {
 		dryTruth = "available: every participating adapter was explicitly approved for side-effect-free dry-run"
 	}
-	return ExplainRunResult{Run: inspected.Run, Facts: inspected.Binding.Record.Facts, Decision: inspected.Binding.Record.Decision, Decisions: inspected.Decisions, Nodes: inspected.Nodes, Blocked: blocked, DryRunTruth: dryTruth}, nil
+	return ExplainRunResult{Run: inspected.Run, Facts: inspected.Binding.Record.Facts, Decision: inspected.Binding.Record.Decision, Decisions: inspected.Decisions, Nodes: inspected.Nodes, Blocked: blocked, DryRunTruth: dryTruth, Plan: inspected.Plan}, nil
 }
 
 func maxTime(candidate, floor time.Time) time.Time {

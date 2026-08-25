@@ -33,6 +33,13 @@ type DefinitionProvider interface {
 	LoadPlan(context.Context, string) (*compile.ExecutionPlan, error)
 }
 
+// DefinitionSnapshotProvider is an optional host-owned extension implemented
+// by resolvers that can return the exact selected source and immutable compile
+// context from the same operation that produced a validated plan.
+type DefinitionSnapshotProvider interface {
+	ResolvePlanSnapshot(context.Context, graph.DefinitionRef) (hoststate.PlanSnapshot, error)
+}
+
 type IdentityRequest struct {
 	PrincipalHint   string                             `json:"principal_hint,omitempty"`
 	SourceAuthority string                             `json:"source_authority"`
@@ -152,6 +159,7 @@ func (r StartRunResult) RejectedBeforeAdmission() bool {
 type InspectRunResult struct {
 	Run       runtime.RunSnapshot
 	Binding   hoststate.StartSnapshot
+	Plan      hoststate.PlanSnapshotMetadata
 	Nodes     []runtime.NodeInvocationSnapshot
 	Events    []runtime.Event
 	Decisions []hoststate.PolicyDecision
@@ -172,6 +180,7 @@ type ExplainRunResult struct {
 	Nodes       []runtime.NodeInvocationSnapshot
 	Blocked     []runtime.BlockedReason
 	DryRunTruth string
+	Plan        hoststate.PlanSnapshotMetadata
 }
 
 type HealthStatus struct {

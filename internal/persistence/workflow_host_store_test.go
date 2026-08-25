@@ -398,13 +398,24 @@ func TestWorkflowHostCancellationRejectsDriftedCoreReplay(t *testing.T) {
 func workflowHostStartFixture(t *testing.T, suffix string) hoststate.StartRecord {
 	t.Helper()
 	at := workflowTestTime()
-	planRef := workflowTestPlan(suffix)
+	plan := workflowcompile.ExecutionPlan{
+		SchemaVersion: workflowcompile.ExecutionPlanSchemaVersion,
+		ID:            "plan-" + suffix,
+		Definition: graph.DefinitionRef{
+			Kind: "workflow", ID: "plan-" + suffix, Version: "v1",
+			Digest: values.SHA256Digest([]byte("source-" + suffix)),
+		},
+		Graph: graph.Graph{ID: "plan-" + suffix, Version: "v1"},
+	}
+	plan.Graph.Digest, _ = workflowcompile.GraphDigest(plan.Graph)
+	plan.Digest, _ = workflowcompile.PlanDigest(plan)
+	planRef := workflowruntime.PlanRef{ID: plan.ID, Version: plan.Graph.Version, Digest: plan.Digest, SchemaVersion: plan.SchemaVersion}
 	inputRef := values.ValueSetRef{ID: "values-000000000001", Digest: values.SHA256Digest([]byte("inputs"))}
 	bound := workflowruntime.BoundRun{ID: workflowruntime.RunID("run-" + suffix), Plan: planRef, InputsRef: inputRef, CreatedAt: at, Provenance: graph.Provenance{Authority: "test", Locator: suffix + ".yaml", Digest: planRef.Digest}}
 	identity := workflowHostIdentity()
 	facts := hoststate.PolicyFacts{Operation: "start", RunID: bound.ID, Plan: planRef, Identity: identity, RunScope: identity.RunScope, ExecutionTarget: identity.ExecutionTarget, Effects: graph.EffectSet{graph.EffectCompute}, NodeCount: 1, BlastRadius: map[string]int{"compute": 1}}
 	decision := hoststate.PolicyDecision{ID: "decision-" + suffix, RunID: bound.ID, Operation: "start", Outcome: hoststate.PolicyAllow, Reason: "test allow", DecidedAt: at}
-	return hoststate.StartRecord{Run: bound, Plan: workflowcompile.ExecutionPlan{SchemaVersion: planRef.SchemaVersion, ID: planRef.ID, Digest: planRef.Digest, Definition: graph.DefinitionRef{Kind: "workflow", ID: planRef.ID, Version: planRef.Version, Digest: planRef.Digest}, Provenance: bound.Provenance, Graph: graph.Graph{ID: planRef.ID, Version: planRef.Version, Digest: planRef.Digest}}, Requested: graph.DefinitionRef{Kind: "workflow", ID: planRef.ID}, StartKey: "host-start-" + suffix, RequestDigest: values.SHA256Digest([]byte("request-" + suffix)), CallerInputHash: values.SHA256Digest([]byte("inputs-" + suffix)), Identity: identity, Facts: facts, Decision: decision, RecordedAt: at}
+	return hoststate.StartRecord{Run: bound, Plan: plan, Requested: graph.DefinitionRef{Kind: "workflow", ID: planRef.ID}, StartKey: "host-start-" + suffix, RequestDigest: values.SHA256Digest([]byte("request-" + suffix)), CallerInputHash: values.SHA256Digest([]byte("inputs-" + suffix)), Identity: identity, Facts: facts, Decision: decision, RecordedAt: at}
 }
 
 func workflowHostIdentity() hoststate.IdentityBinding {

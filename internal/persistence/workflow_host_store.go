@@ -30,6 +30,25 @@ func NewWorkflowHostStore(store *Store) (*WorkflowHostStore, error) {
 }
 
 func canonicalHostStart(record hoststate.StartRecord) (hoststate.StartRecord, string, error) {
+	if record.Snapshot == nil {
+		sealed, err := hoststate.SealPlanSnapshot(hoststate.PlanSnapshot{
+			SchemaVersion: hoststate.PlanSnapshotSchemaVersion, Plan: record.Plan,
+			SourceMap: record.Plan.SourceMap,
+			Compile:   hoststate.UnavailableCompileDescriptor("definition provider does not expose deterministic compile metadata or exact source material"),
+		})
+		if err != nil {
+			return hoststate.StartRecord{}, "", err
+		}
+		record.Snapshot = &sealed
+	}
+	planSnapshot, err := record.Snapshot.Clone()
+	if err != nil {
+		return hoststate.StartRecord{}, "", err
+	}
+	if validationErr := planSnapshot.Validate(); validationErr != nil {
+		return hoststate.StartRecord{}, "", fmt.Errorf("invalid workflow plan snapshot: %w", validationErr)
+	}
+	record.Snapshot = &planSnapshot
 	record.Identity = record.Identity.Clone()
 	record.Facts.Identity = record.Facts.Identity.Clone()
 	record.Facts.RunScope = record.Facts.RunScope.Clone()
@@ -53,6 +72,7 @@ func canonicalHostStart(record hoststate.StartRecord) (hoststate.StartRecord, st
 	if err := decodeWorkflowJSON("workflow host start", encoded, &cloned); err != nil {
 		return hoststate.StartRecord{}, "", err
 	}
+	cloned.Snapshot = &planSnapshot
 	return cloned, encoded, nil
 }
 
@@ -101,11 +121,17 @@ func (s *WorkflowHostStore) RecordStart(ctx context.Context, input hoststate.Sta
 		if !errors.Is(loadErr, workflowruntime.ErrNotFound) {
 			return loadErr
 		}
+		if snapshotErr := ensureWorkflowPlanSnapshot(ctx, query, *input.Snapshot, workflowTime(input.RecordedAt)); snapshotErr != nil {
+			return snapshotErr
+		}
 		if _, execErr := query.ExecContext(ctx, `INSERT INTO workflow_host_starts(run_id, idempotency_key, request_json, recorded_at) VALUES (?, ?, ?, ?)`, input.Run.ID, input.StartKey, encoded, workflowTime(input.RecordedAt)); execErr != nil {
 			if isSQLiteConstraint(execErr) {
 				return &workflowruntime.IdempotencyConflictError{Operation: "record workflow host start", Key: input.StartKey}
 			}
 			return fmt.Errorf("insert workflow host start: %w", execErr)
+		}
+		if linkErr := linkWorkflowPlanSnapshot(ctx, query, input.Run.ID, *input.Snapshot); linkErr != nil {
+			return linkErr
 		}
 		if _, execErr := query.ExecContext(ctx, `INSERT INTO workflow_host_start_progress(run_id, phase, generation, updated_at) VALUES (?, ?, 1, ?)`, input.Run.ID, hoststate.StartRecorded, workflowTime(input.RecordedAt)); execErr != nil {
 			return fmt.Errorf("insert workflow host progress: %w", execErr)
@@ -161,6 +187,21 @@ func loadHostStart(ctx context.Context, query workflowSQL, predicate string, arg
 	if decodeErr := decodeWorkflowJSON("workflow host start", encoded, &record); decodeErr != nil {
 		return hoststate.StartSnapshot{}, decodeErr
 	}
+	planSnapshot, snapshotErr := loadWorkflowPlanSnapshotForRun(ctx, query, record.Run.ID)
+	if errors.Is(snapshotErr, workflowruntime.ErrNotFound) {
+		// Starts created before migration 0028 retain their exact plan in the
+		// immutable request JSON, but have no recoverable raw source/compiler
+		// material. Preserve that compatibility as an explicit unavailable state.
+		planSnapshot, snapshotErr = hoststate.SealPlanSnapshot(hoststate.PlanSnapshot{
+			SchemaVersion: hoststate.PlanSnapshotSchemaVersion, Plan: record.Plan,
+			SourceMap: record.Plan.SourceMap,
+			Compile:   hoststate.UnavailableCompileDescriptor("legacy durable start predates exact source and compile snapshot capture"),
+		})
+	}
+	if snapshotErr != nil {
+		return hoststate.StartSnapshot{}, snapshotErr
+	}
+	record.Snapshot = &planSnapshot
 	parsed, err := parseWorkflowTime("host start updated_at", updated)
 	if err != nil {
 		return hoststate.StartSnapshot{}, err
@@ -213,13 +254,32 @@ func (s *WorkflowHostStore) ListIncompleteStarts(ctx context.Context, limit int)
 		if err != nil {
 			return nil, err
 		}
-		snapshot := hoststate.StartSnapshot{Record: record, Phase: hoststate.StartPhase(phase), Generation: gen, UpdatedAt: parsed}
-		if err := snapshot.Validate(); err != nil {
+		result = append(result, hoststate.StartSnapshot{Record: record, Phase: hoststate.StartPhase(phase), Generation: gen, UpdatedAt: parsed})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range result {
+		planSnapshot, err := loadWorkflowPlanSnapshotForRun(ctx, s.state.db, result[index].Record.Run.ID)
+		if errors.Is(err, workflowruntime.ErrNotFound) {
+			planSnapshot, err = hoststate.SealPlanSnapshot(hoststate.PlanSnapshot{
+				SchemaVersion: hoststate.PlanSnapshotSchemaVersion, Plan: result[index].Record.Plan,
+				SourceMap: result[index].Record.Plan.SourceMap,
+				Compile:   hoststate.UnavailableCompileDescriptor("legacy durable start predates exact source and compile snapshot capture"),
+			})
+		}
+		if err != nil {
+			return nil, err
+		}
+		result[index].Record.Snapshot = &planSnapshot
+		if err := result[index].Validate(); err != nil {
 			return nil, fmt.Errorf("%w: %w", hoststate.ErrInvalidRecord, err)
 		}
-		result = append(result, snapshot)
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 func (s *WorkflowHostStore) AdvanceStart(ctx context.Context, request hoststate.AdvanceStartRequest) (hoststate.StartSnapshot, error) {

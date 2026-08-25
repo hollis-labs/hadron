@@ -234,6 +234,9 @@ func (r *DefinitionResolver) resolveRegistrySource(ctx context.Context, requeste
 		return ResolvedSource{}, definitionError(CodeDefinitionPinConflict, ErrDefinitionPinConflict, requested.Locator, "workflow registry returned incomplete or conflicting authority, trust, or provenance", "Repair the immutable graph-native registry record.")
 	}
 	provenance := record.Provenance
+	if provenance.Authority == "" {
+		provenance.Authority = record.Authority
+	}
 	if provenance.Metadata == nil {
 		provenance.Metadata = make(graph.Metadata)
 	}

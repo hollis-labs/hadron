@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net/url"
 	"reflect"
 	"sort"
 	"strings"
@@ -656,23 +655,7 @@ func finiteCoordinate(input any) (float64, bool) {
 }
 
 func safeLocator(input string) string {
-	trimmed := strings.TrimSpace(input)
-	if strings.HasPrefix(strings.ToLower(trimmed), "secret://") {
-		return values.RedactedMarker
-	}
-	parsed, err := url.Parse(trimmed)
-	if err == nil && parsed.Scheme != "" {
-		parsed.User = nil
-		parsed.RawQuery = ""
-		parsed.Fragment = ""
-		return parsed.String()
-	}
-	for _, marker := range []string{"?", "#"} {
-		if index := strings.Index(trimmed, marker); index >= 0 {
-			trimmed = trimmed[:index]
-		}
-	}
-	return trimmed
+	return hoststate.SanitizeLocator(input)
 }
 
 func safeProvenance(input graph.Provenance) ProvenanceDiagnostic {

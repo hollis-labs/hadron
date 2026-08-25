@@ -1,6 +1,7 @@
 package appworkflow_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/artifacts"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	calladapter "github.com/hollis-labs/hadron/workflow/adapters/call"
 	"github.com/hollis-labs/hadron/workflow/adapters/transform"
 	waitadapter "github.com/hollis-labs/hadron/workflow/adapters/wait"
@@ -51,6 +53,9 @@ func TestHostGraphNativeStartInspectExplainReplayAndActivation(t *testing.T) {
 	if err != nil || len(inspected.Nodes) != 1 || inspected.Nodes[0].Status != workflowruntime.NodeReady || len(inspected.Decisions) != 1 {
 		t.Fatalf("InspectRun = %#v, %v", inspected, err)
 	}
+	if inspected.Plan.Source.Available || inspected.Plan.Compile.Available || inspected.Plan.SnapshotDigest == "" || inspected.Binding.Record.Snapshot != nil {
+		t.Fatalf("fallback provider inspection metadata = %#v", inspected.Plan)
+	}
 	queried, err := fixture.host.QueryRun(callerContext, appworkflow.QueryRunRequest{Query: workflowruntime.RunStateQuery{RunID: request.RunID, Limit: 10}, Identity: request.Identity})
 	if err != nil || queried.Run.ID != request.RunID || len(queried.Nodes) != 1 {
 		t.Fatalf("QueryRun = %#v, %v", queried, err)
@@ -61,7 +66,7 @@ func TestHostGraphNativeStartInspectExplainReplayAndActivation(t *testing.T) {
 		t.Fatalf("foreign QueryRun = %v", queryErr)
 	}
 	explained, err := fixture.host.ExplainRun(t.Context(), request.RunID)
-	if err != nil || explained.Decision.ID == "" || explained.DryRunTruth == "" {
+	if err != nil || explained.Decision.ID == "" || explained.DryRunTruth == "" || explained.Plan.SnapshotDigest != inspected.Plan.SnapshotDigest {
 		t.Fatalf("ExplainRun = %#v, %v", explained, err)
 	}
 	replayed, err := fixture.host.StartRun(callerContext, request)
@@ -87,6 +92,203 @@ func TestHostGraphNativeStartInspectExplainReplayAndActivation(t *testing.T) {
 	}
 	if fixture.scheduler.scheduled != 1 || fixture.scheduler.canceled != 1 {
 		t.Fatalf("scheduler calls = %#v", fixture.scheduler)
+	}
+}
+
+func TestHostExactPlanSnapshotsSurviveLocatorMutationDeletionAndSQLiteReopen(t *testing.T) {
+	root := t.TempDir()
+	const privateMarker = "private-source-snapshot-marker"
+	source := []byte(`workflow:
+  id: locator-snapshot
+  version: v1
+inputs:
+  - name: message
+    type: string
+    required: true
+steps:
+  - id: echo
+    kind_version: v1
+    transform:
+      result: inputs.message
+    with:
+      message: inputs.message
+    effects: [compute]
+# ` + privateMarker + "\n")
+	firstPath := filepath.Join(root, "first.workflow.yaml")
+	secondPath := filepath.Join(root, "second.workflow.yaml")
+	for _, path := range []string{firstPath, secondPath} {
+		if err := os.WriteFile(path, source, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	kinds := stepkind.NewRegistry()
+	if err := kinds.Register(transform.New()); err != nil {
+		t.Fatal(err)
+	}
+	resolver, resolverErr := appworkflow.NewDefinitionResolver(appworkflow.DefinitionResolverOptions{
+		Roots: []string{root}, Authorizer: appworkflow.DefinitionAuthorizerFunc(func(context.Context, appworkflow.DefinitionAuthorization) error { return nil }),
+		Compile: appworkflow.DefinitionCompileOptions{StepKinds: kinds, SemanticRevision: "plan-snapshot-integration-v1"},
+	})
+	if resolverErr != nil {
+		t.Fatal(resolverErr)
+	}
+	identity := identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+		principal, _ := ctx.Value(authenticatedPrincipalKey{}).(string)
+		if principal == "" {
+			return hoststate.IdentityBinding{}, errors.New("missing authenticated principal")
+		}
+		return testIdentityBinding(principal, request.SourceAuthority), nil
+	})
+	policy := appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+		return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "snapshot integration allow"}, nil
+	})
+	newSnapshotHost := func(state workflowruntime.StateStore, journal *persistence.WorkflowHostStore, definitions appworkflow.DefinitionProvider) *appworkflow.Host {
+		host, hostErr := appworkflow.New(appworkflow.Options{
+			State: state, Journal: journal, Definitions: definitions, Identity: identity, Policy: policy,
+			Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}},
+			Activations: fixture.scheduler, Artifacts: fixture.artifacts, Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now }),
+			RecoveryInterval: time.Hour, RecoveryBatchLimit: 10,
+			ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }),
+		})
+		if hostErr != nil {
+			t.Fatal(hostErr)
+		}
+		return host
+	}
+	host := newSnapshotHost(fixture.state, fixture.journal, resolver)
+	if err := host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	requests := []appworkflow.StartRunRequest{
+		{RunID: "locator-first", IdempotencyKey: "locator-first-start", Definition: graph.DefinitionRef{Kind: appworkflow.DefinitionKindFile, ID: "locator-snapshot", Locator: "first.workflow.yaml", Version: "v1"}, Inputs: map[string]any{"message": "first"}, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}},
+		{RunID: "locator-second", IdempotencyKey: "locator-second-start", Definition: graph.DefinitionRef{Kind: appworkflow.DefinitionKindFile, ID: "locator-snapshot", Locator: "second.workflow.yaml", Version: "v1"}, Inputs: map[string]any{"message": "second"}, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}},
+	}
+	plans := make([]hoststate.PlanSnapshotMetadata, 0, 2)
+	for _, request := range requests {
+		started, err := host.StartRun(authenticatedContext(t.Context(), "user:snapshot"), request)
+		if err != nil || started.Run == nil {
+			t.Fatalf("StartRun(%s) = %#v, %v", request.RunID, started, err)
+		}
+		inspected, err := host.InspectRun(t.Context(), request.RunID)
+		if err != nil || !inspected.Plan.Source.Available || inspected.Binding.Record.Snapshot != nil {
+			t.Fatalf("InspectRun(%s) = %#v, %v", request.RunID, inspected, err)
+		}
+		plans = append(plans, inspected.Plan)
+	}
+	if plans[0].Plan.Digest != plans[1].Plan.Digest || plans[0].SnapshotDigest == plans[1].SnapshotDigest || plans[0].Definition.Locator == plans[1].Definition.Locator {
+		t.Fatalf("plan/snapshot locator identities = %#v", plans)
+	}
+	internal, internalErr := fixture.journal.LoadStart(t.Context(), requests[0].RunID)
+	if internalErr != nil || internal.Record.Snapshot == nil || !bytes.Contains(internal.Record.Snapshot.Source.Content, []byte(privateMarker)) {
+		t.Fatalf("internal exact source = %#v, %v", internal.Record.Snapshot, internalErr)
+	}
+	encodedInspect, _ := json.Marshal(plans[0])
+	if bytes.Contains(encodedInspect, []byte(privateMarker)) {
+		t.Fatalf("inspection exposed raw source: %s", encodedInspect)
+	}
+
+	firstNode, _ := fixture.state.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: requests[0].RunID, NodeID: "echo"})
+	claim, claimErr := fixture.state.ClaimNode(t.Context(), workflowruntime.ClaimNodeRequest{InvocationID: firstNode.ID, ExpectedClaimGeneration: firstNode.ClaimGeneration, Owner: "snapshot-test", Token: "snapshot-test-token", IdempotencyKey: "snapshot-test-claim", Now: fixture.now.Add(time.Second), LeaseUntil: fixture.now.Add(time.Minute)})
+	if claimErr != nil || !claim.Acquired || claim.Lease == nil {
+		t.Fatalf("claim exact-plan source node = %#v, %v", claim, claimErr)
+	}
+	proof := workflowruntime.ClaimProof{Owner: claim.Lease.Owner, Token: claim.Lease.Token, Generation: claim.Lease.Generation}
+	claimedNode, claimedNodeErr := fixture.state.LoadNodeInvocation(t.Context(), firstNode.ID)
+	if claimedNodeErr != nil {
+		t.Fatal(claimedNodeErr)
+	}
+	startedAttempt, attemptErr := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: firstNode.ID, ExpectedNodeGeneration: claimedNode.Generation, Claim: proof, Executor: workflowruntime.ExecutorMetadata{Kind: transform.Name, Version: transform.Version, Target: "local"}, Inputs: firstNode.Inputs, At: fixture.now.Add(2 * time.Second)})
+	if attemptErr != nil {
+		t.Fatal(attemptErr)
+	}
+	if _, err := fixture.state.FinishNodeAttempt(t.Context(), workflowruntime.FinishNodeAttemptRequest{InvocationID: firstNode.ID, AttemptNumber: startedAttempt.Attempt.ID.Number, ExpectedNodeGeneration: startedAttempt.Node.Generation, ExpectedAttemptGeneration: startedAttempt.Attempt.Generation, Claim: proof, AttemptStatus: workflowruntime.NodeSucceeded, NextNodeStatus: workflowruntime.NodeSucceeded, At: fixture.now.Add(3 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	firstRun, _ := fixture.state.LoadRun(t.Context(), requests[0].RunID)
+	if _, err := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: firstRun.ID, ExpectedGeneration: firstRun.Generation, To: workflowruntime.RunSucceeded, At: fixture.now.Add(4 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(firstPath, []byte("modified after accepted start"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{firstPath, secondPath} {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := host.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopenedStore, reopenErr := persistence.Open(fixture.dbPath)
+	if reopenErr != nil {
+		t.Fatal(reopenErr)
+	}
+	t.Cleanup(func() { _ = reopenedStore.Close() })
+	reopenedState, _ := persistence.NewWorkflowStateStore(reopenedStore)
+	reopenedJournal, _ := persistence.NewWorkflowHostStore(reopenedStore)
+	var restartedResolutionCalls atomic.Int32
+	restartedKinds := stepkind.NewRegistry()
+	_ = restartedKinds.Register(transform.New())
+	restartedResolver, restartedResolverErr := appworkflow.NewDefinitionResolver(appworkflow.DefinitionResolverOptions{
+		Roots: []string{root}, Authorizer: appworkflow.DefinitionAuthorizerFunc(func(context.Context, appworkflow.DefinitionAuthorization) error {
+			restartedResolutionCalls.Add(1)
+			return nil
+		}), Compile: appworkflow.DefinitionCompileOptions{StepKinds: restartedKinds, SemanticRevision: "plan-snapshot-integration-v1"},
+	})
+	if restartedResolverErr != nil {
+		t.Fatal(restartedResolverErr)
+	}
+	restarted := newSnapshotHost(reopenedState, reopenedJournal, restartedResolver)
+	if err := restarted.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Shutdown(context.Background()) })
+	for index, request := range requests {
+		inspected, err := restarted.InspectRun(t.Context(), request.RunID)
+		if err != nil || inspected.Plan.SnapshotDigest != plans[index].SnapshotDigest || inspected.Plan.Definition.Locator != plans[index].Definition.Locator {
+			t.Fatalf("reopened InspectRun(%s) = %#v, %v", request.RunID, inspected.Plan, err)
+		}
+		explained, err := restarted.ExplainRun(t.Context(), request.RunID)
+		if err != nil || explained.Plan.SnapshotDigest != plans[index].SnapshotDigest {
+			t.Fatalf("reopened ExplainRun(%s) = %#v, %v", request.RunID, explained, err)
+		}
+		replayed, err := restarted.StartRun(authenticatedContext(t.Context(), "user:snapshot"), request)
+		if err != nil || replayed.Outcome != workflowruntime.IdempotencyReplayed {
+			t.Fatalf("reopened StartRun replay(%s) = %#v, %v", request.RunID, replayed, err)
+		}
+	}
+	if restartedResolutionCalls.Load() != 0 {
+		t.Fatalf("reopened inspection/start replay re-resolved deleted source %d times", restartedResolutionCalls.Load())
+	}
+	if _, err := restarted.StartRun(authenticatedContext(t.Context(), "user:foreign"), requests[0]); !errors.Is(err, appworkflow.ErrPolicyDenied) {
+		t.Fatalf("unauthorized durable start replay = %v", err)
+	}
+
+	recoveryPlans := appworkflow.PinnedRecoveryPlanSource{Roots: reopenedJournal, Children: reopenedJournal, State: reopenedState, Replays: reopenedState}
+	replayService := &workflowruntime.ReplayService{
+		Store: reopenedState, Replay: reopenedState, Inputs: reopenedState, Control: reopenedState, Plans: recoveryPlans, Registry: restartedKinds,
+		Policy: workflowruntime.RepeatPolicyFunc(func(context.Context, workflowruntime.RepeatCandidate) (workflowruntime.RepeatPolicyDecision, error) {
+			return workflowruntime.RepeatPolicyDecision{Allow: true, Code: "snapshot_test_approved", Reason: "test operator approved exact-plan rerun"}, nil
+		}),
+	}
+	operator, operatorErr := appworkflow.NewWorkflowOperator(appworkflow.WorkflowOperatorOptions{
+		Host: restarted, Diagnostics: graphInspectorFunc(func(context.Context, rundiagnostics.Query) (rundiagnostics.Result, error) {
+			return rundiagnostics.Result{}, nil
+		}), Replay: replayService,
+	})
+	if operatorErr != nil {
+		t.Fatal(operatorErr)
+	}
+	if _, err := operator.RerunWorkflow(authenticatedContext(t.Context(), "user:foreign"), appworkflow.RerunWorkflowRequest{SourceRunID: requests[0].RunID, RunID: "locator-rerun-denied", FromNodeID: "echo", IdempotencyKey: "locator-rerun-denied", Identity: requests[0].Identity}); !errors.Is(err, appworkflow.ErrPolicyDenied) {
+		t.Fatalf("unauthorized exact-plan rerun = %v", err)
+	}
+	rerun, rerunErr := operator.RerunWorkflow(authenticatedContext(t.Context(), "user:snapshot"), appworkflow.RerunWorkflowRequest{SourceRunID: requests[0].RunID, RunID: "locator-rerun", FromNodeID: "echo", IdempotencyKey: "locator-rerun", Identity: requests[0].Identity})
+	if rerunErr != nil || rerun.Outcome != workflowruntime.IdempotencyApplied || rerun.Run.Plan.Digest != plans[0].Plan.Digest || restartedResolutionCalls.Load() != 0 {
+		t.Fatalf("authorized exact-plan rerun = %#v, %v resolutions=%d", rerun, rerunErr, restartedResolutionCalls.Load())
 	}
 }
 
@@ -1002,6 +1204,8 @@ func TestHostExecutionTargetIsOptionalUntilPlanRequiresComputeBinding(t *testing
 
 	requiredPlan := compileHostPlan(t)
 	requiredPlan.Graph.Target.Capabilities = []string{"compute"}
+	requiredPlan.Graph.Digest, _ = workflowcompile.GraphDigest(requiredPlan.Graph)
+	requiredPlan.Digest, _ = workflowcompile.PlanDigest(*requiredPlan)
 	requiredFixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, requiredPlan)
 	requiredHost := hostWithFixedIdentity(t, requiredFixture, withoutTarget)
 	if startErr := requiredHost.Start(t.Context()); startErr != nil {
@@ -2149,12 +2353,26 @@ func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, inter
 		_, err = fixture.state.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: child.ID, ExpectedGeneration: child.Generation, To: workflowruntime.RunRunning, At: child.UpdatedAt.Add(time.Nanosecond)})
 		return err
 	})
-	host, hostErr := appworkflow.New(appworkflow.Options{State: state, Journal: journal, Definitions: definitionProvider{plan: plan, calls: &fixture.definitionCalls}, Identity: identity, Policy: policy, Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: scheduler, Artifacts: artifactStore, Clock: appworkflow.ClockFunc(func() time.Time { return now }), RecoveryInterval: interval, RecoveryBatchLimit: 1, RecoveryHooks: hooks, ChildRuns: childMaterializer})
+	host, hostErr := appworkflow.New(appworkflow.Options{State: state, Journal: &snapshotRequiredJournal{WorkflowHostStore: journal}, Definitions: definitionProvider{plan: plan, calls: &fixture.definitionCalls}, Identity: identity, Policy: policy, Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: scheduler, Artifacts: artifactStore, Clock: appworkflow.ClockFunc(func() time.Time { return now }), RecoveryInterval: interval, RecoveryBatchLimit: 1, RecoveryHooks: hooks, ChildRuns: childMaterializer})
 	if hostErr != nil {
 		t.Fatal(hostErr)
 	}
 	fixture.host = host
 	return fixture
+}
+
+// snapshotRequiredJournal proves that Host seals a snapshot before handing a
+// start to any journal. The embedded SQLite store still provides the optional
+// durable host journal capabilities exercised by the integration suite.
+type snapshotRequiredJournal struct {
+	*persistence.WorkflowHostStore
+}
+
+func (j *snapshotRequiredJournal) RecordStart(ctx context.Context, record hoststate.StartRecord) (hoststate.StartSnapshot, workflowruntime.IdempotencyOutcome, error) {
+	if record.Snapshot == nil {
+		return hoststate.StartSnapshot{}, "", errors.New("host handed journal a start without a plan snapshot")
+	}
+	return j.WorkflowHostStore.RecordStart(ctx, record)
 }
 
 func hostWithFixedIdentity(t *testing.T, fixture *hostFixture, binding hoststate.IdentityBinding) *appworkflow.Host {
@@ -2389,6 +2607,7 @@ steps:
 	plan := inferHostPlan(t, result.Plan)
 	plan.Definition.Authority = "project"
 	plan.Definition.Kind = "workflow"
+	plan.Digest, _ = workflowcompile.PlanDigest(*plan)
 	return plan
 }
 

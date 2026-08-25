@@ -249,6 +249,10 @@ type StartRecord struct {
 	Pins            []StartPin            `json:"pins,omitempty"`
 	DryRun          bool                  `json:"dry_run,omitempty"`
 	RecordedAt      time.Time             `json:"recorded_at"`
+	// Snapshot is persisted through migration 0028's immutable exact-snapshot
+	// table and per-start link, not duplicated in the immutable start JSON or
+	// exposed through ordinary application transports.
+	Snapshot *PlanSnapshot `json:"-"`
 }
 
 // BundledDefinitionCandidate associates one exact serialized child definition
@@ -289,6 +293,14 @@ func (r StartRecord) Validate() error {
 	}
 	if r.Plan.Digest != r.Run.Plan.Digest || r.Plan.ID != r.Run.Plan.ID {
 		return errors.New("start record plan does not match bound run")
+	}
+	if r.Snapshot != nil {
+		if err := r.Snapshot.Validate(); err != nil {
+			return err
+		}
+		if r.Snapshot.PlanRef() != r.Run.Plan || !equalJSON(r.Snapshot.Plan, r.Plan) {
+			return errors.New("start record snapshot does not match bound run and plan")
+		}
 	}
 	if err := r.Identity.Validate(); err != nil {
 		return err

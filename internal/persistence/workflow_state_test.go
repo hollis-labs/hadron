@@ -20,6 +20,7 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 	store, _ := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "hadron.db"))
 	objects := map[string]string{
 		"workflow_plan_refs": "table", "workflow_runs": "table",
+		"workflow_plan_snapshots": "table", "workflow_host_start_plan_snapshots": "table",
 		"workflow_run_start_idempotency": "table", "workflow_node_invocations": "table",
 		"workflow_node_leases": "table", "workflow_claim_idempotency": "table",
 		"workflow_attempts": "table", "workflow_waits": "table",
@@ -63,7 +64,8 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"idx_workflow_scheduler_holders_capacity": "index", "idx_workflow_scheduler_holders_invocation": "index",
 		"idx_workflow_scheduler_waiters_order": "index",
 		"idx_workflow_crash_recovery_attempt":  "index", "idx_workflow_replay_source": "index",
-		"idx_workflow_memo_lookup":      "index",
+		"idx_workflow_memo_lookup":         "index",
+		"idx_workflow_plan_snapshots_plan": "index", "idx_workflow_host_start_plan_snapshot_ref": "index",
 		"workflow_events_reject_update": "trigger", "workflow_events_reject_delete": "trigger",
 		"workflow_external_operations_immutable_binding": "trigger", "workflow_external_operations_reject_delete": "trigger",
 		"workflow_retry_activations_immutable_attempt": "trigger", "workflow_fanout_items_immutable": "trigger",
@@ -80,7 +82,9 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_memo_entries_reject_update": "trigger", "workflow_memo_entries_reject_delete": "trigger",
 		"workflow_pin_bindings_reject_update": "trigger", "workflow_pin_bindings_reject_delete": "trigger",
 		"workflow_reuse_idempotency_reject_update": "trigger", "workflow_reuse_idempotency_reject_delete": "trigger",
-		"workflow_services_reject_delete": "trigger",
+		"workflow_services_reject_delete":       "trigger",
+		"workflow_plan_snapshots_reject_update": "trigger", "workflow_host_start_plan_snapshots_reject_update": "trigger",
+		"workflow_host_start_plan_snapshots_reject_delete": "trigger",
 	}
 	for name, kind := range objects {
 		var found string
@@ -131,6 +135,12 @@ SELECT name FROM sqlite_master WHERE type = ? AND name = ?`, kind, name).Scan(&f
 	}
 	if migrations != 1 {
 		t.Fatalf("migration 27 count = %d, want 1", migrations)
+	}
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 28`).Scan(&migrations); err != nil {
+		t.Fatalf("read migration version 28: %v", err)
+	}
+	if migrations != 1 {
+		t.Fatalf("migration 28 count = %d, want 1", migrations)
 	}
 	if !hasColumn(t, store, "workflow_fanouts", "fail_fast") {
 		t.Fatal("workflow_fanouts missing fail_fast persistence")

@@ -62,16 +62,17 @@ type DefinitionCacheStats struct {
 // DefinitionResolver is Hadron's sole graph-native source/compiler boundary.
 // Its options and collaborator semantics are immutable for its lifetime.
 type DefinitionResolver struct {
-	sources      definitionSourceOptions
-	authorizer   DefinitionAuthorizer
-	bundles      hoststate.BundledDefinitionSource
-	kinds        *frozenKindLookup
-	verifiers    *verification.MemoryRegistry
-	policyHooks  []compile.PolicyHook
-	dependencies compile.DependencyOptions
-	expanders    []compile.NodeExpander
-	maxCallDepth int
-	semanticKey  string
+	sources           definitionSourceOptions
+	authorizer        DefinitionAuthorizer
+	bundles           hoststate.BundledDefinitionSource
+	kinds             *frozenKindLookup
+	verifiers         *verification.MemoryRegistry
+	policyHooks       []compile.PolicyHook
+	dependencies      compile.DependencyOptions
+	expanders         []compile.NodeExpander
+	maxCallDepth      int
+	semanticKey       string
+	compileDescriptor hoststate.CompileDescriptor
 
 	mu           sync.Mutex
 	plans        map[definitionCacheKey]*compile.ExecutionPlan
@@ -144,10 +145,14 @@ func NewDefinitionResolver(options DefinitionResolverOptions) (*DefinitionResolv
 	if err != nil {
 		return nil, invalidDefinitionOptions(err.Error())
 	}
+	compileDescriptor, err := hoststate.NewCompileDescriptor(options.Compile.SemanticRevision, maxDepth, specs, verifierSpecs, len(hooks), extractorKeys, expanderNames)
+	if err != nil {
+		return nil, invalidDefinitionOptions(fmt.Sprintf("compile descriptor: %v", err))
+	}
 	return &DefinitionResolver{
 		sources: sources, authorizer: options.Authorizer, bundles: options.BundledDefinitions, kinds: kinds, verifiers: verifiers,
 		policyHooks: hooks, dependencies: compile.DependencyOptions{VerificationExtractors: extractors},
-		expanders: expanders, maxCallDepth: maxDepth, semanticKey: semanticKey,
+		expanders: expanders, maxCallDepth: maxDepth, semanticKey: semanticKey, compileDescriptor: compileDescriptor,
 		plans:        make(map[definitionCacheKey]*compile.ExecutionPlan),
 		planByDigest: make(map[string]planVariants),
 		exactSources: make(map[string]ResolvedSource), flights: make(map[definitionCacheKey]*definitionFlight),
@@ -304,19 +309,72 @@ func (r *DefinitionResolver) callAuthorizer(ctx context.Context, input Definitio
 // definition. Full call validation is intentionally not cached because child
 // references may be movable aliases.
 func (r *DefinitionResolver) ResolvePlan(ctx context.Context, requested graph.DefinitionRef) (*compile.ExecutionPlan, error) {
+	plan, _, err := r.resolvePlanAndSource(ctx, requested)
+	return plan, err
+}
+
+// ResolvePlanSnapshot resolves the plan and exact selected source through one
+// authorization/read operation. It prevents a mutable file from changing
+// between compilation and durable source capture.
+func (r *DefinitionResolver) ResolvePlanSnapshot(ctx context.Context, requested graph.DefinitionRef) (hoststate.PlanSnapshot, error) {
+	plan, source, err := r.resolvePlanAndSource(ctx, requested)
+	if err != nil {
+		return hoststate.PlanSnapshot{}, err
+	}
+	descriptor, err := cloneCompileDescriptor(r.compileDescriptor)
+	if err != nil {
+		return hoststate.PlanSnapshot{}, err
+	}
+	snapshot := hoststate.PlanSnapshot{
+		SchemaVersion: hoststate.PlanSnapshotSchemaVersion, Plan: *plan,
+		SourceMap: plan.SourceMap, Compile: descriptor,
+		Source: &hoststate.SourceSnapshot{
+			SchemaVersion: hoststate.SourceSnapshotSchemaVersion,
+			Definition:    source.Definition, Format: source.SourceFormat,
+			SourceSchemaID: source.SourceSchemaID, SourceSchemaVersion: source.SourceSchemaVersion,
+			TrustClass: source.TrustClass, Digest: source.Digest, Content: bytes.Clone(source.Bytes),
+			MovableAtResolution: source.Movable, Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
+		},
+	}
+	snapshot, err = hoststate.SealPlanSnapshot(snapshot)
+	if err != nil {
+		return hoststate.PlanSnapshot{}, err
+	}
+	if err := snapshot.Validate(); err != nil {
+		return hoststate.PlanSnapshot{}, definitionError(CodeDefinitionPinConflict, errors.Join(ErrDefinitionPinConflict, err), source.Definition.Locator, "resolved plan snapshot is internally inconsistent", "Repair the source/compiler boundary before accepting durable work.")
+	}
+	return snapshot.Clone()
+}
+
+func cloneCompileDescriptor(input hoststate.CompileDescriptor) (hoststate.CompileDescriptor, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return hoststate.CompileDescriptor{}, err
+	}
+	var output hoststate.CompileDescriptor
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&output); err != nil {
+		return hoststate.CompileDescriptor{}, err
+	}
+	return output, nil
+}
+
+func (r *DefinitionResolver) resolvePlanAndSource(ctx context.Context, requested graph.DefinitionRef) (*compile.ExecutionPlan, ResolvedSource, error) {
 	resolved, err := r.ResolveSource(ctx, requested)
 	if err != nil {
-		return nil, err
+		return nil, ResolvedSource{}, err
 	}
 	plan, err := r.localPlan(ctx, resolved)
 	if err != nil {
-		return nil, err
+		return nil, ResolvedSource{}, err
 	}
 	definitions := compile.DefinitionResolver(r)
 	if resolved.Definition.Kind == DefinitionKindAuthoring {
 		definitions, err = r.authoringValidationResolver(plan)
 		if err != nil {
-			return nil, err
+			return nil, ResolvedSource{}, err
 		}
 	}
 	findings := compile.ValidatePlan(ctx, plan, compile.ValidationOptions{
@@ -324,30 +382,30 @@ func (r *DefinitionResolver) ResolvePlan(ctx context.Context, requested graph.De
 		MaxCallDepth: r.maxCallDepth,
 	})
 	if len(findings) != 0 {
-		return nil, diagnosticsError(ErrDefinitionUnresolved, findings)
+		return nil, ResolvedSource{}, diagnosticsError(ErrDefinitionUnresolved, findings)
 	}
 	cloned, err := cloneExecutionPlan(plan)
 	if err != nil {
-		return nil, err
+		return nil, ResolvedSource{}, err
 	}
 	if resolved.Definition.Kind == DefinitionKindAuthoring {
 		// Authoring plans exist only while their exact staged source is being
 		// qualified. Registration resolves the durable registry record through
 		// the ordinary cache path after qualification succeeds.
-		return cloned, nil
+		return cloned, resolved, nil
 	}
 	r.mu.Lock()
 	variants := r.planByDigest[cloned.Digest]
 	for _, prior := range variants {
 		if !sameSemanticPlan(prior, cloned) {
 			r.mu.Unlock()
-			return nil, definitionError(CodeDefinitionPinConflict, ErrDefinitionPinConflict, resolved.Definition.Locator, "plan digest collides with different compiled content", "Change the semantic revision or repair non-deterministic compiler collaborators.")
+			return nil, ResolvedSource{}, definitionError(CodeDefinitionPinConflict, ErrDefinitionPinConflict, resolved.Definition.Locator, "plan digest collides with different compiled content", "Change the semantic revision or repair non-deterministic compiler collaborators.")
 		}
 	}
 	variantKey, keyErr := exactPlanVariantKey(cloned)
 	if keyErr != nil {
 		r.mu.Unlock()
-		return nil, keyErr
+		return nil, ResolvedSource{}, keyErr
 	}
 	if variants == nil {
 		variants = make(planVariants)
@@ -358,13 +416,14 @@ func (r *DefinitionResolver) ResolvePlan(ctx context.Context, requested graph.De
 		currentJSON, currentErr := json.Marshal(cloned)
 		if priorErr != nil || currentErr != nil || !bytes.Equal(priorJSON, currentJSON) {
 			r.mu.Unlock()
-			return nil, definitionError(CodeDefinitionPinConflict, ErrDefinitionPinConflict, resolved.Definition.Locator, "plan provenance cache key collides with different content", "Repair non-deterministic compiler or provenance collaborators.")
+			return nil, ResolvedSource{}, definitionError(CodeDefinitionPinConflict, ErrDefinitionPinConflict, resolved.Definition.Locator, "plan provenance cache key collides with different content", "Repair non-deterministic compiler or provenance collaborators.")
 		}
 	} else {
 		variants[variantKey] = cloned
 	}
 	r.mu.Unlock()
-	return cloneExecutionPlan(cloned)
+	result, err := cloneExecutionPlan(cloned)
+	return result, resolved, err
 }
 
 // ResolveDefinition implements compile.DefinitionResolver for call traversal
