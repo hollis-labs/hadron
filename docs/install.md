@@ -11,8 +11,7 @@ Hadron is distributed during beta as:
 
 - macOS or Linux
 - no separate database dependency; Hadron uses local SQLite
-- if building from source: Go `1.26.3+` and `make`
-- if developing the desktop app: Node.js for frontend tasks
+- if building from source: Go `1.26.3+`, Node.js `24+`, npm, and `make`
 
 ## Recommended Paths
 
@@ -47,6 +46,7 @@ Each archive contains:
 
 - `hadron`
 - `hadrond`
+- `hadron-app` (optional browser launcher)
 - `README.md`
 - `LICENSE`
 
@@ -58,7 +58,7 @@ curl -L -o hadron.tar.gz \
 tar -xzf hadron.tar.gz
 cd hadron_v0.4.2-beta.1_darwin_arm64
 install -d "$HOME/.local/bin"
-install -m 0755 hadron hadrond "$HOME/.local/bin/"
+install -m 0755 hadron hadrond hadron-app "$HOME/.local/bin/"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
@@ -104,6 +104,7 @@ make install BINDIR="$HOME/bin"
 ```sh
 go install github.com/hollis-labs/hadron/cmd/hadrond@latest
 go install github.com/hollis-labs/hadron/cmd/hadron@latest
+go install github.com/hollis-labs/hadron/cmd/hadron-app@latest
 ```
 
 This installs into one of:
@@ -143,22 +144,27 @@ live under `examples/workflow/`.
 Hadron has two different runtime modes:
 
 - `hadrond serve`
-  - runs the local HTTP daemon used by the CLI and desktop app
+  - runs the local HTTP daemon used by the CLI and serves the operator UI at
+    `http://127.0.0.1:8095/`
 - `hadrond mcp`
   - runs a stdio MCP server for agent clients
 
 They can point at the same `~/.hadron` data directory and SQLite database.
 
-## Desktop App
+## Operator UI And Optional Launcher
 
-The Wails desktop app is still part of the beta surface and is built
-separately:
+`hadrond serve` embeds the production React application, so a normal browser is
+the primary UI and a headless installation needs no desktop framework. The
+optional `hadron-app` binary only starts/adopts the daemon and opens that URL;
+it has no workflow DTOs, file bindings, or execution semantics.
 
 ```sh
 make app
+bin/hadron-app
 ```
 
-For frontend iteration:
+For frontend iteration, run `hadrond serve` in one terminal and the Vite proxy
+in another:
 
 ```sh
 make app-dev

@@ -20,7 +20,8 @@ What "beta" means today:
 
 - APIs and workflow primitives are still being hardened
 - packaging and install UX are still being improved
-- the desktop app is substantially complete but still stabilizing
+- the daemon-served browser UI is stabilizing; the desktop binary is now only
+  an optional launcher
 - some docs and ergonomics are still catching up with the live daemon
 
 ## Install
@@ -39,7 +40,7 @@ curl -L -o hadron.tar.gz \
 tar -xzf hadron.tar.gz
 cd hadron_v0.4.2-beta.1_darwin_arm64
 install -d "$HOME/.local/bin"
-install -m 0755 hadron hadrond "$HOME/.local/bin/"
+install -m 0755 hadron hadrond hadron-app "$HOME/.local/bin/"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
@@ -57,6 +58,7 @@ export PATH="$PWD/bin:$PATH"
 ```sh
 go install github.com/hollis-labs/hadron/cmd/hadrond@latest
 go install github.com/hollis-labs/hadron/cmd/hadron@latest
+go install github.com/hollis-labs/hadron/cmd/hadron-app@latest
 ```
 
 See [docs/install.md](docs/install.md) for prerequisites, paths, release
@@ -71,6 +73,9 @@ guidance; target-format examples will live under `examples/workflow/`.
 ```sh
 # Start the daemon
 hadrond serve
+
+# Open the browser operator UI
+open http://127.0.0.1:8095/
 
 # Check daemon status
 hadron daemon

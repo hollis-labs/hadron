@@ -1,5 +1,48 @@
 import type { WorkflowResumeRequest } from '../../api/types';
 
+export interface WorkflowWaitResumePolicy {
+  manual: boolean;
+  tokenRequired: boolean;
+  guidance: string;
+}
+
+export function workflowWaitResumePolicy(wakeSource: string): WorkflowWaitResumePolicy {
+  switch (wakeSource) {
+    case 'gate':
+    case 'message':
+    case 'signal':
+      return {
+        manual: true,
+        tokenRequired: false,
+        guidance: 'This authorized wait route does not use a one-time token.',
+      };
+    case 'callback':
+      return {
+        manual: true,
+        tokenRequired: true,
+        guidance: 'The callback credential is sent once and never appears in diagnostics.',
+      };
+    case 'timer':
+      return {
+        manual: false,
+        tokenRequired: false,
+        guidance: 'The runtime resumes this wait when its durable timer fires.',
+      };
+    case 'child_run':
+      return {
+        manual: false,
+        tokenRequired: false,
+        guidance: 'The runtime resumes this wait when the linked child run reaches its required state.',
+      };
+    default:
+      return {
+        manual: false,
+        tokenRequired: false,
+        guidance: `Manual resume is unavailable for the ${wakeSource || 'unknown'} wake source.`,
+      };
+  }
+}
+
 function normalizeForCanonicalJSON(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalizeForCanonicalJSON);
   if (value !== null && typeof value === 'object') {

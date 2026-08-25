@@ -31,6 +31,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/telemetry"
 	"github.com/hollis-labs/hadron/internal/trigger"
+	"github.com/hollis-labs/hadron/internal/webui"
 )
 
 var (
@@ -188,6 +189,7 @@ func runServe(args []string) error {
 		Scheduler:    sched,
 		Pipeline:     pipelineRunner,
 		BlueprintDir: sett.BlueprintDir,
+		WebUI:        webui.Handler(),
 	})
 
 	// Start trigger file watchers and TTL cleanup.

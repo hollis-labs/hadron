@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { setBaseURL, listWorkspaces, createWorkspace as apiCreateWorkspace, getPreference, setPreference, listRuns } from '../api/client';
+import { createWorkspace as apiCreateWorkspace, getHealth, getPreference, listWorkspaces, setPreference } from '../api/client';
 import { setDemoMode, isDemoMode } from '../demo/demoMode';
 import type { Workspace } from '../api/types';
 
@@ -25,8 +25,8 @@ export function useDaemon() {
 }
 
 export function DaemonProvider({ children }: { children: ReactNode }) {
-  const [address, setAddress] = useState('127.0.0.1:8095');
-  const [status, setStatus] = useState('stopped');
+  const [address] = useState(() => globalThis.location?.host || 'same-origin');
+  const [status, setStatus] = useState('connecting');
   const [workspaceId, setWorkspaceId] = useState('default');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeRunStartedAt, setActiveRunStartedAt] = useState<string | null>(null);
@@ -39,34 +39,16 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     if (next) setStatus('running');
   };
 
-  // On mount: grab daemon addr from Go binding and listen for status events
+  // The production SPA is served by hadrond, so daemon health is a normal
+  // same-origin HTTP capability. Polling is also used by the Vite proxy in dev.
   useEffect(() => {
-    const app = window.go?.main?.App;
-    if (app?.GetDaemonAddr) {
-      app.GetDaemonAddr().then(addr => {
-        if (addr) {
-          setAddress(addr);
-          setBaseURL(`http://${addr}`);
-        }
-      });
-      app.GetDaemonStatus?.().then(s => {
-        if (s) setStatus(s);
-      });
-    } else {
-      // Dev mode: assume daemon is up at default addr
-      setStatus('running');
-    }
-
-    const unsubscribe = window.runtime?.EventsOn('daemon:status', (data: unknown) => {
-      const payload = data as { status: string; addr?: string };
-      setStatus(payload.status);
-      if (payload.addr) {
-        setAddress(payload.addr);
-        setBaseURL(`http://${payload.addr}`);
-      }
-    });
-
-    return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
+    let cancelled = false;
+    const poll = () => getHealth()
+      .then(() => { if (!cancelled) setStatus('running'); })
+      .catch(() => { if (!cancelled) setStatus('unavailable'); });
+    poll();
+    const timer = setInterval(poll, 3_000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
   // When daemon comes up: fetch workspaces and restore last workspace
@@ -76,21 +58,9 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     getPreference('lastWorkspaceId').then(id => { if (id) setWorkspaceId(id); }).catch(() => {});
   }, [status]);
 
-  // Poll for active runs to show timer in header
-  useEffect(() => {
-    if (status !== 'running') { setActiveRunStartedAt(null); return; }
-    let cancelled = false;
-    const poll = () => {
-      listRuns({ limit: 20 }).then(res => {
-        if (cancelled) return;
-        const running = (res.items ?? []).find(r => r.status === 'running');
-        setActiveRunStartedAt(running?.started_at ?? null);
-      }).catch(() => {});
-    };
-    poll();
-    const timer = setInterval(poll, 3000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [status]);
+  // W06-T02 does not expose a workflow-run collection. Do not derive graph
+  // activity from the legacy run-list model.
+  useEffect(() => setActiveRunStartedAt(null), []);
 
   const selectWorkspace = (id: string) => {
     setWorkspaceId(id);

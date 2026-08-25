@@ -5,17 +5,18 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.e2e.json",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "lint:eslint": "eslint .",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test:e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@hollis-labs/sysop-ui": "0.9.0",
     "@base-ui/react": "^1.3.0",
     "@fontsource-variable/geist": "^5.2.8",
+    "@hollis-labs/sysop-ui": "0.9.0",
     "@tailwindcss/vite": "^4.2.2",
     "@xyflow/react": "^12.10.1",
     "class-variance-authority": "^0.7.1",
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.7",
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",

@@ -31,11 +31,11 @@ const PARENT_PAGE: Partial<Record<NavPage, NavPage>> = {
   blueprintDetail: 'blueprints',
   blueprintWizard: 'blueprints',
   pipelineDetail: 'pipelines',
-  flowBuilder: 'pipelines',
+  flowBuilder: 'dashboard',
 };
 
 export function NavigationProvider({ children }: { children: ReactNode }) {
-  const [page, setPage] = useState<NavPage>('dashboard');
+  const [page, setPage] = useState<NavPage>('flowBuilder');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedBlueprintPath, setSelectedBlueprintPath] = useState<string | null>(null);
   const [selectedPipelinePath, setSelectedPipelinePath] = useState<string | null>(null);

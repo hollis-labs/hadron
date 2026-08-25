@@ -4,11 +4,12 @@
 **Date:** 2026-04-23  
 **Status:** Active draft
 
-Hadron is a local-first blueprint execution system with three primary surfaces:
+Hadron is a local-first workflow execution system with three primary surfaces:
 
 - `hadrond`: the long-running daemon
 - `hadron`: the CLI client
-- `cmd/hadron-app`: the Wails desktop app backed by the daemon API
+- browser operator UI: the React/xyflow SPA embedded in `hadrond`
+- `cmd/hadron-app`: an optional lifecycle-only browser launcher
 
 This document is the canonical high-level map for the current system shape.
 
@@ -19,10 +20,10 @@ This document is the canonical high-level map for the current system shape.
 │                         Hadron                               │
 │                                                              │
 │  ┌──────────────────────┐   ┌─────────────────────────────┐  │
-│  │  hadron CLI          │   │  Wails Desktop App          │  │
-│  │                      │   │  React + Vite frontend      │  │
-│  │  run / validate      │   │  dashboards, runs, flows,   │  │
-│  │  schedule / pipeline │   │  pipelines, settings        │  │
+│  │  hadron CLI          │   │  Browser Operator UI        │  │
+│  │                      │   │  React + xyflow             │  │
+│  │  run / validate      │   │  graph diagnostics, waits,  │  │
+│  │  workflow operations │   │  replay and safe controls   │  │
 │  └──────────┬───────────┘   └──────────────┬──────────────┘  │
 │             │                              │                 │
 │             └──────────────HTTP API────────┘                 │
@@ -31,8 +32,8 @@ This document is the canonical high-level map for the current system shape.
 │  ┌────────────────────────────────────────────────────────┐   │
 │  │                    hadrond daemon                     │   │
 │  │                                                        │   │
-│  │  API server      Execution manager    Scheduler       │   │
-│  │  Trigger manager Pipeline runner      MCP adapter     │   │
+│  │  API server + SPA  Execution manager  Scheduler       │   │
+│  │  Workflow facade   Trigger manager    MCP adapter     │   │
 │  └──────────────────────────┬─────────────────────────────┘   │
 │                             │                                 │
 │                 ┌───────────┴───────────┐                     │
@@ -53,6 +54,7 @@ The daemon is the operational center of the system.
 Primary responsibilities:
 
 - expose the HTTP API
+- serve the embedded, same-origin operator SPA
 - persist runs, events, schedules, triggers, and workspaces
 - enqueue and execute blueprint runs
 - manage pipeline orchestration
@@ -81,19 +83,32 @@ Primary responsibilities:
 
 This split keeps orchestration and persistence in one place while allowing multiple clients to share the same daemon state.
 
-### 2.3 Wails app
+### 2.3 Browser UI and optional launcher
 
-The desktop app provides a richer operator surface over the same daemon API.
+The React application in `cmd/hadron-app/frontend` is a browser client of the
+daemon. Vite writes its production bundle to `internal/webui/dist`; `hadrond`
+embeds and serves that package. The frontend has no generated desktop bindings,
+runtime-event global, or private workflow model.
 
 Current frontend responsibilities:
 
 - dashboard and run visibility
 - blueprint browsing and details
-- pipeline authoring and inspection
-- flow-builder interactions
+- graph-native validation, run start, inspection, wait resume, and replay
+- xyflow graph layout and bounded redacted diagnostics
 - scheduler, settings, telemetry, and help screens
 
-The desktop app should remain a presentation layer over the daemon contract rather than introducing separate orchestration rules.
+Registry publication, exposure mutation, and source persistence remain explicit
+unavailable capabilities until their shared daemon contracts land. The UI does
+not proxy legacy pipeline/blueprint execution as graph workflows. Exposure
+profile enforcement depends on W06-T03; the absent registry, exposure, and
+authoring UI contracts remain W06-T08 scope. Retirement of the remaining
+legacy public runtime paths and live graph-host composition remain W06-T06
+responsibilities.
+
+`cmd/hadron-app` is optional. It starts or adopts `hadrond` and opens the same
+HTTP URL in the system browser; removing it does not change the frontend or any
+workflow operation.
 
 ## 3. Backend Package Layout
 
@@ -152,7 +167,7 @@ The current store layer is functional and well-covered by tests, but it is still
 
 ## 6. Frontend Architecture
 
-The frontend is currently organized around route-like pages plus shared component families:
+The frontend is organized around route-like pages plus shared component families:
 
 - `components/layout`
 - `components/ui`
@@ -163,7 +178,11 @@ The frontend is currently organized around route-like pages plus shared componen
 - `contexts/*`
 - `hooks/*`
 
-This is already enough structure to support a stronger frontend quality baseline. The next modernization step is to add first-class linting, typecheck discipline, and a small test layer, then progressively separate page orchestration from reusable app state and data access patterns.
+Graph workflow calls are isolated in `src/api/workflows.ts` and use the shared
+W06 HTTP JSON shapes. Production calls are same-origin; the Vite development
+server proxies `/v1` to a local daemon. Polling/subscriptions read only bounded,
+redacted workflow diagnostics and never fall back to legacy `/v1/runs` event or
+pipeline semantics.
 
 ## 7. Trust and Safety Boundaries
 

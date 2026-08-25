@@ -34,12 +34,17 @@ jobs:
         working-directory: cmd/hadron-app/frontend
         run: npm ci
 
+      - name: Install Playwright browser
+        working-directory: cmd/hadron-app/frontend
+        run: npx playwright install --with-deps chromium
+
       - name: Run verification suite
         run: |
           make build VERSION="${GITHUB_REF_NAME}"
           make test
           make test-ui
           make typecheck
+          make test-ui-e2e
           make e2e
 
   package:
@@ -56,6 +61,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cmd/hadron-app/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: cmd/hadron-app/frontend
+        run: npm ci
 
       - name: Build release artifacts
         run: make package-release VERSION="${GITHUB_REF_NAME}"

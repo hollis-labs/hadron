@@ -11,7 +11,10 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    // The daemon is the production web host. Keeping the generated bundle in
+    // an internal Go package lets ordinary `go build ./cmd/hadrond` embed the
+    // exact same SPA used by `vite preview` without depending on Wails.
+    outDir: '../../../internal/webui/dist',
     emptyOutDir: true,
   },
   server: {

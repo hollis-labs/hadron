@@ -23,7 +23,6 @@ function getBreadcrumbs(phase: NavPage): Breadcrumb[] {
     case 'blueprintWizard': return [{ label: 'Blueprints', page: 'blueprints' }, { label: 'Wizard' }];
     case 'runDetail': return [{ label: 'Runs', page: 'runs' }, { label: 'Detail' }];
     case 'pipelineDetail': return [{ label: 'Pipelines', page: 'pipelines' }, { label: 'Detail' }];
-    case 'flowBuilder': return [{ label: 'Pipelines', page: 'pipelines' }, { label: 'Flow Builder' }];
     default: return [];
   }
 }

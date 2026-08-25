@@ -94,18 +94,44 @@ func NewServer(addr string, deps Dependencies) *Server {
 	// Blueprints
 	mux.HandleFunc("/v1/blueprints/validate", s.handleBlueprintValidate)
 
-	// 404 catch-all
+	// Browser operator UI. API-looking paths remain structured API 404s so a
+	// mistyped workflow route can never be hidden by the SPA fallback.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if deps.WebUI != nil && !isAPIPath(r.URL.Path) {
+			deps.WebUI.ServeHTTP(w, r)
+			return
+		}
 		writeError(w, http.StatusNotFound, "not found")
 	})
 
-	s.handler = corsMiddleware(propagation.HTTPMiddleware(mux))
+	s.handler = corsMiddleware(propagation.HTTPMiddleware(rejectPathTraversal(mux)))
 	s.httpServer = &http.Server{
 		Addr:              addr,
 		Handler:           s.handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
+}
+
+func rejectPathTraversal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, segment := range strings.Split(r.URL.Path, "/") {
+			if segment == ".." {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isAPIPath(requestPath string) bool {
+	for _, prefix := range []string{"/v1", "/a2a", "/.well-known"} {
+		if requestPath == prefix || strings.HasPrefix(requestPath, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) ListenAndServe() error {
@@ -116,10 +142,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }
 
-// corsMiddleware handles CORS preflight (OPTIONS) requests and sets
-// permissive headers for local development. The Wails webview in production
-// mode loads from a wails:// origin, so cross-origin requests to the daemon
-// require proper CORS headers.
+// corsMiddleware handles CORS preflight requests for local development and
+// separately hosted browser clients. The production operator UI is same-origin.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")

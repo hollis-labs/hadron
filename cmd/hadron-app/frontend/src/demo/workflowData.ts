@@ -184,7 +184,7 @@ function scenarioNodes(runId: string, scenario: Scenario): WorkflowNodeDiagnosti
     inputs: scenario === 'active' || scenario === 'failed' ? undefined : QUALIFY,
     outputs: scenario === 'completed' ? APPROVAL : undefined,
     wait: scenario === 'waiting' ? {
-      id: 'wait-release-approval', kind: 'gate', status: 'open', wake_source: 'operator', visibility: 'private',
+      id: 'wait-release-approval', kind: 'gate', status: 'open', wake_source: 'gate', visibility: 'private',
       payload: QUALIFY, generation: 1, created_at: at(7), updated_at: at(7), deadline: at(67),
     } : undefined,
     explanation: scenario === 'waiting'

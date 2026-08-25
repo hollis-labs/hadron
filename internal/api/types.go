@@ -117,6 +117,10 @@ type Dependencies struct {
 	WorkflowReads appworkflow.WorkflowRunReadOperations
 	WorkflowAuth  WorkflowRequestAuthenticator
 	BlueprintDir  string
+	// WebUI is the optional transport-neutral operator SPA. The daemon owns
+	// delivery; the handler owns only static browser assets and never workflow
+	// semantics.
+	WebUI http.Handler
 }
 
 type Server struct {

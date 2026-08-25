@@ -1,36 +1,29 @@
 package main
 
 import (
-	"embed"
-	"log"
-
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
-
 func main() {
-	app := NewApp()
+	address := flag.String("addr", defaultDaemonAddress, "hadrond listen address")
+	noBrowser := flag.Bool("no-browser", false, "print the operator UI URL without opening it")
+	flag.Parse()
 
-	err := wails.Run(&options.App{
-		Title:  "Hadron",
-		Width:  1280,
-		Height: 820,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		BackgroundColour: &options.RGBA{R: 9, G: 9, B: 11, A: 1},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
-		Bind: []interface{}{
-			app,
-		},
-	})
-
+	app, err := newDesktopApp(*address)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := app.run(ctx, !*noBrowser); err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }

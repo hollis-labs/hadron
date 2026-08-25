@@ -1,9 +1,13 @@
 # ADR 0005: Wails App Keeps a Frontend/Backend Contract Boundary
 
-**Status:** Accepted<br>
+**Status:** Superseded by the daemon-served browser UI<br>
 **Date:** 2026-05-12
 
 ## Context
+
+> Historical decision. The workflow frontend now runs as the SPA served by
+> `hadrond`; `cmd/hadron-app` is a lifecycle-only browser launcher with no
+> frontend binding contract.
 
 The Wails app combines a Go backend and a React/Vite frontend. It needs desktop
 capabilities such as file picking and local app lifecycle integration, while the

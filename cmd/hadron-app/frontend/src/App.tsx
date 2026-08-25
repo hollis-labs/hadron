@@ -7,23 +7,6 @@ import { AppNav, type NavPage } from './components/layout/AppNav';
 import { AppFooter } from './components/layout/AppFooter';
 import { Spinner } from './components/ui/Spinner';
 
-// Wails runtime events are exposed on window.runtime in v2
-declare global {
-  interface Window {
-    runtime?: {
-      EventsOn: (event: string, callback: (data: unknown) => void) => () => void;
-    };
-    go?: {
-      main?: {
-        App?: {
-          GetDaemonAddr: () => Promise<string>;
-          GetDaemonStatus: () => Promise<string>;
-        };
-      };
-    };
-  }
-}
-
 const PAGE_TITLES: Record<NavPage, string> = {
   dashboard: 'Operations',
   blueprints: 'Blueprint Browser',
@@ -31,7 +14,7 @@ const PAGE_TITLES: Record<NavPage, string> = {
   blueprintWizard: 'Blueprint Wizard',
   pipelines: 'Pipelines',
   pipelineDetail: 'Pipeline Detail',
-  flowBuilder: 'Flow Builder',
+  flowBuilder: 'Workflow Graph',
   runs: 'Run Log',
   runDetail: 'Run Detail',
   schedules: 'Schedules',

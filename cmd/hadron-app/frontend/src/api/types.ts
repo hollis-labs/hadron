@@ -311,7 +311,7 @@ export interface WizardTask {
   on_fail: { type: string; value: string }[];
 }
 
-// ── Wails Go binding types ────────────────────────────────────────────
+// ── Legacy file/settings view types (capability-fenced in browser) ────
 
 export interface FileEntry {
   name: string;
@@ -672,6 +672,57 @@ export interface WorkflowResumeResult {
   node?: { id: WorkflowNodeInvocationID; status: string };
   attempt?: { id: WorkflowAttemptID; status: string };
   values?: WorkflowValueSetRef;
+}
+
+export interface WorkflowDefinitionRef {
+  authority?: string;
+  kind: 'file' | 'registry' | 'package';
+  id: string;
+  locator?: string;
+  version?: string;
+  digest?: string;
+}
+
+export interface WorkflowPlanRef {
+  id: string;
+  version: string;
+  digest: string;
+  schema_version: string;
+}
+
+export interface WorkflowDiagnosticFinding {
+  severity: string;
+  code: string;
+  message: string;
+  source?: WorkflowSourceDiagnostic;
+  remediation?: { message: string };
+}
+
+export interface WorkflowValidateResult {
+  definition: WorkflowDefinitionRef;
+  plan?: WorkflowPlanRef;
+  diagnostics: WorkflowDiagnosticFinding[];
+}
+
+export interface WorkflowStartResult {
+  run?: WorkflowGraphDiagnostic['run'];
+  outcome?: string;
+  phase?: string;
+  dry_run: boolean;
+  decision?: { outcome?: string; reason?: string };
+  diagnostics?: WorkflowDiagnosticFinding[];
+}
+
+export interface WorkflowRerunResult {
+  outcome: string;
+  run: WorkflowGraphDiagnostic['run'];
+  provenance: {
+    source_run_id: string;
+    run_id: string;
+    from_node_id: string;
+    plan_digest: string;
+    created_at: string;
+  };
 }
 
 export interface ValidateResult {

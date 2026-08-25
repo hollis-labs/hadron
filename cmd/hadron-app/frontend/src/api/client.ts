@@ -1,34 +1,18 @@
-import type { Run, RunEvent, ListResponse, Health, EnqueueRunRequest, FileEntry, ValidateResult, Schedule, CreateScheduleRequest, BlueprintInput, ParsedBlueprint, BlueprintMetaSummary, Pipeline, PipelineStage, EnqueuePipelineRequest, Workspace, HadronSettings, TelemetryRunSummary, TelemetryLogEntry, MCPCallDiagnostic, OperationDiagnostic, WorkflowGraphDiagnostic, WorkflowResumeRequest, WorkflowResumeResult } from './types';
+import type { Run, RunEvent, ListResponse, Health, EnqueueRunRequest, FileEntry, ValidateResult, Schedule, CreateScheduleRequest, BlueprintInput, ParsedBlueprint, BlueprintMetaSummary, Pipeline, PipelineStage, EnqueuePipelineRequest, Workspace, HadronSettings, TelemetryRunSummary, TelemetryLogEntry, MCPCallDiagnostic, OperationDiagnostic } from './types';
 import { isDemoMode } from '../demo/demoMode';
 import { DEMO_RUNS, getDemoRunEvents, getDemoRunMCPCalls, getDemoRunOperations, DEMO_SCHEDULES, DEMO_PIPELINES, getDemoPipelineStages, DEMO_TELEMETRY_RUNS, getDemoTelemetryEntries, DEMO_HEALTH, DEMO_WORKSPACES } from '../demo/data';
-import { getDemoWorkflowDiagnostic } from '../demo/workflowData';
+import { apiFetch, getAPIBaseURL, setAPIBaseURL } from './http';
 
 // ── Base URL management ───────────────────────────────────────────────
 
-// Always use the daemon URL directly. The daemon has CORS headers enabled,
-// so cross-origin requests from the Wails webview (any origin) work fine.
-let _base = 'http://127.0.0.1:8095';
-
+// Production uses the daemon origin that served the SPA. Tests and explicitly
+// separate development hosts can override this value.
 export function setBaseURL(url: string) {
-  _base = url;
+  setAPIBaseURL(url);
 }
 
 export function getBaseURL(): string {
-  return _base;
-}
-
-// ── Generic fetch helper ──────────────────────────────────────────────
-
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(`${_base}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: resp.statusText }));
-    throw new Error(err.error ?? `HTTP ${resp.status}`);
-  }
-  return resp.json() as Promise<T>;
+  return getAPIBaseURL();
 }
 
 // ── Health ────────────────────────────────────────────────────────────
@@ -75,50 +59,6 @@ export async function enqueueRun(req: EnqueueRunRequest): Promise<Run> {
 
 export async function cancelRun(id: string): Promise<void> {
   await apiFetch(`/v1/runs/${id}`, { method: 'DELETE' });
-}
-
-// ── Graph-native workflow operations ─────────────────────────────────
-
-const desktopWorkflowIdentity = { source_authority: 'desktop' } as const;
-
-export async function inspectWorkflowRun(runId: string): Promise<WorkflowGraphDiagnostic> {
-  if (isDemoMode()) return getDemoWorkflowDiagnostic(runId);
-  return apiFetch<WorkflowGraphDiagnostic>(`/v1/workflows/runs/${encodeURIComponent(runId)}/inspect`, {
-    method: 'POST',
-    body: JSON.stringify({
-      run_id: runId,
-      identity: desktopWorkflowIdentity,
-      node_limit: 500,
-      attempt_limit: 100,
-      event_limit: 1000,
-      value_limit: 1000,
-      resource_limit: 500,
-      activation_limit: 200,
-    }),
-  });
-}
-
-export async function cancelWorkflowRun(runId: string, idempotencyKey: string): Promise<void> {
-  if (isDemoMode()) return;
-  await apiFetch(`/v1/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
-    method: 'POST',
-    body: JSON.stringify({
-      run_id: runId,
-      identity: desktopWorkflowIdentity,
-      idempotency_key: idempotencyKey,
-      reason: 'operator requested cancellation from desktop',
-    }),
-  });
-}
-
-export async function resumeWorkflowWait(request: Omit<WorkflowResumeRequest, 'identity'>): Promise<WorkflowResumeResult> {
-  if (isDemoMode()) {
-    return { outcome: 'applied', wait: { id: request.wait_id, status: 'resolved' } };
-  }
-  return apiFetch<WorkflowResumeResult>(`/v1/workflows/runs/${encodeURIComponent(request.run_id)}/resume`, {
-    method: 'POST',
-    body: JSON.stringify({ ...request, identity: desktopWorkflowIdentity }),
-  });
 }
 
 // ── Run events ────────────────────────────────────────────────────────
@@ -189,188 +129,67 @@ export async function deleteSchedule(id: string): Promise<void> {
   await apiFetch(`/v1/schedules/${id}`, { method: 'DELETE' });
 }
 
-// ── Blueprint validation ──────────────────────────────────────────────
-// Note: validation by path goes through the Go binding (reads file server-side).
+// ── Browser capability fences ─────────────────────────────────────────
+// These legacy file/settings screens remain outside the graph workflow path.
+// Their former desktop-only operations are intentionally unavailable until a
+// separately owned daemon contract exists; no private HTTP semantic is added.
 
-// ── Wails Go bindings ─────────────────────────────────────────────────
-
-const go: any = (window as any).go?.main?.App;
+function unavailable(capability: string): never {
+  throw new Error(`${capability} is unavailable in the daemon-served UI`);
+}
 
 export async function getDaemonAddr(): Promise<string> {
-  if (go?.GetDaemonAddr) return go.GetDaemonAddr();
-  return '';
+  return globalThis.location?.host ?? '';
 }
 
 export async function getDaemonStatus(): Promise<string> {
-  if (go?.GetDaemonStatus) return go.GetDaemonStatus();
-  return 'stopped';
+  try { await getHealth(); return 'running'; } catch { return 'unavailable'; }
 }
 
-export async function openDirectoryDialog(): Promise<string> {
-  if (go?.OpenDirectoryDialog) return go.OpenDirectoryDialog();
-  return '';
-}
+export async function openDirectoryDialog(): Promise<string> { return ''; }
+export async function selectDirectoryDialog(): Promise<string> { return ''; }
+export async function selectBlueprintFile(): Promise<string> { return ''; }
+export async function listFilesInDir(_dir: string): Promise<FileEntry[]> { return []; }
+export async function listBlueprintFilesInDir(_dir: string): Promise<FileEntry[]> { return []; }
+export async function listPipelineFilesInDir(_dir: string): Promise<FileEntry[]> { return []; }
 
-export async function selectDirectoryDialog(): Promise<string> {
-  if (go?.SelectDirectoryDialog) return go.SelectDirectoryDialog();
-  return '';
+export async function validateBlueprintFile(_path: string): Promise<ValidateResult> {
+  return { valid: false, error: 'Legacy blueprint file validation is unavailable in the daemon-served UI' };
 }
-
-export async function listFilesInDir(dir: string): Promise<FileEntry[]> {
-  if (go?.ListFilesInDir) return go.ListFilesInDir(dir);
-  return [];
-}
-
-export async function listBlueprintFilesInDir(dir: string): Promise<FileEntry[]> {
-  if (go?.ListBlueprintFilesInDir) return go.ListBlueprintFilesInDir(dir);
-  return [];
-}
-
-export async function listPipelineFilesInDir(dir: string): Promise<FileEntry[]> {
-  if (go?.ListPipelineFilesInDir) return go.ListPipelineFilesInDir(dir);
-  return [];
-}
-
-export async function validateBlueprintFile(path: string): Promise<ValidateResult> {
-  if (go?.ValidateBlueprintFile) return go.ValidateBlueprintFile(path);
-  return { valid: false, error: 'Wails binding not available' };
-}
-
-export async function selectBlueprintFile(): Promise<string> {
-  if (go?.SelectBlueprintFile) return go.SelectBlueprintFile();
-  return '';
-}
-
-// ── Preferences (Go binding wrappers) ─────────────────────────────────
 
 export async function getPreference(key: string): Promise<string> {
-  if (go?.GetPreference) return go.GetPreference(key);
-  return '';
+  return globalThis.localStorage?.getItem(`hadron:${key}`) ?? '';
 }
 
 export async function setPreference(key: string, value: string): Promise<void> {
-  if (go?.SetPreference) return go.SetPreference(key, value);
+  globalThis.localStorage?.setItem(`hadron:${key}`, value);
 }
 
-// ── Blueprint inputs (Go binding) ─────────────────────────────────────
-
-export async function parseBlueprintInputs(path: string): Promise<BlueprintInput[]> {
-  if (go?.ParseBlueprintInputs) return go.ParseBlueprintInputs(path);
-  return [];
-}
-
-// ── Blueprint file operations (Go bindings) ───────────────────────────
-
-export async function readBlueprintFile(path: string): Promise<string> {
-  if (go?.ReadBlueprintFile) return go.ReadBlueprintFile(path);
-  return '';
-}
-
-export async function parseBlueprintFull(path: string): Promise<ParsedBlueprint> {
-  if (go?.ParseBlueprintFull) {
-    const json = await go.ParseBlueprintFull(path);
-    return JSON.parse(json);
-  }
-  throw new Error('Wails binding not available');
-}
-
-export async function saveBlueprintFile(path: string, content: string): Promise<void> {
-  if (go?.SaveBlueprintFile) return go.SaveBlueprintFile(path, content);
-  throw new Error('Wails binding not available');
-}
-
-export async function createBlueprintFile(dir: string, filename: string, content: string): Promise<string> {
-  if (go?.CreateBlueprintFile) return go.CreateBlueprintFile(dir, filename, content);
-  throw new Error('Wails binding not available');
-}
-
-export async function deleteBlueprintFile(path: string): Promise<void> {
-  if (go?.DeleteBlueprintFile) return go.DeleteBlueprintFile(path);
-  throw new Error('Wails binding not available');
-}
-
-export async function createDirectory(parentDir: string, name: string): Promise<string> {
-  if (go?.CreateDirectory) return go.CreateDirectory(parentDir, name);
-  throw new Error('Wails binding not available');
-}
-
-export async function moveBlueprintFile(srcPath: string, destDir: string): Promise<string> {
-  if (go?.MoveBlueprintFile) return go.MoveBlueprintFile(srcPath, destDir);
-  throw new Error('Wails binding not available');
-}
-
-export async function copyBlueprintFile(srcPath: string, destDir: string): Promise<string> {
-  if (go?.CopyBlueprintFile) return go.CopyBlueprintFile(srcPath, destDir);
-  throw new Error('Wails binding not available');
-}
-
-export async function archiveBlueprintFile(srcPath: string): Promise<void> {
-  if (go?.ArchiveBlueprintFile) return go.ArchiveBlueprintFile(srcPath);
-  throw new Error('Wails binding not available');
-}
-
-export async function getBlueprintMetadata(path: string): Promise<BlueprintMetaSummary> {
-  if (go?.GetBlueprintMetadata) {
-    const json = await go.GetBlueprintMetadata(path);
-    return JSON.parse(json);
-  }
-  throw new Error('Wails binding not available');
-}
-
-// ── Blueprint directory (Go bindings) ─────────────────────────────────
-
-export async function getBlueprintDir(): Promise<string> {
-  if (go?.GetBlueprintDir) return go.GetBlueprintDir();
-  return '';
-}
-
-export async function setBlueprintDir(dir: string): Promise<void> {
-  if (go?.SetBlueprintDir) return go.SetBlueprintDir(dir);
-}
-
-// ── Settings (Go bindings) ────────────────────────────────────────────
-
-export async function getSettings(): Promise<HadronSettings> {
-  if (go?.GetSettings) {
-    const json = await go.GetSettings();
-    return JSON.parse(json);
-  }
-  throw new Error('Wails binding not available');
-}
-
-export async function saveSettings(s: HadronSettings): Promise<void> {
-  if (go?.SaveSettings) return go.SaveSettings(JSON.stringify(s));
-  throw new Error('Wails binding not available');
-}
-
-// ── Telemetry (Go bindings) ───────────────────────────────────────────
+export async function parseBlueprintInputs(_path: string): Promise<BlueprintInput[]> { return unavailable('Legacy blueprint parsing'); }
+export async function readBlueprintFile(_path: string): Promise<string> { return unavailable('Legacy blueprint file reads'); }
+export async function parseBlueprintFull(_path: string): Promise<ParsedBlueprint> { return unavailable('Legacy blueprint parsing'); }
+export async function saveBlueprintFile(_path: string, _content: string): Promise<void> { return unavailable('Legacy blueprint file writes'); }
+export async function createBlueprintFile(_dir: string, _filename: string, _content: string): Promise<string> { return unavailable('Legacy blueprint file creation'); }
+export async function deleteBlueprintFile(_path: string): Promise<void> { return unavailable('Legacy blueprint file deletion'); }
+export async function createDirectory(_parentDir: string, _name: string): Promise<string> { return unavailable('Legacy source directory mutation'); }
+export async function moveBlueprintFile(_srcPath: string, _destDir: string): Promise<string> { return unavailable('Legacy blueprint file moves'); }
+export async function copyBlueprintFile(_srcPath: string, _destDir: string): Promise<string> { return unavailable('Legacy blueprint file copies'); }
+export async function archiveBlueprintFile(_srcPath: string): Promise<void> { return unavailable('Legacy blueprint file archival'); }
+export async function getBlueprintMetadata(_path: string): Promise<BlueprintMetaSummary> { return unavailable('Legacy blueprint metadata'); }
+export async function getBlueprintDir(): Promise<string> { return ''; }
+export async function setBlueprintDir(_dir: string): Promise<void> { return unavailable('Legacy blueprint settings'); }
+export async function getSettings(): Promise<HadronSettings> { return unavailable('Legacy desktop settings'); }
+export async function saveSettings(_settings: HadronSettings): Promise<void> { return unavailable('Legacy desktop settings'); }
 
 export async function listTelemetryRuns(): Promise<TelemetryRunSummary[]> {
-  if (isDemoMode()) return DEMO_TELEMETRY_RUNS;
-  if (go?.ListTelemetryRuns) {
-    const json = await go.ListTelemetryRuns();
-    if (!json) return [];
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed : [];
-  }
-  return [];
+  return isDemoMode() ? DEMO_TELEMETRY_RUNS : [];
 }
 
 export async function readTelemetryLog(runID: string): Promise<TelemetryLogEntry[]> {
-  if (isDemoMode()) return getDemoTelemetryEntries(runID);
-  if (go?.ReadTelemetryLog) {
-    const json = await go.ReadTelemetryLog(runID);
-    if (!json) return [];
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed : [];
-  }
-  return [];
+  return isDemoMode() ? getDemoTelemetryEntries(runID) : [];
 }
 
-export async function deleteTelemetryLog(runID: string): Promise<void> {
-  if (go?.DeleteTelemetryLog) return go.DeleteTelemetryLog(runID);
-  throw new Error('Wails binding not available');
-}
+export async function deleteTelemetryLog(_runID: string): Promise<void> { return unavailable('Legacy telemetry deletion'); }
 
 // ── Pipelines (REST) ──────────────────────────────────────────────────
 

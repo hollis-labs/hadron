@@ -265,7 +265,9 @@ built: 2026-05-24T22:00:00Z
 
 ### `hadrond serve`
 
-Starts the HTTP REST API server.
+Starts the HTTP REST API server and serves the embedded operator SPA at `/`.
+The graph-native workflow UI uses the same-origin `/v1/workflows/*` routes; API
+404s are never hidden by the SPA fallback.
 
 ```sh
 hadrond serve [flags]

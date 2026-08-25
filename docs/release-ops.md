@@ -6,7 +6,8 @@ This document covers the current public beta release flow for Hadron.
 
 Tagged releases produce:
 
-- GitHub release tarballs for `hadron` and `hadrond`
+- GitHub release tarballs for `hadron`, `hadrond`, and the optional
+  `hadron-app` browser launcher
 - `checksums.txt`
 - CI verification before publish
 

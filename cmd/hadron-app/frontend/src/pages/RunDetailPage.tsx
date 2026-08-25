@@ -8,12 +8,13 @@ import {
   ReactFlow,
   type Edge,
   type Node,
+  type OnSelectionChangeFunc,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { AlertTriangle, ChevronLeft, GitBranch, LockKeyhole, RefreshCw, Square, Workflow } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, GitBranch, LockKeyhole, RefreshCw, Repeat2, Square, Workflow } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { cancelWorkflowRun, inspectWorkflowRun } from '../api/client';
+import { cancelWorkflowRun, inspectWorkflowRun, rerunWorkflowRun } from '../api/workflows';
 import type { WorkflowNodeDiagnostic } from '../api/types';
 import { WorkflowEventTrail } from '../components/workflow/WorkflowEventTrail';
 import { WorkflowResumeDialog } from '../components/workflow/WorkflowResumeDialog';
@@ -46,6 +47,8 @@ import './workflowRun.css';
 
 const nodeTypes = { workflowRunNode: WorkflowRunNode };
 const edgeTypes = { workflowRunEdge: WorkflowRunEdge };
+const fitViewOptions = { padding: 0.24, maxZoom: 1.1 };
+const proOptions = { hideAttribution: true };
 const FAILED_NODE_STATES = new Set(['failed', 'crashed', 'timed_out']);
 
 function markerColor(kind: WorkflowRunEdgeData['kind']): string {
@@ -79,6 +82,12 @@ export function RunDetailPage() {
   const [resumeNode, setResumeNode] = useState<WorkflowNodeDiagnostic>();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [canceling, setCanceling] = useState(false);
+  const [replayOpen, setReplayOpen] = useState(false);
+  const [replaying, setReplaying] = useState(false);
+  const handleSelectionChange: OnSelectionChangeFunc<Node<WorkflowRunNodeData>, Edge<WorkflowRunEdgeData>> = useCallback(({ nodes }) => {
+    const nextNodeID = nodes[0]?.id;
+    if (nextNodeID) setSelectedNodeId(current => current === nextNodeID ? current : nextNodeID);
+  }, []);
 
   useEffect(() => {
     setPolling(result ? !isTerminalWorkflowRun(result.run.status) : true);
@@ -92,10 +101,10 @@ export function RunDetailPage() {
 
   const graph = useMemo(() => result ? buildWorkflowGraph(result) : { nodes: [], edges: [] }, [result]);
   const flowNodes = graph.nodes as Node<WorkflowRunNodeData>[];
-  const flowEdges = graph.edges.map(edge => ({
+  const flowEdges = useMemo(() => graph.edges.map(edge => ({
     ...edge,
     markerEnd: { type: MarkerType.ArrowClosed, color: markerColor(edge.data.kind), width: 16, height: 16 },
-  })) as Edge<WorkflowRunEdgeData>[];
+  })) as Edge<WorkflowRunEdgeData>[], [graph.edges]);
 
   useEffect(() => {
     if (flowNodes.length === 0) {
@@ -118,6 +127,23 @@ export function RunDetailPage() {
       toast.error('Cancellation was not accepted. Refresh the run and try again.');
     } finally {
       setCanceling(false);
+    }
+  };
+
+  const replayRun = async () => {
+    if (!selectedNodeId) return;
+    setReplaying(true);
+    try {
+      const nextRunID = `replay-${crypto.randomUUID()}`;
+      const key = crypto.randomUUID();
+      const replay = await rerunWorkflowRun(runId, selectedNodeId, nextRunID, key);
+      toast.success(`Replay created from ${selectedNodeId}`);
+      setReplayOpen(false);
+      navigation.openRun(replay.run.id || nextRunID);
+    } catch {
+      toast.error('Replay was not accepted. Review effect policy and try again.');
+    } finally {
+      setReplaying(false);
     }
   };
 
@@ -176,6 +202,7 @@ export function RunDetailPage() {
         <div className="workflow-command-spacer" />
         <span className="workflow-run-duration">{formatDuration(result.run.created_at, terminal ? result.run.updated_at : undefined)}</span>
         <Button variant="outline" size="sm" onClick={refresh} disabled={loading}><RefreshCw size={12} /> Refresh</Button>
+        {terminal && selectedNodeId && <Button variant="outline" size="sm" onClick={() => setReplayOpen(true)}><Repeat2 size={12} /> Replay from node</Button>}
         {!terminal && <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}><Square size={11} /> Cancel</Button>}
       </header>
 
@@ -232,15 +259,15 @@ export function RunDetailPage() {
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-                onSelectionChange={({ nodes }) => setSelectedNodeId(nodes[0]?.id ?? null)}
+                onSelectionChange={handleSelectionChange}
                 nodesDraggable={false}
                 nodesConnectable={false}
                 edgesFocusable
                 fitView
-                fitViewOptions={{ padding: 0.24, maxZoom: 1.1 }}
+                fitViewOptions={fitViewOptions}
                 minZoom={0.25}
                 maxZoom={1.6}
-                proOptions={{ hideAttribution: true }}
+                proOptions={proOptions}
               >
                 <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#27272a" />
                 <MiniMap
@@ -289,6 +316,21 @@ export function RunDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={canceling}>Keep running</AlertDialogCancel>
             <AlertDialogAction variant="destructive" disabled={canceling} onClick={cancelRun}>{canceling ? 'Requesting…' : 'Request cancel'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={replayOpen} onOpenChange={setReplayOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replay from {selectedNodeId}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Hadron will reuse the pinned plan and re-evaluate the downstream effect surface. The daemon may reject consequential or unsafe repetition.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={replaying}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={replaying || !selectedNodeId} onClick={replayRun}>{replaying ? 'Creating replay…' : 'Create replay'}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

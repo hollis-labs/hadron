@@ -11,7 +11,7 @@ const MAIN_NAV: { page: NavPage; label: string; icon: React.ReactNode; parents?:
   { page: 'dashboard', label: 'Operations', icon: <LayoutDashboard size={18} /> },
   { page: 'blueprints', label: 'Blueprints', icon: <FileText size={18} />, parents: ['blueprintDetail', 'blueprintWizard'] },
   { page: 'pipelines', label: 'Pipelines', icon: <GitBranch size={18} />, parents: ['pipelineDetail'] },
-  { page: 'flowBuilder', label: 'Flow Builder', icon: <Workflow size={18} /> },
+  { page: 'flowBuilder', label: 'Workflow Graph', icon: <Workflow size={18} /> },
   { page: 'runs', label: 'Runs', icon: <ActivityIcon size={18} />, parents: ['runDetail'] },
   { page: 'schedules', label: 'Schedules', icon: <Clock size={18} /> },
   { page: 'telemetry', label: 'Telemetry', icon: <BarChart3 size={18} /> },
@@ -42,6 +42,9 @@ export function AppNav({ current, onNavigate }: AppNavProps) {
         {MAIN_NAV.map(item => (
           <button
             key={item.page}
+            type="button"
+            aria-label={item.label}
+            aria-current={isActive(current, item) ? 'page' : undefined}
             className={`nav-item${isActive(current, item) ? ' active' : ''}`}
             onClick={() => onNavigate(item.page)}
           >
@@ -54,6 +57,9 @@ export function AppNav({ current, onNavigate }: AppNavProps) {
         {FOOTER_NAV.map(item => (
           <button
             key={item.page}
+            type="button"
+            aria-label={item.label}
+            aria-current={isActive(current, item) ? 'page' : undefined}
             className={`nav-item${isActive(current, item) ? ' active' : ''}`}
             onClick={() => onNavigate(item.page)}
           >

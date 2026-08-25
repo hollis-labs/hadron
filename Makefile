@@ -1,4 +1,4 @@
-.PHONY: build install go-install uninstall test test-ui lint lint-go lint-ui typecheck run-daemon e2e frontend-build app app-dev package-release
+.PHONY: build install go-install uninstall test test-ui test-ui-e2e lint lint-go lint-ui typecheck run-daemon e2e frontend-build app app-dev package-release
 
 GO_PACKAGES := ./cmd/hadron ./cmd/hadron-app ./cmd/hadrond ./internal/... ./schemas/... ./workflow/...
 GO_LINT_CACHE_DIR := /tmp/hadron-go-build
@@ -9,28 +9,34 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.buildDate=$(BUILD_DATE)'
 
-build:
+build: frontend-build
 	mkdir -p bin
 	go build -ldflags "$(LDFLAGS)" -o bin/hadrond ./cmd/hadrond
 	go build -ldflags "$(LDFLAGS)" -o bin/hadron ./cmd/hadron
+	go build -ldflags "$(LDFLAGS)" -o bin/hadron-app ./cmd/hadron-app
 
 install: build
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 0755 bin/hadrond $(DESTDIR)$(BINDIR)/hadrond
 	install -m 0755 bin/hadron $(DESTDIR)$(BINDIR)/hadron
+	install -m 0755 bin/hadron-app $(DESTDIR)$(BINDIR)/hadron-app
 
-go-install:
+go-install: frontend-build
 	go install ./cmd/hadrond
 	go install ./cmd/hadron
+	go install ./cmd/hadron-app
 
 uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/hadrond $(DESTDIR)$(BINDIR)/hadron
+	rm -f $(DESTDIR)$(BINDIR)/hadrond $(DESTDIR)$(BINDIR)/hadron $(DESTDIR)$(BINDIR)/hadron-app
 
 test:
 	go test $(GO_PACKAGES)
 
 test-ui:
 	cd cmd/hadron-app/frontend && npm run test
+
+test-ui-e2e:
+	cd cmd/hadron-app/frontend && npm run test:e2e
 
 lint: lint-go lint-ui
 
@@ -58,13 +64,12 @@ run-daemon:
 e2e: build
 	go test -tags e2e -v ./test/e2e/...
 
-app: frontend-build
-	cd cmd/hadron-app && wails build
+app: build
 
 app-dev:
-	cd cmd/hadron-app && wails dev
+	cd cmd/hadron-app/frontend && npm run dev
 
-package-release:
+package-release: frontend-build
 	mkdir -p dist
 	for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do \
 		os=$${target%/*}; \
@@ -75,6 +80,7 @@ package-release:
 		mkdir -p "$$stage"; \
 		CGO_ENABLED=0 GOOS="$$os" GOARCH="$$arch" go build -ldflags "$(LDFLAGS)" -o "$$stage/hadron" ./cmd/hadron; \
 		CGO_ENABLED=0 GOOS="$$os" GOARCH="$$arch" go build -ldflags "$(LDFLAGS)" -o "$$stage/hadrond" ./cmd/hadrond; \
+		CGO_ENABLED=0 GOOS="$$os" GOARCH="$$arch" go build -ldflags "$(LDFLAGS)" -o "$$stage/hadron-app" ./cmd/hadron-app; \
 		cp README.md LICENSE "$$stage/"; \
 		tar -C dist -czf "$$archive" "$$(basename "$$stage")"; \
 	done

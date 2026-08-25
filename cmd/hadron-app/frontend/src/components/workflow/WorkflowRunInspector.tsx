@@ -6,6 +6,7 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { StatusBadge } from '../ui/StatusBadge';
 import { findValueSet, invocationKey, selectPrimaryInvocation, sortWorkflowInvocations, sourceLabel } from './workflowGraph.helpers';
+import { workflowWaitResumePolicy } from './workflowResume.helpers';
 import { workflowValuePreview } from './workflowValues.helpers';
 
 interface WorkflowRunInspectorProps {
@@ -170,6 +171,7 @@ export function WorkflowRunInspector({ result, selectedNodeId, onResume }: Workf
   const primary = selectPrimaryInvocation(invocations);
   const selected = invocations.find(node => invocationKey(node) === selectedInvocationKey) ?? primary;
   const selectedInvocationIndex = selected ? invocations.findIndex(node => invocationKey(node) === invocationKey(selected)) : -1;
+  const waitResumePolicy = workflowWaitResumePolicy(selected?.wait?.wake_source ?? '');
   return (
     <aside className="workflow-run-inspector" aria-label="Workflow run inspector">
       <section className="workflow-inspector-section workflow-run-identity">
@@ -241,7 +243,14 @@ export function WorkflowRunInspector({ result, selectedNodeId, onResume }: Workf
                 <div><dt>Visibility</dt><dd>{selected.wait.visibility}</dd></div>
               </dl>
               {selected.wait.deadline && <div className="workflow-deadline">Deadline · {new Date(selected.wait.deadline).toLocaleString()}</div>}
-              {selected.wait.status === 'open' && <Button onClick={() => onResume(selected)}><LockKeyhole size={12} /> Resume wait</Button>}
+              {selected.wait.status === 'open' && waitResumePolicy.manual && (
+                <Button onClick={() => onResume(selected)}>
+                  {waitResumePolicy.tokenRequired && <LockKeyhole size={12} />} Resume wait
+                </Button>
+              )}
+              {selected.wait.status === 'open' && !waitResumePolicy.manual && (
+                <div className="workflow-unavailable" role="status">{waitResumePolicy.guidance}</div>
+              )}
             </section>
           )}
 
