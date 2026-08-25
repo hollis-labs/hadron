@@ -9,7 +9,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -275,7 +275,7 @@ func TestDispatcherProjectionSchemaAndSecretFailuresPreserveOutputSource(t *test
 
 func TestDispatcherNodeOutputProjectionUsesDurableFanOutItemAndIndex(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 18, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("dispatch-fanout-projection")
 	parent := invocationID(runID, "create")

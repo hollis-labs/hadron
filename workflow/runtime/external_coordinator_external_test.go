@@ -10,7 +10,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -276,7 +276,7 @@ func TestExternalOperationCoordinatorObserveErrorRemainsPendingAndRetries(t *tes
 }
 
 type dispatchedExternalFixture struct {
-	store      *runtimetest.Store
+	store      *inmemory.Store
 	registry   *stepkind.MemoryRegistry
 	kind       *stepkindtest.LifecycleKind
 	attempt    workflowruntime.AttemptID

@@ -11,7 +11,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -33,7 +33,7 @@ func TestMemoizedSafeNodeSkipsExecutorAndJournalsOrigin(t *testing.T) {
 	node := graph.Node{ID: "node", Kind: "memo-fixture", KindVersion: "v1", Memoization: &graph.MemoizationSpec{Key: graph.Expression{Text: "inputs.input"}, MaxAge: "1h"}}
 	keyDigest, _ := values.DigestInline("hello")
 
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 15, 0, 0, 0, time.UTC)
 	firstClaim := memoClaimedNode(t, store, "memo-first", keyDigest, base)
 	firstDispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }})
@@ -90,7 +90,7 @@ func TestMemoizationExpirySchemaAuthorizationAndUnsafeEffectsAreStructured(t *te
 	if err := registry.Register(kind); err != nil {
 		t.Fatal(err)
 	}
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 16, 0, 0, 0, time.UTC)
 	keyDigest, _ := values.DigestInline("hello")
 	node := graph.Node{ID: "node", Kind: "memo-policy", KindVersion: "v1", Memoization: &graph.MemoizationSpec{Key: graph.Expression{Text: "inputs.input"}, MaxAge: "1s"}}
@@ -125,7 +125,7 @@ func TestPinCoordinatorValidatesAndDispatcherConsumesOrdinaryTypedOutputs(t *tes
 	if err := registry.Register(kind); err != nil {
 		t.Fatal(err)
 	}
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 17, 0, 0, 0, time.UTC)
 	sourceClaim := memoClaimedNode(t, store, "pin-source", "", base)
 	dispatcher, _ := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }})
@@ -200,7 +200,7 @@ func TestPinCoordinatorRejectsForgedValueRecordsBeforeAuthorizationOrBinding(t *
 	if err := registry.Register(kind); err != nil {
 		t.Fatal(err)
 	}
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 17, 15, 0, 0, time.UTC)
 	sourceClaim := memoClaimedNode(t, store, "pin-integrity-source", "", base)
 	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }})
@@ -276,7 +276,7 @@ func TestMemoizedMaterializeRequiresExecutorAndFreshHostApproval(t *testing.T) {
 	}
 	node := graph.Node{ID: "node", Kind: "memo-materialize", KindVersion: "v1", Memoization: &graph.MemoizationSpec{Key: graph.Expression{Text: "inputs.input"}, MaxAge: "1h"}}
 	keyDigest, _ := values.DigestInline("hello")
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 17, 30, 0, 0, time.UTC)
 	authorizations := 0
 	allow := workflowruntime.ReuseAuthorizerFunc(func(_ context.Context, candidate workflowruntime.ReuseCandidate) (workflowruntime.ReusePolicyDecision, error) {
@@ -310,7 +310,7 @@ func TestMemoizedMaterializeRequiresExecutorAndFreshHostApproval(t *testing.T) {
 
 func TestMemoPublicationRetentionAndPersistenceFailureNeverReverseSuccess(t *testing.T) {
 	t.Run("run retention", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		registry := stepkind.NewRegistry()
 		kind := stepkindtest.NewNoopKind("memo-retention", "v1")
 		kind.SpecValue.InputSchema = objectSchema("input", "string")
@@ -338,7 +338,7 @@ func TestMemoPublicationRetentionAndPersistenceFailureNeverReverseSuccess(t *tes
 	})
 
 	t.Run("append failure", func(t *testing.T) {
-		baseStore := runtimetest.NewStore()
+		baseStore := inmemory.NewStore()
 		store := &failingMemoStore{Store: baseStore, failure: errors.New("memo journal unavailable")}
 		registry := stepkind.NewRegistry()
 		kind := stepkindtest.NewNoopKind("memo-failure", "v1")
@@ -374,7 +374,7 @@ func TestSchemaIncompatibleMemoEntryIsDiagnosedAndExecuted(t *testing.T) {
 	if err := registry.Register(kind); err != nil {
 		t.Fatal(err)
 	}
-	baseStore := runtimetest.NewStore()
+	baseStore := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 19, 0, 0, 0, time.UTC)
 	keyDigest, _ := values.DigestInline("hello")
 	node := graph.Node{ID: "node", Kind: "memo-schema", KindVersion: "v1", Memoization: &graph.MemoizationSpec{Key: graph.Expression{Text: "inputs.input"}, MaxAge: "1h"}}
@@ -462,7 +462,7 @@ func TestMemoizationReusesAcrossFanOutInvocationIdentities(t *testing.T) {
 	if err := registry.Register(kind); err != nil {
 		t.Fatal(err)
 	}
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 19, 30, 0, 0, time.UTC)
 	createRun(t, store, "memo-fanout", base)
 	keyDigest, _ := values.DigestInline("same-item")
@@ -493,7 +493,7 @@ func TestMemoizationKeySelectsEquivalenceDespiteIrrelevantInputChanges(t *testin
 	if err := registry.Register(kind); err != nil {
 		t.Fatal(err)
 	}
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 20, 0, 0, 0, time.UTC)
 	keyDigest, _ := values.DigestInline("stable-key")
 	node := graph.Node{ID: "node", Kind: "memo-selector", KindVersion: "v1", Memoization: &graph.MemoizationSpec{Key: graph.Expression{Text: "inputs.key"}, MaxAge: "1h"}}
@@ -514,25 +514,25 @@ func TestMemoizationKeySelectsEquivalenceDespiteIrrelevantInputChanges(t *testin
 	}
 }
 
-func memoClaimedNode(t *testing.T, store *runtimetest.Store, run string, memoDigest string, at time.Time) workflowruntime.ReadyClaim {
+func memoClaimedNode(t *testing.T, store *inmemory.Store, run string, memoDigest string, at time.Time) workflowruntime.ReadyClaim {
 	t.Helper()
 	node := memoPendingNode(t, store, run, memoDigest, at)
 	return memoClaimExisting(t, store, node, at)
 }
 
-func memoClaimedInvocation(t *testing.T, store *runtimetest.Store, id workflowruntime.NodeInvocationID, memoDigest string, at time.Time) workflowruntime.ReadyClaim {
+func memoClaimedInvocation(t *testing.T, store *inmemory.Store, id workflowruntime.NodeInvocationID, memoDigest string, at time.Time) workflowruntime.ReadyClaim {
 	t.Helper()
 	inputs := values.ValueSet{"input": memoValue(t, "input", "hello", values.RedactionPublic, values.RetentionProject)}
 	return memoClaimedInvocationValues(t, store, id, memoDigest, inputs, at)
 }
 
-func memoClaimedInvocationValues(t *testing.T, store *runtimetest.Store, id workflowruntime.NodeInvocationID, memoDigest string, inputs values.ValueSet, at time.Time) workflowruntime.ReadyClaim {
+func memoClaimedInvocationValues(t *testing.T, store *inmemory.Store, id workflowruntime.NodeInvocationID, memoDigest string, inputs values.ValueSet, at time.Time) workflowruntime.ReadyClaim {
 	t.Helper()
 	node := memoPendingInvocationValues(t, store, id, memoDigest, inputs, at)
 	return memoClaimExisting(t, store, node, at)
 }
 
-func memoClaimExisting(t *testing.T, store *runtimetest.Store, node workflowruntime.NodeInvocationSnapshot, at time.Time) workflowruntime.ReadyClaim {
+func memoClaimExisting(t *testing.T, store *inmemory.Store, node workflowruntime.NodeInvocationSnapshot, at time.Time) workflowruntime.ReadyClaim {
 	t.Helper()
 	ready, err := store.TransitionNode(context.Background(), workflowruntime.NodeTransitionRequest{InvocationID: node.ID, ExpectedGeneration: node.Generation, To: workflowruntime.NodeReady, At: at.Add(time.Second)})
 	if err != nil {
@@ -546,20 +546,20 @@ func memoClaimExisting(t *testing.T, store *runtimetest.Store, node workflowrunt
 	return claim
 }
 
-func memoPendingNode(t *testing.T, store *runtimetest.Store, run string, memoDigest string, at time.Time) workflowruntime.NodeInvocationSnapshot {
+func memoPendingNode(t *testing.T, store *inmemory.Store, run string, memoDigest string, at time.Time) workflowruntime.NodeInvocationSnapshot {
 	t.Helper()
 	runID := workflowruntime.RunID(run)
 	createRun(t, store, runID, at)
 	return memoPendingInvocation(t, store, workflowruntime.NodeInvocationID{RunID: runID, NodeID: "node"}, memoDigest, at)
 }
 
-func memoPendingInvocation(t *testing.T, store *runtimetest.Store, id workflowruntime.NodeInvocationID, memoDigest string, at time.Time) workflowruntime.NodeInvocationSnapshot {
+func memoPendingInvocation(t *testing.T, store *inmemory.Store, id workflowruntime.NodeInvocationID, memoDigest string, at time.Time) workflowruntime.NodeInvocationSnapshot {
 	t.Helper()
 	inputs := values.ValueSet{"input": memoValue(t, "input", "hello", values.RedactionPublic, values.RetentionProject)}
 	return memoPendingInvocationValues(t, store, id, memoDigest, inputs, at)
 }
 
-func memoPendingInvocationValues(t *testing.T, store *runtimetest.Store, id workflowruntime.NodeInvocationID, memoDigest string, inputs values.ValueSet, at time.Time) workflowruntime.NodeInvocationSnapshot {
+func memoPendingInvocationValues(t *testing.T, store *inmemory.Store, id workflowruntime.NodeInvocationID, memoDigest string, inputs values.ValueSet, at time.Time) workflowruntime.NodeInvocationSnapshot {
 	t.Helper()
 	node, err := store.CreateNodeInvocation(context.Background(), workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{ID: id, Status: workflowruntime.NodePending, CreatedAt: at, UpdatedAt: at}})
 	if err != nil {
@@ -574,7 +574,7 @@ func memoPendingInvocationValues(t *testing.T, store *runtimetest.Store, id work
 }
 
 type failingMemoStore struct {
-	*runtimetest.Store
+	*inmemory.Store
 	failure error
 }
 
@@ -583,7 +583,7 @@ func (s *failingMemoStore) RecordMemoEntry(context.Context, workflowruntime.Memo
 }
 
 type corruptingLoadStore struct {
-	*runtimetest.Store
+	*inmemory.Store
 	ref    values.ValueSetRef
 	values values.ValueSet
 }

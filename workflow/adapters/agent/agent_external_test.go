@@ -15,7 +15,7 @@ import (
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -454,7 +454,7 @@ func TestComposedWaitDispatchesThroughTypedCallOutputAndDurableChildRunWait(t *t
 		t.Fatal(registerErr)
 	}
 
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, 8, 24, 11, 59, 0, 0, time.UTC)
 	if _, _, createErr := store.CreateRun(t.Context(), workflowruntime.CreateRunRequest{
 		ID: "parent-run", Plan: testPlanRef(), Status: workflowruntime.RunPending,
@@ -578,7 +578,7 @@ func TestComposedChildTerminalFailuresDispatchAsOrdinaryNodeFailure(t *testing.T
 			if registerErr := registry.Register(waitKind); registerErr != nil {
 				t.Fatal(registerErr)
 			}
-			store := runtimetest.NewStore()
+			store := inmemory.NewStore()
 			runID := workflowruntime.RunID("parent-" + status)
 			now := time.Date(2026, 8, 24, 12, 59, 0, 0, time.UTC)
 			if _, _, createErr := store.CreateRun(t.Context(), workflowruntime.CreateRunRequest{
@@ -670,7 +670,7 @@ func testPlanRef() workflowruntime.PlanRef {
 	return workflowruntime.PlanRef{ID: "plan", Version: "v1", Digest: values.SHA256Digest([]byte("agent-plan")), SchemaVersion: "v1"}
 }
 
-func createReadyClaim(t *testing.T, store *runtimetest.Store, runID workflowruntime.RunID, nodeID string, inputs values.ValueSet, now time.Time, suffix string) workflowruntime.ReadyClaim {
+func createReadyClaim(t *testing.T, store *inmemory.Store, runID workflowruntime.RunID, nodeID string, inputs values.ValueSet, now time.Time, suffix string) workflowruntime.ReadyClaim {
 	t.Helper()
 	inputRef, err := store.SaveValues(t.Context(), workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "node-inputs", RunID: runID}, Values: inputs})
 	if err != nil {

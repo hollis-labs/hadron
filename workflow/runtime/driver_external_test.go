@@ -9,7 +9,7 @@ import (
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -21,7 +21,7 @@ func TestNodeDriverDefersInputEvaluationUntilReadinessAndRouteSelection(t *testi
 	registry := driverRegistry(t)
 
 	t.Run("dependency-pending", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		createRun(t, store, "driver-pending", base)
 		run, err := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "driver-pending", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base})
 		if err != nil {
@@ -42,7 +42,7 @@ func TestNodeDriverDefersInputEvaluationUntilReadinessAndRouteSelection(t *testi
 	})
 
 	t.Run("route-unselected", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		createRun(t, store, "driver-route", base)
 		run, transitionErr := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "driver-route", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base})
 		if transitionErr != nil {
@@ -72,7 +72,7 @@ func TestNodeDriverBindsCompilerScopedTypedInputsAndFailsClosedOnSchema(t *testi
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
 	registry := driverRegistry(t)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "driver-ready", base)
 	run, err := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "driver-ready", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base})
 	if err != nil {
@@ -158,7 +158,7 @@ func TestNodeDriverBindsCompilerScopedTypedInputsAndFailsClosedOnSchema(t *testi
 func TestInMemoryNodeInputBindingDefensivelyClonesIdempotencyIntent(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 22, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "binding-clone", base)
 	if _, err := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "binding-clone", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base}); err != nil {
 		t.Fatal(err)

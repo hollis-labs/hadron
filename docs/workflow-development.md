@@ -84,6 +84,10 @@ under `internal/appworkflow`, `internal/api`, `internal/mcpadapter`, and
 idempotency, exact refs, and shared lifecycle evidence. `test/e2e` exercises
 the built production daemon and active CLI.
 
+For an extraction-oriented package map, minimal external host, store/timer
+contracts, complete conformance entry point, and compatibility policy, see
+[Embed the workflow engine in a Go host](workflow-engine-adoption.md).
+
 ## Generated contracts
 
 Regenerate graph schema:

@@ -12,7 +12,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -488,7 +488,7 @@ func TestNewFailureValueRejectsMismatchedAttemptOrigin(t *testing.T) {
 }
 
 func TestControlFlowPublicHelpersRejectNilAndTypedNilStores(t *testing.T) {
-	var typedNil *runtimetest.Store
+	var typedNil *inmemory.Store
 	var nilContext context.Context
 	var state workflowruntime.StateStore = typedNil
 	var control workflowruntime.ControlFlowStore = typedNil
@@ -496,7 +496,7 @@ func TestControlFlowPublicHelpersRejectNilAndTypedNilStores(t *testing.T) {
 	if _, _, err := workflowruntime.CatchBinding(context.Background(), state, control, id); !errors.Is(err, workflowruntime.ErrInvalidControlFlow) {
 		t.Fatalf("typed-nil CatchBinding = %v", err)
 	}
-	if _, _, err := workflowruntime.CatchBinding(nilContext, runtimetest.NewStore(), runtimetest.NewStore(), id); !errors.Is(err, workflowruntime.ErrInvalidControlFlow) {
+	if _, _, err := workflowruntime.CatchBinding(nilContext, inmemory.NewStore(), inmemory.NewStore(), id); !errors.Is(err, workflowruntime.ErrInvalidControlFlow) {
 		t.Fatalf("nil-context CatchBinding = %v", err)
 	}
 	coordinator := workflowruntime.NewControlFlowCoordinator(state, control, nil)
@@ -507,7 +507,7 @@ func TestControlFlowPublicHelpersRejectNilAndTypedNilStores(t *testing.T) {
 
 func TestPendingRunRejectsUnclosableCancellationFinalizerIntent(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 18, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("run-control-pending-finalizer")
 	createRun(t, store, runID, base)
@@ -552,7 +552,7 @@ func TestPendingRunRejectsUnclosableCancellationFinalizerIntent(t *testing.T) {
 
 func TestCancellationTreePreservesDirectChildFinalizersAndReplays(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 19, 0, 0, 0, time.UTC)
 	rootID, childID := workflowruntime.RunID("cancel-tree-root"), workflowruntime.RunID("cancel-tree-child")
 	for _, runID := range []workflowruntime.RunID{rootID, childID} {
@@ -921,10 +921,10 @@ func TestCompletedReconcileReplaysAndConvergesUnderContention(t *testing.T) {
 	}
 }
 
-func controlFixture(t *testing.T, suffix string) (context.Context, *runtimetest.Store, time.Time, workflowruntime.RunID) {
+func controlFixture(t *testing.T, suffix string) (context.Context, *inmemory.Store, time.Time, workflowruntime.RunID) {
 	t.Helper()
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 18, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("run-control-" + suffix)
 	createRun(t, store, runID, base)

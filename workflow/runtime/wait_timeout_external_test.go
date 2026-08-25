@@ -11,13 +11,13 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
 func TestWaitTimeoutStoreConformance(t *testing.T) {
-	var _ workflowruntime.WaitTimeoutStore = runtimetest.NewStore()
+	var _ workflowruntime.WaitTimeoutStore = inmemory.NewStore()
 }
 
 func TestTimeoutWaitBoundaryAtomicOutcomeAndUTCReplay(t *testing.T) {
@@ -274,7 +274,7 @@ func TestTimeoutWaitRacesResumeWithOneDurableWinner(t *testing.T) {
 }
 
 type waitTimeoutFixture struct {
-	store      *runtimetest.Store
+	store      *inmemory.Store
 	invocation workflowruntime.NodeInvocationID
 	attempt    workflowruntime.AttemptID
 	request    workflowruntime.TimeoutWaitRequest
@@ -293,7 +293,7 @@ type resumeCall struct {
 func prepareWaitingWait(t *testing.T, suffix string, base time.Time) waitTimeoutFixture {
 	t.Helper()
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	invocation := invocationID(workflowruntime.RunID("run-timeout-"+suffix), "wait-node")
 	waitID := workflowruntime.WaitID("wait-" + suffix)
 	createNode(t, store, invocation, workflowruntime.NodeReady, 0, base)

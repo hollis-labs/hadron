@@ -33,7 +33,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
@@ -867,7 +867,7 @@ func TestProductionMCPAdapterUsesSharedWorkflowComposition(t *testing.T) {
 func TestProductionResourceAdmissionEnforcesFanOutOccupancy(t *testing.T) {
 	ctx := t.Context()
 	base := time.Date(2026, 8, 25, 18, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	runID := workflowruntime.RunID("production-fanout")
 	ref := workflowruntime.PlanRef{ID: "production-fanout", Version: "v1", Digest: values.SHA256Digest([]byte("production-fanout")), SchemaVersion: workflowcompile.ExecutionPlanSchemaVersion}
 	if _, _, err := store.CreateRun(ctx, workflowruntime.CreateRunRequest{ID: runID, Plan: ref, Status: workflowruntime.RunPending, StartIdempotencyKey: "production-fanout", CreatedAt: base}); err != nil {

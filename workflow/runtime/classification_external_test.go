@@ -8,13 +8,13 @@ import (
 	"time"
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
 func TestSaveValuesWithRetentionGroupsMixedClassesAndNilHook(t *testing.T) {
 	t.Parallel()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	request := classificationSaveRequest(t)
 	var before workflowruntime.RetentionPlan
 	var after workflowruntime.RetentionRecord
@@ -53,7 +53,7 @@ func TestSaveValuesWithRetentionFailureBoundaries(t *testing.T) {
 	t.Parallel()
 	request := classificationSaveRequest(t)
 	beforeCause := errors.New("prepare cleanup")
-	beforeStore := runtimetest.NewStore()
+	beforeStore := inmemory.NewStore()
 	_, err := workflowruntime.SaveValuesWithRetention(t.Context(), beforeStore, workflowruntime.RetentionHookFuncs{
 		Before: func(context.Context, workflowruntime.RetentionPlan) error { return beforeCause },
 	}, request)
@@ -64,7 +64,7 @@ func TestSaveValuesWithRetentionFailureBoundaries(t *testing.T) {
 	}
 
 	afterCause := errors.New("record cleanup")
-	afterStore := runtimetest.NewStore()
+	afterStore := inmemory.NewStore()
 	_, err = workflowruntime.SaveValuesWithRetention(t.Context(), afterStore, workflowruntime.RetentionHookFuncs{
 		After: func(context.Context, workflowruntime.RetentionRecord) error { return afterCause },
 	}, request)
@@ -82,7 +82,7 @@ func TestSaveValuesWithRetentionFailureBoundaries(t *testing.T) {
 		Owner: request.Owner, Values: values.ValueSet{"ephemeral": none},
 	}
 	called := false
-	_, err = workflowruntime.SaveValuesWithRetention(t.Context(), runtimetest.NewStore(), workflowruntime.RetentionHookFuncs{
+	_, err = workflowruntime.SaveValuesWithRetention(t.Context(), inmemory.NewStore(), workflowruntime.RetentionHookFuncs{
 		Before: func(context.Context, workflowruntime.RetentionPlan) error { called = true; return nil },
 	}, noneRequest)
 	if !errors.Is(err, values.ErrRetentionViolation) || called {
@@ -98,7 +98,7 @@ func TestAppendMaskedEventMasksAdapterObservationsBeforePersistence(t *testing.T
 	ref, _ := values.ParseSecretRef("secret://project/service#token")
 	resolved, _ := values.NewResolvedSecret(ref, []byte("token-123"))
 	redactor, _ := values.NewRedactor(resolved)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
 	for index, channel := range []string{"command", "prompt", "message", "http", "mcp"} {
 		request := workflowruntime.AppendEventRequest{

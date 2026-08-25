@@ -11,7 +11,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -248,14 +248,14 @@ func TestPinnedChildRunMaterializerLeavesControlFlowTargetsPending(t *testing.T)
 }
 
 type childMaterializerFixture struct {
-	store   *runtimetest.Store
+	store   *inmemory.Store
 	request calladapter.ChildRunRequest
 	now     time.Time
 }
 
 func newChildMaterializerFixture(t *testing.T) childMaterializerFixture {
 	t.Helper()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 	childDigest := values.SHA256Digest([]byte("child-graph-v1"))
 	parentDigest := values.SHA256Digest([]byte("parent-graph-v1"))

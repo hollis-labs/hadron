@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -26,7 +26,7 @@ func TestBindRunRequiredUnknownDefaultsCoercionAndProvenance(t *testing.T) {
 		}, Source: bindingSource("inputs", "enabled", 8)},
 		{Name: "large", Schema: graph.Schema{"type": "integer"}, Source: bindingSource("inputs", "large", 13)},
 	}, nil, nil)
-	base := runtimetest.NewStore()
+	base := inmemory.NewStore()
 	observed := &observedStateStore{StateStore: base}
 	request := workflowruntime.BindRunRequest{
 		ID: "run-bind", Plan: plan, Inputs: map[string]any{"unknown": true},
@@ -136,7 +136,7 @@ func TestBindRunRejectsNonLiteralDefaultsLossyCoercionAndSchemaFailures(t *testi
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			store := &observedStateStore{StateStore: runtimetest.NewStore()}
+			store := &observedStateStore{StateStore: inmemory.NewStore()}
 			result, err := workflowruntime.BindRun(t.Context(), store, workflowruntime.BindRunRequest{
 				ID: "run-invalid", Plan: bindingPlan([]graph.InputSpec{test.spec}, nil, nil), Inputs: test.input, CreatedAt: bindingTime(),
 			})
@@ -167,7 +167,7 @@ func TestBindRunAcceptsAndPreservesPreEnvelopedAndArtifactInputs(t *testing.T) {
 	}
 	artifactValue := bindingArtifact(t)
 	artifactRef := *artifactValue.Artifact
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	result, err := workflowruntime.BindRun(t.Context(), store, workflowruntime.BindRunRequest{
 		ID: "run-artifact-input", Plan: plan,
 		Inputs: map[string]any{"secret": secret, "typed-ref": typedRef, "report": artifactRef}, CreatedAt: bindingTime(),
@@ -191,7 +191,7 @@ func TestBindRunAcceptsAndPreservesPreEnvelopedAndArtifactInputs(t *testing.T) {
 
 	invalid := secret
 	invalid.Digest = values.SHA256Digest([]byte("wrong"))
-	observed := &observedStateStore{StateStore: runtimetest.NewStore()}
+	observed := &observedStateStore{StateStore: inmemory.NewStore()}
 	rejected, err := workflowruntime.BindRun(t.Context(), observed, workflowruntime.BindRunRequest{
 		ID: "run-invalid-envelope", Plan: plan,
 		Inputs: map[string]any{"secret": invalid, "typed-ref": typedRef, "report": artifactRef}, CreatedAt: bindingTime(),
@@ -207,7 +207,7 @@ func TestBindRunAcceptsAndPreservesPreEnvelopedAndArtifactInputs(t *testing.T) {
 
 func TestBindRunPersistenceFailureAndStartStoreOwnedReplayConflict(t *testing.T) {
 	plan := bindingPlan([]graph.InputSpec{{Name: "name", Required: true, Schema: graph.Schema{"type": "string"}}}, nil, nil)
-	base := runtimetest.NewStore()
+	base := inmemory.NewStore()
 	failing := &observedStateStore{StateStore: base, saveErr: errors.New("value store unavailable")}
 	request := workflowruntime.BindRunRequest{ID: "run-start", Plan: plan, Inputs: map[string]any{"name": "release"}, CreatedAt: bindingTime()}
 	if _, err := workflowruntime.BindRun(t.Context(), failing, request); err == nil {
@@ -286,7 +286,7 @@ func TestFinalizeRunOutputsPreservesPassthroughAndPublishesCompleteSet(t *testin
 	}
 	outputs[2].Metadata = graph.Metadata{"redaction": "public", "retention": "external", "media_type": "text/plain"}
 	plan := bindingPlan(nil, outputs, []graph.Node{{ID: "render", Kind: "test", Source: bindingSource("steps", "render", 12)}})
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	bound, running := startedBindingRun(t, store, plan, "run-output")
 	secret := bindingSecretRef(t, "secret://project/render#token", "node-secret", values.RetentionProject)
 	artifact := bindingArtifact(t)
@@ -330,7 +330,7 @@ func TestFinalizeRunOutputsCompletesNestedFinalizerIntentAtomically(t *testing.T
 		{ID: "inner", Kind: "test", Finally: &graph.FinallySpec{Scope: []string{"work"}}},
 		{ID: "outer", Kind: "test", Finally: &graph.FinallySpec{}},
 	})
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	bound, _ := startedBindingRun(t, store, plan, "run-finalizer-outputs")
 	for _, node := range plan.Graph.Nodes {
 		createNode(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: node.ID}, workflowruntime.NodePending, 0, base.Add(time.Minute))
@@ -468,7 +468,7 @@ func TestReconcileRunCompletionNeverPublishesOutputsForFailure(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			plan := bindingPlan(nil, []graph.OutputSpec{bindingOutput("result", graph.Schema{"type": "string"}, "steps.work.outputs.result", 20)}, []graph.Node{{ID: "work", Kind: "test"}, {ID: "cleanup", Kind: "test", Finally: &graph.FinallySpec{}}})
-			store := runtimetest.NewStore()
+			store := inmemory.NewStore()
 			bound, _ := startedBindingRun(t, store, plan, workflowruntime.RunID("run-output-failure-"+test.name))
 			for _, node := range plan.Graph.Nodes {
 				createNode(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: node.ID}, workflowruntime.NodePending, 0, base.Add(time.Minute))
@@ -566,7 +566,7 @@ func TestFinalizeRunOutputsDiagnosticsDoNotPersistPartialOutputs(t *testing.T) {
 			plan := bindingPlan(nil, append([]graph.OutputSpec{
 				bindingOutput("first", graph.Schema{"type": "string"}, `"valid"`, 18),
 			}, test.outputs...), []graph.Node{{ID: "render", Kind: "test", Source: bindingSource("steps", "render", 12)}})
-			base := runtimetest.NewStore()
+			base := inmemory.NewStore()
 			bound, running := startedBindingRun(t, base, plan, "run-failed-output")
 			observed := &observedStateStore{StateStore: base}
 			result, err := workflowruntime.FinalizeRunOutputs(t.Context(), observed, workflowruntime.FinalizeRunRequest{
@@ -594,7 +594,7 @@ func TestFinalizeRunOutputsRequiresCompleteCanonicalGraphAndPreservesBasePolicy(
 		{ID: "prepare", Kind: "test", Source: bindingSource("steps", "prepare", 10)},
 		{ID: "finish", Kind: "test", Source: bindingSource("steps", "finish", 14)},
 	})
-	base := runtimetest.NewStore()
+	base := inmemory.NewStore()
 	bound, running := startedBindingRun(t, base, plan, "run-completion")
 	observed := &observedStateStore{StateStore: base}
 	incomplete := values.ExpressionContext{Steps: map[string]values.StepContext{
@@ -634,7 +634,7 @@ func TestFinalizeRunOutputsRequiresCompleteCanonicalGraphAndPreservesBasePolicy(
 
 func TestFinalizeRunOutputsRejectsBoundPlanProvenanceMismatch(t *testing.T) {
 	plan := bindingPlan(nil, nil, []graph.Node{{ID: "render", Kind: "test", Source: bindingSource("steps", "render", 12)}})
-	base := runtimetest.NewStore()
+	base := inmemory.NewStore()
 	bound, running := startedBindingRun(t, base, plan, "run-identity")
 	bound.Provenance.Revision = "different"
 	observed := &observedStateStore{StateStore: base}
@@ -662,7 +662,7 @@ func TestFinalizeRunOutputsPersistenceBoundariesAndReplay(t *testing.T) {
 	}
 
 	t.Run("save failure publishes nothing", func(t *testing.T) {
-		base := runtimetest.NewStore()
+		base := inmemory.NewStore()
 		bound, running := startedBindingRun(t, base, plan, "run-save-failure")
 		observed := &observedStateStore{StateStore: base, saveErr: errors.New("save failed")}
 		_, err := workflowruntime.FinalizeRunOutputs(t.Context(), observed, workflowruntime.FinalizeRunRequest{
@@ -678,7 +678,7 @@ func TestFinalizeRunOutputsPersistenceBoundariesAndReplay(t *testing.T) {
 	})
 
 	t.Run("transition failure leaves no published ref", func(t *testing.T) {
-		base := runtimetest.NewStore()
+		base := inmemory.NewStore()
 		bound, running := startedBindingRun(t, base, plan, "run-transition-failure")
 		observed := &observedStateStore{StateStore: base, transitionErr: errors.New("transition failed")}
 		_, err := workflowruntime.FinalizeRunOutputs(t.Context(), observed, workflowruntime.FinalizeRunRequest{
@@ -694,7 +694,7 @@ func TestFinalizeRunOutputsPersistenceBoundariesAndReplay(t *testing.T) {
 	})
 
 	t.Run("exact replay reads before write and conflict is store-neutral", func(t *testing.T) {
-		base := runtimetest.NewStore()
+		base := inmemory.NewStore()
 		bound, running := startedBindingRun(t, base, plan, "run-replay")
 		applied, err := workflowruntime.FinalizeRunOutputs(t.Context(), base, workflowruntime.FinalizeRunRequest{
 			BoundRun: bound, Run: running, Plan: plan, Context: contextValue("one"), At: bindingTime().Add(2 * time.Minute),

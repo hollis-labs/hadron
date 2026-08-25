@@ -10,13 +10,13 @@ import (
 	"time"
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
 func TestClaimLeaseCASFencingAndExpiry(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Now()
 	id := invocationID("run-1", "execute")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, now)
@@ -137,7 +137,7 @@ func TestClaimLeaseCASFencingAndExpiry(t *testing.T) {
 }
 
 func TestClaimRejectsNodeTimestampRegression(t *testing.T) {
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-time", "execute")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, now)
@@ -156,7 +156,7 @@ func TestClaimRejectsNodeTimestampRegression(t *testing.T) {
 
 func TestConcurrentDuplicateClaimPrevention(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-concurrent", "execute")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, now)
@@ -190,7 +190,7 @@ func TestConcurrentDuplicateClaimPrevention(t *testing.T) {
 
 func TestAppendOnlyEventsAreAtomicOrderedAndImmutable(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	const count = 80
 	var wg sync.WaitGroup
@@ -234,7 +234,7 @@ func TestAppendOnlyEventsAreAtomicOrderedAndImmutable(t *testing.T) {
 
 func TestRecoveryFiltersAndOrdering(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	for _, item := range []struct {
 		id     workflowruntime.RunID

@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/conformance"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -279,8 +279,8 @@ func runCompletionFixture(ctx context.Context, input controlFlowFixtureInput) er
 	return nil
 }
 
-func newControlFlowFixtureStore(ctx context.Context, suffix string) (*runtimetest.Store, workflowruntime.RunID, time.Time, error) {
-	store := runtimetest.NewStore()
+func newControlFlowFixtureStore(ctx context.Context, suffix string) (*inmemory.Store, workflowruntime.RunID, time.Time, error) {
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 19, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("fixture-control-" + suffix)
 	_, _, err := store.CreateRun(ctx, workflowruntime.CreateRunRequest{
@@ -300,14 +300,14 @@ func newControlFlowFixtureStore(ctx context.Context, suffix string) (*runtimetes
 	return store, runID, base, nil
 }
 
-func createControlNode(ctx context.Context, store *runtimetest.Store, runID workflowruntime.RunID, nodeID string, at time.Time) error {
+func createControlNode(ctx context.Context, store *inmemory.Store, runID workflowruntime.RunID, nodeID string, at time.Time) error {
 	_, err := store.CreateNodeInvocation(ctx, workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
 		ID: workflowruntime.NodeInvocationID{RunID: runID, NodeID: nodeID}, Status: workflowruntime.NodePending, CreatedAt: at, UpdatedAt: at,
 	}})
 	return err
 }
 
-func finishControlNode(ctx context.Context, store *runtimetest.Store, id workflowruntime.NodeInvocationID, status workflowruntime.NodeStatus, failureCode string, at time.Time) error {
+func finishControlNode(ctx context.Context, store *inmemory.Store, id workflowruntime.NodeInvocationID, status workflowruntime.NodeStatus, failureCode string, at time.Time) error {
 	node, err := store.LoadNodeInvocation(ctx, id)
 	if err != nil {
 		return err

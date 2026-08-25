@@ -12,7 +12,7 @@ import (
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -21,7 +21,7 @@ import (
 func TestRecoveryReconcilesExpiredCrashAndRebuildsControlBeforeReady(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "recover", base)
 	run, _ := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "recover", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base.Add(time.Second)})
 	_ = run
@@ -86,7 +86,7 @@ func TestRecoveryPublishesDeclaredOutputsAfterCompletedFinalizer(t *testing.T) {
 	plan := bindingPlan(nil, []graph.OutputSpec{
 		bindingOutput("cleanup", graph.Schema{"type": "string"}, "steps.cleanup.outputs.result", 30),
 	}, []graph.Node{{ID: "work", Kind: "safe", KindVersion: "v1"}, {ID: "cleanup", Kind: "safe", KindVersion: "v1", Finally: &graph.FinallySpec{}}})
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	bound, _ := startedBindingRun(t, store, plan, "recover-finalizer-outputs")
 	for _, node := range plan.Graph.Nodes {
 		createNode(t, store, workflowruntime.NodeInvocationID{RunID: bound.ID, NodeID: node.ID}, workflowruntime.NodePending, 0, base.Add(time.Minute))
@@ -119,7 +119,7 @@ func TestRecoveryPublishesDeclaredOutputsAfterCompletedFinalizer(t *testing.T) {
 
 func TestCrashRecoveryUsesPinnedKindAndEffectiveEffectUnion(t *testing.T) {
 	base := time.Date(2026, 8, 24, 11, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "effect", base)
 	_, _ = store.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: "effect", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base.Add(time.Second)})
 	id := invocationID("effect", "work")
@@ -144,7 +144,7 @@ func TestCrashRecoveryUsesPinnedKindAndEffectiveEffectUnion(t *testing.T) {
 		t.Fatalf("unsafe union bypassed floor: calls=%d result=%#v", calls.Load(), result.Crashes)
 	}
 
-	badStore := runtimetest.NewStore()
+	badStore := inmemory.NewStore()
 	createRun(t, badStore, "kind", base)
 	_, _ = badStore.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: "kind", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base.Add(time.Second)})
 	badID := invocationID("kind", "work")
@@ -165,7 +165,7 @@ func TestCrashRecoveryUsesPinnedKindAndEffectiveEffectUnion(t *testing.T) {
 func TestReplayReusesUpstreamValuesCreatesFreshHistoryAndConverges(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "source", base)
 	_, _ = store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "source", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base.Add(time.Second)})
 	upstreamID, downstreamID := invocationID("source", "upstream"), invocationID("source", "downstream")
@@ -218,7 +218,7 @@ func TestReplayReusesUpstreamValuesCreatesFreshHistoryAndConverges(t *testing.T)
 
 func TestCrashStoreConcurrentExactReplayProducesOneEvent(t *testing.T) {
 	base := time.Date(2026, 8, 24, 13, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "race", base)
 	_, _ = store.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: "race", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base.Add(time.Second)})
 	id := invocationID("race", "work")
@@ -275,7 +275,7 @@ func TestCrashStoreConcurrentExactReplayProducesOneEvent(t *testing.T) {
 
 func TestRecoveryCrashConvergesAcrossDifferentWorkerClocks(t *testing.T) {
 	base := time.Date(2026, 8, 24, 14, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "clock-race", base)
 	_, _ = store.TransitionRun(context.Background(), workflowruntime.RunTransitionRequest{RunID: "clock-race", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base.Add(time.Second)})
 	id := invocationID("clock-race", "work")
@@ -321,7 +321,7 @@ func TestRecoveryCrashConvergesAcrossDifferentWorkerClocks(t *testing.T) {
 func TestRecoveryReadyRebuildConvergesReverseIDDependencyChain(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 15, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "reverse", base)
 	run, _ := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "reverse", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base})
 	createNode(t, store, invocationID("reverse", "a"), workflowruntime.NodePending, 0, base)
@@ -344,7 +344,7 @@ func TestRecoveryReadyRebuildConvergesReverseIDDependencyChain(t *testing.T) {
 func TestRecoveryFailsClosedWhenTerminalIntentCannotBeLoaded(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 15, 30, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "intent-load", base)
 	if _, err := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "intent-load", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base}); err != nil {
 		t.Fatal(err)
@@ -362,7 +362,7 @@ func TestRecoveryFailsClosedWhenTerminalIntentCannotBeLoaded(t *testing.T) {
 func TestRecoveryTerminalCrashCreatesAndDrivesFinalizerSamePass(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "cleanup", base)
 	_, _ = store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "cleanup", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base})
 	workID, cleanupID := invocationID("cleanup", "work"), invocationID("cleanup", "cleanup")
@@ -403,7 +403,7 @@ func TestRecoveryTerminalCrashCreatesAndDrivesFinalizerSamePass(t *testing.T) {
 func TestRecoverySkipsSucceededInnerFinalizerAndDrivesPendingOuter(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 17, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "nested-cleanup", base)
 	_, _ = store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "nested-cleanup", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base})
 	workID := invocationID("nested-cleanup", "work")
@@ -488,7 +488,7 @@ func TestReplayRebindsFanOutAggregateItemsAndTypedFailureContext(t *testing.T) {
 		{ID: "after", Kind: "safe", KindVersion: "v1", Needs: []graph.Need{{Node: "fan"}}},
 		{ID: "cleanup", Kind: "safe", KindVersion: "v1", Finally: &graph.FinallySpec{}},
 	}}
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	createRun(t, store, "fan-source", base)
 	_, _ = store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: "fan-source", ExpectedGeneration: 1, To: workflowruntime.RunRunning, At: base})
 	parent, downstream, cleanup := invocationID("fan-source", "fan"), invocationID("fan-source", "after"), invocationID("fan-source", "cleanup")

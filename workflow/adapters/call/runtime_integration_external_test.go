@@ -17,7 +17,7 @@ import (
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
@@ -98,7 +98,7 @@ func TestRuntimeDispatchRejectsMissingCallLineageBeforeStartingAttempt(t *testin
 }
 
 type runtimeCallHost struct {
-	store      *runtimetest.Store
+	store      *inmemory.Store
 	registry   stepkind.Registry
 	dispatcher *workflowruntime.StepDispatcher
 	resolver   *definitionMap
@@ -115,7 +115,7 @@ type runtimeCallHost struct {
 func newRuntimeCallHost(t *testing.T, nestedMode graph.CallMode) *runtimeCallHost {
 	t.Helper()
 	host := &runtimeCallHost{
-		store: runtimetest.NewStore(), resolver: &definitionMap{definitions: make(map[string]workflowcompile.ResolvedDefinition)},
+		store: inmemory.NewStore(), resolver: &definitionMap{definitions: make(map[string]workflowcompile.ResolvedDefinition)},
 		contexts: newContextTable(), journal: calltest.NewJournal(), runs: newAtomicRunHost(),
 		runID: "nested-call-run", now: time.Date(2026, time.August, 24, 16, 0, 0, 0, time.UTC),
 	}

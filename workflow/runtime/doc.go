@@ -14,6 +14,10 @@
 // resolution, scheduler adapters, secret authorities, cleanup execution, and
 // concrete storage remain separate concerns.
 //
+// Package inmemory provides a concurrency-safe process-lifetime implementation
+// for embedded execution and qualification. Hosts that promise crash recovery
+// must bind a durable StateStore implementation instead.
+//
 // It is extraction-ready engine core. Hadron internal packages and concrete
 // persistence implementations are forbidden.
 package runtime

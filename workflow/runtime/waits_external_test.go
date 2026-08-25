@@ -10,7 +10,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
@@ -236,7 +236,7 @@ func TestRecoveryAndCleanupUseDurableWaits(t *testing.T) {
 }
 
 type atomicWaitFixture struct {
-	store       *runtimetest.Store
+	store       *inmemory.Store
 	coordinator workflowruntime.WaitCoordinator
 	authorizer  *recordingAuthorizer
 	base        time.Time
@@ -245,7 +245,7 @@ type atomicWaitFixture struct {
 	token       string
 }
 type runningWaitFixture struct {
-	store      *runtimetest.Store
+	store      *inmemory.Store
 	base       time.Time
 	waitID     workflowruntime.WaitID
 	invocation workflowruntime.NodeInvocationID
@@ -267,7 +267,7 @@ func prepareAtomicWait(t *testing.T, suffix string, kind workflowwait.Kind, sour
 
 func prepareRunningWait(t *testing.T, suffix string, kind workflowwait.Kind, source workflowwait.WakeSource, base time.Time, timeout time.Duration) runningWaitFixture {
 	t.Helper()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	invocation := invocationID(workflowruntime.RunID("run-wait-"+suffix), "wait-node")
 	waitID := workflowruntime.WaitID("wait-" + suffix)
 	createNode(t, store, invocation, workflowruntime.NodeReady, 0, base)
@@ -353,5 +353,5 @@ func (m *recordingMaterializer) Resolve(context.Context, workflowwait.Materializ
 }
 
 func TestWaitStorePublicConformance(t *testing.T) {
-	var _ workflowruntime.WaitStore = runtimetest.NewStore()
+	var _ workflowruntime.WaitStore = inmemory.NewStore()
 }

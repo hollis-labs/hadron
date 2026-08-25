@@ -14,7 +14,7 @@ import (
 	workflowgate "github.com/hollis-labs/hadron/workflow/gate"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
@@ -179,9 +179,9 @@ func TestWaitBackedDispatcherTimeoutIsTypedFailureNotSuccessfulOutput(t *testing
 	}
 }
 
-func dispatchFixture(t *testing.T, run string) (*runtimetest.Store, workflowruntime.ReadyClaim, workflowruntime.NodeInvocationSnapshot, time.Time) {
+func dispatchFixture(t *testing.T, run string) (*inmemory.Store, workflowruntime.ReadyClaim, workflowruntime.NodeInvocationSnapshot, time.Time) {
 	t.Helper()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, 8, 24, 14, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID(run)
 	_, _, err := store.CreateRun(t.Context(), workflowruntime.CreateRunRequest{

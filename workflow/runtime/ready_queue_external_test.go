@@ -11,12 +11,12 @@ import (
 	"time"
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 )
 
 func TestReadyQueueDefaultsToFIFOWithStableInvocationTieBreak(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	oldest := invocationID("run-z", "oldest")
 	tieIterationA := workflowruntime.NodeInvocationID{RunID: "run-a", NodeID: "expand", Iteration: "a"}
@@ -47,7 +47,7 @@ func TestReadyQueueDefaultsToFIFOWithStableInvocationTieBreak(t *testing.T) {
 func TestReadyQueuePolicyCanSelectPriorityAndPerRunFairness(t *testing.T) {
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	t.Run("priority", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		low := invocationID("run-a", "low")
 		high := invocationID("run-a", "high")
 		createNode(t, store, low, workflowruntime.NodeReady, 1, now.Add(-time.Minute))
@@ -67,7 +67,7 @@ func TestReadyQueuePolicyCanSelectPriorityAndPerRunFairness(t *testing.T) {
 	})
 
 	t.Run("per_run_selection", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		runA := invocationID("run-a", "first")
 		runB := invocationID("run-b", "first")
 		createNode(t, store, runA, workflowruntime.NodeReady, 0, now.Add(-time.Minute))
@@ -89,7 +89,7 @@ func TestReadyQueuePolicyCanSelectPriorityAndPerRunFairness(t *testing.T) {
 
 func TestReadyQueueReplaysOwnLiveClaimAndSkipsOtherLiveClaims(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-replay", "work")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, now.Add(-time.Minute))
@@ -127,7 +127,7 @@ func TestReadyQueueReplaysOwnLiveClaimAndSkipsOtherLiveClaims(t *testing.T) {
 
 func TestReadyQueueReplayPrecedesChangedPolicySelection(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	firstID := invocationID("run-policy-replay", "first")
 	secondID := invocationID("run-policy-replay", "second")
@@ -158,7 +158,7 @@ func TestReadyQueueReplayPrecedesChangedPolicySelection(t *testing.T) {
 
 func TestReadyQueueRestartReclaimsExpiredLease(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	start := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-restart", "work")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, start.Add(-time.Minute))
@@ -185,7 +185,7 @@ func TestReadyQueueRestartReclaimsExpiredLease(t *testing.T) {
 
 func TestReadyQueueRenewAndReleaseRemainFenced(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-fenced", "work")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, now)
@@ -224,7 +224,7 @@ func TestReadyQueueRenewAndReleaseRemainFenced(t *testing.T) {
 func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	t.Run("empty", func(t *testing.T) {
-		claim, ok, err := workflowruntime.NewReadyQueueCoordinator(runtimetest.NewStore(), nil).ClaimNext(
+		claim, ok, err := workflowruntime.NewReadyQueueCoordinator(inmemory.NewStore(), nil).ClaimNext(
 			context.Background(), readyClaimRequest(now, 1),
 		)
 		if err != nil || ok || claim != (workflowruntime.ReadyClaim{}) {
@@ -236,7 +236,7 @@ func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		calls := atomic.Int64{}
-		store := &stateStoreHooks{StateStore: runtimetest.NewStore()}
+		store := &stateStoreHooks{StateStore: inmemory.NewStore()}
 		store.recovery = func(ctx context.Context, query workflowruntime.RecoveryQuery) (workflowruntime.RecoverySnapshot, error) {
 			calls.Add(1)
 			return store.StateStore.Recovery(ctx, query)
@@ -248,7 +248,7 @@ func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 	})
 
 	t.Run("nil_context", func(t *testing.T) {
-		queue := workflowruntime.NewReadyQueueCoordinator(runtimetest.NewStore(), nil)
+		queue := workflowruntime.NewReadyQueueCoordinator(inmemory.NewStore(), nil)
 		var nilContext context.Context
 		if _, _, err := queue.ClaimNext(nilContext, readyClaimRequest(now, 1)); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
 			t.Fatalf("nil ClaimNext context = %v", err)
@@ -263,7 +263,7 @@ func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 
 	t.Run("store_error", func(t *testing.T) {
 		failure := errors.New("recovery unavailable")
-		store := &stateStoreHooks{StateStore: runtimetest.NewStore(), recovery: func(context.Context, workflowruntime.RecoveryQuery) (workflowruntime.RecoverySnapshot, error) {
+		store := &stateStoreHooks{StateStore: inmemory.NewStore(), recovery: func(context.Context, workflowruntime.RecoveryQuery) (workflowruntime.RecoverySnapshot, error) {
 			return workflowruntime.RecoverySnapshot{}, failure
 		}}
 		_, _, err := workflowruntime.NewReadyQueueCoordinator(store, nil).ClaimNext(context.Background(), readyClaimRequest(now, 1))
@@ -273,7 +273,7 @@ func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 	})
 
 	t.Run("claim_error", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		createNode(t, store, invocationID("run-error", "work"), workflowruntime.NodeReady, 0, now)
 		failure := errors.New("claim unavailable")
 		wrapped := &stateStoreHooks{StateStore: store, claim: func(context.Context, workflowruntime.ClaimNodeRequest) (workflowruntime.ClaimResult, error) {
@@ -286,7 +286,7 @@ func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 	})
 
 	t.Run("malformed_claim_result", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		createNode(t, store, invocationID("run-malformed", "work"), workflowruntime.NodeReady, 0, now)
 		wrapped := &stateStoreHooks{StateStore: store, claim: func(context.Context, workflowruntime.ClaimNodeRequest) (workflowruntime.ClaimResult, error) {
 			return workflowruntime.ClaimResult{Acquired: true}, nil
@@ -298,7 +298,7 @@ func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 	})
 
 	t.Run("invalid_policy_selection", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		id := invocationID("run-policy", "work")
 		createNode(t, store, id, workflowruntime.NodeReady, 0, now)
 		policy := workflowruntime.ReadyQueuePolicyFunc(func(context.Context, []workflowruntime.ReadyCandidate) ([]workflowruntime.NodeInvocationID, error) {
@@ -317,7 +317,7 @@ func TestReadyQueueCanceledEmptyAndErrorPaths(t *testing.T) {
 
 func TestClaimNodeReturnsDurableNegativeForNonReadyAfterCAS(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-pending", "work")
 	createNode(t, store, id, workflowruntime.NodePending, 0, now)
@@ -350,7 +350,7 @@ func TestClaimNodeReturnsDurableNegativeForNonReadyAfterCAS(t *testing.T) {
 
 func TestReadyQueueHighContentionPreventsDuplicateOwnership(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-contention", "work")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, now)

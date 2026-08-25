@@ -12,7 +12,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -133,7 +133,7 @@ func TestReadinessRejectsAmbiguousDependenciesAndCanonicalizesDiagnostics(t *tes
 
 func TestProgressNodeDefersPredicateAndRefreshesBlockedDiagnostics(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 15, 0, 0, 0, time.UTC)
 	firstDependencyID := invocationID("run-progress", "dependency-a")
 	secondDependencyID := invocationID("run-progress", "dependency-b")
@@ -183,7 +183,7 @@ func TestProgressNodeDefersPredicateAndRefreshesBlockedDiagnostics(t *testing.T)
 func TestProgressNodePredicateFalseTrueErrorAndIdempotency(t *testing.T) {
 	now := time.Date(2026, time.August, 24, 16, 0, 0, 0, time.UTC)
 	t.Run("false_and_idempotent", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		id := invocationID("run-false", "target")
 		createNode(t, store, id, workflowruntime.NodePending, 0, now)
 		evaluator := &predicateStub{value: false}
@@ -209,7 +209,7 @@ func TestProgressNodePredicateFalseTrueErrorAndIdempotency(t *testing.T) {
 	})
 
 	t.Run("true", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		id := invocationID("run-true", "target")
 		createNode(t, store, id, workflowruntime.NodePending, 0, now)
 		result, err := workflowruntime.NewProgressionCoordinator(store, &predicateStub{value: true}).ProgressNode(
@@ -223,7 +223,7 @@ func TestProgressNodePredicateFalseTrueErrorAndIdempotency(t *testing.T) {
 	})
 
 	t.Run("error_preserves_pending", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		id := invocationID("run-error", "target")
 		createNode(t, store, id, workflowruntime.NodePending, 0, now)
 		failure := errors.New("predicate failed")
@@ -241,7 +241,7 @@ func TestProgressNodePredicateFalseTrueErrorAndIdempotency(t *testing.T) {
 
 func TestProgressNodeUsesTypedExpressionEngineAndPreservesSourceDiagnostic(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 16, 30, 0, 0, time.UTC)
 	trueID := invocationID("run-expression", "true-target")
 	errorID := invocationID("run-expression", "error-target")
@@ -294,7 +294,7 @@ func TestProgressNodeFailureTimeoutHandledAndBlockedToSkip(t *testing.T) {
 		{"handled timeout permits default", workflowruntime.NodeTimedOut, "", true, workflowruntime.NodeReady},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			store := runtimetest.NewStore()
+			store := inmemory.NewStore()
 			runID := workflowruntime.RunID(fmt.Sprintf("run-propagation-%d", index))
 			dependencyID := invocationID(runID, "dependency")
 			targetID := invocationID(runID, "target")
@@ -317,7 +317,7 @@ func TestProgressNodeFailureTimeoutHandledAndBlockedToSkip(t *testing.T) {
 		})
 	}
 
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	dependencyID := invocationID("run-blocked-skip", "dependency")
 	targetID := invocationID("run-blocked-skip", "target")
 	createNode(t, store, dependencyID, workflowruntime.NodePending, 0, now)
@@ -341,7 +341,7 @@ func TestProgressNodeFailureTimeoutHandledAndBlockedToSkip(t *testing.T) {
 
 func TestProgressNodeRejectsDependencyIdentityErrorsBeforeMutation(t *testing.T) {
 	now := time.Date(2026, time.August, 24, 18, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	targetID := invocationID("run-identities", "target")
 	dependencyID := invocationID("run-identities", "dependency")
 	crossRunID := invocationID("other-run", "dependency")
@@ -370,7 +370,7 @@ func TestProgressNodeRejectsDependencyIdentityErrorsBeforeMutation(t *testing.T)
 }
 
 func TestSkippedTransitionExplanationReplayAndConflict(t *testing.T) {
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 19, 0, 0, 0, time.UTC)
 	id := invocationID("run-explanation", "target")
 	createNode(t, store, id, workflowruntime.NodePending, 0, now)
@@ -414,7 +414,7 @@ func TestSkippedTransitionExplanationReplayAndConflict(t *testing.T) {
 
 func TestBlockedTransitionDiagnosticRefreshContract(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 19, 30, 0, 0, time.UTC)
 	id := invocationID("run-blocked-refresh", "target")
 	createNode(t, store, id, workflowruntime.NodePending, 0, now)

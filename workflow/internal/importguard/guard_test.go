@@ -83,6 +83,21 @@ func TestWorkflowCoreDependencyGraph(t *testing.T) {
 	}
 }
 
+func TestEveryWorkflowPackageHasNoHadronInternalDependency(t *testing.T) {
+	root := moduleRoot(t)
+	dependencies := goList(t, root, "-deps", "-f", "{{.ImportPath}}", "./workflow/...")
+	var rejected []string
+	for _, dependency := range dependencies {
+		if pathWithin(dependency, hadronImportPath+"/internal") {
+			rejected = append(rejected, dependency)
+		}
+	}
+	if len(rejected) != 0 {
+		sort.Strings(rejected)
+		t.Fatalf("workflow public packages depend on Hadron internal packages: %s", strings.Join(rejected, ", "))
+	}
+}
+
 func TestForbiddenImportFixture(t *testing.T) {
 	root := moduleRoot(t)
 	fixture := filepath.Join(root, "workflow", "internal", "importguard", "testdata", "forbidden")

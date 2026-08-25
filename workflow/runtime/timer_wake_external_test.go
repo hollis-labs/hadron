@@ -10,7 +10,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
@@ -146,7 +146,7 @@ func TestConcurrentTimerWakeAndRunCancellationConverge(t *testing.T) {
 
 func TestTimerRecoveryOrdersEarliestActionAndRespectsLimit(t *testing.T) {
 	base := time.Date(2026, time.August, 24, 20, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	suspendSuccessfulTimerOnStore(t, store, "late", base, 30*time.Second, 0)
 	suspendSuccessfulTimerOnStore(t, store, "early", base, 10*time.Second, 0)
 	suspendSuccessfulTimerOnStore(t, store, "middle", base, 20*time.Second, 0)
@@ -308,7 +308,7 @@ func prepareSuccessfulTimer(t *testing.T, suffix string, base time.Time, wakeAft
 	return running
 }
 
-func suspendSuccessfulTimerOnStore(t *testing.T, store *runtimetest.Store, suffix string, base time.Time, wakeAfter, deadlineAfter time.Duration) workflowruntime.SuspendWaitResult {
+func suspendSuccessfulTimerOnStore(t *testing.T, store *inmemory.Store, suffix string, base time.Time, wakeAfter, deadlineAfter time.Duration) workflowruntime.SuspendWaitResult {
 	t.Helper()
 	invocation := invocationID("run-timer-order", "node-"+suffix)
 	createNode(t, store, invocation, workflowruntime.NodeReady, 0, base)
@@ -349,7 +349,7 @@ func suspendSuccessfulTimerOnStore(t *testing.T, store *runtimetest.Store, suffi
 	return result
 }
 
-func suspendTimeoutWaitOnStore(t *testing.T, store *runtimetest.Store, suffix string, base time.Time, timeoutAfter time.Duration) workflowruntime.SuspendWaitResult {
+func suspendTimeoutWaitOnStore(t *testing.T, store *inmemory.Store, suffix string, base time.Time, timeoutAfter time.Duration) workflowruntime.SuspendWaitResult {
 	t.Helper()
 	invocation := invocationID("run-timer-order", "node-"+suffix)
 	createNode(t, store, invocation, workflowruntime.NodeReady, 0, base)

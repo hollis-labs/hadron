@@ -36,3 +36,12 @@ not enter through an allowed import. Directories named `testdata` are ignored,
 which keeps the deliberately forbidden test fixture out of normal builds. The
 repository `make test` target includes all workflow packages and therefore runs
 the guard.
+
+The guard separately resolves the entire public `workflow/...` dependency
+graph, including concrete adapters, and rejects every Hadron `internal/...`
+dependency. It also compares exported declarations for every non-internal
+workflow package with [`public-api.txt`](public-api.txt). Refresh that snapshot
+only after reviewing the compatibility policy in
+[`docs/workflow-engine-adoption.md`](../docs/workflow-engine-adoption.md); the
+snapshot intentionally excludes documentation, source positions, function
+bodies, and unexported struct fields.

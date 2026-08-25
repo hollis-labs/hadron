@@ -11,7 +11,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/conformance"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -58,7 +58,7 @@ func runSchedulerFixture(ctx context.Context, fixture conformance.Fixture) error
 }
 
 func runSchedulerResourceFixture(ctx context.Context, input schedulerFixtureInput) error {
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 22, 0, 0, 0, time.UTC)
 	ids := []workflowruntime.NodeInvocationID{{RunID: "fixture-resource-a", NodeID: "work"}, {RunID: "fixture-resource-b", NodeID: "work"}}
 	for _, id := range ids {
@@ -89,7 +89,7 @@ func runSchedulerResourceFixture(ctx context.Context, input schedulerFixtureInpu
 }
 
 func runSchedulerPolicyFixture(ctx context.Context, input schedulerFixtureInput) error {
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 22, 30, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("fixture-policy-" + string(input.Completion))
 	plan := schedulerFixturePlan()

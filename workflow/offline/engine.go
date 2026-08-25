@@ -13,7 +13,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 	"github.com/hollis-labs/hadron/workflow/verification"
@@ -86,7 +86,7 @@ func (e *RunFailureError) Error() string {
 // fresh concurrency-safe in-memory store. It never interprets graph edges or
 // expressions independently of runtime coordinators.
 func Execute(ctx context.Context, manifest Manifest, options ExecuteOptions) (ExecutionResult, error) {
-	return ExecuteWithStore(ctx, manifest, options, runtimetest.NewStore())
+	return ExecuteWithStore(ctx, manifest, options, inmemory.NewStore())
 }
 
 // ExecuteWithStore runs the same embedded host loop against an injected

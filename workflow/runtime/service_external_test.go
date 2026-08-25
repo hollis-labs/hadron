@@ -10,7 +10,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 	"github.com/hollis-labs/hadron/workflow/verification"
@@ -170,7 +170,7 @@ func TestGeneratedServiceTeardownIsGlobalFinalizer(t *testing.T) {
 	}
 }
 
-func startServiceFixture(t *testing.T, suffix string, readyCheck *graph.VerificationSpec) (*runtimetest.Store, *durableServiceHost, *stepkind.MemoryRegistry, graph.Node, workflowruntime.ServiceSnapshot, time.Time) {
+func startServiceFixture(t *testing.T, suffix string, readyCheck *graph.VerificationSpec) (*inmemory.Store, *durableServiceHost, *stepkind.MemoryRegistry, graph.Node, workflowruntime.ServiceSnapshot, time.Time) {
 	t.Helper()
 	store, claim, node, base := dispatchFixture(t, suffix)
 	run, err := store.LoadRun(context.Background(), node.ID.RunID)
@@ -212,7 +212,7 @@ func serviceGraph(start graph.Node) graph.Graph {
 }
 
 type failServiceSuspendStore struct {
-	*runtimetest.Store
+	*inmemory.Store
 	err error
 }
 

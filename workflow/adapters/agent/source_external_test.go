@@ -16,7 +16,7 @@ import (
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -152,7 +152,7 @@ func TestCompiledFireAndForgetDispatchReturnsOrdinaryTypedCallHandle(t *testing.
 	if err := registry.Register(callKind); err != nil {
 		t.Fatal(err)
 	}
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, 8, 24, 15, 0, 0, 0, time.UTC)
 	if _, _, err := store.CreateRun(t.Context(), workflowruntime.CreateRunRequest{
 		ID: "parent-run", Plan: testPlanRef(), Status: workflowruntime.RunPending, StartIdempotencyKey: "fire-start", CreatedAt: now,

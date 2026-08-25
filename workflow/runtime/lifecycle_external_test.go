@@ -8,7 +8,7 @@ import (
 	"time"
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -102,7 +102,7 @@ func TestGenericNodeTransitionMatrix(t *testing.T) {
 
 func TestRunLifecycleEventsNoOpAndTerminalFencing(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 13, 0, 0, 0, time.UTC)
 	createRun(t, store, "run-lifecycle", now)
 
@@ -163,7 +163,7 @@ func TestRunLifecycleEventsNoOpAndTerminalFencing(t *testing.T) {
 
 func TestBlockedReasonReplayConflictAndTerminalNode(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 13, 0, 0, 0, time.UTC)
 	id := invocationID("run-blocked", "node")
 	createNode(t, store, id, workflowruntime.NodePending, 0, now)
@@ -224,7 +224,7 @@ func TestBlockedReasonReplayConflictAndTerminalNode(t *testing.T) {
 
 func TestAttemptLifecycleHistorySuspendResumeAndRetryReady(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 14, 0, 0, 0, time.UTC)
 	id := invocationID("run-attempt", "execute")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, now)
@@ -366,7 +366,7 @@ func TestAttemptLifecycleHistorySuspendResumeAndRetryReady(t *testing.T) {
 
 func TestFinishAttemptFailureIsAtomicAfterWaitResume(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 15, 0, 0, 0, time.UTC)
 	id := invocationID("run-waiting-attempt", "waiter")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, now)
@@ -449,7 +449,7 @@ func TestFinishAttemptFailureIsAtomicAfterWaitResume(t *testing.T) {
 
 func TestConcurrentRunTransitionCASProducesOneEvent(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 16, 0, 0, 0, time.UTC)
 	createRun(t, store, "run-concurrent-transition", now)
 	targets := []workflowruntime.RunStatus{workflowruntime.RunCanceled, workflowruntime.RunTimedOut}
@@ -487,7 +487,7 @@ func TestConcurrentRunTransitionCASProducesOneEvent(t *testing.T) {
 
 func TestSnapshotSavesCannotBypassLifecycle(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 17, 0, 0, 0, time.UTC)
 	createRun(t, store, "run-save-fence", now)
 	run, err := store.LoadRun(ctx, "run-save-fence")

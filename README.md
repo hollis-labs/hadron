@@ -87,6 +87,7 @@ pins, lazy mounts, and the graph-native tool families.
 | [MCP setup](docs/mcp-setup.md) | Token bootstrap, exposure profiles, discovery, and tools |
 | [Safety](docs/safety.md) | Identity, effects, secrets, redaction, and compatibility boundaries |
 | [Workflow development](docs/workflow-development.md) | Package ownership, host composition, adapters, conformance, and release checks |
+| [Embed the workflow engine](docs/workflow-engine-adoption.md) | Public Go boundary, minimal host, storage/timers, conformance, compatibility, and extraction criteria |
 | [Generated graph schema](workflow/graph/schema/README.md) | Authoritative JSON Schema and generation command |
 | [Architecture](docs/architecture/ARCHITECTURE.md) | Current graph-native system boundary |
 | [Beta status](docs/beta-status.md) | Implemented surface and current constraints |

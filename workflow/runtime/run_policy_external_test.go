@@ -9,7 +9,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -284,7 +284,7 @@ func TestRunPolicyConcurrentFailuresConvergeOnWinningTrigger(t *testing.T) {
 }
 
 func TestRunPolicyTypedNilStoresFailClosed(t *testing.T) {
-	var nilStore *runtimetest.Store
+	var nilStore *inmemory.Store
 	coordinator := workflowruntime.NewRunPolicyCoordinator(nilStore, nilStore, nilStore)
 	_, err := coordinator.HandleFailure(context.Background(), graph.Graph{}, invocationID("nil-run", "node"), "nil-policy", time.Now())
 	if !errors.Is(err, workflowruntime.ErrInvalidRunPolicy) {

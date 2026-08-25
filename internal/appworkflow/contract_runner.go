@@ -15,7 +15,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 	"github.com/hollis-labs/hadron/workflow/verification"
@@ -99,7 +99,7 @@ type contractObservation struct {
 type contractExecution struct {
 	plan      *compile.ExecutionPlan
 	recovery  runtime.RecoveryPlan
-	store     *runtimetest.Store
+	store     *inmemory.Store
 	registry  *stepkind.MemoryRegistry
 	verifiers verification.Registry
 	mocks     *contractMockCatalog
@@ -117,7 +117,7 @@ func executeContractRepetition(ctx context.Context, plan *compile.ExecutionPlan,
 	}
 	runID := runtime.RunID("contract-" + values.SHA256Digest([]byte(plan.Digest + "\x00" + contractCase.Name))[7:31])
 	base := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	caller := make(map[string]any, len(contractCase.Inputs))
 	for name, value := range contractCase.Inputs {
 		caller[name] = value

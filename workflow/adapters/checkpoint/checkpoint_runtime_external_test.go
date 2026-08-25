@@ -8,7 +8,7 @@ import (
 	checkpointadapter "github.com/hollis-labs/hadron/workflow/adapters/checkpoint"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
@@ -107,7 +107,7 @@ func TestCheckpointDispatcherResumeReplayRestartAndTimeout(t *testing.T) {
 }
 
 type checkpointRuntime struct {
-	store    *runtimetest.Store
+	store    *inmemory.Store
 	registry *stepkind.MemoryRegistry
 	runID    workflowruntime.RunID
 	node     graph.Node
@@ -116,7 +116,7 @@ type checkpointRuntime struct {
 
 func newCheckpointRuntime(t *testing.T, name string) checkpointRuntime {
 	t.Helper()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	runID := workflowruntime.RunID(name)
 	plan := workflowruntime.PlanRef{ID: "checkpoint-plan", Version: "v1", Digest: values.SHA256Digest([]byte("checkpoint-plan")), SchemaVersion: "workflow.execution-plan/v1"}
 	if _, _, err := store.CreateRun(t.Context(), workflowruntime.CreateRunRequest{

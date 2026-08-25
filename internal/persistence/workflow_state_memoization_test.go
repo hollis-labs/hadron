@@ -11,7 +11,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -31,7 +31,7 @@ func TestWorkflowMemoEntryOrderingParity(t *testing.T) {
 		name  string
 		store func(*testing.T) memoOrderingStore
 	}{
-		{name: "runtimetest", store: func(*testing.T) memoOrderingStore { return runtimetest.NewStore() }},
+		{name: "inmemory", store: func(*testing.T) memoOrderingStore { return inmemory.NewStore() }},
 		{name: "sqlite", store: func(t *testing.T) memoOrderingStore {
 			_, state := openWorkflowStateTest(t, filepath.Join(t.TempDir(), "memo-ordering.db"))
 			return state

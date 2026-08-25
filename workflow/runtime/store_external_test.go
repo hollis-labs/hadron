@@ -7,13 +7,13 @@ import (
 	"time"
 
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
 func TestRunCASIdempotencyAndDefensiveCopies(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Now()
 	inputSet := testValueSet(t, map[string]any{"items": []any{"one", "two"}})
 	inputRef, err := store.SaveValues(ctx, workflowruntime.SaveValuesRequest{
@@ -80,7 +80,7 @@ func TestRunCASIdempotencyAndDefensiveCopies(t *testing.T) {
 
 func TestNodePersistenceDefensiveCopies(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	id := invocationID("run-1", "execute")
 	createRun(t, store, id.RunID, now)
@@ -109,7 +109,7 @@ func TestNodePersistenceDefensiveCopies(t *testing.T) {
 
 func TestPlanCachePinsAndExternalActivation(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	plan := testPlan()
 	if err := store.RecordPlan(ctx, plan); err != nil {

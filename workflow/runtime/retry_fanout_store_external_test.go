@@ -12,14 +12,14 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
 func TestRetryActivationClosesAttemptReleasesClaimAndSurvivesRecovery(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 15, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("run-retry-durable")
 	id := invocationID(runID, "fetch")
@@ -72,7 +72,7 @@ func TestRetryActivationClosesAttemptReleasesClaimAndSurvivesRecovery(t *testing
 
 func TestRetryCoordinatorSchedulerFailureKeepsDurableActivationRecoverable(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 15, 10, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("run-retry-scheduler-failure")
 	id := invocationID(runID, "fetch")
@@ -105,7 +105,7 @@ func TestRetryCoordinatorSchedulerFailureKeepsDurableActivationRecoverable(t *te
 
 func TestRunCancellationCancelsRetryAndFencesActivationAndClaims(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 15, 15, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("run-retry-canceled")
 	id := invocationID(runID, "fetch")
@@ -155,7 +155,7 @@ func TestRunCancellationCancelsRetryAndFencesActivationAndClaims(t *testing.T) {
 
 func TestFanOutClaimSlotsPersistAcrossWaitAndTypedItemsRecover(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 15, 30, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("run-fanout")
 	parent := invocationID(runID, "bulk")
@@ -254,7 +254,7 @@ func TestFanOutClaimSlotsPersistAcrossWaitAndTypedItemsRecover(t *testing.T) {
 
 func TestFanOutExpandPersistsSyntheticAndEvaluatedNodeInputs(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 16, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("run-fanout-input-bindings")
 	parent := invocationID(runID, "bulk")
@@ -319,7 +319,7 @@ func TestFanOutExpandPersistsSyntheticAndEvaluatedNodeInputs(t *testing.T) {
 
 func TestFanOutFailFastFencesAndCancelsUnstartedItems(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 16, 30, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("run-fanout-fail-fast")
 	parent := invocationID(runID, "matrix")
@@ -414,7 +414,7 @@ func TestFanOutToleranceCountAndPercentageBoundaries(t *testing.T) {
 
 func TestCompleteFanOutCannotMutateTerminalRun(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 16, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID("fanout-terminal-run")
 	parent := invocationID(runID, "bulk")

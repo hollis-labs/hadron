@@ -75,9 +75,10 @@ func (f RunnerFunc) Run(ctx context.Context, fixture Fixture) error {
 // Factory creates an isolated runner for one fixture invocation.
 type Factory func() (Runner, error)
 
-// Host supplies factories for all conformance suites. These factories are test
-// seams, not production workflow host or runtime contracts.
-type Host interface {
+// RequiredHost supplies factories for the stable required conformance suites.
+// These factories are test seams, not production workflow host or runtime
+// contracts.
+type RequiredHost interface {
 	CompilerFactory() Factory
 	StateStoreFactory() Factory
 	SchedulerFactory() Factory
@@ -85,8 +86,22 @@ type Host interface {
 	StepKindRegistryFactory() Factory
 }
 
-// RunAll invokes every conformance suite using one application-neutral host.
-func RunAll(t *testing.T, store FixtureStore, host Host) {
+// Host is the original required-suite host contract.
+//
+// Deprecated: use RequiredHost for RunRequired or CompleteHost for RunComplete.
+type Host = RequiredHost
+
+// CompleteHost supplies factories for every required and optional conformance
+// family published by this package.
+type CompleteHost interface {
+	RequiredHost
+	VerificationFactory() Factory
+	MemoizationFactory() Factory
+}
+
+// RunRequired invokes the stable required conformance suite set using one
+// application-neutral host.
+func RunRequired(t *testing.T, store FixtureStore, host RequiredHost) {
 	t.Helper()
 	if host == nil {
 		t.Fatal("conformance: host is nil")
@@ -110,6 +125,32 @@ func RunAll(t *testing.T, store FixtureStore, host Host) {
 	t.Run("step-kind-registry", func(t *testing.T) {
 		StepKindRegistrySuite(t, store, host.StepKindRegistryFactory())
 	})
+}
+
+// RunComplete invokes every conformance suite published by this package,
+// including verification and memoization.
+func RunComplete(t *testing.T, store FixtureStore, host CompleteHost) {
+	t.Helper()
+	if host == nil {
+		t.Fatal("conformance: complete host is nil")
+	}
+	RunRequired(t, store, host)
+	t.Run("verification", func(t *testing.T) {
+		VerificationSuite(t, store, host.VerificationFactory())
+	})
+	t.Run("memoization", func(t *testing.T) {
+		MemoizationSuite(t, store, host.MemoizationFactory())
+	})
+}
+
+// RunAll invokes the original required conformance suite set.
+//
+// Deprecated: its historical name predates optional verification and
+// memoization families. Use RunRequired for that exact compatibility contract
+// or RunComplete for the exhaustive current suite set.
+func RunAll(t *testing.T, store FixtureStore, host Host) {
+	t.Helper()
+	RunRequired(t, store, host)
 }
 
 // CompilerSuite runs graph-validation and source-map fixtures.
@@ -158,15 +199,15 @@ func StepKindRegistrySuite(t *testing.T, store FixtureStore, factory Factory) {
 }
 
 // VerificationSuite runs deterministic decision, literal evidence, retry,
-// catch, and fail-closed reviewer fixtures without widening Host for callers
-// that have not yet adopted the optional node modifier.
+// catch, and fail-closed reviewer fixtures independently of the combined host
+// entry points.
 func VerificationSuite(t *testing.T, store FixtureStore, factory Factory) {
 	t.Helper()
 	runSuite(t, "verification", store, factory, VerificationFixtures)
 }
 
 // MemoizationSuite runs production memo entry, pin binding, expiry, and effect
-// safety fixtures without adding a transport-specific Host method.
+// safety fixtures independently of the combined host entry points.
 func MemoizationSuite(t *testing.T, store FixtureStore, factory Factory) {
 	t.Helper()
 	runSuite(t, "memoization", store, factory, MemoizationFixtures)

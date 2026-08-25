@@ -10,7 +10,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -639,9 +639,9 @@ func TestStepDispatcherFinalizeFailureIsNonReversingStructuredWarning(t *testing
 	}
 }
 
-func dispatchFixture(t *testing.T, run string) (*runtimetest.Store, workflowruntime.ReadyClaim, workflowruntime.NodeInvocationSnapshot, time.Time) {
+func dispatchFixture(t *testing.T, run string) (*inmemory.Store, workflowruntime.ReadyClaim, workflowruntime.NodeInvocationSnapshot, time.Time) {
 	t.Helper()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	now := time.Date(2026, time.August, 24, 14, 0, 0, 0, time.UTC)
 	runID := workflowruntime.RunID(run)
 	createRun(t, store, runID, now)

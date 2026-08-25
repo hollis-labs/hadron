@@ -3,7 +3,8 @@
 //
 // Execution deliberately uses the ordinary runtime binding, recovery,
 // ready-queue, dispatch, and output-finalization contracts. The current
-// in-memory durable implementation is provided by runtime/runtimetest; it is
+// process-lifetime implementation is provided by runtime/inmemory; it is
 // encapsulated here so generated artifacts do not acquire a second scheduler
-// or reimplement graph semantics.
+// or reimplement graph semantics. Hosts that promise restart recovery must
+// inject durable storage through ExecuteWithStore.
 package offline

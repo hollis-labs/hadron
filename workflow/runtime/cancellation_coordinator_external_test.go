@@ -8,7 +8,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 )
@@ -226,7 +226,7 @@ func TestCancellationCoordinatorExplicitExternalAndUnsupportedRecovery(t *testin
 }
 
 func TestCancellationCoordinatorPropagatesDirectAndRequestCancelChildren(t *testing.T) {
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, time.August, 24, 18, 0, 0, 0, time.UTC)
 	parent, directChild := workflowruntime.RunID("parent"), workflowruntime.RunID("direct-child")
 	requestedChild, terminalChild := workflowruntime.RunID("requested-child"), workflowruntime.RunID("terminal-child")

@@ -12,7 +12,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 )
 
 func TestBuildSchedulerRequirementsKeepsDimensionsIndependent(t *testing.T) {
@@ -62,7 +62,7 @@ func TestBuildSchedulerRequirementsKeepsDimensionsIndependent(t *testing.T) {
 
 func TestSchedulerAdmissionIsAtomicInspectableAndLeakFree(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 20, 0, 0, 123, time.UTC)
 	first := invocationID("resource-run-a", "first")
 	second := invocationID("resource-run-b", "second")
@@ -160,7 +160,7 @@ func TestSchedulerAdmissionIsAtomicInspectableAndLeakFree(t *testing.T) {
 
 func TestSchedulerAdmissionErrorRollsBackEveryInMemoryProjection(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 20, 20, 0, 0, time.UTC)
 	id := invocationID("resource-rollback", "work")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, base.Add(10*time.Second))
@@ -191,7 +191,7 @@ func TestSchedulerAdmissionContentionAndFanOutOccupancy(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 8, 24, 20, 30, 0, 0, time.UTC)
 	t.Run("global_and_cross_run", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		const contenders = 32
 		ids := make([]workflowruntime.NodeInvocationID, contenders)
 		for index := range ids {
@@ -232,7 +232,7 @@ func TestSchedulerAdmissionContentionAndFanOutOccupancy(t *testing.T) {
 	})
 
 	t.Run("waiting_item_keeps_logical_slot", func(t *testing.T) {
-		store := runtimetest.NewStore()
+		store := inmemory.NewStore()
 		runID := workflowruntime.RunID("resource-fanout")
 		parent := invocationID(runID, "bulk")
 		createRun(t, store, runID, base)
@@ -277,7 +277,7 @@ func TestSchedulerResourcesReleaseOnRetryAndEveryAttemptTerminal(t *testing.T) {
 	base := time.Date(2026, 8, 24, 20, 45, 0, 0, time.UTC)
 	for _, status := range []workflowruntime.NodeStatus{workflowruntime.NodeSucceeded, workflowruntime.NodeFailed, workflowruntime.NodeTimedOut, workflowruntime.NodeCrashed} {
 		t.Run(string(status), func(t *testing.T) {
-			store := runtimetest.NewStore()
+			store := inmemory.NewStore()
 			id := invocationID(workflowruntime.RunID("release-"+status), "work")
 			createNode(t, store, id, workflowruntime.NodeReady, 0, base)
 			requirements := resourceRequirements(t, id.RunID, workflowruntime.SchedulerLimits{Workers: 2, Capabilities: map[string]int{"network": 1}}, workflowruntime.SchedulerDemand{Capabilities: []string{"network"}})
@@ -308,7 +308,7 @@ func TestSchedulerResourcesReleaseOnRetryAndEveryAttemptTerminal(t *testing.T) {
 		})
 	}
 
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	id := invocationID("release-retry", "work")
 	createNode(t, store, id, workflowruntime.NodeReady, 0, base)
 	requirements := resourceRequirements(t, id.RunID, workflowruntime.SchedulerLimits{Workers: 2}, workflowruntime.SchedulerDemand{})
@@ -339,7 +339,7 @@ func TestSchedulerResourcesReleaseOnRetryAndEveryAttemptTerminal(t *testing.T) {
 
 func TestResourceReadyQueuePreservesFIFOAndFairnessHooks(t *testing.T) {
 	ctx := context.Background()
-	store := runtimetest.NewStore()
+	store := inmemory.NewStore()
 	base := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
 	low := invocationID("fair-run-a", "low")
 	high := invocationID("fair-run-b", "high")
@@ -390,11 +390,11 @@ func TestResourceReadyQueuePreservesFIFOAndFairnessHooks(t *testing.T) {
 func TestResourceReadyQueueRejectsMissingAndTypedNilAdmission(t *testing.T) {
 	now := time.Date(2026, 8, 24, 21, 30, 0, 0, time.UTC)
 	request := workflowruntime.ReadyClaimRequest{Owner: "worker", Token: "token", IdempotencyKey: "nil-admission", Now: now, LeaseUntil: now.Add(time.Minute)}
-	if _, _, err := workflowruntime.NewResourceReadyQueueCoordinator(runtimetest.NewStore(), nil, nil).ClaimNext(context.Background(), request); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
+	if _, _, err := workflowruntime.NewResourceReadyQueueCoordinator(inmemory.NewStore(), nil, nil).ClaimNext(context.Background(), request); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
 		t.Fatalf("nil admission = %v", err)
 	}
 	var typedNil workflowruntime.SchedulerAdmissionPolicyFunc
-	if _, _, err := workflowruntime.NewResourceReadyQueueCoordinator(runtimetest.NewStore(), nil, typedNil).ClaimNext(context.Background(), request); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
+	if _, _, err := workflowruntime.NewResourceReadyQueueCoordinator(inmemory.NewStore(), nil, typedNil).ClaimNext(context.Background(), request); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
 		t.Fatalf("typed-nil admission = %v", err)
 	}
 }

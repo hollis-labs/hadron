@@ -19,6 +19,26 @@ type fakeHost struct {
 	calls *int
 }
 
+type completeFakeHost struct{ fakeHost }
+
+func (h completeFakeHost) VerificationFactory() conformance.Factory {
+	return func() (conformance.Runner, error) {
+		return conformance.RunnerFunc(func(ctx context.Context, fixture conformance.Fixture) error {
+			(*h.calls)++
+			return runVerificationFixture(ctx, fixture)
+		}), nil
+	}
+}
+
+func (h completeFakeHost) MemoizationFactory() conformance.Factory {
+	return func() (conformance.Runner, error) {
+		return conformance.RunnerFunc(func(ctx context.Context, fixture conformance.Fixture) error {
+			(*h.calls)++
+			return runMemoFixture(ctx, fixture)
+		}), nil
+	}
+}
+
 func (h fakeHost) CompilerFactory() conformance.Factory {
 	return h.factory()
 }
@@ -169,6 +189,16 @@ func TestExternalHostRunsAllSuites(t *testing.T) {
 	conformance.RunAll(t, conformance.EmbeddedFixtures(), fakeHost{calls: &calls})
 
 	const wantCalls = 44
+	if calls != wantCalls {
+		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
+	}
+}
+
+func TestExternalHostRunsCompleteSuites(t *testing.T) {
+	calls := 0
+	conformance.RunComplete(t, conformance.EmbeddedFixtures(), completeFakeHost{fakeHost{calls: &calls}})
+
+	const wantCalls = 54
 	if calls != wantCalls {
 		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
 	}
