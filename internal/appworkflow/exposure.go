@@ -696,7 +696,19 @@ func definitionAllowedBySession(session WorkflowExposureSession, record registry
 }
 
 func exactExposurePlan(record registry.WorkflowRecord, plan *compile.ExecutionPlan) error {
-	if plan == nil || plan.Definition.Kind != "workflow" || plan.Definition.ID != record.Name || plan.Definition.Version != record.Version || plan.Definition.Digest != record.Digest || plan.Definition.Authority != record.Authority || plan.Definition.Locator != record.Provenance.Locator || plan.Definition.Provenance == nil || plan.Graph.ID != record.Name || plan.Graph.Namespace != record.Namespace || plan.Graph.Version != record.Version || record.PlanDigest != "" && plan.Digest != record.PlanDigest {
+	sourceID := record.SourceDefinitionID()
+	expectedName := sourceID
+	if record.Namespace != "" {
+		expectedName = record.Namespace + "/" + sourceID
+	}
+	if plan == nil || graph.ValidateID(sourceID) != nil || record.Name != expectedName ||
+		plan.ID != sourceID || plan.Definition.Kind != "workflow" || plan.Definition.ID != sourceID ||
+		plan.Definition.Version != record.Version || plan.Definition.Digest != record.Digest ||
+		plan.Definition.Authority != record.Authority || plan.Definition.Locator != record.Provenance.Locator ||
+		plan.Definition.Provenance == nil || plan.Graph.ID != sourceID || plan.Graph.Namespace != record.Namespace ||
+		plan.Graph.Version != record.Version || len(plan.SourceDigests) != 1 ||
+		plan.SourceDigests[0].Format != record.SourceFormat || plan.SourceDigests[0].Digest != record.Digest ||
+		record.PlanDigest != "" && plan.Digest != record.PlanDigest {
 		return errors.New("resolved workflow does not match its immutable catalog definition")
 	}
 	expectedProvenance := record.Provenance
@@ -707,7 +719,9 @@ func exactExposurePlan(record registry.WorkflowRecord, plan *compile.ExecutionPl
 	if record.TrustClass != "" {
 		expectedProvenance.Metadata["trust_class"] = record.TrustClass
 	}
-	if !reflect.DeepEqual(*plan.Definition.Provenance, expectedProvenance) {
+	if !reflect.DeepEqual(*plan.Definition.Provenance, expectedProvenance) ||
+		!reflect.DeepEqual(plan.Provenance, expectedProvenance) ||
+		!reflect.DeepEqual(plan.Graph.Provenance, expectedProvenance) {
 		return errors.New("resolved workflow does not match its immutable catalog definition")
 	}
 	return nil

@@ -12,6 +12,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
+	"github.com/hollis-labs/hadron/workflow/authoring"
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
@@ -207,6 +208,16 @@ func TestWorkflowExposureNamespaceSearchScopeAndCorruptionBoundaries(t *testing.
 		t.Fatalf("namespace-substituted plan was authorized: %v", searchErr)
 	}
 	fixture.definitions.plans["team/review/summarize"].Graph.Namespace = "team/review"
+	localID := fixture.catalog.records[0].SourceDefinitionID()
+	fixture.definitions.plans["team/review/summarize"].ID = fixture.catalog.records[0].Name
+	fixture.definitions.plans["team/review/summarize"].Definition.ID = fixture.catalog.records[0].Name
+	fixture.definitions.plans["team/review/summarize"].Graph.ID = fixture.catalog.records[0].Name
+	if _, searchErr := fixture.service.Search(ctx, session, "summarize", 10); searchErr == nil || errors.Is(searchErr, appworkflow.ErrWorkflowHidden) {
+		t.Fatalf("qualified catalog name was accepted as source-local plan identity: %v", searchErr)
+	}
+	fixture.definitions.plans["team/review/summarize"].ID = localID
+	fixture.definitions.plans["team/review/summarize"].Definition.ID = localID
+	fixture.definitions.plans["team/review/summarize"].Graph.ID = localID
 	fixture.definitions.plans["team/review/summarize"].Definition.Kind = "file"
 	fixture.definitions.plans["team/review/summarize"].Definition.Locator = "/substituted.workflow.yaml"
 	if _, searchErr := fixture.service.Search(ctx, session, "summarize", 10); searchErr == nil || errors.Is(searchErr, appworkflow.ErrWorkflowHidden) {
@@ -235,9 +246,10 @@ func TestWorkflowExposureBudgetCollisionAndAdditionalAuthoritiesFailClosed(t *te
 	}
 
 	fixture := newExposureFixture(t)
+	truncatedToolPrefix := strings.Repeat("a", 108)
 	fixture.catalog.records = append(fixture.catalog.records,
-		exposureRecord("team/review/a_b", "team/review", false),
-		exposureRecord("team/review/a/b", "team/review", false),
+		exposureRecord("team/review/"+truncatedToolPrefix+"-one", "team/review", false),
+		exposureRecord("team/review/"+truncatedToolPrefix+"-two", "team/review", false),
 	)
 	for _, record := range fixture.catalog.records[len(fixture.catalog.records)-2:] {
 		fixture.definitions.plans[record.Name] = exposurePlan(record, "noop", graph.EffectCompute)
@@ -387,8 +399,9 @@ func exposureRecord(name, namespace string, published bool) registry.WorkflowRec
 	digest := values.SHA256Digest([]byte(name))
 	return registry.WorkflowRecord{
 		Name: name, Namespace: namespace, Version: "v1", Digest: digest, Published: published,
+		SourceFormat: graph.SourceWorkflow, SourceSchemaID: authoring.WorkflowSourceSchemaID, SourceSchemaVersion: authoring.WorkflowSourceSchemaVersion,
 		Authority: "registry.test", TrustClass: "project", PlanDigest: values.SHA256Digest([]byte("plan-" + name)),
-		Provenance: graph.Provenance{Origin: "fixture", Locator: "registry://" + name + "/v1", Authority: "registry.test", Revision: "v1"},
+		Provenance: graph.Provenance{Origin: "fixture", Locator: "registry://" + name + "/v1", Authority: "registry.test", Revision: "v1", Digest: digest},
 	}
 }
 
@@ -399,10 +412,12 @@ func exposureDefinitionRef(r registry.WorkflowRecord) graph.DefinitionRef {
 func exposurePlan(record registry.WorkflowRecord, kind string, effect graph.Effect) *workflowcompile.ExecutionPlan {
 	provenance := record.Provenance
 	provenance.Metadata = graph.Metadata{"trust_class": record.TrustClass}
-	definition := graph.DefinitionRef{Authority: record.Authority, Kind: "workflow", ID: record.Name, Locator: provenance.Locator, Version: record.Version, Digest: record.Digest, Provenance: &provenance}
+	sourceID := record.SourceDefinitionID()
+	definition := graph.DefinitionRef{Authority: record.Authority, Kind: "workflow", ID: sourceID, Locator: provenance.Locator, Version: record.Version, Digest: record.Digest, Provenance: &provenance}
 	return &workflowcompile.ExecutionPlan{
-		SchemaVersion: workflowcompile.ExecutionPlanSchemaVersion, ID: record.Name, Digest: values.SHA256Digest([]byte("plan-" + record.Name)), Definition: definition,
-		Graph: graph.Graph{ID: record.Name, Namespace: record.Namespace, Version: record.Version, Digest: values.SHA256Digest([]byte("graph-" + record.Name)),
+		SchemaVersion: workflowcompile.ExecutionPlanSchemaVersion, ID: sourceID, Digest: values.SHA256Digest([]byte("plan-" + record.Name)), Definition: definition,
+		Provenance: provenance, SourceDigests: []workflowcompile.SourceDigest{{Format: record.SourceFormat, Digest: record.Digest}},
+		Graph: graph.Graph{ID: sourceID, Namespace: record.Namespace, Version: record.Version, Digest: values.SHA256Digest([]byte("graph-" + record.Name)), Provenance: provenance,
 			Inputs: []graph.InputSpec{
 				{Name: "message", Description: "Message", Required: true, Schema: graph.Schema{"type": "string"}},
 				{Name: "tone", Required: true, Default: &graph.Binding{Kind: graph.BindingLiteral, Literal: "brief"}, Schema: graph.Schema{"type": "string"}},
