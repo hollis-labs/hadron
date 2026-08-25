@@ -72,7 +72,8 @@ func TestActivationExternalUsesHostStartPathAndReplaysStableFire(t *testing.T) {
 		RegistrationID: registration.ID, IdempotencyKey: "delivery-one", OccurredAt: now, ReceivedAt: now,
 		Payload: map[string]any{"message": "from webhook"}, SourceRef: "delivery-source",
 	}
-	if _, err := service.ActivateExternal(nil, request); !errors.Is(err, appworkflow.ErrInvalidActivation) { //nolint:staticcheck // Explicit exported-boundary nil-context regression.
+	//lint:ignore SA1012 Explicit exported-boundary nil-context regression.
+	if _, err := service.ActivateExternal(nil, request); !errors.Is(err, appworkflow.ErrInvalidActivation) { //nolint:staticcheck // Native staticcheck and golangci-lint use separate directive syntaxes.
 		t.Fatalf("nil-context external activation = %v", err)
 	}
 	future := request
