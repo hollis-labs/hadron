@@ -1,0 +1,1 @@
+function e(e){return e.split(/[/\\]/).slice(-2).join(`/`)}function t(e){let t=e.split(/[/\\]/);return t[t.length-1]||e}export{e as n,t};
