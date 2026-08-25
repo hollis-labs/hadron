@@ -1269,3 +1269,26 @@ defaulted input can bind in later generations.
 | independent source review `880241b` | contract, host composition, migration/CAS, recovery, timestamp, redaction, child identity, failure convergence, event ceiling, and continuation-bindability audit | pass after required/defaulted/optional continuation inputs were hardened |
 | integration `53217b3` | seven-package focused suite at `-count=3`; same suite under race detector | pass |
 | integration `53217b3` | `go test -count=1 ./...` | pass |
+
+## W06-T10
+
+Reviewed the transport-neutral browser cutover, same-origin workflow commands,
+opaque run-ID escaping and mutation idempotency, embedded SPA route/cache/path
+behavior, optional lifecycle-only launcher, retained xyflow authoring and run
+inspection, explicit upstream registry/exposure gaps, release packaging, and
+complete removal of Wails bindings and Go dependencies. Source commit
+`c1580b41` was integrated as `2fdb665`; hygiene, dependency-security, and
+generated-scan hardening landed as `e2ee5ee`, `225d113`, and `bc3b589`.
+
+Live `WorkflowOperations`, `WorkflowRunReadOperations`, and HTTP authentication
+composition remains assigned to W06-T06. Until then, the UI is served by the
+real daemon and its request contracts are browser-tested, while uncomposed live
+graph operations fail closed instead of falling back to legacy semantics.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `c1580b41` | frontend unit/typecheck/Biome/ESLint/build; focused embedded-web Go suites; vet/golangci; full repository; build/install/release packaging and HTTP smoke | pass; zero task-local issues |
+| source worktree `c1580b41` | `npm run test:e2e` with installed Chromium | pass, 3/3 graph-edit, waiting-run resume, registry/exposure fact, and replay scenarios |
+| integration `2fdb665` plus hardening through `bc3b589` | 41 frontend unit tests; typecheck; Biome; ESLint; Vite 8 production build; focused app/api/webui Go suite | pass |
+| integration `225d113` | fresh `npm ci`; `npm audit --audit-level=low` | pass; zero vulnerabilities and no dependency overrides |
+| integration `bc3b589` | repeated production build; exact Wails reference scan; `npm run test:e2e`; `go test -count=1 ./...`; committed diff/status checks | pass; byte-stable embedded bundle, 3/3 Chromium scenarios, clean full repository suite |

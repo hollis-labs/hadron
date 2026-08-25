@@ -61,3 +61,7 @@
 | 57 | W06-T02-H1 | root integration review | `99de732` | Hadron | accepted after escaped-segment routing preserved opaque run IDs containing path separators without weakening exact action matching |
 | 58 | W07-T04 | `e52e041` | `3a88a51` | Hadron | accepted after bounded local-schema expansion, runtime-bound unsafe idempotency, secret-backed bearer/basic/header credentials, credential-channel rejection, conservative effects, and immutable generated catalog hardening |
 | 59 | W07-T08 | `880241b` | `53217b3` | Hadron | accepted after exact source-derived reactor identity, serialized ordinary-wait delivery, bounded bindable continuation state, safe named controls, non-durable confinement, child-terminal bridging, and recursion-fenced failure hooks |
+| 60 | W06-T10 | `c1580b41` | `2fdb665` | Hadron | accepted after Wails removal, same-origin HTTP workflow routing, embedded SPA delivery, thin launcher isolation, accessible navigation, controlled-xyflow stabilization, and real-browser acceptance coverage |
+| 61 | W06-T10-H1 | `9c8f13b` | `e2ee5ee` | Hadron | preserved ignored legacy desktop build artifacts without allowing them into source control |
+| 62 | W06-T10-H2 | `2238c756` | `225d113` | Hadron | resolved the complete frontend dependency advisory set through Vite/plugin and shadcn toolchain upgrades with no overrides |
+| 63 | W06-T10-H3 | root integration review | `bc3b589` | Hadron | excluded the obsolete nested frontend bundle from Tailwind and source scans, restoring byte-stable generated assets on main |
