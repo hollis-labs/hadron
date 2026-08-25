@@ -53,7 +53,7 @@ When sources differ, use this order:
 
 1. Current user instructions and the planning assumptions in
    `docs/planning/workflow-engine-future-state/README.md`.
-2. Accepted ADRs 0006 through 0012.
+2. Accepted ADRs 0006 through 0013.
 3. `docs/architecture/workflow-engine-future-state/`.
 4. The coverage matrix and task specifications.
 5. `docs/architecture/HADRON_DESIRED_FUTURE_STATE.md`,
@@ -95,9 +95,10 @@ create or extract a separate shared workflow repository in this execution.
 Wave 06 is the initial engine release gate. It is a milestone, not permission
 to silently discard Wave 07. After Wave 06 passes, continue with eligible Wave
 07 tasks unless the user explicitly defers them. Respect each Wave 07 entry
-criterion. W07-T10 cannot begin until its compensation ADR is approved by the
-owner. For this orchestration session, all 68 indexed tasks are in the execution
-queue; the `later` label controls sequence, not whether the work exists.
+criterion. W07-T10's compensation gate was satisfied by accepted ADR 0013 on
+2026-08-25. For this orchestration session, all 68 indexed tasks are in the
+execution queue; the `later` label controls sequence, not whether the work
+exists.
 
 ## Critical State Notes (Read Before Starting)
 
@@ -116,7 +117,7 @@ queue; the `later` label controls sequence, not whether the work exists.
   coverage. Do not pull them into earlier public contracts unless a dependency
   requires it and the plan is updated first.
 - The open-decision register contains recorded decisions despite its historical
-  filename. ADRs 0006-0012 are the durable authority for accepted rules.
+  filename. ADRs 0006-0013 are the durable authority for accepted rules.
 
 ## Decisions Already Locked
 
@@ -142,6 +143,10 @@ Do not reopen these during implementation:
   `ExecutionTarget` owns compute, workspace, lease, and isolation.
 - **Sibling adoption is downstream-owned.** This plan delivers contracts and
   an adoption kit, not cross-application implementation or coordination.
+- **Compensation is graph-visible and durable.** ADR 0013 selects dormant
+  graph-node handlers, a per-run saga ledger, reverse-dependency unwind,
+  separate rollback outcomes, child-owned ledgers, and compensation before
+  finalizers.
 
 ## Work Breakdown And Exit Gates
 
@@ -268,7 +273,7 @@ document them. Ask the owner when a discovery would:
 - alter a public contract in a way not already permitted by the task;
 - remove or materially defer a covered capability or release criterion;
 - require a destructive or irreversible migration;
-- select compensation semantics for W07-T10; or
+- contradict ADR 0013's accepted compensation semantics; or
 - leave no meaningful eligible work after concrete debugging and verification
   attempts have established a blocker.
 
@@ -284,7 +289,8 @@ or task authority already answers.
 - Creating or extracting a new shared workflow repository.
 - Treating archived blueprint/pipeline behavior as a public compatibility
   requirement.
-- Implementing W07-T10 before its owner-approved ADR.
+- Product-specific compensation actions or policy outside the application-neutral
+  engine contract selected by ADR 0013.
 
 Capture newly discovered out-of-scope work with enough evidence for a later
 session, but do not let it expand this execution. Use an existing Hadron project
@@ -337,7 +343,7 @@ Do not invent tracker IDs or revive superseded Clockwork coordination.
    or names a limitation touched by the first eligible tasks, reconcile it
    before dispatch.
 5. Read the plan README and orchestrator handoff front to back, then read the
-   coverage matrix and ADRs 0006 through 0012.
+   coverage matrix and ADRs 0006 through 0013.
 6. Create the dated tracking root and initialize the task/dependency ledger from
    the README index.
 7. Identify the dependency-ready Wave 00 tasks and ownership conflicts.

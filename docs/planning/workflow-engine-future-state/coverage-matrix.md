@@ -12,8 +12,8 @@ the executable task plan. `Implemented` means integrated evidence satisfies the
 capability. `Superseded` means a later accepted architecture decision
 intentionally replaced the source statement. `Downstream` means the engine
 contract is delivered here but another application owns its later adoption.
-`Owner-gated` is temporary and prevents full-plan completion until the required
-decision is approved and implemented.
+`Eligible` is temporary and prevents full-plan completion until the remaining
+approved task is implemented.
 
 ## Supersession Rule
 
@@ -74,7 +74,7 @@ or the detailed architecture made a later choice. In particular:
 | Runtime `for_each`, bounded fan-out, per-item attempts/output/error | Implemented | W03-T04 |
 | Effect-aware retry, backoff, idempotency, cancellation, and timeout taxonomy | Implemented | W01-T05, W03-T04, W04-T01 |
 | Crash recovery and replay from a selected node using journaled outputs | Implemented | W03-T06 |
-| Compensation/rollback as an application-neutral design input | Owner-gated | W07-T10 |
+| Compensation/rollback as an application-neutral design input | Eligible | W07-T10 |
 
 ## Waits And Timed Activation
 

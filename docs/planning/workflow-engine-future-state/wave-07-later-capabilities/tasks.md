@@ -331,10 +331,11 @@ for workflows whose materializing or mutating nodes need explicit rollback.
 **Entry criteria:** catch/finally, effects, child calls, typed outputs, and
 idempotency policy are stable.
 
-**Decision gate:** before implementation, produce an ADR selecting compensation
-registration, ordering, failure policy, persistence, replay, and cancellation
-semantics. The orchestrator must obtain owner approval because this choice is
-left open by the source architecture.
+**Decision gate:** resolved by
+[ADR 0013](../../../architecture/adr/0013-durable-graph-visible-compensation.md),
+approved on 2026-08-25. Implementation must preserve its compensation
+registration, ordering, failure policy, persistence, replay, cancellation,
+child-run, and `finally` semantics.
 
 **Concrete work:**
 

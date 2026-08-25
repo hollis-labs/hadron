@@ -13,7 +13,7 @@ this document defines execution discipline.
 Use this order when documents differ:
 
 1. current user scope and the planning assumptions in [README](README.md);
-2. accepted ADRs 0006 through 0012;
+2. accepted ADRs 0006 through 0013;
 3. the area architecture under
    [`docs/architecture/workflow-engine-future-state`](../../architecture/workflow-engine-future-state/README.md);
 4. the [coverage matrix](coverage-matrix.md) and task specifications;
@@ -141,7 +141,8 @@ verification before integrating and checking off the task.
   quarantined, and W06-T09 passes end to end. This is the initial engine release
   gate.
 - **Wave 07:** deferred capabilities are independently promotable after their
-  entry criteria. W07-T10 has an explicit owner-approved ADR gate.
+  entry criteria. W07-T10's owner-approved gate was satisfied by accepted ADR
+  0013 on 2026-08-25.
 
 ## Completion Rule
 

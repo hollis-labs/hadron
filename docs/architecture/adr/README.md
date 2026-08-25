@@ -18,6 +18,7 @@ implementation work.
 - [ADR 0010: Step executor registry](0010-step-executor-registry.md)
 - [ADR 0011: Hadron host surfaces and exposure profiles](0011-hadron-host-surfaces-and-exposure.md)
 - [ADR 0012: RunScope and ExecutionTarget are separate concepts](0012-run-scope-and-execution-target.md)
+- [ADR 0013: Durable graph-visible compensation with a per-run saga ledger](0013-durable-graph-visible-compensation.md)
 
 ## Format
 

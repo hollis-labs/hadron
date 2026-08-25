@@ -601,3 +601,15 @@
   visible in verbose scans but does not fail the repository gate.
 
   Vanta revision: `01M0W0T7Y5E10D4FS85QEAHEP9`.
+
+- W07-T10 uses graph-visible compensation handlers backed by a durable per-run
+  saga ledger. Eligibility is frozen from truthful effect receipts; ordering is
+  reverse dependency order; handlers use ordinary executor/attempt machinery;
+  best-effort unwind preserves partial failures in a separate compensation
+  outcome; child runs own their ledgers; compensation precedes `finally`;
+  ordinary cancellation does not silently cancel rollback; and replay cannot
+  reuse successfully compensated effects. Executor callbacks, catch/finally-only
+  rollback, and product-specific saga ownership were rejected.
+
+  Accepted record: [ADR 0013](../../../../../docs/architecture/adr/0013-durable-graph-visible-compensation.md).
+  Vanta revision: `01M0WJYFPXFTSP504WK74SQ85K`.
