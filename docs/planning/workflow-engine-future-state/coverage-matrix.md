@@ -98,7 +98,7 @@ or the detailed architecture made a later choice. In particular:
 | Heavy `agent_launch` plus correlated wait sugar | Planned later | W07-T03, W07-T08 |
 | Generated OpenAPI/AsyncAPI/gRPC/GraphQL operation families | Planned later | W07-T04 |
 | `emit` and `checkpoint` | Implemented | W07-T07 |
-| Effect-driven retry/recovery/MCP/confirmation/dry-run/blast-radius policy | Planned | W01-T05, W03-T04, W03-T07, W05-T01, W06-T01, W06-T03 |
+| Effect-driven retry/recovery/MCP/confirmation/dry-run/blast-radius policy | Implemented | W01-T05, W03-T04, W03-T07, W05-T01, W06-T01, W06-T03 |
 
 ## Hadron Product Surfaces
 
@@ -108,12 +108,12 @@ or the detailed architecture made a later choice. In particular:
 | Definition-level contract tests with mocked executors | Implemented | W05-T07 |
 | Agent-builds-tools flow from discovery through tested pinned exposure | Planned | W05-T07, W06-T08 |
 | CLI and HTTP validate/explain/run/inspect/cancel/resume/rerun/signals | Implemented for CLI and HTTP workflow operations; named signals planned | W06-T01, W06-T02, W07-T08 |
-| MCP meta, pinned, discoverable/lazy, hidden tiers; namespaces/budgets/catalog/list-changed | Planned | W06-T03 |
+| MCP meta, pinned, discoverable/lazy, hidden tiers; namespaces/budgets/catalog/list-changed | Implemented; live daemon graph composition pending W06-T06 | W06-T03 |
 | A2A durable task correlation and schema/effect/provenance-derived cards | Planned | W06-T04 |
-| UI graph, edge values, waits, artifacts, source maps, exposure, blast radius, replay | Implemented for graph-native diagnostics and desktop views; live daemon composition and remaining legacy-Wails cleanup planned | W06-T02, W06-T05, W06-T06, W06-T10 |
-| Legacy Wails workflow UI replaced while preserving the flow canvas | Planned | W06-T10 |
+| UI graph, edge values, waits, artifacts, source maps, exposure, blast radius, replay | Implemented for graph-native diagnostics and browser views; live daemon operation composition pending W06-T06 | W06-T02, W06-T05, W06-T06, W06-T10 |
+| Legacy Wails workflow UI replaced while preserving the flow canvas | Implemented | W06-T10 |
 | Compiled CLI and stdio MCP-server artifacts | Implemented | W07-T05 |
-| Global run-failure workflow | Planned later | W07-T08 |
+| Global run-failure workflow | Implemented | W07-T08 |
 | Torque bulk-create runs end to end as a pinned MCP tool | Required release gate | W06-T09 |
 
 ## Advanced Authoring

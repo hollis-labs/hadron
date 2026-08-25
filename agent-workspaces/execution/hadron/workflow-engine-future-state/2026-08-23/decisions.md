@@ -493,3 +493,19 @@
   or returning an error with pending runnable state were rejected.
 
   Vanta revision for both W06-T01 decisions: `01M0V08XGXP6Q2FR4HSW1EK8RQ`.
+
+- W06-T03 stores only canonical SHA-256 MCP credential verifiers and binds each
+  durable principal to a complete identity, optional exposure profile,
+  generation CAS, and canonical agent-owned namespace. Profiles separately
+  govern exact pins, discovery scope, namespaces, denied effects, direct-tool
+  budgets, lazy loading, and display policy; every operation reauthenticates the
+  complete principal/profile snapshot and exact registry-plan identity.
+
+- Generated workflow tools are session-scoped, except for the protocol's exact
+  single-client stdio fallback, and publish list-changed notifications when
+  mounts change. Their immediate result is an asynchronous run handle with the
+  exact terminal workflow output schema nested as optional; generated mutation
+  identities include restart-unique entropy, and lossy or fractional numeric
+  coercion fails closed before canonical binding.
+
+  Vanta revision for both W06-T03 decisions: `01M0V9RMZ896Y0THPNGC7HT44H`.

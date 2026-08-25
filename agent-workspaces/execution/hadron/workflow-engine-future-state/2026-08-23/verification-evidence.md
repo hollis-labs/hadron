@@ -1292,3 +1292,27 @@ graph operations fail closed instead of falling back to legacy semantics.
 | integration `2fdb665` plus hardening through `bc3b589` | 41 frontend unit tests; typecheck; Biome; ESLint; Vite 8 production build; focused app/api/webui Go suite | pass |
 | integration `225d113` | fresh `npm ci`; `npm audit --audit-level=low` | pass; zero vulnerabilities and no dependency overrides |
 | integration `bc3b589` | repeated production build; exact Wails reference scan; `npm run test:e2e`; `go test -count=1 ./...`; committed diff/status checks | pass; byte-stable embedded bundle, 3/3 Chromium scenarios, clean full repository suite |
+
+## W06-T03
+
+Reviewed durable MCP principal and exposure-profile CAS records, canonical
+credential digests, complete identity/profile reauthorization, exact pinned and
+discoverable registry-plan binding, schema/effect projection, per-session lazy
+mounts, stdio's single-client fallback, list-changed notifications, safe
+redaction, typed resume/signal routing, honest asynchronous run-handle output
+schemas, restart-unique invocation identities, and lossless JSON-number
+handling. Source commit `f21e495` was integrated as `6a4f55f` with append-only
+migration 0026 after the final raw MCP regressions proved unsafe integers and
+fractional limits cannot reach workflow operations.
+
+Live graph Host, catalog, operator, and read-service composition remains owned
+by W06-T06. The production daemon composes the durable exposure boundary now
+and fails graph-dependent MCP calls closed with typed unavailable results until
+that switchover.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `f21e495` | focused exposure/appworkflow/MCP/persistence suites at repeated counts; boundary cases at `-count=10`; focused race at `-count=3`; workflow packages; full repository suite | pass |
+| source worktree `f21e495` | `go vet ./...`; targeted golangci/staticcheck; generation, module, format, commit-hook, and diff stability | pass; zero task-local issues and no dependency/generated-artifact changes |
+| independent source review `f21e495` | focused changed packages at `-count=3`; focused race; vet; gofmt and diff checks; migration, authorization, schema, session, stdio, replay, collision, and raw MCP numeric audit | pass |
+| integration `6a4f55f` | focused appworkflow/MCP/persistence/webui suite at `-count=3`; focused race; `go test -count=1 ./...` | pass; one persistence cancellation-contention fixture failed once in the first aggregate run, then passed 20/20 in isolation, 3/3 in the complete aggregate rerun, and in the full repository run |
