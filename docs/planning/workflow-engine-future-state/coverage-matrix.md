@@ -142,7 +142,7 @@ or the detailed architecture made a later choice. In particular:
 
 | Source follow-up | Disposition | Owning tasks |
 | --- | --- | --- |
-| `::set-output` injection risk and safety documentation | Planned | W04-T03, W06-T06, W06-T07 |
+| `::set-output` injection risk and safety documentation | Implemented | W04-T03, W06-T06, W06-T07 |
 | Timestamp MCP session replaced by real principal/profile | Planned | W06-T02, W06-T03 |
 | Worker-holding gate/message polling | Replaced by target runtime | W03-T05, W04-T07, W06-T06 |
 | Pipeline 60-second wait and `on_success: step` stub | Superseded with legacy runtime quarantine | W03-T04, W03-T08, W06-T06 |

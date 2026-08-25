@@ -77,3 +77,5 @@
 | 73 | W06-T06-H1 | `05597f9` | `3e694a3` | Hadron | documented the intentional exported-boundary nil-context regression for both static-analysis front ends without weakening the fail-closed production guard |
 | 74 | W06-T06-H2 | `0cfdd9b` | `5124860` | Hadron | replaced legacy tagged E2E with production graph validate/run/inspect/output/replay coverage and fixed unpinned file/package snapshot ID/version binding |
 | 75 | W06-T06-H3 | `16c4f43` | `87c0e56` | Hadron | isolated Playwright daemon state per run and aligned browser navigation with the Workflow Registry default |
+| 76 | W06-T07 | `801f3e21` | `7c20913` | Hadron | accepted with graph-native user/developer/safety docs, production-only runnable examples, release E2E, complete lint cleanup, and patched reachable toolchain/dependency vulnerabilities |
+| 77 | W06-T07-H1 | `66522696` | `374ccc1` | Hadron | corrected operational versus lifecycle registry-reference grammar and distinguished source lowering from production value-dependency inference |

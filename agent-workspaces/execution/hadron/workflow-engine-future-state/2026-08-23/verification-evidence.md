@@ -1460,3 +1460,23 @@ diagnostics, and proves retired legacy roots are unavailable.
 | independent hardening `0cfdd9b` | resolver and daemon suites at `-count=3`; focused race; direct staticcheck and exact golangci; `go test -count=1 ./...`; `go vet ./...`; `go test -tags e2e -count=3 ./test/e2e/...`; exact `make e2e` | pass; file-path workflow validates, starts, executes, persists outputs, and replays through freshly built production binaries |
 | browser hardening `16c4f43` | frontend freshness and 45 unit tests; typecheck; Biome; ESLint; Vite build; isolated `CI=1 npm run test:e2e` | pass; 3/3 Chromium scenarios against a fresh canonical daemon runtime directory |
 | integration `c714e0b` through `87c0e56` | cherry-pick, committed diff check, and clean-tree check | pass |
+
+## W06-T07
+
+Reviewed the graph-native user, operator, safety, architecture, and developer
+documentation; production-only runnable examples; release E2E; lint cleanup;
+and the Go/toolchain security baseline. Source commit `801f3e21` integrated as
+`7c20913`; review correction `66522696` integrated as `374ccc1`.
+
+The docs now distinguish the stock daemon's frozen six-kind capability profile
+from embeddable adapter/conformance fixtures, and distinguish operational
+registry selectors from fully qualified lifecycle mutation refs. The release
+gate fixes every reachable `govulncheck` finding with Go 1.26.6 and aligned
+fixed dependency versions instead of accepting a security waiver.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `801f3e21` + `66522696` | full/focused/race Go suites; frontend tests, typecheck, lint, and build; graph generation; tagged production-example E2E; exact `make lint`; tidy, link, and diff checks | pass; 45 UI tests, all 12 errcheck findings fixed, zero reachable vulnerabilities, stable generated/module state |
+| independent integration `7c20913` + `374ccc1` | `go generate ./workflow/graph`; `go generate ./internal/api`; `go mod tidy`; clean diff check | pass under Go 1.26.6; byte-stable generated and module files |
+| independent integration `7c20913` + `374ccc1` | `go test -count=1 ./...`; `make test-ui`; `make typecheck`; `make lint-ui`; `make frontend-build` | pass; all Go packages and 45 UI tests green |
+| independent integration `7c20913` + `374ccc1` | exact `make lint`; exact `make e2e` | pass; zero lint issues, zero reachable vulnerabilities, both production examples validate/run, and retired CLI roots remain unavailable |

@@ -592,3 +592,12 @@
 
   Vanta revision: `01M0VYP6XTF1H51BQJ8656NPDT` (supersedes
   `01M0VFYAWFJ2VSTGR22YPA2HHJ`).
+
+- W06-T07 treats symbol-reachable security findings as release blockers rather
+  than pre-existing lint debt. The release floor is Go 1.26.6 with aligned
+  fixed OpenTelemetry 1.44, gRPC 1.82.1, `x/net` 0.55, and `x/text` 0.39
+  dependencies. This closes all reachable `govulncheck` findings while keeping
+  workflow public contracts unchanged; non-reachable advisory metadata remains
+  visible in verbose scans but does not fail the repository gate.
+
+  Vanta revision: `01M0W0T7Y5E10D4FS85QEAHEP9`.

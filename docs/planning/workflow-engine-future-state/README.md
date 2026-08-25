@@ -97,19 +97,19 @@ superseded requirements are not mistaken for omissions.
 | W05-T02 | Introduce `RunScope` and `ExecutionTarget` | 05 | W05-T01 | [x] |
 | W05-T03 | Bind registry and definition resolution | 05 | W01-T04, W05-T01 | [x] |
 | W05-T04 | Bind schedules and triggers to activation registrations | 05 | W00-T07, W03-T05, W05-T03 | [x] |
-| W05-T05 | Persist plan/source snapshots and provenance | 05 | W01-T04, W05-T03 | [ ] |
+| W05-T05 | Persist plan/source snapshots and provenance | 05 | W01-T04, W05-T03 | [x] |
 | W05-T06 | Update run inspection and diagnostics | 05 | W03-T01, W03-T07, W05-T01 | [x] |
 | W05-T07 | Add workflow contract-test and registration service | 05 | W03-T06, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07, W05-T01, W05-T03 | [x] |
 | W05-T08 | Materialize source-declared activations | 05 | W01-T07, W05-T03, W05-T04 | [x] |
 | W06-T01 | Add workflow CLI commands | 06 | W05-T03, W05-T06 | [x] |
 | W06-T02 | Add HTTP workflow API surface | 06 | W05-T01, W05-T06 | [x] |
 | W06-T03 | Update MCP workflow exposure profiles | 06 | W05-T03, W05-T07, W06-T02 | [x] |
-| W06-T04 | Bind A2A task/run correlation | 06 | W05-T01, W06-T02 | [ ] |
+| W06-T04 | Bind A2A task/run correlation | 06 | W05-T01, W06-T02 | [x] |
 | W06-T05 | Update desktop graph/run views | 06 | W01-T04, W05-T06 | [x] |
-| W06-T06 | Quarantine old blueprint/pipeline runtime paths | 06 | W06-T01, W06-T02, W06-T03, W06-T04, W06-T05 | [ ] |
-| W06-T07 | Final docs, examples, and release checks | 06 | W06-T06, W06-T08, W06-T09, W06-T10 | [ ] |
-| W06-T08 | Add workflow authoring, registry, and tool-building surfaces | 06 | W05-T07, W06-T01, W06-T03, W06-T04 | [ ] |
-| W06-T09 | Prove the Torque bulk-create end-to-end acceptance case | 06 | W03-T04, W03-T07, W03-T08, W04-T02, W04-T05, W05-T01, W05-T03, W05-T07, W06-T03 | [ ] |
+| W06-T06 | Quarantine old blueprint/pipeline runtime paths | 06 | W06-T01, W06-T02, W06-T03, W06-T04, W06-T05 | [x] |
+| W06-T07 | Final docs, examples, and release checks | 06 | W06-T06, W06-T08, W06-T09, W06-T10 | [x] |
+| W06-T08 | Add workflow authoring, registry, and tool-building surfaces | 06 | W05-T07, W06-T01, W06-T03, W06-T04 | [x] |
+| W06-T09 | Prove the Torque bulk-create end-to-end acceptance case | 06 | W03-T04, W03-T07, W03-T08, W04-T02, W04-T05, W05-T01, W05-T03, W05-T07, W06-T03 | [x] |
 | W06-T10 | Move the workflow UI off legacy Wails contracts | 06 | W06-T02, W06-T05 | [x] |
 | W07-T01 | Add provider-agnostic `llm` step kind | 07 | W04-T08, W05-T01 | [x] |
 | W07-T02 | Add goja-backed `script` step kind | 07 | W04-T01, W02-T02 | [x] |
