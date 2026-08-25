@@ -1496,3 +1496,36 @@ contract execution import `runtime/inmemory` directly.
 | independent integration `6dfcf8c` | `go test -count=3 ./workflow/runtime/inmemory ./workflow/runtime/runtimetest ./workflow/offline ./workflow/conformance`; API snapshot test; `go list -deps` internal-import assertion; `git diff --check` | pass |
 | independent integration `6dfcf8c` | `go test -race -count=1 ./workflow/runtime/inmemory ./workflow/runtime ./workflow/offline ./workflow/conformance ./internal/appworkflow`; `go test -count=1 ./...` | pass |
 | independent integration `6dfcf8c` | `go generate ./workflow/graph`; `go generate ./internal/api`; `go mod tidy`; generated/module diff and clean-tree checks; exact `make lint` | pass; zero lint issues, zero reachable vulnerabilities, and no generated or module drift |
+
+## Dependency Publication Cleanup
+
+Hadron now consumes the same source through published module versions instead
+of workspace-local replacements. `agentkit` v0.5.0 resolves to the previously
+linked clean source at `cc43681`; `go-scheduler` v0.1.1 was tagged and pushed at
+the previously pinned durable fire/attempt commit `51ebe8a`.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| integration `4484aa1` | `go mod tidy`; module diff check; `go mod verify` | pass; no module drift and all modules verified |
+| integration `4484aa1` | `go list -m -f '{{.Path}} {{.Version}} {{if .Replace}}=> {{.Replace.Path}} {{.Replace.Version}}{{end}}' github.com/hollis-labs/agentkit github.com/hollis-labs/go-scheduler` | pass; `agentkit v0.5.0` and `go-scheduler v0.1.1`, with no replacements |
+| integration `4484aa1` | focused scheduler/appworkflow/runtime tests | pass; published modules compile and preserve the prior linked-source behavior |
+
+## W07-T10
+
+Reviewed ADR 0013's graph-visible compensation model across source/compiler,
+step-kind admission, dispatch, durable runtime, both stores, child runs,
+recovery, replay, host operations, offline execution, and conformance. Source
+commit `1d3033e` integrated as `0cf8718`; integration hardening `46a6afb`
+resolved every release-lint finding without weakening repository policy.
+Migration `0029_workflow_compensation.sql` is append-only, and graph/API/client
+generated artifacts are committed and byte-stable.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `1d3033e` | focused compile/stepkind/runtime/store/host/call/offline/conformance suites; focused race; graph/API generation and API snapshot checks | pass; durable ordered, parallel, nested, partial, cancel, retry, replay, recovery, and unsupported-compensation cases covered |
+| integration `0cf8718` + `46a6afb` | `go test -count=1 ./workflow/stepkind ./workflow/compile ./workflow/runtime ./workflow/runtime/inmemory ./internal/persistence ./internal/appworkflow ./workflow/adapters/call ./workflow/offline ./workflow/conformance` | pass |
+| integration `0cf8718` + `46a6afb` | `go test -race -count=1 ./workflow/runtime/... ./internal/persistence/... ./internal/appworkflow/...` | pass |
+| integration `0cf8718` + `46a6afb` | `go test -count=1 ./...`; exact `make lint` | pass; all packages green, zero lint issues, and zero reachable vulnerabilities |
+| integration `0cf8718` + `46a6afb` | `go generate ./workflow/graph`; `go generate ./internal/api`; API snapshot/import guard; generated diff checks; `go mod tidy`; module diff and verification | pass; generated and module state byte-stable |
+| integration `0cf8718` + `46a6afb` | `make test-ui`; `make typecheck`; `make lint-ui`; `make frontend-build` | pass; 45 frontend tests, TypeScript, Biome, ESLint, and production build green |
+| integration `0cf8718` + `46a6afb` | exact `make e2e` | pass; production binaries built and all tagged health, graph validation/execution, workspace, daemon, and retired-root scenarios passed |

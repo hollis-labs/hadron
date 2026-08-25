@@ -72,7 +72,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W07-T07 | W04-T01, W04-T07, W05-T01 | integrated | `9431754` |
 | W07-T08 | W00-T07, W03-T06, W04-T07, W05-T04 | integrated | `53217b3` |
 | W07-T09 | W02-T07, W03-T08, W04-T07 | integrated | `94f03bb` |
-| W07-T10 | W03-T08, W04-T06, accepted ADR 0013 | dispatched | |
+| W07-T10 | W03-T08, W04-T06, accepted ADR 0013 | integrated | `0cf8718`, `46a6afb` |
 | W07-T11 | W01-T02, W05-T03, W06-T01, W06-T02 | integrated | `d66cc39` |
 
 W07-T09's durable service-store migration integrated as `0024` after W05-T04's
