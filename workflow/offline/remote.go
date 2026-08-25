@@ -81,6 +81,10 @@ func AdaptExecutionRegistry(plan compile.ExecutionPlan, source stepkind.Registry
 		spec.Effects = effects
 		spec.CanSuspend = false
 		spec.EmbeddedModeSupported = true
+		// Preparation belongs to the remote daemon's registered implementation.
+		// The proxy forwards the raw invocation and therefore must not advertise
+		// or repeat adapter-owned preparation in the generated process.
+		spec.Lifecycle.Prepare = false
 		spec.Observation = stepkind.ObservationSpec{Mode: stepkind.ObservationPoll}
 		spec.Cancellation = stepkind.CancellationSpec{Mode: stepkind.CancellationContext}
 		resolved := make([]ResolvedBinding, 0, len(bindings))

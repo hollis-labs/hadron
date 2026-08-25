@@ -228,6 +228,20 @@ func TestExecuteUsesScopedStepsAndFanOutItemContext(t *testing.T) {
 	}
 }
 
+func TestContextProviderCannotExposeDispatcherPrivateRawOutputsRoot(t *testing.T) {
+	t.Parallel()
+	executor, err := transform.NewWithContextProvider(transform.ContextProviderFunc(func(context.Context, stepkind.Invocation) (values.ExpressionContext, error) {
+		return values.ExpressionContext{Outputs: valueSet(t, "native", "must-not-be-visible")}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = executor.Execute(t.Context(), stepkind.PreparedInvocation{Invocation: fixtureInvocation(t,
+		graph.Config{"result": "outputs.native"}, map[string]any{},
+	)})
+	assertExpressionFailure(t, err, values.CodeExpressionUnresolved, "result")
+}
+
 func TestDefaultContextAndExpressionFailuresAreStructured(t *testing.T) {
 	t.Parallel()
 

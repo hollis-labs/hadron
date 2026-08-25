@@ -338,7 +338,7 @@ func advanceFanOut(ctx context.Context, store ExecutionStore, plan runtime.Recov
 			if scopeErr != nil {
 				return false, scopeErr
 			}
-			_, err = coordinator.Expand(ctx, runtime.FanOutExpandCommand{Parent: id, ExpectedParentGeneration: snapshot.Generation, Spec: *node.ForEach, ExpressionContext: scoped, ExpressionOptions: options, Priority: snapshot.Priority, At: at})
+			_, err = coordinator.Expand(ctx, runtime.FanOutExpandCommand{Parent: id, ExpectedParentGeneration: snapshot.Generation, Spec: *node.ForEach, InputBindings: node.InputBindings, ExpressionContext: scoped, ExpressionOptions: options, Priority: snapshot.Priority, At: at})
 			return err == nil, err
 		}
 		if snapshot.Status != runtime.NodeWaiting {

@@ -188,7 +188,7 @@ func TestEvaluateBindingPreservesExactValuePassthroughEnvelopes(t *testing.T) {
 	}
 	context := values.ExpressionContext{Steps: map[string]values.StepContext{
 		"render": {Outputs: values.ValueSet{"secret": secretRef, "report": artifact}, Status: "succeeded"},
-	}}
+	}, Outputs: values.ValueSet{"secret": secretRef, "report": artifact}}
 	engine := values.NewExpressionEngine()
 	computedMetadata := bindingTestMetadata("workflow-output", values.RedactionPrivate, values.RetentionRun)
 	for name, want := range map[string]values.Value{"secret": secretRef, "report": artifact} {
@@ -204,6 +204,13 @@ func TestEvaluateBindingPreservesExactValuePassthroughEnvelopes(t *testing.T) {
 			t.Fatalf("EvaluateBinding(%s) changed envelope:\ngot  %#v\nwant %#v", name, got, want)
 		}
 	}
+	for name, want := range map[string]values.Value{"secret": secretRef, "report": artifact} {
+		binding := graph.Binding{Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "outputs." + name}}
+		got, evaluationErr := engine.EvaluateBinding(binding, context, values.ExpressionOptions{VisibleSteps: []string{}}, computedMetadata)
+		if evaluationErr != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("EvaluateBinding(raw outputs.%s) = %#v, %v; want %#v", name, got, evaluationErr, want)
+		}
+	}
 
 	_, err = engine.EvaluateBinding(graph.Binding{
 		Kind:       graph.BindingExpression,
@@ -211,6 +218,12 @@ func TestEvaluateBindingPreservesExactValuePassthroughEnvelopes(t *testing.T) {
 	}, context, values.ExpressionOptions{VisibleSteps: []string{"render"}}, computedMetadata)
 	if !errors.Is(err, values.ErrSecretDerivation) {
 		t.Fatalf("computed secret-ref binding error = %v, want ErrSecretDerivation", err)
+	}
+	_, err = engine.EvaluateBinding(graph.Binding{
+		Kind: graph.BindingInterpolation, Interpolation: `token={{ outputs.secret }}`,
+	}, context, values.ExpressionOptions{VisibleSteps: []string{}}, computedMetadata)
+	if !errors.Is(err, values.ErrSecretDerivation) {
+		t.Fatalf("computed raw-output secret-ref binding error = %v, want ErrSecretDerivation", err)
 	}
 }
 

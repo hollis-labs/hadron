@@ -252,6 +252,71 @@ func TestFanOutClaimSlotsPersistAcrossWaitAndTypedItemsRecover(t *testing.T) {
 	}
 }
 
+func TestFanOutExpandPersistsSyntheticAndEvaluatedNodeInputs(t *testing.T) {
+	ctx := context.Background()
+	store := runtimetest.NewStore()
+	base := time.Date(2026, time.August, 24, 16, 0, 0, 0, time.UTC)
+	runID := workflowruntime.RunID("run-fanout-input-bindings")
+	parent := invocationID(runID, "bulk")
+	createRun(t, store, runID, base)
+	createNode(t, store, parent, workflowruntime.NodePending, 0, base)
+	project, err := values.NewInline("project-7", values.Metadata{Producer: values.Producer{Kind: "test", Reference: "run", Output: "project"}, MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings := map[string]graph.Binding{
+		"project-id": {Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "inputs.project"}},
+		"title":      {Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "item.title"}},
+		"ordinal":    {Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "index"}},
+	}
+	expanded, err := (workflowruntime.FanOutCoordinator{Store: store}).Expand(ctx, workflowruntime.FanOutExpandCommand{
+		Parent: parent, ExpectedParentGeneration: 1,
+		Spec:              graph.ForEachSpec{Items: graph.Expression{Text: `[{"title":"one"},{"title":"two"}]`}},
+		InputBindings:     bindings,
+		ExpressionContext: values.ExpressionContext{Inputs: values.ValueSet{"project": project}},
+		At:                base.Add(time.Second),
+	})
+	if err != nil || len(expanded.Children) != 2 {
+		t.Fatalf("Expand = %#v, %v", expanded, err)
+	}
+	for index, child := range expanded.Children {
+		if child.Status != workflowruntime.NodeReady || child.Inputs == nil {
+			t.Fatalf("child %d = %#v", index, child)
+		}
+		inputs, loadErr := store.LoadValues(ctx, *child.Inputs)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if len(inputs) != 5 || inputs["title"].Inline != []string{"one", "two"}[index] || inputs["project-id"].Inline != "project-7" {
+			t.Fatalf("child %d inputs = %#v", index, inputs)
+		}
+		if got := inputs["ordinal"].Inline.(json.Number).String(); got != fmt.Sprint(index) {
+			t.Fatalf("child %d ordinal = %s", index, got)
+		}
+		if inputs["project-id"].Digest != project.Digest || inputs["project-id"].Producer != project.Producer {
+			t.Fatalf("exact workflow-input passthrough did not preserve envelope: %#v", inputs["project-id"])
+		}
+	}
+
+	collisionRun := workflowruntime.RunID("run-fanout-input-collision")
+	collisionParent := invocationID(collisionRun, "bulk")
+	createRun(t, store, collisionRun, base)
+	createNode(t, store, collisionParent, workflowruntime.NodePending, 0, base)
+	_, err = (workflowruntime.FanOutCoordinator{Store: store}).Expand(ctx, workflowruntime.FanOutExpandCommand{
+		Parent: collisionParent, ExpectedParentGeneration: 1,
+		Spec:          graph.ForEachSpec{Items: graph.Expression{Text: `[1]`}},
+		InputBindings: map[string]graph.Binding{"item": {Kind: graph.BindingLiteral, Literal: "collision"}},
+		At:            base.Add(time.Second),
+	})
+	if !errors.Is(err, workflowruntime.ErrInvalidFanOut) || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("collision error = %v", err)
+	}
+	collisionNode, loadErr := store.LoadNodeInvocation(ctx, collisionParent)
+	if loadErr != nil || collisionNode.Status != workflowruntime.NodePending || collisionNode.Generation != 1 {
+		t.Fatalf("collision mutated parent = %#v, %v", collisionNode, loadErr)
+	}
+}
+
 func TestFanOutFailFastFencesAndCancelsUnstartedItems(t *testing.T) {
 	ctx := context.Background()
 	store := runtimetest.NewStore()

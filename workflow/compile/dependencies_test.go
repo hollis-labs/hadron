@@ -35,7 +35,7 @@ func TestInferValueDependenciesWalksEveryExpressionCarrier(t *testing.T) {
 
 	producerIDs := []string{
 		"need-only", "edge-only", "existing-data", "binding", "condition",
-		"collection", "switch-source", "transform-source", "node-output",
+		"collection", "switch-source", "transform-source",
 		"verifier-source", "memo-source", "idempotency-source", "interpolation-source",
 		"workflow-output-source", "switch-target",
 	}
@@ -66,7 +66,7 @@ func TestInferValueDependenciesWalksEveryExpressionCarrier(t *testing.T) {
 			"mapped": "steps['transform-source'].outputs.value",
 		}},
 		Outputs: []graph.OutputSpec{{
-			Name: "derived", Value: dependencyBinding(47, "steps['node-output'].outputs.value", "steps", "consume", "outputs", "derived"),
+			Name: "derived", Value: dependencyBinding(47, "outputs.native", "steps", "consume", "outputs", "derived"),
 		}},
 		Verification: &graph.VerificationSpec{Checks: []graph.VerificationCheck{{
 			Kind: "expression-check", Config: graph.Config{"rule": "steps['verifier-source'].outputs.value"},
@@ -115,7 +115,7 @@ func TestInferValueDependenciesWalksEveryExpressionCarrier(t *testing.T) {
 	wantProducers := []string{
 		"binding", "collection", "condition", "edge-only", "existing-data",
 		"idempotency-source", "interpolation-source", "memo-source", "need-only",
-		"node-output", "switch-source", "transform-source", "verifier-source",
+		"switch-source", "transform-source", "verifier-source",
 	}
 	if got := result.Visibility.Nodes["consume"]; !slices.Equal(got.Producers, wantProducers) || !got.FanOut {
 		t.Fatalf("consume visibility = %#v, want producers %#v and fan-out", got, wantProducers)
@@ -162,6 +162,48 @@ func TestInferValueDependenciesWalksEveryExpressionCarrier(t *testing.T) {
 	}
 	if !reflect.DeepEqual(afterJSON, originalJSON) {
 		t.Fatal("InferValueDependencies mutated its input plan")
+	}
+}
+
+func TestRawOutputsRootIsRestrictedToNodeOutputProjection(t *testing.T) {
+	t.Parallel()
+	source := dependencySource(10, "steps", "consume")
+	base := dependencyPlan(graph.Graph{ID: "raw-output-scope", Version: "v1", Nodes: []graph.Node{
+		{ID: "producer", Kind: "fixture", Source: dependencySource(2, "steps", "producer")},
+		{ID: "consume", Kind: "fixture", Source: source, Outputs: []graph.OutputSpec{{
+			Name: "public", Value: dependencyBinding(11, "outputs.native", "steps", "consume", "outputs", "public"),
+		}}},
+	}})
+	if result := InferValueDependencies(base, DependencyOptions{}); result.Plan == nil || len(result.Diagnostics) != 0 {
+		t.Fatalf("node output projection rejected raw outputs root: %#v", result.Diagnostics)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*ExecutionPlan)
+	}{
+		{name: "node input", mutate: func(plan *ExecutionPlan) {
+			plan.Graph.Nodes[1].InputBindings = map[string]graph.Binding{"value": dependencyExpressionBinding(12, "outputs.native", "steps", "consume", "with", "value")}
+		}},
+		{name: "node output upstream step", mutate: func(plan *ExecutionPlan) {
+			plan.Graph.Nodes[1].Outputs[0].Value = dependencyBinding(13, "steps.producer.outputs.native", "steps", "consume", "outputs", "public")
+		}},
+		{name: "workflow output", mutate: func(plan *ExecutionPlan) {
+			plan.Graph.Outputs = []graph.OutputSpec{{Name: "public", Value: dependencyBinding(14, "outputs.native", "outputs", "public")}}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate, err := cloneExecutionPlan(*base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&candidate)
+			result := InferValueDependencies(&candidate, DependencyOptions{})
+			if result.Plan != nil || !hasDiagnosticCode(result.Diagnostics, CodeUnavailableValueReference) {
+				t.Fatalf("diagnostics = %#v", result.Diagnostics)
+			}
+		})
 	}
 }
 
@@ -236,8 +278,8 @@ func TestInferValueDependenciesDefersDynamicOptionalFanOutAndOpaqueVerification(
 				Kind: "opaque", Config: graph.Config{"expression": "steps.missing.outputs.value"}, Source: dependencySource(25, "steps", "consume", "verify", "checks", "0"),
 			}}}},
 			{ID: "fan-consumer", Kind: "fixture", ForEach: &graph.ForEachSpec{Items: graph.Expression{Text: "inputs.items"}}, Source: dependencySource(30, "steps", "fan-consumer"), InputBindings: map[string]graph.Binding{
-				"item":  dependencyExpressionBinding(31, "item.name", "steps", "fan-consumer", "with", "item"),
-				"index": dependencyExpressionBinding(32, "index", "steps", "fan-consumer", "with", "index"),
+				"item-name":  dependencyExpressionBinding(31, "item.name", "steps", "fan-consumer", "with", "item-name"),
+				"item-index": dependencyExpressionBinding(32, "index", "steps", "fan-consumer", "with", "item-index"),
 			}},
 		},
 	})
@@ -287,7 +329,7 @@ func TestValueVisibilityPlanScopesAvailableContextAndPreservesBasePolicy(t *test
 				"dynamic": dependencyExpressionBinding(10, "steps[run.pick].status", "steps", "consume", "with", "dynamic"),
 			}},
 			{ID: "fan", Kind: "fixture", ForEach: &graph.ForEachSpec{Items: graph.Expression{Text: "inputs.items"}}, InputBindings: map[string]graph.Binding{
-				"item": dependencyExpressionBinding(20, "item", "steps", "fan", "with", "item"),
+				"selected-item": dependencyExpressionBinding(20, "item", "steps", "fan", "with", "selected-item"),
 			}},
 		},
 	})

@@ -97,6 +97,12 @@ func exactValuePassthrough(expression graph.Expression, context ExpressionContex
 		if !ok {
 			return Value{}, false, nil
 		}
+	case reference.Root == "outputs" && len(reference.Path) == 1:
+		var ok bool
+		value, ok = context.Outputs[reference.Path[0]]
+		if !ok {
+			return Value{}, false, nil
+		}
 	case reference.Root == "steps" && len(reference.Path) == 3 && reference.Path[1] == "outputs":
 		step, ok := context.Steps[reference.Path[0]]
 		if !ok {

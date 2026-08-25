@@ -151,9 +151,10 @@ func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvoca
 			return stepkind.StepResult{}, ctxErr
 		}
 		// Invocation inputs are authoritative even when a provider supplies the
-		// remaining roots. Env is never available to transform expressions.
+		// remaining roots. Env and the dispatcher-private raw outputs root are
+		// never available to transform expressions.
 		expressionContext.Inputs = authoritativeInputs
-		expressionContext.Env = nil
+		expressionContext.Outputs, expressionContext.Env = nil, nil
 	}
 	expressionContext, err = cloneContext(expressionContext)
 	if err != nil {
@@ -354,6 +355,9 @@ func cloneInvocation(invocation stepkind.Invocation) (stepkind.Invocation, error
 func cloneContext(expressionContext values.ExpressionContext) (values.ExpressionContext, error) {
 	if expressionContext.Inputs == nil {
 		expressionContext.Inputs = values.ValueSet{}
+	}
+	if expressionContext.Outputs == nil {
+		expressionContext.Outputs = values.ValueSet{}
 	}
 	if expressionContext.Env == nil {
 		expressionContext.Env = values.ValueSet{}

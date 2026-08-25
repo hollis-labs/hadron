@@ -344,7 +344,7 @@ func (e *contractExecution) expandAndCollectFanOut(ctx context.Context) (bool, e
 			if scopeErr != nil {
 				return false, scopeErr
 			}
-			if _, expandErr := coordinator.Expand(ctx, runtime.FanOutExpandCommand{Parent: id, ExpectedParentGeneration: snapshot.Generation, Spec: *node.ForEach, ExpressionContext: scoped, ExpressionOptions: options, Priority: snapshot.Priority, At: e.tick()}); expandErr != nil {
+			if _, expandErr := coordinator.Expand(ctx, runtime.FanOutExpandCommand{Parent: id, ExpectedParentGeneration: snapshot.Generation, Spec: *node.ForEach, InputBindings: node.InputBindings, ExpressionContext: scoped, ExpressionOptions: options, Priority: snapshot.Priority, At: e.tick()}); expandErr != nil {
 				return false, expandErr
 			}
 			changed = true
@@ -588,6 +588,8 @@ type contractMockKind struct {
 	catalog *contractMockCatalog
 }
 
+type contractPreparedMockKind struct{ *contractMockKind }
+
 func contractMockRegistry(kinds stepkind.Registry, workflow graph.Graph, contractCase WorkflowContractCase) (*stepkind.MemoryRegistry, *contractMockCatalog, error) {
 	catalog := &contractMockCatalog{mocks: make(map[string]ContractExecutorMock, len(contractCase.Mocks)), nodes: make(map[string]graph.EffectSet, len(workflow.Nodes)), effects: make(map[graph.Effect]struct{})}
 	for _, mock := range contractCase.Mocks {
@@ -605,7 +607,12 @@ func contractMockRegistry(kinds stepkind.Registry, workflow graph.Graph, contrac
 		if _, exists := registered[key]; exists {
 			continue
 		}
-		if err := registry.Register(&contractMockKind{spec: spec, catalog: catalog}); err != nil {
+		base := &contractMockKind{spec: spec, catalog: catalog}
+		var controlled stepkind.StepKind = base
+		if spec.Lifecycle.Prepare {
+			controlled = &contractPreparedMockKind{contractMockKind: base}
+		}
+		if err := registry.Register(controlled); err != nil {
 			return nil, nil, err
 		}
 		registered[key] = struct{}{}
@@ -617,6 +624,12 @@ func (k *contractMockKind) Spec() stepkind.StepKindSpec { return k.spec }
 
 func (k *contractMockKind) ValidateConfig(context.Context, graph.Config) []diagnostic.Diagnostic {
 	return nil
+}
+
+// Prepare preserves a registered kind's declared lifecycle contract while
+// keeping qualification execution fully controlled by the literal mock.
+func (k *contractPreparedMockKind) Prepare(_ context.Context, invocation stepkind.Invocation) (stepkind.PreparedInvocation, error) {
+	return stepkind.PreparedInvocation{Invocation: invocation}, nil
 }
 
 func (k *contractMockKind) Execute(ctx context.Context, prepared stepkind.PreparedInvocation) (stepkind.StepResult, error) {

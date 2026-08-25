@@ -60,10 +60,40 @@ func TestRetryEvaluatorUsesTrustedEffectUnion(t *testing.T) {
 	if err != nil || !decision.Retry {
 		t.Fatalf("authorized destructive retry = %#v, %v", decision, err)
 	}
+	request.Spec.RetrySafety = stepkind.RetryRequiresIdempotency
+	decision, err = authorized.Evaluate(context.Background(), request)
+	if err != nil || !decision.Retry {
+		t.Fatalf("authorized keyed destructive retry = %#v, %v", decision, err)
+	}
+	decision, err = (workflowruntime.RetryEvaluator{}).Evaluate(context.Background(), request)
+	if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonEffectDenied {
+		t.Fatalf("unauthorized keyed destructive retry = %#v, %v", decision, err)
+	}
+	request.Spec.Idempotency = graph.IdempotencyIntrinsic
+	request.Node.Idempotency.Mode = graph.IdempotencyIntrinsic
+	request.IdempotencyKey = ""
+	decision, err = authorized.Evaluate(context.Background(), request)
+	if err != nil || !decision.Retry {
+		t.Fatalf("authorized intrinsic destructive retry = %#v, %v", decision, err)
+	}
+	request.Spec.Idempotency = graph.IdempotencyKeyed
+	request.Node.Idempotency.Mode = graph.IdempotencyKeyed
 	request.IdempotencyKey = ""
 	decision, err = authorized.Evaluate(context.Background(), request)
 	if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonIdempotencyMissing {
 		t.Fatalf("missing idempotency key = %#v, %v", decision, err)
+	}
+	request.IdempotencyKey = "delete:42"
+	request.Spec.Idempotency = graph.IdempotencyNone
+	decision, err = authorized.Evaluate(context.Background(), request)
+	if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonEffectDenied {
+		t.Fatalf("untrusted key did not preserve destructive denial: %#v, %v", decision, err)
+	}
+	request.Spec.Idempotency = graph.IdempotencyKeyed
+	request.Spec.RetrySafety = stepkind.RetryUnsupported
+	decision, err = authorized.Evaluate(context.Background(), request)
+	if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonKindUnsupported {
+		t.Fatalf("unsupported destructive retry = %#v, %v", decision, err)
 	}
 }
 
@@ -90,10 +120,13 @@ func TestRetryEvaluatorDoesNotTrustGraphIdempotencyUpgrade(t *testing.T) {
 
 	request.Spec.Idempotency = graph.IdempotencyNone
 	request.Spec.RetrySafety = stepkind.RetrySafe
-	request.Spec.Effects = graph.EffectSet{graph.EffectMaterialize}
-	decision, err = (workflowruntime.RetryEvaluator{}).Evaluate(context.Background(), request)
-	if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonEffectDenied {
-		t.Fatalf("graph intrinsic upgrade bypassed unprotected materialization: %#v, %v", decision, err)
+	request.IdempotencyKey = "untrusted-key"
+	for _, effect := range []graph.Effect{graph.EffectMaterialize, graph.EffectMutate} {
+		request.Spec.Effects = graph.EffectSet{effect}
+		decision, err = (workflowruntime.RetryEvaluator{}).Evaluate(context.Background(), request)
+		if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonEffectDenied {
+			t.Fatalf("raw key bypassed unprotected %s: %#v, %v", effect, decision, err)
+		}
 	}
 }
 

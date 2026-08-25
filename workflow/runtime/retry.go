@@ -386,7 +386,7 @@ func (e RetryEvaluator) authorizeEffects(ctx context.Context, request RetryEvalu
 	if err != nil {
 		return err
 	}
-	keyed := strings.TrimSpace(request.IdempotencyKey) != ""
+	keyed := mode == graph.IdempotencyKeyed && strings.TrimSpace(request.IdempotencyKey) != ""
 	needsGrant := false
 	for _, effect := range effects {
 		switch effect {
@@ -400,7 +400,13 @@ func (e RetryEvaluator) authorizeEffects(ctx context.Context, request RetryEvalu
 				needsGrant = true
 			}
 		case graph.EffectDestructive:
-			if request.Spec.RetrySafety != stepkind.RetrySafe {
+			switch request.Spec.RetrySafety {
+			case stepkind.RetrySafe:
+			case stepkind.RetryRequiresIdempotency:
+				if mode != graph.IdempotencyIntrinsic && (mode != graph.IdempotencyKeyed || !keyed) {
+					return ErrRetryDenied
+				}
+			default:
 				return ErrRetryDenied
 			}
 			needsGrant = true

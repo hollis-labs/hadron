@@ -11,7 +11,7 @@ import (
 var expressionLocalName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 var reservedExpressionRoots = map[string]struct{}{
-	"inputs": {}, "steps": {}, "item": {}, "index": {}, "run": {},
+	"inputs": {}, "outputs": {}, "steps": {}, "item": {}, "index": {}, "run": {},
 	"run_scope": {}, "execution_target": {}, "env": {},
 }
 
@@ -60,12 +60,14 @@ type StepContext struct {
 	Items   []StepContext
 }
 
-// ExpressionContext contains the standard expression roots. Inputs, step
-// outputs, the optional fan-out item, and env enter through Value envelopes.
+// ExpressionContext contains the standard expression roots. Inputs, raw
+// adapter Outputs used only by node-output projection, step outputs, the
+// optional fan-out item, and env enter through Value envelopes.
 // Run, RunScope, and ExecutionTarget are host-provided JSON-compatible
 // metadata. Env is never populated from the ambient process environment.
 type ExpressionContext struct {
 	Inputs          ValueSet
+	Outputs         ValueSet
 	Steps           map[string]StepContext
 	Item            *Value
 	Index           *int

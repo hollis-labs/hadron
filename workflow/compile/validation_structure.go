@@ -476,6 +476,19 @@ func (v *validator) validateForEach(node graph.Node, fallback *graph.SourceRef) 
 	if forEach.ItemName != "" && forEach.ItemName == forEach.IndexName {
 		add("item_name and index_name are identical", "Use distinct item and index binding names.")
 	}
+	itemName, indexName := forEach.ItemName, forEach.IndexName
+	if itemName == "" {
+		itemName = "item"
+	}
+	if indexName == "" {
+		indexName = "index"
+	}
+	if _, collision := node.InputBindings[itemName]; collision {
+		add(fmt.Sprintf("with binding %q collides with the fan-out item binding", itemName), "Rename the node input; item/index values are supplied automatically for every fan-out child.")
+	}
+	if _, collision := node.InputBindings[indexName]; collision {
+		add(fmt.Sprintf("with binding %q collides with the fan-out index binding", indexName), "Rename the node input; item/index values are supplied automatically for every fan-out child.")
+	}
 	if forEach.Tolerate != nil {
 		if forEach.Tolerate.Count < 0 {
 			add("tolerated failure count is negative", "Use a non-negative tolerated failure count.")

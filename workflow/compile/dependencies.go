@@ -223,13 +223,14 @@ type inferredEdge struct {
 }
 
 type expressionUse struct {
-	consumer    ValueConsumer
-	expression  graph.Expression
-	scope       *mutableValueScope
-	nodeID      string
-	allowSteps  bool
-	allowLocals bool
-	addEdge     bool
+	consumer     ValueConsumer
+	expression   graph.Expression
+	scope        *mutableValueScope
+	nodeID       string
+	allowSteps   bool
+	allowLocals  bool
+	allowOutputs bool
+	addEdge      bool
 }
 
 type dependencyAnalyzer struct {
@@ -325,7 +326,7 @@ func (a *dependencyAnalyzer) walk() {
 			Kind: ValueConsumerWorkflowOutput, ID: output.Name,
 			Surface: "workflow.outputs." + output.Name,
 			Source:  firstSource(output.Value.Source, output.Source, graphSource(a.plan.Graph)),
-		}, a.outputScope, "", true, false, false)
+		}, a.outputScope, "", true, false, false, false)
 	}
 	for _, activation := range a.plan.Graph.Activations {
 		a.walkActivation(activation)
@@ -343,7 +344,7 @@ func (a *dependencyAnalyzer) walkNode(node graph.Node) {
 		a.walkBinding(binding, ValueConsumer{
 			Kind: ValueConsumerNode, ID: identity, Surface: "with." + name,
 			Source: firstSource(binding.Source, fallback),
-		}, scope, identity, true, node.ForEach != nil, true)
+		}, scope, identity, true, node.ForEach != nil, false, true)
 	}
 	if node.If != nil {
 		a.walkExpression(expressionUseForNode(node, identity, "if", *node.If, scope, fallback, true))
@@ -376,7 +377,7 @@ func (a *dependencyAnalyzer) walkNode(node graph.Node) {
 		a.walkBinding(*output.Value, ValueConsumer{
 			Kind: ValueConsumerNode, ID: identity, Surface: "outputs." + output.Name,
 			Source: firstSource(output.Value.Source, output.Source, fallback),
-		}, scope, identity, true, node.ForEach != nil, true)
+		}, scope, identity, false, node.ForEach != nil, true, false)
 	}
 	if node.Idempotency != nil && node.Idempotency.Key != nil {
 		a.walkExpression(expressionUseForNode(node, identity, "idempotency.key", *node.Idempotency.Key, scope, fallback, true))
@@ -404,7 +405,7 @@ func expressionUseForNode(node graph.Node, identity, surface string, expression 
 	}
 }
 
-func (a *dependencyAnalyzer) walkBinding(binding graph.Binding, consumer ValueConsumer, scope *mutableValueScope, nodeID string, allowSteps, allowLocals, addEdge bool) {
+func (a *dependencyAnalyzer) walkBinding(binding graph.Binding, consumer ValueConsumer, scope *mutableValueScope, nodeID string, allowSteps, allowLocals, allowOutputs, addEdge bool) {
 	source := firstSource(binding.Source, consumer.Source)
 	consumer.Source = cloneSource(source)
 	switch binding.Kind {
@@ -421,14 +422,14 @@ func (a *dependencyAnalyzer) walkBinding(binding graph.Binding, consumer ValueCo
 		consumer.Source = cloneSource(expression.Source)
 		a.walkExpression(expressionUse{
 			consumer: consumer, expression: expression, scope: scope, nodeID: nodeID,
-			allowSteps: allowSteps, allowLocals: allowLocals, addEdge: addEdge,
+			allowSteps: allowSteps, allowLocals: allowLocals, allowOutputs: allowOutputs, addEdge: addEdge,
 		})
 	case graph.BindingInterpolation:
 		expression := graph.Expression{Text: binding.Interpolation, Source: cloneSource(source)}
 		references, err := values.ParseInterpolationReferences(binding.Interpolation, source)
 		use := expressionUse{
 			consumer: consumer, expression: expression, scope: scope, nodeID: nodeID,
-			allowSteps: allowSteps, allowLocals: allowLocals, addEdge: addEdge,
+			allowSteps: allowSteps, allowLocals: allowLocals, allowOutputs: allowOutputs, addEdge: addEdge,
 		}
 		if err != nil {
 			a.addExpressionError(use, err)
@@ -458,6 +459,11 @@ func (a *dependencyAnalyzer) walkReferences(use expressionUse, references []valu
 			a.walkStepReference(use, reference)
 		case "item", "index":
 			a.walkLocalReference(use, reference)
+		case "outputs":
+			if !use.allowOutputs {
+				a.addUnavailableReference(use, reference, "raw adapter outputs exist only while projecting a node's declared outputs",
+					"Use outputs only in a node output value binding; use steps.<node>.outputs from downstream or workflow outputs.")
+			}
 		}
 	}
 }
@@ -641,7 +647,7 @@ func (a *dependencyAnalyzer) walkActivation(activation graph.ActivationDeclarati
 		a.walkBinding(binding, ValueConsumer{
 			Kind: ValueConsumerActivation, ID: identity, Surface: "inputs." + name,
 			Source: firstSource(binding.Source, activation.Source, graphSource(a.plan.Graph)),
-		}, scope, "", false, false, false)
+		}, scope, "", false, false, false, false)
 	}
 	if activation.Policy.DeduplicationKey != nil {
 		expression := *activation.Policy.DeduplicationKey

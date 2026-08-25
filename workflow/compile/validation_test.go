@@ -137,6 +137,31 @@ func TestValidateGraphReportsClosedShapeFailures(t *testing.T) {
 	}
 }
 
+func TestValidateGraphRejectsFanOutSyntheticInputBindingCollisions(t *testing.T) {
+	registry := validationRegistry(t, stepkindtest.NewNoopKind("noop", "v1"))
+	for _, test := range []struct {
+		name      string
+		forEach   graph.ForEachSpec
+		collision string
+	}{
+		{name: "default item", forEach: graph.ForEachSpec{Items: graph.Expression{Text: "inputs.items"}}, collision: "item"},
+		{name: "default index", forEach: graph.ForEachSpec{Items: graph.Expression{Text: "inputs.items"}}, collision: "index"},
+		{name: "custom item", forEach: graph.ForEachSpec{Items: graph.Expression{Text: "inputs.items"}, ItemName: "entry", IndexName: "position"}, collision: "entry"},
+		{name: "custom index", forEach: graph.ForEachSpec{Items: graph.Expression{Text: "inputs.items"}, ItemName: "entry", IndexName: "position"}, collision: "position"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			node := validationNode("fan", "noop", "v1", 4)
+			node.ForEach = &test.forEach
+			node.InputBindings = map[string]graph.Binding{test.collision: {Kind: graph.BindingLiteral, Literal: "collision"}}
+			findings := workflowcompile.ValidateGraph(t.Context(), validationGraph(node), workflowcompile.ValidationOptions{StepKinds: registry})
+			assertCodes(t, findings, workflowcompile.CodeInvalidForEach)
+			if !strings.Contains(findings[0].Message, "collides") {
+				t.Fatalf("collision diagnostic = %#v", findings[0])
+			}
+		})
+	}
+}
+
 func TestValidateGraphRejectsMismatchedCallNodeShape(t *testing.T) {
 	registry := validationRegistry(t,
 		stepkindtest.NewNoopKind("call", "v1"),

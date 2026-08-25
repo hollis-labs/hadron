@@ -237,6 +237,10 @@ func prepareEnvironment(
 	if err != nil {
 		return nil, fmt.Errorf("inputs: %w", err)
 	}
+	outputs, err := unwrapValueSet(context.Outputs)
+	if err != nil {
+		return nil, fmt.Errorf("outputs: %w", err)
+	}
 	steps := make(map[string]any, len(context.Steps))
 	stepIDs := make([]string, 0, len(context.Steps))
 	for stepID := range context.Steps {
@@ -269,7 +273,7 @@ func prepareEnvironment(
 		return nil, err
 	}
 	environment := map[string]any{
-		"inputs": inputs, "steps": steps,
+		"inputs": inputs, "outputs": outputs, "steps": steps,
 		"item": nil, "index": nil,
 		"run": run, "run_scope": runScope, "execution_target": executionTarget,
 	}
@@ -423,6 +427,16 @@ func rejectSecretReferenceUse(references []Reference, context ExpressionContext)
 				continue
 			}
 			if value, ok := context.Inputs[reference.Path[0]]; ok && value.Redaction == RedactionSecret {
+				return ErrSecretDerivation
+			}
+		case "outputs":
+			if reference.Dynamic || len(reference.Path) == 0 {
+				if valueSetContainsSecret(context.Outputs) {
+					return ErrSecretDerivation
+				}
+				continue
+			}
+			if value, ok := context.Outputs[reference.Path[0]]; ok && value.Redaction == RedactionSecret {
 				return ErrSecretDerivation
 			}
 		case "steps":

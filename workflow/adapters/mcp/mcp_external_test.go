@@ -134,6 +134,91 @@ func TestRegistrationSpecAndConfigValidation(t *testing.T) {
 	}
 }
 
+func TestPrepareInterpolatesArgumentsFromBoundInputsWithoutMutatingInvocation(t *testing.T) {
+	client := &fakeClient{call: func(_ context.Context, request mcpadapter.CallRequest) (mcpadapter.CallResult, error) {
+		want := map[string]any{
+			"project": "project-9", "literal": "inputs.title", "closing": "}}",
+			"nested": []any{"Task one", map[string]any{"description": "desc Task one"}},
+		}
+		if !reflect.DeepEqual(request.Arguments, want) {
+			t.Fatalf("prepared arguments = %#v, want %#v", request.Arguments, want)
+		}
+		return mcpadapter.CallResult{HasStructured: true, Structured: map[string]any{"id": "task-1"}}, nil
+	}}
+	kind := mustKind(t, client, &fakeDescriptor{}, nil, 0, 0)
+	inputMetadata := values.Metadata{Producer: values.Producer{Kind: "node-input", Reference: "run/create/item-1"}, MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun}
+	project, err := values.NewInline("project-9", inputMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	title, err := values.NewInline("Task one", inputMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := map[string]any{
+		"project": "{{ inputs['project-id'] }}", "literal": "inputs.title", "closing": "}}",
+		"nested": []any{"{{ inputs.title }}", map[string]any{"description": "desc {{ inputs.title }}"}},
+	}
+	configuration := config(arguments)
+	invocation := stepkind.Invocation{
+		Identity: stepkind.InvocationIdentity{RunID: "run", NodeID: "create", Iteration: "item-1", Attempt: 2},
+		Config:   configuration, Inputs: values.ValueSet{"project-id": project, "title": title}, IdempotencyKey: "logical-create-1",
+	}
+	before, err := json.Marshal(invocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := kind.Prepare(t.Context(), invocation)
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	after, err := json.Marshal(prepared.Invocation)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("Prepare mutated invocation: before=%s after=%s err=%v", before, after, err)
+	}
+	if _, err := kind.Execute(t.Context(), prepared); err != nil {
+		t.Fatalf("Execute(prepared) error = %v", err)
+	}
+	if client.request.IdempotencyKey != invocation.IdempotencyKey {
+		t.Fatalf("idempotency key = %q", client.request.IdempotencyKey)
+	}
+	if arguments["project"] != "{{ inputs['project-id'] }}" || arguments["nested"].([]any)[0] != "{{ inputs.title }}" {
+		t.Fatalf("plan arguments mutated = %#v", arguments)
+	}
+}
+
+func TestPrepareRejectsUnsafeOrMalformedArgumentInterpolation(t *testing.T) {
+	kind := mustKind(t, &fakeClient{}, &fakeDescriptor{}, nil, 0, 0)
+	secretRef, err := values.ParseSecretRef("secret://project/mcp#token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := values.NewSecretRef(secretRef, values.Metadata{Producer: values.Producer{Kind: "test", Reference: "run"}, MediaType: "text/plain", Redaction: values.RedactionSecret, Retention: values.RetentionRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		text   string
+		inputs values.ValueSet
+	}{
+		{name: "secret derivation", text: "Bearer {{ inputs.token }}", inputs: values.ValueSet{"token": secret}},
+		{name: "malformed", text: "{{ inputs.title", inputs: values.ValueSet{}},
+		{name: "non-input root", text: "{{ run.id }}", inputs: values.ValueSet{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			invocation := stepkind.Invocation{Identity: stepkind.InvocationIdentity{RunID: "run", NodeID: "node", Attempt: 1}, Config: config(map[string]any{"value": test.text}), Inputs: test.inputs}
+			_, prepareErr := kind.Prepare(t.Context(), invocation)
+			if prepareErr == nil || stepkind.ClassifyError(prepareErr) != stepkind.RetryPermanent {
+				t.Fatalf("Prepare error = %v", prepareErr)
+			}
+			if strings.Contains(prepareErr.Error(), string(secretRef)) {
+				t.Fatalf("Prepare error leaked secret reference: %v", prepareErr)
+			}
+		})
+	}
+}
+
 func TestDescribeConfigTrustedAndFailClosedAnnotationMapping(t *testing.T) {
 	trueValue, falseValue := true, false
 	tests := []struct {

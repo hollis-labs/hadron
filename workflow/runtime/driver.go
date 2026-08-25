@@ -157,7 +157,13 @@ func (d *NodeDriver) Drive(ctx context.Context, request DriveNodeRequest) (Drive
 		result.Progressed = progressed
 		return result, progressErr
 	}
-	if node.Inputs == nil {
+	// A fan-out aggregate is a coordinator-owned invocation, not an executor
+	// call. Its node bindings may reference item/index and are evaluated once
+	// per child by FanOutCoordinator. Binding them on the aggregate would either
+	// fail against absent locals or persist a misleading pre-expansion input set.
+	// Children are created with their complete immutable inputs already bound.
+	fanOutAggregate := request.Node.ForEach != nil && id.Iteration == ""
+	if !fanOutAggregate && node.Inputs == nil {
 		if node.Status != NodePending && node.Status != NodeBlocked {
 			return result, fmt.Errorf("%w: unbound node %v is already claimable or terminal", ErrRecoveryConflict, id)
 		}
@@ -186,7 +192,7 @@ func (d *NodeDriver) Drive(ctx context.Context, request DriveNodeRequest) (Drive
 		}
 		result.Binding = &binding
 		node = binding.Node
-	} else {
+	} else if !fanOutAggregate {
 		if request.Node.Memoization != nil && node.MemoKeyDigest == "" {
 			return result, fmt.Errorf("%w: memoized node is missing its durable key digest", ErrRecoveryConflict)
 		}

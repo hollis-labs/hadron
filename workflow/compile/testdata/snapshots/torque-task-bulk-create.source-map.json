@@ -34,7 +34,7 @@
     "count": {
       "format": "workflow",
       "locator": "examples/workflow/torque-task-bulk-create.workflow.yaml",
-      "start_line": 82,
+      "start_line": 93,
       "start_column": 5,
       "path": [
         "outputs",
@@ -44,7 +44,7 @@
     "created": {
       "format": "workflow",
       "locator": "examples/workflow/torque-task-bulk-create.workflow.yaml",
-      "start_line": 74,
+      "start_line": 85,
       "start_column": 5,
       "path": [
         "outputs",
@@ -54,7 +54,7 @@
     "failed": {
       "format": "workflow",
       "locator": "examples/workflow/torque-task-bulk-create.workflow.yaml",
-      "start_line": 78,
+      "start_line": 89,
       "start_column": 5,
       "path": [
         "outputs",
@@ -76,7 +76,7 @@
     "summarize": {
       "format": "workflow",
       "locator": "examples/workflow/torque-task-bulk-create.workflow.yaml",
-      "start_line": 54,
+      "start_line": 64,
       "start_column": 5,
       "path": [
         "steps",
@@ -88,7 +88,7 @@
     "create-\u003esummarize:control": {
       "format": "workflow",
       "locator": "examples/workflow/torque-task-bulk-create.workflow.yaml",
-      "start_line": 56,
+      "start_line": 67,
       "start_column": 13,
       "path": [
         "steps",
@@ -100,7 +100,7 @@
     "create-\u003esummarize:data": {
       "format": "workflow",
       "locator": "examples/workflow/torque-task-bulk-create.workflow.yaml",
-      "start_line": 54,
+      "start_line": 64,
       "start_column": 5,
       "path": [
         "steps",

@@ -25,15 +25,20 @@ inputs:
 steps:
   - id: create
     display_name: Create Torque tasks
-    for_each: inputs.tasks
-    concurrency: 4
+    kind_version: v1
+    for_each:
+      items: inputs.tasks
+      max_concurrency: 4
+      tolerate:
+        count: 1
     mcp_call:
       server: torque
       tool: torque_task_create
+      timeout: 250ms
       arguments:
         project_id: "{{ inputs['project-id'] }}"
-        title: "{{ item.title }}"
-        description: "{{ item.description }}"
+        title: "{{ inputs.title }}"
+        description: "{{ inputs.description }}"
     with:
       project-id: inputs["project-id"]
       title: item.title
@@ -41,21 +46,27 @@ steps:
     outputs:
       result-json:
         type: object
+        value: outputs.structured_content
       task-id:
         type: string
-        value: outputs["result-json"].id
+        value: outputs.structured_content.id
     effects: [mutate]
     retry:
       attempts: 3
-      backoff: exponential
+      backoff:
+        strategy: exponential
+        initial_delay: 1s
+        max_delay: 30s
+        multiplier: 2
       on: [timeout, rate_limited]
       idempotency_key: inputs["project-id"] + ":" + item.title
 
   - id: summarize
     display_name: Summarize task creation
+    kind_version: v1
     needs: [create]
     transform:
-      created: map(steps.create.items, .outputs["result-json"].id)
+      created: map(filter(steps.create.items, .status == "succeeded"), .outputs["result-json"].id)
       failed: filter(steps.create.items, .status == "failed")
       count: len(steps.create.items)
     outputs:

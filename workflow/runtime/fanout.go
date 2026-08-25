@@ -308,10 +308,15 @@ type FanOutExpandCommand struct {
 	Parent                   NodeInvocationID
 	ExpectedParentGeneration uint64
 	Spec                     graph.ForEachSpec
-	ExpressionContext        values.ExpressionContext
-	ExpressionOptions        values.ExpressionOptions
-	Priority                 int
-	At                       time.Time
+	// InputBindings is the exact compiled node-local binding set. Each child
+	// receives the synthetic item/index values plus these evaluated inputs in
+	// one immutable ValueSet before it becomes ready. Nil preserves the legacy
+	// low-level fan-out contract that stores only item/index.
+	InputBindings     map[string]graph.Binding
+	ExpressionContext values.ExpressionContext
+	ExpressionOptions values.ExpressionOptions
+	Priority          int
+	At                time.Time
 }
 
 func (c FanOutCoordinator) Expand(ctx context.Context, command FanOutExpandCommand) (ExpandFanOutResult, error) {
@@ -343,6 +348,12 @@ func (c FanOutCoordinator) Expand(ctx context.Context, command FanOutExpandComma
 	if indexName == "" {
 		indexName = "index"
 	}
+	if _, collision := command.InputBindings[itemName]; collision {
+		return ExpandFanOutResult{}, fmt.Errorf("%w: node input binding %q collides with the fan-out item binding", ErrInvalidFanOut, itemName)
+	}
+	if _, collision := command.InputBindings[indexName]; collision {
+		return ExpandFanOutResult{}, fmt.Errorf("%w: node input binding %q collides with the fan-out index binding", ErrInvalidFanOut, indexName)
+	}
 	bindings := make([]FanOutItemBinding, len(items))
 	for index, item := range items {
 		iteration := FanOutIteration(index)
@@ -357,7 +368,18 @@ func (c FanOutCoordinator) Expand(ctx context.Context, command FanOutExpandComma
 			return ExpandFanOutResult{}, fmt.Errorf("%w: index %d: %w", ErrInvalidFanOut, index, valueErr)
 		}
 		invocation := NodeInvocationID{RunID: command.Parent.RunID, NodeID: command.Parent.NodeID, Iteration: iteration}
-		set := values.ValueSet{itemName: itemValue, indexName: indexValue}
+		itemContext := command.ExpressionContext
+		itemContext.Item = &itemValue
+		itemContext.Index = &index
+		bound, bindErr := bindNodeInputValues(graph.Node{InputBindings: command.InputBindings}, itemContext, command.ExpressionOptions, invocation)
+		if bindErr != nil {
+			return ExpandFanOutResult{}, fmt.Errorf("%w: bind item %d inputs: %w", ErrInvalidFanOut, index, bindErr)
+		}
+		set := make(values.ValueSet, len(bound)+2)
+		set[itemName], set[indexName] = itemValue, indexValue
+		for name, value := range bound {
+			set[name] = value
+		}
 		ref, saveErr := SaveValuesWithRetention(ctx, c.Store, c.Retention, SaveValuesRequest{
 			Owner: ValueOwner{Kind: "fanout-item-inputs", RunID: command.Parent.RunID, Invocation: &invocation}, Values: set,
 		})

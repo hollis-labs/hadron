@@ -305,6 +305,43 @@ func TestDefinitionResolverSupportsFileDirectoryRegistryAndPackageSources(t *tes
 	}
 }
 
+func TestDefinitionResolverMapsNamespacedRegistryIdentityToAuthoredGraph(t *testing.T) {
+	index := hadronregistry.NewWorkflowIndex()
+	source := []byte(`workflow:
+  name: registered
+  namespace: team
+  version: 1.0.0
+steps:
+  - id: root
+    kind: noop
+    kind_version: v1
+`)
+	record, err := index.RegisterWorkflow(t.Context(), hadronregistry.WorkflowRecord{
+		Name: "team/registered", Namespace: "team", Version: "1.0.0", Source: source,
+		Authority: "registry.test", TrustClass: "signed",
+		Provenance: graph.Provenance{Origin: "publisher", Locator: "registry://team/registered/1.0.0/registered.workflow.yaml"},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := newTestDefinitionResolver(t, t.TempDir(), index, DefinitionAuthorizerFunc(allowDefinitions))
+	ref := graph.DefinitionRef{Kind: DefinitionKindRegistry, ID: record.Name, Version: record.Version, Digest: record.Digest}
+	resolved, err := resolver.ResolveSource(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Requested.ID != "team/registered" || resolved.Definition.ID != "registered" {
+		t.Fatalf("resolved registry/authored identities = %#v / %#v", resolved.Requested, resolved.Definition)
+	}
+	plan, err := resolver.ResolvePlan(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Graph.ID != "registered" || plan.Graph.Namespace != "team" || plan.Definition.ID != "registered" {
+		t.Fatalf("resolved namespaced plan = %#v", plan)
+	}
+}
+
 func TestDefinitionResolverAcceptsMaximumFileAndPackageBounds(t *testing.T) {
 	root := t.TempDir()
 	fileSource := testWorkflowSource("maximum-file", "1.0.0", "noop")

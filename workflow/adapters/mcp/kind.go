@@ -60,6 +60,10 @@ type config struct {
 	Expected       ExpectedResult
 }
 
+type preparedArguments struct {
+	arguments map[string]any
+}
+
 // Kind is the registered MCP step-kind implementation.
 type Kind struct {
 	client       Client
@@ -120,6 +124,7 @@ func (*Kind) Spec() stepkind.StepKindSpec {
 		Idempotency:          graph.IdempotencyKeyed, RetrySafety: stepkind.RetryRequiresIdempotency,
 		Cancellation:          stepkind.CancellationSpec{Mode: stepkind.CancellationContext},
 		Observation:           stepkind.ObservationSpec{Mode: stepkind.ObservationNone},
+		Lifecycle:             stepkind.LifecycleSpec{Prepare: true},
 		EmbeddedModeSupported: true,
 	}
 }
@@ -191,6 +196,34 @@ func (k *Kind) DescribeConfig(ctx context.Context, input graph.Config) (ConfigDe
 	return describe(parsed, descriptor), nil
 }
 
+// Prepare evaluates adapter-owned argument interpolation against only the
+// invocation's already-bound node inputs. The immutable invocation and plan
+// config remain byte-for-byte unchanged; resolved secrets are deliberately
+// deferred to the immediate Execute boundary.
+func (k *Kind) Prepare(ctx context.Context, invocation stepkind.Invocation) (stepkind.PreparedInvocation, error) {
+	if ctx == nil {
+		return stepkind.PreparedInvocation{}, permanent("mcp_invalid_invocation", "MCP invocation is invalid", errors.New("context is required"), nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return stepkind.PreparedInvocation{}, classifyCallFailure("mcp_canceled", "MCP argument preparation was canceled", err, config{})
+	}
+	parsed, err := parseConfig(invocation.Config)
+	if err != nil {
+		return stepkind.PreparedInvocation{}, permanent("mcp_invalid_config", "MCP step configuration is invalid", err, nil)
+	}
+	engine := values.NewExpressionEngine()
+	prepared, err := transformMap(parsed.Arguments, func(text string) (any, error) {
+		if !strings.Contains(text, "{{") {
+			return text, nil
+		}
+		return engine.Interpolate(text, nil, values.ExpressionContext{Inputs: invocation.Inputs}, values.ExpressionOptions{VisibleSteps: []string{}})
+	})
+	if err != nil {
+		return stepkind.PreparedInvocation{}, permanent("mcp_argument_interpolation", "MCP argument interpolation failed", err, safeDetails(parsed))
+	}
+	return stepkind.PreparedInvocation{Invocation: invocation, State: preparedArguments{arguments: prepared}}, nil
+}
+
 func describe(parsed config, descriptor ToolDescriptor) ConfigDescription {
 	description := ConfigDescription{
 		Server: parsed.Server, Tool: parsed.Tool, Annotations: cloneAnnotations(descriptor.Annotations),
@@ -234,6 +267,18 @@ func (k *Kind) Execute(ctx context.Context, invocation stepkind.PreparedInvocati
 	parsed, err := parseConfig(invocation.Invocation.Config)
 	if err != nil {
 		return stepkind.StepResult{}, permanent("mcp_invalid_config", "MCP step configuration is invalid", err, nil)
+	}
+	switch prepared := invocation.State.(type) {
+	case nil:
+		// Direct adapter callers remain backward compatible with literal config.
+	case preparedArguments:
+		arguments, cloneErr := cloneJSONObject(prepared.arguments)
+		if cloneErr != nil {
+			return stepkind.StepResult{}, permanent("mcp_invalid_invocation", "MCP prepared arguments are invalid", cloneErr, safeDetails(parsed))
+		}
+		parsed.Arguments = arguments
+	default:
+		return stepkind.StepResult{}, permanent("mcp_invalid_invocation", "MCP prepared state is invalid", fmt.Errorf("unexpected prepared state %T", invocation.State), safeDetails(parsed))
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return stepkind.StepResult{}, classifyCallFailure("mcp_canceled", "MCP tool call was canceled", contextErr, parsed)

@@ -64,7 +64,7 @@ func NewDefault() (*Builder, error) {
 	registry := stepkind.NewRegistry()
 	for _, kind := range []stepkind.StepKind{
 		transform.New(), script.New(),
-		&validationKind{delegate: &mcpadapter.Kind{}},
+		validationOnlyKind(&mcpadapter.Kind{}),
 		&validationKind{delegate: &llmadapter.Kind{}},
 		&validationKind{delegate: &gateadapter.Executor{}},
 		&validationKind{delegate: &waitadapter.Sleep{}},
@@ -80,12 +80,29 @@ func NewDefault() (*Builder, error) {
 
 type validationKind struct{ delegate stepkind.StepKind }
 
+type validationPreparedKind struct {
+	*validationKind
+	preparer stepkind.Preparer
+}
+
+func validationOnlyKind(delegate stepkind.StepKind) stepkind.StepKind {
+	kind := &validationKind{delegate: delegate}
+	if preparer, ok := delegate.(stepkind.Preparer); ok {
+		return &validationPreparedKind{validationKind: kind, preparer: preparer}
+	}
+	return kind
+}
+
 func (k *validationKind) Spec() stepkind.StepKindSpec { return k.delegate.Spec() }
 func (k *validationKind) ValidateConfig(ctx context.Context, config graph.Config) []diagnostic.Diagnostic {
 	return k.delegate.ValidateConfig(ctx, config)
 }
 func (*validationKind) Execute(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
 	return stepkind.StepResult{}, errors.New("validation-only kind cannot execute")
+}
+
+func (k *validationPreparedKind) Prepare(ctx context.Context, invocation stepkind.Invocation) (stepkind.PreparedInvocation, error) {
+	return k.preparer.Prepare(ctx, invocation)
 }
 
 type Request struct {

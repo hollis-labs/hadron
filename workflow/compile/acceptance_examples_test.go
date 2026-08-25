@@ -71,7 +71,7 @@ func TestTorqueBulkCreateAcceptanceContract(t *testing.T) {
 	}
 
 	create := nodeByID(t, plan.Graph, "create")
-	if create.Kind != "mcp" || create.ForEach == nil || create.ForEach.Items.Text != "inputs.tasks" || create.ForEach.MaxConcurrency != 4 {
+	if create.Kind != "mcp" || create.ForEach == nil || create.ForEach.Items.Text != "inputs.tasks" || create.ForEach.MaxConcurrency != 4 || create.ForEach.Tolerate == nil || create.ForEach.Tolerate.Count != 1 {
 		t.Fatalf("create fan-out = kind %q, for_each %#v", create.Kind, create.ForEach)
 	}
 	if !slices.Equal(create.Effects, graph.EffectSet{graph.EffectMutate}) || create.Retry == nil || create.Retry.Attempts != 3 ||
@@ -82,17 +82,16 @@ func TestTorqueBulkCreateAcceptanceContract(t *testing.T) {
 	}
 	arguments := create.Config["arguments"].(map[string]any)
 	if create.Config["server"] != "torque" || create.Config["tool"] != "torque_task_create" ||
-		arguments["title"] != "{{ item.title }}" || arguments["project_id"] != "{{ inputs['project-id'] }}" {
+		arguments["title"] != "{{ inputs.title }}" || arguments["description"] != "{{ inputs.description }}" || arguments["project_id"] != "{{ inputs['project-id'] }}" {
 		t.Fatalf("MCP config = %#v", create.Config)
 	}
-	if schemaOfOutput(t, create.Outputs, "result-json")["type"] != "object" ||
-		schemaOfOutput(t, create.Outputs, "task-id")["type"] != "string" ||
-		outputByName(t, create.Outputs, "task-id").Value == nil {
+	resultJSON, taskID := outputByName(t, create.Outputs, "result-json"), outputByName(t, create.Outputs, "task-id")
+	if resultJSON.Schema["type"] != "object" || taskID.Schema["type"] != "string" || resultJSON.Value == nil || resultJSON.Value.Expression == nil || resultJSON.Value.Expression.Text != "outputs.structured_content" || taskID.Value == nil || taskID.Value.Expression == nil || taskID.Value.Expression.Text != "outputs.structured_content.id" {
 		t.Fatalf("create outputs = %#v", create.Outputs)
 	}
 
 	summarize := nodeByID(t, plan.Graph, "summarize")
-	if summarize.Kind != "transform" || summarize.Config["created"] != `map(steps.create.items, .outputs["result-json"].id)` ||
+	if summarize.Kind != "transform" || summarize.Config["created"] != `map(filter(steps.create.items, .status == "succeeded"), .outputs["result-json"].id)` ||
 		summarize.Config["failed"] != `filter(steps.create.items, .status == "failed")` {
 		t.Fatalf("summary transform = %#v", summarize.Config)
 	}

@@ -621,7 +621,7 @@ func (h *Host) materializeNodes(ctx context.Context, record hoststate.StartRecor
 			return loadErr
 		}
 		var inputRef *values.ValueSetRef
-		if !hasDependencies(record.Plan.Graph, node.ID) {
+		if !hasDependencies(record.Plan.Graph, node.ID) && node.ForEach == nil {
 			bound, bindErr := bindNodeInputs(node, inputs, record.Run.ID)
 			if bindErr != nil {
 				return fmt.Errorf("bind root node %s: %w", node.ID, bindErr)

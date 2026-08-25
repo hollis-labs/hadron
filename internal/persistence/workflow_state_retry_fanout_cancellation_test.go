@@ -10,6 +10,7 @@ import (
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	"github.com/hollis-labs/hadron/workflow/values"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
 
@@ -100,6 +101,57 @@ func TestWorkflowSQLiteRetryReopenActivationHistoryAndCAS(t *testing.T) {
 	attempts, historyErr := reopened.ListAttempts(context.Background(), started.Node.ID)
 	if err != nil || historyErr != nil || node.Status != workflowruntime.NodeReady || len(attempts) != 1 || attempts[0].Status != workflowruntime.NodeFailed {
 		t.Fatalf("reopened retry state node=%#v attempts=%#v errors=%v/%v", node, attempts, err, historyErr)
+	}
+}
+
+func TestWorkflowSQLiteFanOutBoundInputsRecoverAfterReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fanout-bound-inputs.db")
+	store, state := openWorkflowStateTest(t, path)
+	base := workflowTestTime()
+	run := createWorkflowTestRun(t, state, "fanout-bound-inputs", base)
+	parent := createWorkflowTestNode(t, state, run.ID, "create", base)
+	project, err := values.NewInline("project-1", values.Metadata{Producer: values.Producer{Kind: "workflow_input", Reference: string(run.ID), Output: "project"}, MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expanded, err := (workflowruntime.FanOutCoordinator{Store: state}).Expand(context.Background(), workflowruntime.FanOutExpandCommand{
+		Parent: parent.ID, ExpectedParentGeneration: parent.Generation,
+		Spec: graph.ForEachSpec{Items: graph.Expression{Text: `[{"title":"one"},{"title":"two"}]`}},
+		InputBindings: map[string]graph.Binding{
+			"project": {Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "inputs.project"}},
+			"title":   {Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "item.title"}},
+		},
+		ExpressionContext: values.ExpressionContext{Inputs: values.ValueSet{"project": project}},
+		At:                base.Add(time.Second),
+	})
+	if err != nil || len(expanded.Children) != 2 {
+		t.Fatalf("Expand = %#v, %v", expanded, err)
+	}
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	reopenedStore, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopenedStore.Close() })
+	reopened, err := NewWorkflowStateStore(reopenedStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := reopened.LoadFanOut(context.Background(), parent.ID)
+	if err != nil || len(recovered.Items) != 2 {
+		t.Fatalf("LoadFanOut = %#v, %v", recovered, err)
+	}
+	for index, item := range recovered.Items {
+		inputs, loadErr := reopened.LoadValues(context.Background(), item.Inputs)
+		if loadErr != nil || len(inputs) != 4 || inputs["title"].Inline != []string{"one", "two"}[index] || inputs["project"].Digest != project.Digest {
+			t.Fatalf("recovered item %d inputs = %#v, %v", index, inputs, loadErr)
+		}
+		child, childErr := reopened.LoadNodeInvocation(context.Background(), item.Invocation)
+		if childErr != nil || child.Status != workflowruntime.NodeReady || child.Inputs == nil || *child.Inputs != item.Inputs {
+			t.Fatalf("recovered child %d = %#v, %v", index, child, childErr)
+		}
 	}
 }
 

@@ -2,12 +2,14 @@ package runtime_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	"github.com/hollis-labs/hadron/workflow/runtime/runtimetest"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -30,8 +32,8 @@ func TestDispatcherSchedulesDurableRetryThenPreservesFinalTypedOutput(t *testing
 		}
 		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{"result": dispatchValue(t, "result", "done")}}, nil
 	}
-	if err := registry.Register(kind); err != nil {
-		t.Fatal(err)
+	if registerErr := registry.Register(kind); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	now := base.Add(3 * time.Second)
 	scheduler := &recordingScheduler{}
@@ -89,8 +91,8 @@ func TestDispatcherRetryDenialCannotBeBypassedByReadyDisposition(t *testing.T) {
 	kind.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
 		return stepkind.StepResult{}, &stepkind.ExecutionError{Code: "temporary", Message: "retry later", Classification: stepkind.Retryable}
 	}
-	if err := registry.Register(kind); err != nil {
-		t.Fatal(err)
+	if registerErr := registry.Register(kind); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	dispositionCalled := false
 	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{
@@ -148,31 +150,172 @@ func TestDispatcherValidatesDeclaredNodeOutputsWithSource(t *testing.T) {
 	}
 }
 
-func TestDispatcherRejectsUndeclaredNodeOutput(t *testing.T) {
-	store, claim, node, base := dispatchFixture(t, "dispatch-undeclared-output")
+func TestDispatcherProjectsDeclaredNodeOutputsAndExcludesUnselectedRawValues(t *testing.T) {
+	store, claim, node, base := dispatchFixture(t, "dispatch-projected-output")
 	registry := stepkind.NewRegistry()
-	kind := stepkindtest.NewLifecycleKind("undeclared-output-kind", "v1")
+	kind := stepkindtest.NewLifecycleKind("projected-output-kind", "v1")
 	kind.SpecValue.InputSchema = objectSchema("input", "string")
 	kind.SpecValue.OutputSchema = graph.Schema{}
+	artifact := values.ArtifactRef{
+		Store: "fixture", URI: "artifact://fixture/receipt", Digest: values.SHA256Digest([]byte("receipt")), MediaType: "application/json", SizeBytes: 7,
+		Producer: values.Producer{Kind: "adapter", Reference: "raw", Output: "receipt"}, Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
+	}
+	artifactValue, err := values.NewArtifact(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	structured := dispatchValue(t, "structured", map[string]any{"id": "task-1"})
 	kind.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
 		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{
-			"result": dispatchValue(t, "result", "expected"),
-			"extra":  dispatchValue(t, "extra", "unexpected"),
+			"structured": structured,
+			"receipt":    artifactValue,
+			"metadata":   dispatchValue(t, "metadata", map[string]any{"private": "not-public"}),
 		}}, nil
 	}
-	if err := registry.Register(kind); err != nil {
-		t.Fatal(err)
+	if registerErr := registry.Register(kind); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{Claim: claim, Node: graph.Node{
-		ID: node.ID.NodeID, Kind: "undeclared-output-kind", KindVersion: "v1",
-		Outputs: []graph.OutputSpec{{Name: "result", Schema: graph.Schema{"type": "string"}}},
+		ID: node.ID.NodeID, Kind: "projected-output-kind", KindVersion: "v1",
+		Outputs: []graph.OutputSpec{
+			{Name: "result-json", Schema: graph.Schema{"type": "object"}, Value: &graph.Binding{Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "outputs.structured"}}},
+			{Name: "task-id", Schema: graph.Schema{"type": "string"}, Value: &graph.Binding{Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "outputs.structured.id"}}},
+			{Name: "artifact", Schema: graph.Schema{}, Value: &graph.Binding{Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "outputs.receipt"}}},
+		},
 	}})
-	var outputErr *workflowruntime.NodeOutputValidationError
-	if !errors.Is(err, workflowruntime.ErrStepValidation) || !errors.As(err, &outputErr) || outputErr.Output != "extra" || result.Attempt.Status != workflowruntime.NodeFailed {
-		t.Fatalf("Dispatch(undeclared output) = %#v, %v outputErr=%#v", result, err, outputErr)
+	if err != nil || result.Attempt.Status != workflowruntime.NodeSucceeded || result.Outputs == nil || result.Result == nil {
+		t.Fatalf("Dispatch(projected output) = %#v, %v", result, err)
+	}
+	public, loadErr := store.LoadValues(context.Background(), *result.Outputs)
+	if loadErr != nil || len(public) != 3 || public["task-id"].Inline != "task-1" {
+		t.Fatalf("public outputs = %#v, %v", public, loadErr)
+	}
+	if _, exists := public["metadata"]; exists {
+		t.Fatalf("unselected raw metadata was published: %#v", public)
+	}
+	if public["result-json"].Digest != structured.Digest || public["result-json"].Producer != structured.Producer {
+		t.Fatalf("exact raw output passthrough lost envelope: %#v", public["result-json"])
+	}
+	if public["artifact"].Type != values.TypeArtifact || public["artifact"].Artifact.URI != artifact.URI || public["artifact"].Digest != artifactValue.Digest {
+		t.Fatalf("artifact passthrough = %#v", public["artifact"])
+	}
+	if public["task-id"].Producer.Kind != "node_output" || public["task-id"].Producer.Output != "task-id" {
+		t.Fatalf("computed output metadata = %#v", public["task-id"].Producer)
+	}
+	if len(result.Result.Outputs) != 3 || result.Result.Outputs["metadata"].Inline == nil {
+		t.Fatalf("adapter result was rewritten instead of preserving raw outputs: %#v", result.Result)
+	}
+}
+
+func TestDispatcherProjectionSchemaAndSecretFailuresPreserveOutputSource(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		raw        func(*testing.T) values.ValueSet
+		binding    *graph.Binding
+		schema     graph.Schema
+		wantSecret bool
+	}{
+		{
+			name: "schema mismatch", schema: graph.Schema{"type": "string"},
+			raw: func(t *testing.T) values.ValueSet {
+				return values.ValueSet{"public": dispatchValue(t, "public", json.Number("7"))}
+			},
+		},
+		{
+			name: "secret derivation", schema: graph.Schema{"type": "string"}, wantSecret: true,
+			binding: &graph.Binding{Kind: graph.BindingInterpolation, Interpolation: "prefix-{{ outputs.secret }}"},
+			raw: func(t *testing.T) values.ValueSet {
+				ref, err := values.ParseSecretRef("secret://project/output#token")
+				if err != nil {
+					t.Fatal(err)
+				}
+				secret, err := values.NewSecretRef(ref, values.Metadata{Producer: values.Producer{Kind: "adapter", Reference: "raw", Output: "secret"}, MediaType: "text/plain", Redaction: values.RedactionSecret, Retention: values.RetentionRun})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return values.ValueSet{"secret": secret}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, claim, node, base := dispatchFixture(t, "dispatch-projection-"+test.name)
+			registry := stepkind.NewRegistry()
+			kind := stepkindtest.NewLifecycleKind("projection-failure-kind", "v1")
+			kind.SpecValue.InputSchema = objectSchema("input", "string")
+			kind.SpecValue.OutputSchema = graph.Schema{}
+			kind.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+				return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: test.raw(t)}, nil
+			}
+			if err := registry.Register(kind); err != nil {
+				t.Fatal(err)
+			}
+			dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := &graph.SourceRef{Format: graph.SourceWorkflow, Locator: "projection.workflow.yaml", StartLine: 27, EndLine: 27}
+			result, dispatchErr := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{Claim: claim, Node: graph.Node{
+				ID: node.ID.NodeID, Kind: "projection-failure-kind", KindVersion: "v1",
+				Outputs: []graph.OutputSpec{{Name: "public", Schema: test.schema, Value: test.binding, Source: source}},
+			}})
+			var outputErr *workflowruntime.NodeOutputValidationError
+			if !errors.Is(dispatchErr, workflowruntime.ErrStepValidation) || !errors.As(dispatchErr, &outputErr) || outputErr.Source == nil || outputErr.Source.StartLine != 27 || result.Attempt.Status != workflowruntime.NodeFailed {
+				t.Fatalf("Dispatch = %#v, %v outputErr=%#v", result, dispatchErr, outputErr)
+			}
+			if test.wantSecret && !errors.Is(dispatchErr, values.ErrSecretDerivation) {
+				t.Fatalf("secret projection error = %v", dispatchErr)
+			}
+		})
+	}
+}
+
+func TestDispatcherNodeOutputProjectionUsesDurableFanOutItemAndIndex(t *testing.T) {
+	ctx := context.Background()
+	store := runtimetest.NewStore()
+	base := time.Date(2026, time.August, 24, 18, 0, 0, 0, time.UTC)
+	runID := workflowruntime.RunID("dispatch-fanout-projection")
+	parent := invocationID(runID, "create")
+	createRun(t, store, runID, base)
+	createNode(t, store, parent, workflowruntime.NodePending, 0, base)
+	forEach := graph.ForEachSpec{Items: graph.Expression{Text: `[{"title":"one"}]`}}
+	expanded, err := (workflowruntime.FanOutCoordinator{Store: store}).Expand(ctx, workflowruntime.FanOutExpandCommand{
+		Parent: parent, ExpectedParentGeneration: 1, Spec: forEach, At: base.Add(time.Second),
+	})
+	if err != nil || len(expanded.Children) != 1 {
+		t.Fatalf("Expand = %#v, %v", expanded, err)
+	}
+	claim, acquired, err := workflowruntime.NewReadyQueueCoordinator(store, nil).ClaimNext(ctx, workflowruntime.ReadyClaimRequest{
+		RunID: runID, Owner: "worker", Token: "token", IdempotencyKey: "fanout-projection-claim", Now: base.Add(2 * time.Second), LeaseUntil: base.Add(time.Minute),
+	})
+	if err != nil || !acquired || claim.Candidate.InvocationID != expanded.Children[0].ID {
+		t.Fatalf("ClaimNext = %#v, %t, %v", claim, acquired, err)
+	}
+	registry := stepkind.NewRegistry()
+	kind := stepkindtest.NewLifecycleKind("fanout-projection-kind", "v1")
+	kind.SpecValue.OutputSchema = graph.Schema{}
+	kind.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{"native": dispatchValue(t, "native", true)}}, nil
+	}
+	if registerErr := registry.Register(kind); registerErr != nil {
+		t.Fatal(registerErr)
+	}
+	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := dispatcher.Dispatch(ctx, workflowruntime.DispatchRequest{Claim: claim, Node: graph.Node{
+		ID: parent.NodeID, Kind: "fanout-projection-kind", KindVersion: "v1", ForEach: &forEach,
+		Outputs: []graph.OutputSpec{{Name: "label", Schema: graph.Schema{"type": "string"}, Value: &graph.Binding{Kind: graph.BindingInterpolation, Interpolation: "{{ item.title }}-{{ index }}"}}},
+	}})
+	if err != nil || result.Outputs == nil {
+		t.Fatalf("Dispatch = %#v, %v", result, err)
+	}
+	outputs, err := store.LoadValues(ctx, *result.Outputs)
+	if err != nil || outputs["label"].Inline != "one-0" {
+		t.Fatalf("fan-out projected outputs = %#v, %v", outputs, err)
 	}
 }

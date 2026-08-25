@@ -51,8 +51,9 @@ type InputSpec struct {
 	Metadata    Metadata   `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
-// OutputSpec declares a named, schema-bearing node or workflow output. Value is
-// set for workflow outputs and omitted for executor-produced node outputs.
+// OutputSpec declares a named, schema-bearing node or workflow output. Workflow
+// outputs require Value. Node outputs omit Value for exact same-name adapter
+// passthrough or set it to project the registered kind's raw outputs root.
 type OutputSpec struct {
 	Name        string     `json:"name" yaml:"name"`
 	Description string     `json:"description,omitempty" yaml:"description,omitempty"`

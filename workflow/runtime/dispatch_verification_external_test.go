@@ -70,6 +70,44 @@ func TestStepDispatcherVerifiesLiteralEvidenceBeforeDurableSuccess(t *testing.T)
 	}
 }
 
+func TestVerificationObservesRawKindOutputsBeforeNodeProjection(t *testing.T) {
+	store, claim, node, now := dispatchFixture(t, "verification-raw-before-projection")
+	kinds := stepkind.NewRegistry()
+	kind := stepkindtest.NewLifecycleKind("raw-projection", "v1")
+	kind.SpecValue.OutputSchema = graph.Schema{"type": "object", "required": []any{"native", "metadata"}, "properties": map[string]any{
+		"native": map[string]any{"type": "string"}, "metadata": map[string]any{"type": "object"},
+	}}
+	kind.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{
+			"native": dispatchValue(t, "native", "ok"), "metadata": dispatchValue(t, "metadata", map[string]any{"attempt": "raw"}),
+		}}, nil
+	}
+	if err := kinds.Register(kind); err != nil {
+		t.Fatal(err)
+	}
+	verifier := &rawOutputVerifier{}
+	verifiers := verification.NewRegistry()
+	if err := verifiers.Register(verifier); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: kinds, Verifiers: verifiers, Now: func() time.Time { return now.Add(3 * time.Second) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{Claim: claim, Node: graph.Node{
+		ID: node.ID.NodeID, Kind: "raw-projection", KindVersion: "v1",
+		Outputs:      []graph.OutputSpec{{Name: "public", Schema: graph.Schema{"type": "string"}, Value: &graph.Binding{Kind: graph.BindingExpression, Expression: &graph.Expression{Text: "outputs.native"}}}},
+		Verification: &graph.VerificationSpec{Checks: []graph.VerificationCheck{{Kind: "raw_output", Config: graph.Config{}}}},
+	}})
+	if err != nil || result.Outputs == nil || verifier.request == nil || len(verifier.request.Outputs) != 2 || verifier.request.Outputs["metadata"].Inline == nil {
+		t.Fatalf("Dispatch = %#v, %v verifier=%#v", result, err, verifier.request)
+	}
+	public, loadErr := store.LoadValues(context.Background(), *result.Outputs)
+	if loadErr != nil || len(public) != 1 || public["public"].Inline != "ok" {
+		t.Fatalf("projected outputs = %#v, %v", public, loadErr)
+	}
+}
+
 func TestVerificationDecisionUsesOrdinaryRetryAndCatchFailureContract(t *testing.T) {
 	t.Run("retry disposition", func(t *testing.T) {
 		store, claim, node, now := dispatchFixture(t, "verification-retry")
@@ -408,6 +446,20 @@ type fixedVerifier struct {
 	calls    *int
 	result   verification.CheckResult
 	err      error
+}
+
+type rawOutputVerifier struct{ request *verification.Request }
+
+func (*rawOutputVerifier) Spec() verification.VerifierSpec {
+	return verification.VerifierSpec{Kind: "raw_output", Version: "v1", Mode: verification.ModeDeterministic, ConfigSchema: graph.Schema{}}
+}
+func (*rawOutputVerifier) ValidateConfig(context.Context, graph.VerificationCheck) []diagnostic.Diagnostic {
+	return nil
+}
+func (v *rawOutputVerifier) Verify(_ context.Context, request verification.Request) (verification.CheckResult, error) {
+	copyRequest := request
+	v.request = &copyRequest
+	return verification.CheckResult{Outcome: verification.CheckPassed, Code: "raw_output_observed", Message: "raw kind outputs observed"}, nil
 }
 
 func (v fixedVerifier) Spec() verification.VerifierSpec {

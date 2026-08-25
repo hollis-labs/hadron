@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -571,9 +572,6 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	if schemaErr := values.ValidateValueSetSchema(spec.OutputSchema, stepResult.Outputs); schemaErr != nil {
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, schemaErr)
 	}
-	if schemaErr := validateDeclaredNodeOutputs(request.Node.Outputs, stepResult.Outputs); schemaErr != nil {
-		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, schemaErr)
-	}
 	if invocation.Verification != nil {
 		evidence, freezeErr := invocation.Activity.Freeze()
 		if freezeErr != nil {
@@ -600,13 +598,17 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchVerify, failureExecute, verificationExecutionError(verificationErr))
 		}
 	}
+	publicOutputs, projectionErr := projectDeclaredNodeOutputs(request.Node, invocation, stepResult.Outputs)
+	if projectionErr != nil {
+		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, projectionErr)
+	}
 
 	outputRef, err := SaveValuesWithRetention(durableCtx, d.store, d.retention, SaveValuesRequest{
 		Owner: ValueOwner{
 			Kind: "node-attempt-outputs", RunID: started.Attempt.ID.Invocation.RunID,
 			Invocation: &started.Attempt.ID.Invocation, Attempt: &started.Attempt.ID,
 		},
-		Values: stepResult.Outputs,
+		Values: publicOutputs,
 	})
 	if err != nil {
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchPersistOutput, failurePersistOutput, err)
@@ -850,46 +852,87 @@ func (e *NodeOutputValidationError) Unwrap() error {
 	return e.Cause
 }
 
-func validateDeclaredNodeOutputs(declarations []graph.OutputSpec, output values.ValueSet) error {
+func projectDeclaredNodeOutputs(node graph.Node, invocation stepkind.Invocation, raw values.ValueSet) (values.ValueSet, error) {
+	declarations := node.Outputs
 	if len(declarations) == 0 {
-		return nil
+		return cloneValueSet(raw), nil
 	}
-	declared := make(map[string]graph.OutputSpec, len(declarations))
+	context, err := nodeOutputExpressionContext(node, invocation, raw)
+	if err != nil {
+		return nil, err
+	}
+	declared := make(map[string]struct{}, len(declarations))
+	projected := make(values.ValueSet, len(declarations))
+	engine := values.NewExpressionEngine()
+	reference := fmt.Sprintf("%s/attempt-%d", controlIdentity(NodeInvocationID{
+		RunID: RunID(invocation.Identity.RunID), NodeID: invocation.Identity.NodeID, Iteration: invocation.Identity.Iteration,
+	}), invocation.Identity.Attempt)
 	for _, declaration := range declarations {
 		if declaration.Name == "" {
-			return &NodeOutputValidationError{Cause: errors.New("output declaration name is required")}
+			return nil, &NodeOutputValidationError{Source: cloneDispatchSource(declaration.Source), Cause: errors.New("output declaration name is required")}
 		}
 		if _, duplicate := declared[declaration.Name]; duplicate {
-			return &NodeOutputValidationError{Output: declaration.Name, Source: cloneDispatchSource(declaration.Source), Cause: errors.New("duplicate output declaration")}
+			return nil, &NodeOutputValidationError{Output: declaration.Name, Source: cloneDispatchSource(declaration.Source), Cause: errors.New("duplicate output declaration")}
 		}
-		declared[declaration.Name] = declaration
-	}
-	expected := make([]string, 0, len(declared))
-	for name := range declared {
-		expected = append(expected, name)
-	}
-	sort.Strings(expected)
-	for _, name := range expected {
-		declaration := declared[name]
-		value, ok := output[name]
-		if !ok {
-			return &NodeOutputValidationError{Output: name, Source: cloneDispatchSource(declaration.Source), Cause: errors.New("required declared output is missing")}
+		declared[declaration.Name] = struct{}{}
+		var value values.Value
+		if declaration.Value == nil {
+			rawValue, ok := raw[declaration.Name]
+			if !ok {
+				return nil, &NodeOutputValidationError{Output: declaration.Name, Source: cloneDispatchSource(declaration.Source), Cause: errors.New("same-name raw adapter output is missing")}
+			}
+			cloned := cloneValueSet(values.ValueSet{declaration.Name: rawValue})
+			value, ok = cloned[declaration.Name]
+			if !ok {
+				return nil, &NodeOutputValidationError{Output: declaration.Name, Source: cloneDispatchSource(declaration.Source), Cause: errors.New("raw adapter output could not be cloned")}
+			}
+		} else {
+			value, err = engine.EvaluateBinding(*declaration.Value, context, values.ExpressionOptions{VisibleSteps: []string{}}, bindingMetadata("node_output", reference, declaration.Name))
+			if err != nil {
+				return nil, &NodeOutputValidationError{Output: declaration.Name, Source: cloneDispatchSource(declaration.Source), Cause: err}
+			}
 		}
 		if err := values.ValidateValueSchema(declaration.Schema, value); err != nil {
-			return &NodeOutputValidationError{Output: name, Source: cloneDispatchSource(declaration.Source), Cause: err}
+			return nil, &NodeOutputValidationError{Output: declaration.Name, Source: cloneDispatchSource(declaration.Source), Cause: err}
 		}
+		projected[declaration.Name] = value
 	}
-	actual := make([]string, 0, len(output))
-	for name := range output {
-		actual = append(actual, name)
+	if err := values.ValidatePersistableSet(projected); err != nil {
+		return nil, err
 	}
-	sort.Strings(actual)
-	for _, name := range actual {
-		if _, ok := declared[name]; !ok {
-			return &NodeOutputValidationError{Output: name, Cause: errors.New("executor produced an undeclared output")}
-		}
+	return projected, nil
+}
+
+func nodeOutputExpressionContext(node graph.Node, invocation stepkind.Invocation, raw values.ValueSet) (values.ExpressionContext, error) {
+	context := values.ExpressionContext{Inputs: invocation.Inputs, Outputs: raw}
+	if node.ForEach == nil || invocation.Identity.Iteration == "" {
+		return context, nil
 	}
-	return nil
+	itemName, indexName := node.ForEach.ItemName, node.ForEach.IndexName
+	if itemName == "" {
+		itemName = "item"
+	}
+	if indexName == "" {
+		indexName = "index"
+	}
+	item, ok := invocation.Inputs[itemName]
+	if !ok {
+		return values.ExpressionContext{}, fmt.Errorf("%w: fan-out item input %q is missing during output projection", ErrInvalidDispatch, itemName)
+	}
+	indexValue, ok := invocation.Inputs[indexName]
+	if !ok || indexValue.Type != values.TypeNumber {
+		return values.ExpressionContext{}, fmt.Errorf("%w: fan-out index input %q is missing or not numeric during output projection", ErrInvalidDispatch, indexName)
+	}
+	number, ok := indexValue.Inline.(json.Number)
+	if !ok {
+		return values.ExpressionContext{}, fmt.Errorf("%w: fan-out index input %q has a noncanonical representation", ErrInvalidDispatch, indexName)
+	}
+	index, err := strconv.Atoi(number.String())
+	if err != nil || index < 0 || FanOutIteration(index) != invocation.Identity.Iteration {
+		return values.ExpressionContext{}, fmt.Errorf("%w: fan-out index input %q conflicts with invocation iteration", ErrInvalidDispatch, indexName)
+	}
+	context.Item, context.Index = &item, &index
+	return context, nil
 }
 
 func cloneDispatchSource(source *graph.SourceRef) *graph.SourceRef {
