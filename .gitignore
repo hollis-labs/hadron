@@ -41,6 +41,8 @@ CLAUDE.md
 
 # Node / Frontend
 node_modules/
+/cmd/hadron-app/frontend/dist/
+/cmd/hadron-app/build/bin/
 # The generated operator SPA under internal/webui/dist is committed so direct
 # headless Go builds embed the browser UI without requiring Node at build time.
 
