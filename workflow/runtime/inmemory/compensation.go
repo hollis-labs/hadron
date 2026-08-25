@@ -48,9 +48,9 @@ func (s *Store) FinishCompensableAttempt(ctx context.Context, request workflowru
 	if err := workflowruntime.ValidateCompensationHandlerNodeID(eligibility.HandlerNodeID); err != nil {
 		return workflowruntime.FinishCompensableAttemptResult{}, invalid(err)
 	}
-	digest, err := workflowruntime.CompensationEvidenceDigest(eligibility.Evidence)
-	if err != nil || eligibility.Receipt.Operation != eligibility.Evidence.Operation {
-		return workflowruntime.FinishCompensableAttemptResult{}, invalid(errors.Join(err, errors.New("compensation receipt operation differs from evidence")))
+	digest, evidenceErr := workflowruntime.CompensationEvidenceDigest(eligibility.Evidence)
+	if evidenceErr != nil || eligibility.Receipt.Operation != eligibility.Evidence.Operation {
+		return workflowruntime.FinishCompensableAttemptResult{}, invalid(errors.Join(evidenceErr, errors.New("compensation receipt operation differs from evidence")))
 	}
 	if err := values.ValidatePersistableSet(eligibility.Receipt.Values); err != nil {
 		return workflowruntime.FinishCompensableAttemptResult{}, invalid(err)
@@ -735,6 +735,8 @@ func completeInmemoryCompensationLedger(ledger *workflowruntime.CompensationLedg
 			allTerminal = false
 		}
 		switch candidate.Status {
+		case workflowruntime.CompensationEligible, workflowruntime.CompensationPending, workflowruntime.CompensationActive:
+			// Nonterminal entries are accounted for by allTerminal.
 		case workflowruntime.CompensationCanceled:
 			canceled++
 		case workflowruntime.CompensationFailed:
@@ -958,6 +960,9 @@ func (s *Store) CancelCompensation(ctx context.Context, request workflowruntime.
 						return workflowruntime.CompensationLedgerSnapshot{}, err
 					}
 				}
+			case workflowruntime.NodeSucceeded, workflowruntime.NodeFailed, workflowruntime.NodeSkipped,
+				workflowruntime.NodeCanceled, workflowruntime.NodeTimedOut, workflowruntime.NodeCrashed:
+				// Terminal handlers are sealed by compensation progression.
 			}
 		}
 	}
@@ -1255,12 +1260,4 @@ func cloneCompensationIdempotencyMap(input map[string]compensationIdempotencyRec
 
 func compensationRequestDigest(input any) (string, error) {
 	return workflowruntime.CompensationRequestDigest(input)
-}
-
-func cloneCompensationKeyMap(input map[string]workflowruntime.RunID) map[string]workflowruntime.RunID {
-	result := make(map[string]workflowruntime.RunID, len(input))
-	for key, value := range input {
-		result[key] = value
-	}
-	return result
 }

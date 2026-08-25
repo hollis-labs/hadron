@@ -245,8 +245,8 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 		compiled.Verification = l.lowerVerification(verify.value, verify.path)
 	}
 	if compensation, exists := fields["compensation"]; exists {
-		fields := l.mapping(compensation.value, compensation.path, "handler")
-		handler, ok := fields["handler"]
+		compensationFields := l.mapping(compensation.value, compensation.path, "handler")
+		handler, ok := compensationFields["handler"]
 		if !ok {
 			l.invalidShape(compensation.value, compensation.path, "compensation.handler is required")
 		} else {

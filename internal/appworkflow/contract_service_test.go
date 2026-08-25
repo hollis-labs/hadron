@@ -207,8 +207,8 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateContractSuiteForPlan(plan, kinds, canonical, false); err != nil {
-		t.Fatal(err)
+	if validationErr := validateContractSuiteForPlan(plan, kinds, canonical, false); validationErr != nil {
+		t.Fatal(validationErr)
 	}
 	report, err := newCanonicalContractRunner(compile.DependencyOptions{}, verification.NewDefaultRegistry()).Execute(t.Context(), plan, kinds, canonical, 2)
 	if err != nil || !report.Passed || len(report.Cases) != 1 || report.Cases[0].Failure == nil || report.Cases[0].Failure.Code != "fixture_failed" || !reflect.DeepEqual(report.Cases[0].Effects, graph.EffectSet{graph.EffectCompute, graph.EffectMaterialize}) {

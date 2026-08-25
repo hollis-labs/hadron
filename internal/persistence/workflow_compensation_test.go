@@ -52,8 +52,8 @@ func TestWorkflowSQLiteCompensationReopenContentionRetryAndStableHistory(t *test
 	if err != nil || manual.Ledger.Status != workflowruntime.CompensationFrozen {
 		t.Fatalf("manual = %#v, %v", manual, err)
 	}
-	if _, err := first.CancelCompensation(ctx, workflowruntime.CancelCompensationRequest{RunID: run.ID, ExpectedLedgerGeneration: manual.Ledger.Generation, IdempotencyKey: manualRequest.IdempotencyKey, Reason: "cross-operation collision", At: base.Add(8 * time.Second)}); !errors.Is(err, workflowruntime.ErrIdempotencyConflict) {
-		t.Fatalf("cross-operation SQLite compensation key = %v", err)
+	if _, cancelErr := first.CancelCompensation(ctx, workflowruntime.CancelCompensationRequest{RunID: run.ID, ExpectedLedgerGeneration: manual.Ledger.Generation, IdempotencyKey: manualRequest.IdempotencyKey, Reason: "cross-operation collision", At: base.Add(8 * time.Second)}); !errors.Is(cancelErr, workflowruntime.ErrIdempotencyConflict) {
+		t.Fatalf("cross-operation SQLite compensation key = %v", cancelErr)
 	}
 	plans := sqliteCompensationPlanSource{graph: graph.Graph{ID: run.Plan.ID, Version: run.Plan.Version, Compensation: &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationManual}}, Nodes: []graph.Node{{ID: "effect", Compensation: &graph.CompensationSpec{Handler: "undo"}}, {ID: "undo"}}}}
 	recovered, err := second.RecoverCompensation(ctx, 10)
@@ -186,8 +186,8 @@ func TestWorkflowSQLiteFinalizerAdmissionAndAutomaticRetryAreAtomicallyOrdered(t
 	if err != nil || frozen.Ledger.Status != workflowruntime.CompensationFrozen {
 		t.Fatalf("freeze = %#v, %v", frozen, err)
 	}
-	if _, err := first.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{InvocationID: cleanup.ID, ExpectedGeneration: cleanup.Generation, To: workflowruntime.NodeReady, At: base.Add(11 * time.Second)}); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
-		t.Fatalf("store admitted finalizer before terminal compensation = %v", err)
+	if _, transitionErr := first.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{InvocationID: cleanup.ID, ExpectedGeneration: cleanup.Generation, To: workflowruntime.NodeReady, At: base.Add(11 * time.Second)}); !errors.Is(transitionErr, workflowruntime.ErrInvalidRecord) {
+		t.Fatalf("store admitted finalizer before terminal compensation = %v", transitionErr)
 	}
 	workflow := graph.Graph{ID: run.Plan.ID, Version: run.Plan.Version, Compensation: &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationOnFailure}}, Nodes: []graph.Node{
 		{ID: "effect", Compensation: &graph.CompensationSpec{Handler: "undo"}}, {ID: "failure"}, {ID: "undo"}, {ID: "cleanup", Finally: &graph.FinallySpec{}},
@@ -318,8 +318,8 @@ func TestWorkflowSQLiteTerminalIntentCannotBypassZeroEntryCompensation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := state.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{RunID: run.ID, ExpectedRunGeneration: begin.Run.Generation, ExpectedIntentGeneration: begin.Intent.Generation, At: base.Add(3 * time.Second)}); !errors.Is(err, workflowruntime.ErrCompensationPending) {
-		t.Fatalf("direct terminal bypass = %v", err)
+	if _, completionErr := state.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{RunID: run.ID, ExpectedRunGeneration: begin.Run.Generation, ExpectedIntentGeneration: begin.Intent.Generation, At: base.Add(3 * time.Second)}); !errors.Is(completionErr, workflowruntime.ErrCompensationPending) {
+		t.Fatalf("direct terminal bypass = %v", completionErr)
 	}
 	freezeRequest := workflowruntime.FreezeCompensationRequest{RunID: run.ID, PlanDigest: run.Plan.Digest, ExpectedRunGeneration: begin.Run.Generation, ExpectedIntentGeneration: begin.Intent.Generation, Trigger: graph.CompensationOnCancel, OriginalStatus: workflowruntime.RunCanceled, OriginalFailure: begin.Intent.Error, IdempotencyKey: "sqlite-compensation-freeze", At: base.Add(3 * time.Second)}
 	frozen, err := state.FreezeCompensation(ctx, freezeRequest)
@@ -416,8 +416,8 @@ func TestWorkflowSQLiteCrashedCompensationHandlerOnTerminalParentCreatesRetry(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := state.BeginManualCompensation(ctx, workflowruntime.BeginManualCompensationRequest{RunID: run.ID, PlanDigest: run.Plan.Digest, ExpectedRunGeneration: succeeded.Snapshot.Generation, OriginalStatus: workflowruntime.RunSucceeded, IdempotencyKey: "sqlite-crash-manual", Authorization: values.SHA256Digest([]byte("sqlite-crash-manual")), At: base.Add(7 * time.Second)}); err != nil {
-		t.Fatal(err)
+	if _, manualErr := state.BeginManualCompensation(ctx, workflowruntime.BeginManualCompensationRequest{RunID: run.ID, PlanDigest: run.Plan.Digest, ExpectedRunGeneration: succeeded.Snapshot.Generation, OriginalStatus: workflowruntime.RunSucceeded, IdempotencyKey: "sqlite-crash-manual", Authorization: values.SHA256Digest([]byte("sqlite-crash-manual")), At: base.Add(7 * time.Second)}); manualErr != nil {
+		t.Fatal(manualErr)
 	}
 	plans := sqliteCompensationPlanSource{graph: graph.Graph{ID: run.Plan.ID, Version: run.Plan.Version, Compensation: &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationManual}}, Nodes: []graph.Node{{ID: "effect", Compensation: &graph.CompensationSpec{Handler: "undo"}}, {ID: "undo"}}}}
 	progress, err := (workflowruntime.CompensationCoordinator{Store: state, Compensation: state, Plans: plans}).Progress(ctx, run.ID, base.Add(8*time.Second))
@@ -458,8 +458,8 @@ func TestWorkflowSQLiteCompensationImmutableEvidenceTriggersRejectDirectSQL(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := state.CancelCompensation(ctx, workflowruntime.CancelCompensationRequest{RunID: run.ID, ExpectedLedgerGeneration: collecting.Generation, IdempotencyKey: "immutable-pretrigger-cancel", Reason: "must not preempt trigger", At: base.Add(5 * time.Second)}); !errors.Is(err, workflowruntime.ErrCompensationConflict) {
-		t.Fatalf("pre-trigger SQLite cancellation = %v", err)
+	if _, cancelErr := state.CancelCompensation(ctx, workflowruntime.CancelCompensationRequest{RunID: run.ID, ExpectedLedgerGeneration: collecting.Generation, IdempotencyKey: "immutable-pretrigger-cancel", Reason: "must not preempt trigger", At: base.Add(5 * time.Second)}); !errors.Is(cancelErr, workflowruntime.ErrCompensationConflict) {
+		t.Fatalf("pre-trigger SQLite cancellation = %v", cancelErr)
 	}
 	current, err := state.LoadRun(ctx, run.ID)
 	if err != nil {
@@ -565,8 +565,8 @@ func seedSQLiteCompensationEligibilityRequest(t *testing.T, state *WorkflowState
 		} else if loadErr != nil {
 			t.Fatal(loadErr)
 		}
-		if err := state.RecordChildRun(t.Context(), workflowruntime.ChildRunLink{ParentRunID: run.ID, Invocation: node.ID, ChildRunID: child, Policy: graph.ParentCloseCancel, CreatedAt: at}); err != nil {
-			t.Fatal(err)
+		if recordErr := state.RecordChildRun(t.Context(), workflowruntime.ChildRunLink{ParentRunID: run.ID, Invocation: node.ID, ChildRunID: child, Policy: graph.ParentCloseCancel, CreatedAt: at}); recordErr != nil {
+			t.Fatal(recordErr)
 		}
 	}
 	request := workflowruntime.FinishCompensableAttemptRequest{Finish: workflowruntime.FinishNodeAttemptRequest{InvocationID: node.ID, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: workflowruntime.NodeSucceeded, NextNodeStatus: workflowruntime.NodeSucceeded, At: at.Add(2 * time.Second)}, Eligibility: workflowruntime.CompensationEligibility{PlanDigest: run.Plan.Digest, HandlerNodeID: handler, Evidence: evidence, Receipt: stepkind.CompensationReceipt{Operation: evidence.Operation, Values: values.ValueSet{}, ChildRunID: string(child)}, ChildRunID: child}}

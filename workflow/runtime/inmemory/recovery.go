@@ -455,8 +455,8 @@ func equalAttemptSemantic(a, b workflowruntime.AttemptSnapshot) bool {
 
 func cloneReplayProvenance(p workflowruntime.ReplayProvenance) workflowruntime.ReplayProvenance {
 	if p.CompensationAuthorization != nil {
-		copy := *p.CompensationAuthorization
-		p.CompensationAuthorization = &copy
+		cloned := *p.CompensationAuthorization
+		p.CompensationAuthorization = &cloned
 	}
 	p.Policy = append([]workflowruntime.ReplayNodePolicy(nil), p.Policy...)
 	for i := range p.Policy {

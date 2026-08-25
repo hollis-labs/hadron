@@ -534,8 +534,8 @@ func cloneReplayCompensationAuthorization(input *ReplayCompensationAuthorization
 	if input == nil {
 		return nil
 	}
-	copy := *input
-	return &copy
+	cloned := *input
+	return &cloned
 }
 
 func (s *ReplayService) validate(ctx context.Context, request ReplayRequest) error {

@@ -80,9 +80,9 @@ func TestHostIssuesBoundedReplayProofForCollectingLedger(t *testing.T) {
 	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
 	ctx := authenticatedContext(t.Context(), "user:collecting-replay")
 	request := fixture.startRequest("collecting-replay-source", "collecting-replay-start", "user:collecting-replay")
-	started, err := host.StartRun(ctx, request)
-	if err != nil || started.Run == nil {
-		t.Fatalf("StartRun = %#v, %v", started, err)
+	started, startErr := host.StartRun(ctx, request)
+	if startErr != nil || started.Run == nil {
+		t.Fatalf("StartRun = %#v, %v", started, startErr)
 	}
 	dispatchCompensationNode(t, fixture, plan.Graph.Nodes[0], effect, undo, started.Run.ID, fixture.now.Add(21*time.Second))
 	run, _ := fixture.state.LoadRun(ctx, started.Run.ID)
@@ -152,11 +152,11 @@ func TestHostCompensationPolicyCancelRetryAndReopenRecovery(t *testing.T) {
 		return hoststate.PolicyAllow
 	})
 	manualRequest := appworkflow.CompensateWorkflowRunRequest{RunID: run.ID, Identity: request.Identity, IdempotencyKey: "manual-rollback"}
-	if _, err := denied.CompensateWorkflowRun(ctx, manualRequest); !errors.Is(err, appworkflow.ErrPolicyDenied) {
-		t.Fatalf("denied manual compensation = %v", err)
+	if _, deniedErr := denied.CompensateWorkflowRun(ctx, manualRequest); !errors.Is(deniedErr, appworkflow.ErrPolicyDenied) {
+		t.Fatalf("denied manual compensation = %v", deniedErr)
 	}
-	if ledger, err := fixture.state.LoadCompensationLedger(t.Context(), run.ID); err != nil || ledger.Status != workflowruntime.CompensationCollecting {
-		t.Fatalf("denial changed collecting ledger = %#v, %v", ledger, err)
+	if ledger, ledgerErr := fixture.state.LoadCompensationLedger(t.Context(), run.ID); ledgerErr != nil || ledger.Status != workflowruntime.CompensationCollecting {
+		t.Fatalf("denial changed collecting ledger = %#v, %v", ledger, ledgerErr)
 	}
 
 	confirm := newCompensationHost(t, fixture, effect, undo, func(operation string) hoststate.PolicyOutcome {
@@ -165,8 +165,8 @@ func TestHostCompensationPolicyCancelRetryAndReopenRecovery(t *testing.T) {
 		}
 		return hoststate.PolicyAllow
 	})
-	if _, err := confirm.CompensateWorkflowRun(ctx, manualRequest); !errors.Is(err, appworkflow.ErrConfirmationRequired) {
-		t.Fatalf("unconfirmed manual compensation = %v", err)
+	if _, confirmationErr := confirm.CompensateWorkflowRun(ctx, manualRequest); !errors.Is(confirmationErr, appworkflow.ErrConfirmationRequired) {
+		t.Fatalf("unconfirmed manual compensation = %v", confirmationErr)
 	}
 	manualRequest.Confirmed = true
 	manual, err := confirm.CompensateWorkflowRun(ctx, manualRequest)
@@ -190,8 +190,8 @@ func TestHostCompensationPolicyCancelRetryAndReopenRecovery(t *testing.T) {
 	}
 	changedCancel := cancelRequest
 	changedCancel.Reason = "different cancellation intent"
-	if _, err := allow.CancelWorkflowCompensation(ctx, changedCancel); !errors.Is(err, workflowruntime.ErrIdempotencyConflict) {
-		t.Fatalf("changed cancel replay = %v", err)
+	if _, cancelErr := allow.CancelWorkflowCompensation(ctx, changedCancel); !errors.Is(cancelErr, workflowruntime.ErrIdempotencyConflict) {
+		t.Fatalf("changed cancel replay = %v", cancelErr)
 	}
 	immutable, err := fixture.state.LoadRun(t.Context(), run.ID)
 	if err != nil || immutable.Status != workflowruntime.RunSucceeded || immutable.Generation != succeeded.Snapshot.Generation {
@@ -212,27 +212,27 @@ func TestHostCompensationPolicyCancelRetryAndReopenRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	rerun := appworkflow.RerunWorkflowRequest{SourceRunID: run.ID, RunID: "compensation-replay-target", FromNodeID: plan.Graph.Nodes[0].ID, IdempotencyKey: "compensation-replay", Identity: request.Identity}
-	if _, err := operator.RerunWorkflow(ctx, rerun); !errors.Is(err, appworkflow.ErrPolicyDenied) || len(replayRequests) != 0 {
-		t.Fatalf("unattested canceled replay calls=%d err=%v", len(replayRequests), err)
+	if _, replayErr := operator.RerunWorkflow(ctx, rerun); !errors.Is(replayErr, appworkflow.ErrPolicyDenied) || len(replayRequests) != 0 {
+		t.Fatalf("unattested canceled replay calls=%d err=%v", len(replayRequests), replayErr)
 	}
 	rerun.CompensationAttestation = strings.Repeat("x", 1025)
-	if _, err := operator.RerunWorkflow(ctx, rerun); !errors.Is(err, appworkflow.ErrPolicyDenied) || len(replayRequests) != 0 {
-		t.Fatalf("unbounded canceled replay calls=%d err=%v", len(replayRequests), err)
+	if _, replayErr := operator.RerunWorkflow(ctx, rerun); !errors.Is(replayErr, appworkflow.ErrPolicyDenied) || len(replayRequests) != 0 {
+		t.Fatalf("unbounded canceled replay calls=%d err=%v", len(replayRequests), replayErr)
 	}
 	rerun.CompensationAttestation = "operator attests exact canceled rollback"
-	if _, err := operator.RerunWorkflow(ctx, rerun); err != nil || len(replayRequests) != 1 {
-		t.Fatalf("attested canceled replay calls=%d err=%v", len(replayRequests), err)
+	if _, replayErr := operator.RerunWorkflow(ctx, rerun); replayErr != nil || len(replayRequests) != 1 {
+		t.Fatalf("attested canceled replay calls=%d err=%v", len(replayRequests), replayErr)
 	}
 	firstAuthorization := replayRequests[0].CompensationAuthorization
 	if firstAuthorization == nil || firstAuthorization.LedgerGeneration != canceled.Ledger.Generation || firstAuthorization.LedgerOutcome != workflowruntime.CompensationOutcomeCanceled || values.ValidateDigest(firstAuthorization.Digest) != nil || strings.Contains(firstAuthorization.Digest, rerun.CompensationAttestation) {
 		t.Fatalf("bounded replay authorization = %#v", firstAuthorization)
 	}
 	rerun.RunID, rerun.IdempotencyKey = "compensation-replay-target-two", "compensation-replay-two"
-	if _, err := operator.RerunWorkflow(ctx, rerun); err != nil || len(replayRequests) != 2 || replayRequests[1].CompensationAuthorization == nil || replayRequests[1].CompensationAuthorization.Digest == firstAuthorization.Digest {
-		t.Fatalf("target-bound replay authorizations = %#v, err=%v", replayRequests, err)
+	if _, replayErr := operator.RerunWorkflow(ctx, rerun); replayErr != nil || len(replayRequests) != 2 || replayRequests[1].CompensationAuthorization == nil || replayRequests[1].CompensationAuthorization.Digest == firstAuthorization.Digest {
+		t.Fatalf("target-bound replay authorizations = %#v, err=%v", replayRequests, replayErr)
 	}
-	if _, err := allow.RetryWorkflowCompensation(ctx, appworkflow.RetryWorkflowCompensationRequest{RunID: run.ID, Identity: request.Identity, IdempotencyKey: "invalid-retry", Attestation: strings.Repeat("x", 1025)}); !errors.Is(err, appworkflow.ErrInvalidHost) {
-		t.Fatalf("unbounded retry attestation = %v", err)
+	if _, retryErr := allow.RetryWorkflowCompensation(ctx, appworkflow.RetryWorkflowCompensationRequest{RunID: run.ID, Identity: request.Identity, IdempotencyKey: "invalid-retry", Attestation: strings.Repeat("x", 1025)}); !errors.Is(retryErr, appworkflow.ErrInvalidHost) {
+		t.Fatalf("unbounded retry attestation = %v", retryErr)
 	}
 	retryRequest := appworkflow.RetryWorkflowCompensationRequest{RunID: run.ID, Identity: request.Identity, IdempotencyKey: "retry-rollback", Attestation: "operator attests the exact indeterminate rollback"}
 	retried, err := allow.RetryWorkflowCompensation(ctx, retryRequest)
@@ -260,8 +260,8 @@ func TestHostCompensationPolicyCancelRetryAndReopenRecovery(t *testing.T) {
 		plan: fixture.plan, now: fixture.now, scheduler: fixture.scheduler, artifacts: fixture.artifacts,
 	}
 	recoveredHost := newCompensationHost(t, reopenedFixture, effect, undo, func(string) hoststate.PolicyOutcome { return hoststate.PolicyAllow })
-	if err := recoveredHost.Start(t.Context()); err != nil {
-		t.Fatal(err)
+	if startErr := recoveredHost.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
 	}
 	t.Cleanup(func() { _ = recoveredHost.Shutdown(t.Context()) })
 	entries, err := reopenedState.ListCompensationEntries(t.Context(), run.ID)
@@ -272,12 +272,12 @@ func TestHostCompensationPolicyCancelRetryAndReopenRecovery(t *testing.T) {
 
 	// A second reopen is the crash point after handler commit but before ledger
 	// seal. Production recovery must converge it without a caller replay.
-	if err := recoveredHost.Shutdown(t.Context()); err != nil {
-		t.Fatal(err)
+	if shutdownErr := recoveredHost.Shutdown(t.Context()); shutdownErr != nil {
+		t.Fatal(shutdownErr)
 	}
 	sealer := newCompensationHost(t, reopenedFixture, effect, undo, func(string) hoststate.PolicyOutcome { return hoststate.PolicyAllow })
-	if err := sealer.Start(t.Context()); err != nil {
-		t.Fatal(err)
+	if startErr := sealer.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
 	}
 	t.Cleanup(func() { _ = sealer.Shutdown(t.Context()) })
 	inspected, err := sealer.InspectWorkflowCompensation(ctx, appworkflow.InspectWorkflowCompensationRequest{RunID: run.ID, Identity: request.Identity, Limit: 1})
@@ -302,8 +302,8 @@ func TestHostCompensationPolicyCancelRetryAndReopenRecovery(t *testing.T) {
 	}
 	changedRetry := retryRequest
 	changedRetry.Attestation = "operator attests a different rollback state"
-	if _, err := sealer.RetryWorkflowCompensation(ctx, changedRetry); !errors.Is(err, workflowruntime.ErrIdempotencyConflict) {
-		t.Fatalf("changed retry replay = %v", err)
+	if _, retryErr := sealer.RetryWorkflowCompensation(ctx, changedRetry); !errors.Is(retryErr, workflowruntime.ErrIdempotencyConflict) {
+		t.Fatalf("changed retry replay = %v", retryErr)
 	}
 	immutable, err = reopenedState.LoadRun(t.Context(), run.ID)
 	if err != nil || immutable.Status != workflowruntime.RunSucceeded || immutable.Generation != succeeded.Snapshot.Generation {

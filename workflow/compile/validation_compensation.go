@@ -121,6 +121,8 @@ func (v *validator) validateCompensation() {
 		var references []values.Reference
 		var err error
 		switch output.Value.Kind {
+		case graph.BindingLiteral:
+			// Literal outputs cannot reference dormant compensation handlers.
 		case graph.BindingExpression:
 			if output.Value.Expression != nil {
 				references, err = values.ParseReferences(*output.Value.Expression)

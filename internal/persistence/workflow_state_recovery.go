@@ -567,8 +567,8 @@ func canonicalWorkflowReplayRequest(r workflowruntime.BeginReplayRequest) workfl
 func cloneWorkflowReplayRequest(r workflowruntime.BeginReplayRequest) workflowruntime.BeginReplayRequest {
 	r.Inputs = cloneWorkflowValueRef(r.Inputs)
 	if r.Provenance.CompensationAuthorization != nil {
-		copy := *r.Provenance.CompensationAuthorization
-		r.Provenance.CompensationAuthorization = &copy
+		cloned := *r.Provenance.CompensationAuthorization
+		r.Provenance.CompensationAuthorization = &cloned
 	}
 	r.Provenance.Policy = append([]workflowruntime.ReplayNodePolicy(nil), r.Provenance.Policy...)
 	for i := range r.Provenance.Policy {

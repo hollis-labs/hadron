@@ -647,8 +647,8 @@ func (c CompensationCoordinator) progress(ctx context.Context, runID RunID, at t
 	if err != nil {
 		return result, err
 	}
-	if err := validateCompensationEntriesForPlan(ledger, entries, plan.Plan.Graph); err != nil {
-		return result, err
+	if validationErr := validateCompensationEntriesForPlan(ledger, entries, plan.Plan.Graph); validationErr != nil {
+		return result, validationErr
 	}
 	for _, entry := range entries {
 		if entry.Status != CompensationActive {

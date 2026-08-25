@@ -141,8 +141,8 @@ func TestDormantInlineCallHandlerMapsDurableCompensationEvidenceIntoChildInputs(
 	effect.SpecValue.Idempotency = graph.IdempotencyIntrinsic
 	effect.SpecValue.RetrySafety = stepkind.RetrySafe
 	effect.SpecValue.Compensation = stepkind.CompensationReceiptRequired
-	if err := host.registry.Register(effect); err != nil {
-		t.Fatal(err)
+	if registerErr := host.registry.Register(effect); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	receiptName, err := workflowruntime.CompensationHandlerInputName(workflowruntime.CompensationHandlerReceipt, "token")
 	if err != nil {

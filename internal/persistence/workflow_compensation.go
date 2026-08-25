@@ -46,8 +46,8 @@ func loadWorkflowCompensationLedger(ctx context.Context, query workflowSQL, runI
 		return workflowruntime.CompensationLedgerSnapshot{}, fmt.Errorf("load workflow compensation ledger: %w", err)
 	}
 	var snapshot workflowruntime.CompensationLedgerSnapshot
-	if err := decodeWorkflowJSON("compensation ledger", snapshotJSON, &snapshot); err != nil {
-		return workflowruntime.CompensationLedgerSnapshot{}, err
+	if decodeErr := decodeWorkflowJSON("compensation ledger", snapshotJSON, &snapshot); decodeErr != nil {
+		return workflowruntime.CompensationLedgerSnapshot{}, decodeErr
 	}
 	parsedGeneration, err := workflowGeneration("compensation ledger generation", generation)
 	if err != nil {
@@ -77,8 +77,8 @@ func loadWorkflowCompensationEntry(ctx context.Context, query workflowSQL, runID
 		return workflowruntime.CompensationEntrySnapshot{}, err
 	}
 	var snapshot workflowruntime.CompensationEntrySnapshot
-	if err := decodeWorkflowJSON("compensation entry", snapshotJSON, &snapshot); err != nil {
-		return workflowruntime.CompensationEntrySnapshot{}, err
+	if decodeErr := decodeWorkflowJSON("compensation entry", snapshotJSON, &snapshot); decodeErr != nil {
+		return workflowruntime.CompensationEntrySnapshot{}, decodeErr
 	}
 	parsedGeneration, err := workflowGeneration("compensation entry generation", generation)
 	if err != nil {
@@ -102,7 +102,7 @@ func listWorkflowCompensationEntries(ctx context.Context, query workflowSQL, run
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
@@ -266,9 +266,9 @@ func (s *WorkflowStateStore) FinishCompensableAttempt(ctx context.Context, reque
 	if err := workflowruntime.ValidateCompensationHandlerNodeID(e.HandlerNodeID); err != nil {
 		return workflowruntime.FinishCompensableAttemptResult{}, workflowInvalid(err)
 	}
-	evidenceDigest, err := workflowruntime.CompensationEvidenceDigest(e.Evidence)
-	if err != nil || e.Receipt.Operation != e.Evidence.Operation {
-		return workflowruntime.FinishCompensableAttemptResult{}, workflowInvalid(errors.Join(err, errors.New("compensation receipt operation differs from evidence")))
+	evidenceDigest, evidenceErr := workflowruntime.CompensationEvidenceDigest(e.Evidence)
+	if evidenceErr != nil || e.Receipt.Operation != e.Evidence.Operation {
+		return workflowruntime.FinishCompensableAttemptResult{}, workflowInvalid(errors.Join(evidenceErr, errors.New("compensation receipt operation differs from evidence")))
 	}
 	if err := values.ValidateValueSetSchema(e.Evidence.ReceiptSchema, e.Receipt.Values); err != nil {
 		return workflowruntime.FinishCompensableAttemptResult{}, workflowInvalid(err)
@@ -283,17 +283,17 @@ func (s *WorkflowStateStore) FinishCompensableAttempt(ctx context.Context, reque
 		return workflowruntime.FinishCompensableAttemptResult{}, workflowInvalid(errors.New("compensation child run cannot be the owning run"))
 	}
 	var result workflowruntime.FinishCompensableAttemptResult
-	err = s.write(ctx, "finish compensable workflow attempt", func(query workflowSQL) error {
-		run, err := loadWorkflowRun(ctx, query, request.Finish.InvocationID.RunID)
-		if err != nil {
-			return err
+	writeErr := s.write(ctx, "finish compensable workflow attempt", func(query workflowSQL) error {
+		run, loadRunErr := loadWorkflowRun(ctx, query, request.Finish.InvocationID.RunID)
+		if loadRunErr != nil {
+			return loadRunErr
 		}
 		if run.Plan.Digest != e.PlanDigest {
 			return workflowInvalid(errors.New("compensation plan digest differs from run"))
 		}
-		source, err := loadWorkflowNode(ctx, query, request.Finish.InvocationID)
-		if err != nil {
-			return err
+		source, loadSourceErr := loadWorkflowNode(ctx, query, request.Finish.InvocationID)
+		if loadSourceErr != nil {
+			return loadSourceErr
 		}
 		if source.Phase != workflowruntime.InvocationForward {
 			return workflowInvalid(errors.New("compensation eligibility requires a forward invocation"))
@@ -395,8 +395,8 @@ func (s *WorkflowStateStore) FinishCompensableAttempt(ctx context.Context, reque
 		result = workflowruntime.FinishCompensableAttemptResult{Finish: finished, Ledger: ledger, Entry: entry}
 		return nil
 	})
-	if err != nil {
-		return workflowruntime.FinishCompensableAttemptResult{}, err
+	if writeErr != nil {
+		return workflowruntime.FinishCompensableAttemptResult{}, writeErr
 	}
 	return result, nil
 }
@@ -455,16 +455,16 @@ func workflowCompensationValuesMatch(ctx context.Context, query workflowSQL, ref
 }
 
 func finishWorkflowNodeAttemptForCompensation(ctx context.Context, query workflowSQL, request workflowruntime.FinishNodeAttemptRequest) (workflowruntime.FinishNodeAttemptResult, error) {
-	currentNode, err := loadWorkflowNode(ctx, query, request.InvocationID)
-	if err != nil {
-		return workflowruntime.FinishNodeAttemptResult{}, err
+	currentNode, loadNodeErr := loadWorkflowNode(ctx, query, request.InvocationID)
+	if loadNodeErr != nil {
+		return workflowruntime.FinishNodeAttemptResult{}, loadNodeErr
 	}
 	if currentNode.Generation != request.ExpectedNodeGeneration {
 		return workflowruntime.FinishNodeAttemptResult{}, workflowCAS("node invocation", request.ExpectedNodeGeneration, currentNode.Generation)
 	}
-	run, err := loadWorkflowRun(ctx, query, currentNode.ID.RunID)
-	if err != nil {
-		return workflowruntime.FinishNodeAttemptResult{}, err
+	run, loadRunErr := loadWorkflowRun(ctx, query, currentNode.ID.RunID)
+	if loadRunErr != nil {
+		return workflowruntime.FinishNodeAttemptResult{}, loadRunErr
 	}
 	allowedRun, runAdmissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, currentNode)
 	if runAdmissionErr != nil {
@@ -473,10 +473,10 @@ func finishWorkflowNodeAttemptForCompensation(ctx context.Context, query workflo
 	if !allowedRun {
 		return workflowruntime.FinishNodeAttemptResult{}, workflowInvalid(errors.New("terminal run fences attempt completion"))
 	}
-	allowed, err := workflowControlAdmissionAllowed(ctx, query, currentNode.ID)
-	if err != nil || !allowed {
-		if err != nil {
-			return workflowruntime.FinishNodeAttemptResult{}, err
+	allowed, admissionErr := workflowControlAdmissionAllowed(ctx, query, currentNode.ID)
+	if admissionErr != nil || !allowed {
+		if admissionErr != nil {
+			return workflowruntime.FinishNodeAttemptResult{}, admissionErr
 		}
 		return workflowruntime.FinishNodeAttemptResult{}, workflowInvalid(errors.New("pending terminal intent fences attempt completion"))
 	}
@@ -491,9 +491,9 @@ func finishWorkflowNodeAttemptForCompensation(ctx context.Context, query workflo
 		return workflowruntime.FinishNodeAttemptResult{}, workflowAttemptConflict(currentNode.ID, request.AttemptNumber, "only LatestAttempt may be finished")
 	}
 	attemptID := workflowruntime.AttemptID{Invocation: currentNode.ID, Number: request.AttemptNumber}
-	currentAttempt, err := loadWorkflowAttempt(ctx, query, attemptID)
-	if err != nil {
-		return workflowruntime.FinishNodeAttemptResult{}, err
+	currentAttempt, loadAttemptErr := loadWorkflowAttempt(ctx, query, attemptID)
+	if loadAttemptErr != nil {
+		return workflowruntime.FinishNodeAttemptResult{}, loadAttemptErr
 	}
 	if currentAttempt.Generation != request.ExpectedAttemptGeneration {
 		return workflowruntime.FinishNodeAttemptResult{}, workflowCAS("attempt", request.ExpectedAttemptGeneration, currentAttempt.Generation)
@@ -543,15 +543,15 @@ func finishWorkflowNodeAttemptForCompensation(ctx context.Context, query workflo
 	if nextAttempt.Failure != nil {
 		attributes["failure_code"] = nextAttempt.Failure.Code
 	}
-	event, err := appendWorkflowEvent(ctx, query, workflowruntime.AppendEventRequest{RunID: nextNode.ID.RunID, Invocation: &invocation, Attempt: &eventAttempt, Type: workflowruntime.EventNodeAttemptFinished, OccurredAt: at, Attributes: attributes, Values: cloneWorkflowValueRef(request.Outputs), Redaction: values.RedactionPrivate, Retention: values.RetentionRun})
-	if err != nil {
-		return workflowruntime.FinishNodeAttemptResult{}, err
+	event, eventErr := appendWorkflowEvent(ctx, query, workflowruntime.AppendEventRequest{RunID: nextNode.ID.RunID, Invocation: &invocation, Attempt: &eventAttempt, Type: workflowruntime.EventNodeAttemptFinished, OccurredAt: at, Attributes: attributes, Values: cloneWorkflowValueRef(request.Outputs), Redaction: values.RedactionPrivate, Retention: values.RetentionRun})
+	if eventErr != nil {
+		return workflowruntime.FinishNodeAttemptResult{}, eventErr
 	}
 	return workflowruntime.FinishNodeAttemptResult{Node: nextNode, Attempt: nextAttempt, Event: event}, nil
 }
 
-// The remaining transitions use snapshot_json as the semantic source and
-// exact generation predicates as their CAS boundary.
+// FreezeCompensation and the remaining transitions use snapshot_json as the
+// semantic source and exact generation predicates as their CAS boundary.
 func (s *WorkflowStateStore) FreezeCompensation(ctx context.Context, r workflowruntime.FreezeCompensationRequest) (workflowruntime.FreezeCompensationResult, error) {
 	var out workflowruntime.FreezeCompensationResult
 	err := s.write(ctx, "freeze workflow compensation", func(q workflowSQL) error {
@@ -603,45 +603,45 @@ func (s *WorkflowStateStore) FreezeCompensation(ctx context.Context, r workflowr
 			return err
 		}
 		for rows.Next() {
-			node, err := scanWorkflowNode(rows)
-			if err != nil {
-				rows.Close()
-				return err
+			node, scanErr := scanWorkflowNode(rows)
+			if scanErr != nil {
+				_ = rows.Close()
+				return scanErr
 			}
 			if finalizers[node.ID] {
 				continue
 			}
 			if !node.Status.Terminal() {
-				rows.Close()
+				_ = rows.Close()
 				return workflowruntime.ErrCompensationPending
 			}
 			if r.At.Before(node.UpdatedAt) {
-				rows.Close()
+				_ = rows.Close()
 				return workflowInvalid(errors.New("compensation freeze time regresses forward node"))
 			}
 			if node.LatestAttempt > 0 {
-				attempt, err := loadWorkflowAttempt(ctx, q, workflowruntime.AttemptID{Invocation: node.ID, Number: node.LatestAttempt})
-				if err != nil || !attempt.Status.Terminal() || attempt.FinishedAt.IsZero() {
-					rows.Close()
-					if err != nil {
-						return err
+				attempt, loadErr := loadWorkflowAttempt(ctx, q, workflowruntime.AttemptID{Invocation: node.ID, Number: node.LatestAttempt})
+				if loadErr != nil || !attempt.Status.Terminal() || attempt.FinishedAt.IsZero() {
+					_ = rows.Close()
+					if loadErr != nil {
+						return loadErr
 					}
 					return workflowruntime.ErrCompensationPending
 				}
 				if r.At.Before(attempt.UpdatedAt) {
-					rows.Close()
+					_ = rows.Close()
 					return workflowInvalid(errors.New("compensation freeze time regresses forward attempt"))
 				}
 			}
 		}
-		if err := rows.Close(); err != nil {
-			return err
+		if closeErr := rows.Close(); closeErr != nil {
+			return closeErr
 		}
 		ledger, err := loadWorkflowCompensationLedger(ctx, q, r.RunID)
 		if errors.Is(err, workflowruntime.ErrNotFound) {
 			ledger = workflowruntime.CompensationLedgerSnapshot{RunID: r.RunID, PlanDigest: r.PlanDigest, Status: workflowruntime.CompensationCollecting, Generation: 1, CreatedAt: r.At, UpdatedAt: r.At}
-			if err := insertWorkflowCompensationLedger(ctx, q, ledger); err != nil {
-				return err
+			if insertErr := insertWorkflowCompensationLedger(ctx, q, ledger); insertErr != nil {
+				return insertErr
 			}
 		} else if err != nil {
 			return err
@@ -715,9 +715,9 @@ func (s *WorkflowStateStore) BeginManualCompensation(ctx context.Context, r work
 		if r.ExpectedRunGeneration == 0 || r.At.IsZero() || strings.TrimSpace(r.IdempotencyKey) == "" || values.ValidateDigest(r.Authorization) != nil || r.OriginalStatus != workflowruntime.RunSucceeded {
 			return workflowInvalid(errors.New("invalid manual compensation request"))
 		}
-		replayed, digest, err := workflowCompensationReplay(ctx, q, r.IdempotencyKey, "manual", r, &out)
-		if err != nil {
-			return err
+		replayed, digest, replayErr := workflowCompensationReplay(ctx, q, r.IdempotencyKey, "manual", r, &out)
+		if replayErr != nil {
+			return replayErr
 		}
 		if replayed {
 			ledger, loadErr := loadWorkflowCompensationLedger(ctx, q, r.RunID)
@@ -741,10 +741,10 @@ func (s *WorkflowStateStore) BeginManualCompensation(ctx context.Context, r work
 		if run.Status != workflowruntime.RunSucceeded || run.Status != r.OriginalStatus || run.Plan.Digest != r.PlanDigest {
 			return workflowInvalid(errors.New("manual compensation differs from immutable terminal run"))
 		}
-		if _, err := loadWorkflowTerminalIntent(ctx, q, r.RunID); err == nil {
+		if _, intentErr := loadWorkflowTerminalIntent(ctx, q, r.RunID); intentErr == nil {
 			return workflowInvalid(errors.New("manual compensation cannot overlap terminal-intent cleanup"))
-		} else if !errors.Is(err, workflowruntime.ErrNotFound) {
-			return err
+		} else if !errors.Is(intentErr, workflowruntime.ErrNotFound) {
+			return intentErr
 		}
 		if r.At.Before(run.UpdatedAt) {
 			return workflowInvalid(errors.New("manual compensation time regresses run"))
@@ -756,40 +756,40 @@ func (s *WorkflowStateStore) BeginManualCompensation(ctx context.Context, r work
 		for rows.Next() {
 			node, scanErr := scanWorkflowNode(rows)
 			if scanErr != nil {
-				rows.Close()
+				_ = rows.Close()
 				return scanErr
 			}
 			if !node.Status.Terminal() {
-				rows.Close()
+				_ = rows.Close()
 				return workflowruntime.ErrCompensationPending
 			}
 			if r.At.Before(node.UpdatedAt) {
-				rows.Close()
+				_ = rows.Close()
 				return workflowInvalid(errors.New("manual compensation time regresses forward node"))
 			}
 			if node.LatestAttempt > 0 {
 				attempt, loadErr := loadWorkflowAttempt(ctx, q, workflowruntime.AttemptID{Invocation: node.ID, Number: node.LatestAttempt})
 				if loadErr != nil || !attempt.Status.Terminal() || attempt.FinishedAt.IsZero() {
-					rows.Close()
+					_ = rows.Close()
 					if loadErr != nil {
 						return loadErr
 					}
 					return workflowruntime.ErrCompensationPending
 				}
 				if r.At.Before(attempt.UpdatedAt) {
-					rows.Close()
+					_ = rows.Close()
 					return workflowInvalid(errors.New("manual compensation time regresses forward attempt"))
 				}
 			}
 		}
-		if err := rows.Close(); err != nil {
-			return err
+		if closeErr := rows.Close(); closeErr != nil {
+			return closeErr
 		}
 		ledger, err := loadWorkflowCompensationLedger(ctx, q, r.RunID)
 		if errors.Is(err, workflowruntime.ErrNotFound) {
 			ledger = workflowruntime.CompensationLedgerSnapshot{RunID: r.RunID, PlanDigest: r.PlanDigest, Status: workflowruntime.CompensationCollecting, Generation: 1, CreatedAt: r.At, UpdatedAt: r.At}
-			if err := insertWorkflowCompensationLedger(ctx, q, ledger); err != nil {
-				return err
+			if insertErr := insertWorkflowCompensationLedger(ctx, q, ledger); insertErr != nil {
+				return insertErr
 			}
 		} else if err != nil {
 			return err
@@ -1079,6 +1079,8 @@ func completeWorkflowCompensationLedger(ledger *workflowruntime.CompensationLedg
 			allTerminal = false
 		}
 		switch candidate.Status {
+		case workflowruntime.CompensationEligible, workflowruntime.CompensationPending, workflowruntime.CompensationActive:
+			// Nonterminal entries are accounted for by allTerminal.
 		case workflowruntime.CompensationCanceled:
 			canceled++
 		case workflowruntime.CompensationFailed:
@@ -1157,9 +1159,9 @@ func (s *WorkflowStateStore) SealCompensationEntry(ctx context.Context, r workfl
 			entry.Status = workflowruntime.CompensationFailed
 		}
 		if node.LatestAttempt > 0 {
-			attempt, err := loadWorkflowAttempt(ctx, q, workflowruntime.AttemptID{Invocation: node.ID, Number: node.LatestAttempt})
-			if err != nil {
-				return err
+			attempt, loadAttemptErr := loadWorkflowAttempt(ctx, q, workflowruntime.AttemptID{Invocation: node.ID, Number: node.LatestAttempt})
+			if loadAttemptErr != nil {
+				return loadAttemptErr
 			}
 			entry.HandlerFailure = cloneWorkflowFailure(attempt.Failure)
 		}
@@ -1167,8 +1169,8 @@ func (s *WorkflowStateStore) SealCompensationEntry(ctx context.Context, r workfl
 		entry.Generation++
 		entry.UpdatedAt = r.At
 		entry.CompletedAt = r.At
-		if err := updateWorkflowCompensationEntry(ctx, q, entry, ep); err != nil {
-			return err
+		if updateErr := updateWorkflowCompensationEntry(ctx, q, entry, ep); updateErr != nil {
+			return updateErr
 		}
 		entries, err := listWorkflowCompensationEntries(ctx, q, r.RunID)
 		if err != nil {
@@ -1273,6 +1275,9 @@ func (s *WorkflowStateStore) CancelCompensation(ctx context.Context, r workflowr
 							return err
 						}
 					}
+				case workflowruntime.NodeSucceeded, workflowruntime.NodeFailed, workflowruntime.NodeSkipped,
+					workflowruntime.NodeCanceled, workflowruntime.NodeTimedOut, workflowruntime.NodeCrashed:
+					// Terminal handlers are sealed by compensation progression.
 				}
 				continue
 			}

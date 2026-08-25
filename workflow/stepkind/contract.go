@@ -167,8 +167,8 @@ func ResolveReversibility(ctx context.Context, provider ReversibilityProvider, r
 			return ReversibilityEvidence{}, err
 		}
 		var cloned ReversibilityRequest
-		if err := json.Unmarshal(encoded, &cloned); err != nil {
-			return ReversibilityEvidence{}, err
+		if unmarshalErr := json.Unmarshal(encoded, &cloned); unmarshalErr != nil {
+			return ReversibilityEvidence{}, unmarshalErr
 		}
 		evidence, err := provider.DescribeReversibility(ctx, cloned)
 		if err != nil {

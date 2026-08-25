@@ -187,8 +187,8 @@ func TestAppliedCompensationReceiptCommitsForwardFailureWithoutAuthoredRetry(t *
 		}, &stepkind.ExecutionError{Code: "timeout_after_commit", Message: "observer failed after apply", Classification: stepkind.Retryable}
 	}
 	registry := stepkind.NewRegistry()
-	if err := registry.Register(kind); err != nil {
-		t.Fatal(err)
+	if registerErr := registry.Register(kind); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	scheduler := &recordingScheduler{}
 	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }, RetryCoordinator: &workflowruntime.RetryCoordinator{Scheduler: scheduler}})
@@ -200,8 +200,8 @@ func TestAppliedCompensationReceiptCommitsForwardFailureWithoutAuthoredRetry(t *
 	if !errors.Is(dispatchErr, workflowruntime.ErrStepExecution) || result.Node.Status != workflowruntime.NodeFailed || result.Attempt.Status != workflowruntime.NodeFailed {
 		t.Fatalf("Dispatch = %#v, %v", result, dispatchErr)
 	}
-	if recovered, err := store.RecoverRetryActivations(t.Context(), workflowruntime.RetryActivationQuery{RunID: node.ID.RunID}); err != nil || len(recovered) != 0 {
-		t.Fatalf("applied effect scheduled a forward retry: %#v, %v", recovered, err)
+	if recovered, recoveryErr := store.RecoverRetryActivations(t.Context(), workflowruntime.RetryActivationQuery{RunID: node.ID.RunID}); recoveryErr != nil || len(recovered) != 0 {
+		t.Fatalf("applied effect scheduled a forward retry: %#v, %v", recovered, recoveryErr)
 	}
 	ledger, err := store.LoadCompensationLedger(t.Context(), node.ID.RunID)
 	entries, entriesErr := store.ListCompensationEntries(t.Context(), node.ID.RunID)
@@ -294,8 +294,8 @@ func TestAppliedCompensationReceiptWithInvalidPublicOutputTerminalizesAndRemains
 	if !errors.Is(dispatchErr, workflowruntime.ErrStepValidation) || result.Node.Status != workflowruntime.NodeFailed || result.Attempt.Status != workflowruntime.NodeFailed || result.Attempt.Failure == nil || result.Attempt.Failure.Code != "step_result_invalid" || result.Attempt.Failure.Retryable {
 		t.Fatalf("Dispatch = %#v, %v", result, dispatchErr)
 	}
-	if retries, err := store.RecoverRetryActivations(t.Context(), workflowruntime.RetryActivationQuery{RunID: node.ID.RunID}); err != nil || len(retries) != 0 {
-		t.Fatalf("invalid applied output scheduled retry = %#v, %v", retries, err)
+	if retries, recoveryErr := store.RecoverRetryActivations(t.Context(), workflowruntime.RetryActivationQuery{RunID: node.ID.RunID}); recoveryErr != nil || len(retries) != 0 {
+		t.Fatalf("invalid applied output scheduled retry = %#v, %v", retries, recoveryErr)
 	}
 	entries, err := store.ListCompensationEntries(t.Context(), node.ID.RunID)
 	if err != nil || len(entries) != 1 || entries[0].OriginalOutputs == nil || entries[0].OriginalError == nil {
@@ -314,8 +314,8 @@ func TestAppliedCompensationReceiptWithNonPersistableOutputOmitsOutputRefAndFenc
 		}, &stepkind.ExecutionError{Code: "timeout_after_nonpersistable_output", Message: "effect applied before malformed envelope", Classification: stepkind.Retryable}
 	}
 	registry := stepkind.NewRegistry()
-	if err := registry.Register(kind); err != nil {
-		t.Fatal(err)
+	if registerErr := registry.Register(kind); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	scheduler := &recordingScheduler{}
 	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }, RetryCoordinator: &workflowruntime.RetryCoordinator{Scheduler: scheduler}})
@@ -552,8 +552,8 @@ func TestMissingCompensationReceiptReconcilesFanOutParent(t *testing.T) {
 		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{}}, nil
 	}
 	registry := stepkind.NewRegistry()
-	if err := registry.Register(kind); err != nil {
-		t.Fatal(err)
+	if registerErr := registry.Register(kind); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: store, Registry: registry, Now: func() time.Time { return base.Add(3 * time.Second) }, RetryCoordinator: &workflowruntime.RetryCoordinator{Store: store}})
 	if err != nil {
@@ -581,8 +581,8 @@ func TestCollectingCompensationCannotBeCanceledBeforeDeclaredTrigger(t *testing.
 	if err != nil || ledger.Status != workflowruntime.CompensationCollecting {
 		t.Fatalf("collecting ledger = %#v, %v", ledger, err)
 	}
-	if _, err := store.CancelCompensation(ctx, workflowruntime.CancelCompensationRequest{RunID: runID, ExpectedLedgerGeneration: ledger.Generation, IdempotencyKey: "pretrigger-cancel", Reason: "must not preempt declared trigger", At: base.Add(5 * time.Second)}); !errors.Is(err, workflowruntime.ErrCompensationConflict) {
-		t.Fatalf("pre-trigger cancellation = %v", err)
+	if _, cancelErr := store.CancelCompensation(ctx, workflowruntime.CancelCompensationRequest{RunID: runID, ExpectedLedgerGeneration: ledger.Generation, IdempotencyKey: "pretrigger-cancel", Reason: "must not preempt declared trigger", At: base.Add(5 * time.Second)}); !errors.Is(cancelErr, workflowruntime.ErrCompensationConflict) {
+		t.Fatalf("pre-trigger cancellation = %v", cancelErr)
 	}
 	unchanged, err := store.LoadCompensationLedger(ctx, runID)
 	if err != nil || unchanged.Status != workflowruntime.CompensationCollecting || unchanged.Generation != ledger.Generation {
@@ -651,8 +651,8 @@ func TestCompensationCoordinatorRollsBackReverseDependenciesBeforeTerminalIntent
 	if err != nil || ledger.Status != workflowruntime.CompensationFrozen || ledger.OriginalStatus != workflowruntime.RunFailed || ledger.OriginalFailure == nil {
 		t.Fatalf("frozen ledger = %#v, %v", ledger, err)
 	}
-	if _, err := store.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{RunID: runID, ExpectedRunGeneration: result.Generation, ExpectedIntentGeneration: intent.Generation, At: base.Add(6 * time.Second)}); !errors.Is(err, workflowruntime.ErrCompensationPending) {
-		t.Fatalf("terminal bypass before rollback = %v", err)
+	if _, completionErr := store.CompleteTerminalIntent(ctx, workflowruntime.CompleteTerminalIntentRequest{RunID: runID, ExpectedRunGeneration: result.Generation, ExpectedIntentGeneration: intent.Generation, At: base.Add(6 * time.Second)}); !errors.Is(completionErr, workflowruntime.ErrCompensationPending) {
+		t.Fatalf("terminal bypass before rollback = %v", completionErr)
 	}
 	compensation := workflowruntime.CompensationCoordinator{Store: store, Compensation: store, Plans: staticRecoveryPlans{graph: workflow}}
 	progress, err := compensation.Progress(ctx, runID, base.Add(6*time.Second))
@@ -1018,8 +1018,8 @@ func TestCompensationCompletesBeforeFinallyBecomesEligible(t *testing.T) {
 	if err != nil || ready.Snapshot.Status != workflowruntime.NodeReady {
 		t.Fatalf("finally after compensation = %#v, %v", ready, err)
 	}
-	if _, err := store.RetryCompensation(ctx, workflowruntime.RetryCompensationRequest{RunID: runID, ExpectedLedgerGeneration: progress.Ledger.Generation, IdempotencyKey: "retry-after-finally", Attestation: values.SHA256Digest([]byte("retry-after-finally")), At: base.Add(15 * time.Second)}); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
-		t.Fatalf("retry reopened compensation after finalizer readiness = %v", err)
+	if _, retryErr := store.RetryCompensation(ctx, workflowruntime.RetryCompensationRequest{RunID: runID, ExpectedLedgerGeneration: progress.Ledger.Generation, IdempotencyKey: "retry-after-finally", Attestation: values.SHA256Digest([]byte("retry-after-finally")), At: base.Add(15 * time.Second)}); !errors.Is(retryErr, workflowruntime.ErrInvalidRecord) {
+		t.Fatalf("retry reopened compensation after finalizer readiness = %v", retryErr)
 	}
 	makeTerminalNode(t, store, cleanup.ID, workflowruntime.NodeSucceeded, base.Add(16*time.Second))
 	completed, intent, err := control.ReconcileRunCompletion(ctx, workflow, runID, "compensation-before-finally", base.Add(17*time.Second))
@@ -1041,12 +1041,12 @@ func TestReplayFencesCompensatedEffectsAndRequiresExactIndeterminateAttestation(
 		workflow := graph.Graph{ID: testPlan().ID, Version: testPlan().Version, Compensation: &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationManual}}, Nodes: []graph.Node{{ID: "effect", Kind: "test", KindVersion: "v1", Compensation: &graph.CompensationSpec{Handler: "undo"}}, {ID: "undo", Kind: "test", KindVersion: "v1"}}}
 		service := workflowruntime.ReplayService{Store: store, Replay: store, Inputs: store, Control: store, Plans: staticRecoveryPlans{graph: workflow}, Registry: compensationReplayRegistry(t)}
 		request := workflowruntime.ReplayRequest{SourceRunID: runID, RunID: "replay-frozen-target", FromNodeID: "effect", IdempotencyKey: "replay-frozen-target", At: base.Add(7 * time.Second)}
-		if _, err := service.Rerun(ctx, request); !errors.Is(err, workflowruntime.ErrRecoveryUnsafe) {
-			t.Fatalf("frozen replay without proof = %v", err)
+		if _, replayErr := service.Rerun(ctx, request); !errors.Is(replayErr, workflowruntime.ErrRecoveryUnsafe) {
+			t.Fatalf("frozen replay without proof = %v", replayErr)
 		}
 		request.CompensationAuthorization = &workflowruntime.ReplayCompensationAuthorization{LedgerGeneration: frozen.Ledger.Generation - 1, Digest: values.SHA256Digest([]byte("stale-frozen-proof"))}
-		if _, err := service.Rerun(ctx, request); !errors.Is(err, workflowruntime.ErrRecoveryUnsafe) {
-			t.Fatalf("frozen replay with stale generation = %v", err)
+		if _, replayErr := service.Rerun(ctx, request); !errors.Is(replayErr, workflowruntime.ErrRecoveryUnsafe) {
+			t.Fatalf("frozen replay with stale generation = %v", replayErr)
 		}
 		request.CompensationAuthorization = &workflowruntime.ReplayCompensationAuthorization{LedgerGeneration: frozen.Ledger.Generation, Digest: values.SHA256Digest([]byte("exact-frozen-proof"))}
 		replayed, err := service.Rerun(ctx, request)
@@ -1081,8 +1081,8 @@ func TestReplayFencesCompensatedEffectsAndRequiresExactIndeterminateAttestation(
 			{ID: "effect", Kind: "test", KindVersion: "v1", Compensation: &graph.CompensationSpec{Handler: "undo"}}, {ID: "after", Kind: "test", KindVersion: "v1", Needs: []graph.Need{{Node: "effect"}}}, {ID: "undo", Kind: "test", KindVersion: "v1"},
 		}}
 		service := workflowruntime.ReplayService{Store: store, Replay: store, Inputs: store, Control: store, Plans: staticRecoveryPlans{graph: workflow}, Registry: compensationReplayRegistry(t)}
-		if _, err := service.Rerun(ctx, workflowruntime.ReplayRequest{SourceRunID: runID, RunID: "replay-handler-target", FromNodeID: "undo", IdempotencyKey: "replay-handler-target", At: base.Add(11 * time.Second)}); !errors.Is(err, workflowruntime.ErrInvalidReplay) {
-			t.Fatalf("dormant handler replay boundary = %v", err)
+		if _, replayErr := service.Rerun(ctx, workflowruntime.ReplayRequest{SourceRunID: runID, RunID: "replay-handler-target", FromNodeID: "undo", IdempotencyKey: "replay-handler-target", At: base.Add(11 * time.Second)}); !errors.Is(replayErr, workflowruntime.ErrInvalidReplay) {
+			t.Fatalf("dormant handler replay boundary = %v", replayErr)
 		}
 		result, err := service.Rerun(ctx, workflowruntime.ReplayRequest{SourceRunID: runID, RunID: "replay-compensated-target", FromNodeID: "after", IdempotencyKey: "replay-compensated-target", At: base.Add(11 * time.Second)})
 		if err != nil || result.Outcome != workflowruntime.IdempotencyApplied {
@@ -1123,12 +1123,12 @@ func TestReplayFencesCompensatedEffectsAndRequiresExactIndeterminateAttestation(
 		}}
 		service := workflowruntime.ReplayService{Store: store, Replay: store, Inputs: store, Control: store, Plans: staticRecoveryPlans{graph: workflow}, Registry: compensationReplayRegistry(t)}
 		request := workflowruntime.ReplayRequest{SourceRunID: runID, RunID: "replay-partial-target", FromNodeID: "after", IdempotencyKey: "replay-partial-target", At: base.Add(13 * time.Second)}
-		if _, err := service.Rerun(ctx, request); !errors.Is(err, workflowruntime.ErrRecoveryUnsafe) {
-			t.Fatalf("partial replay without attestation = %v", err)
+		if _, replayErr := service.Rerun(ctx, request); !errors.Is(replayErr, workflowruntime.ErrRecoveryUnsafe) {
+			t.Fatalf("partial replay without attestation = %v", replayErr)
 		}
 		request.CompensationAuthorization = &workflowruntime.ReplayCompensationAuthorization{LedgerGeneration: progress.Ledger.Generation - 1, LedgerOutcome: progress.Ledger.Outcome, Digest: values.SHA256Digest([]byte("wrong-generation"))}
-		if _, err := service.Rerun(ctx, request); !errors.Is(err, workflowruntime.ErrRecoveryUnsafe) {
-			t.Fatalf("partial replay with stale attestation = %v", err)
+		if _, replayErr := service.Rerun(ctx, request); !errors.Is(replayErr, workflowruntime.ErrRecoveryUnsafe) {
+			t.Fatalf("partial replay with stale attestation = %v", replayErr)
 		}
 		request.CompensationAuthorization = &workflowruntime.ReplayCompensationAuthorization{LedgerGeneration: progress.Ledger.Generation, LedgerOutcome: progress.Ledger.Outcome, Digest: values.SHA256Digest([]byte("host-bound-attestation"))}
 		result, err := service.Rerun(ctx, request)
@@ -1247,8 +1247,8 @@ func TestCompensationCoordinatorConvergesWhenTerminalChildLedgerCannotRun(t *tes
 			if child.Generation != childRunning.Snapshot.Generation {
 				t.Fatalf("eligibility changed child run = %#v", child)
 			}
-			if _, err := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: childID, ExpectedGeneration: child.Generation, To: test.childStatus, At: base.Add(5 * time.Second)}); err != nil {
-				t.Fatal(err)
+			if _, transitionErr := store.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: childID, ExpectedGeneration: child.Generation, To: test.childStatus, At: base.Add(5 * time.Second)}); transitionErr != nil {
+				t.Fatal(transitionErr)
 			}
 			seedCompensationEligibility(t, store, parentID, "parent-call", "undo-parent", base.Add(2*time.Second), childID)
 			createNode(t, store, workflowruntime.NodeInvocationID{RunID: parentID, NodeID: "child-effect"}, workflowruntime.NodePending, 0, base)
@@ -1259,8 +1259,8 @@ func TestCompensationCoordinatorConvergesWhenTerminalChildLedgerCannotRun(t *tes
 				{ID: "parent-call", Compensation: &graph.CompensationSpec{Handler: "undo-parent"}}, {ID: "undo-parent"}, {ID: "failure"},
 				{ID: "child-effect", Compensation: &graph.CompensationSpec{Handler: "undo-child"}}, {ID: "undo-child"},
 			}}
-			if _, _, err := workflowruntime.NewControlFlowCoordinator(store, store, nil).ReconcileRunCompletion(ctx, workflow, parentID, "child-unavailable-freeze-"+string(test.childStatus), base.Add(7*time.Second)); !errors.Is(err, workflowruntime.ErrCompensationPending) {
-				t.Fatalf("parent freeze = %v", err)
+			if _, _, reconcileErr := workflowruntime.NewControlFlowCoordinator(store, store, nil).ReconcileRunCompletion(ctx, workflow, parentID, "child-unavailable-freeze-"+string(test.childStatus), base.Add(7*time.Second)); !errors.Is(reconcileErr, workflowruntime.ErrCompensationPending) {
+				t.Fatalf("parent freeze = %v", reconcileErr)
 			}
 			coordinator := workflowruntime.CompensationCoordinator{Store: store, Compensation: store, Plans: staticRecoveryPlans{graph: workflow}}
 			progress, err := coordinator.Progress(ctx, parentID, base.Add(8*time.Second))
@@ -1356,8 +1356,8 @@ func TestManualCompensationCancellationAndRetryResumeSameLedgerWithStableKey(t *
 	if err != nil || len(progress.Activated) != 1 {
 		t.Fatalf("manual activation = %#v, %v", progress, err)
 	}
-	if _, err := store.CancelCompensation(ctx, workflowruntime.CancelCompensationRequest{RunID: runID, ExpectedLedgerGeneration: progress.Ledger.Generation, IdempotencyKey: manualRequest.IdempotencyKey, Reason: "cross-operation collision", At: base.Add(8 * time.Second)}); !errors.Is(err, workflowruntime.ErrIdempotencyConflict) {
-		t.Fatalf("cross-operation compensation key = %v", err)
+	if _, cancelErr := store.CancelCompensation(ctx, workflowruntime.CancelCompensationRequest{RunID: runID, ExpectedLedgerGeneration: progress.Ledger.Generation, IdempotencyKey: manualRequest.IdempotencyKey, Reason: "cross-operation collision", At: base.Add(8 * time.Second)}); !errors.Is(cancelErr, workflowruntime.ErrIdempotencyConflict) {
+		t.Fatalf("cross-operation compensation key = %v", cancelErr)
 	}
 	handler := progress.Activated[0].Node
 	claim := claimNode(t, store, handler.ID, handler.ClaimGeneration, "rollback-worker", "rollback-token", "rollback-claim", base.Add(8*time.Second), base.Add(time.Hour))
@@ -1379,16 +1379,16 @@ func TestManualCompensationCancellationAndRetryResumeSameLedgerWithStableKey(t *
 	undo.SpecValue.Effects = graph.EffectSet{graph.EffectMutate}
 	undo.SpecValue.Idempotency = graph.IdempotencyKeyed
 	registry := stepkind.NewRegistry()
-	if err := registry.Register(undo); err != nil {
-		t.Fatal(err)
+	if registerErr := registry.Register(undo); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	canceledAttempt := false
 	cancellation := workflowruntime.CancellationCoordinator{Store: store, Registry: registry, Attempts: compensationAttemptCanceler(func(_ context.Context, attempt workflowruntime.AttemptSnapshot) error {
 		canceledAttempt = attempt.ID == started.Attempt.ID
 		return nil
 	}), Now: func() time.Time { return base.Add(10 * time.Second) }}
-	if _, failures, err := cancellation.Recover(ctx, workflowruntime.CancellationIntentQuery{RunID: runID}); err != nil || len(failures) != 0 || !canceledAttempt {
-		t.Fatalf("recover cancellation failures=%v err=%v canceled=%t", failures, err, canceledAttempt)
+	if _, failures, recoveryErr := cancellation.Recover(ctx, workflowruntime.CancellationIntentQuery{RunID: runID}); recoveryErr != nil || len(failures) != 0 || !canceledAttempt {
+		t.Fatalf("recover cancellation failures=%v err=%v canceled=%t", failures, recoveryErr, canceledAttempt)
 	}
 	progress, err = coordinator.Progress(ctx, runID, base.Add(11*time.Second))
 	if err != nil || progress.Ledger.Outcome != workflowruntime.CompensationOutcomeCanceled {
@@ -1463,8 +1463,8 @@ func TestCompensationHandlerPrestartContractFailureConvergesLedger(t *testing.T)
 	undo.SpecValue.Effects = graph.EffectSet{graph.EffectMutate}
 	undo.SpecValue.Idempotency = graph.IdempotencyKeyed
 	registry := stepkind.NewRegistry()
-	if err := registry.Register(undo); err != nil {
-		t.Fatal(err)
+	if registerErr := registry.Register(undo); registerErr != nil {
+		t.Fatal(registerErr)
 	}
 	claim, ok, err := workflowruntime.NewReadyQueueCoordinator(store, nil).ClaimNext(ctx, workflowruntime.ReadyClaimRequest{RunID: runID, Owner: "contract-worker", Token: "contract-token", IdempotencyKey: "contract-claim", Now: base.Add(8 * time.Second), LeaseUntil: base.Add(time.Hour)})
 	if err != nil || !ok {
@@ -1629,8 +1629,8 @@ func seedCompensationEligibilityRequest(t *testing.T, store workflowruntime.Stat
 		if !ok {
 			t.Fatal("fixture store lacks child run links")
 		}
-		if err := cancellation.RecordChildRun(t.Context(), workflowruntime.ChildRunLink{ParentRunID: runID, Invocation: id, ChildRunID: childRunID, Policy: graph.ParentCloseCancel, CreatedAt: at}); err != nil {
-			t.Fatal(err)
+		if recordErr := cancellation.RecordChildRun(t.Context(), workflowruntime.ChildRunLink{ParentRunID: runID, Invocation: id, ChildRunID: childRunID, Policy: graph.ParentCloseCancel, CreatedAt: at}); recordErr != nil {
+			t.Fatal(recordErr)
 		}
 	}
 	request := workflowruntime.FinishCompensableAttemptRequest{

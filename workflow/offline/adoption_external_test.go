@@ -125,14 +125,14 @@ func TestExternalOfflineExecutionDrivesCompensationBeforeReturningOriginalFailur
 	}
 	plan.Graph.Edges = []graph.Edge{{From: "a-effect", To: "z-fail", Kind: graph.EdgeControl}}
 	plan.Graph.Compensation = &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationOnFailure}, Mode: graph.CompensationBestEffort}
-	var err error
-	plan.Graph.Digest, err = compile.GraphDigest(plan.Graph)
-	if err != nil {
-		t.Fatal(err)
+	var digestErr error
+	plan.Graph.Digest, digestErr = compile.GraphDigest(plan.Graph)
+	if digestErr != nil {
+		t.Fatal(digestErr)
 	}
-	plan.Digest, err = compile.PlanDigest(*plan)
-	if err != nil {
-		t.Fatal(err)
+	plan.Digest, digestErr = compile.PlanDigest(*plan)
+	if digestErr != nil {
+		t.Fatal(digestErr)
 	}
 	effect := &offlineReversibleKind{Kind: stepkindtest.NewNoopKind("offline-effect", "v1")}
 	effect.SpecValue.Effects = graph.EffectSet{graph.EffectMaterialize}
@@ -181,8 +181,8 @@ func TestExternalOfflineExecutionDrivesCompensationBeforeReturningOriginalFailur
 	if err != nil || ledger.Status != workflowruntime.CompensationTerminal || ledger.Outcome != workflowruntime.CompensationOutcomeSucceeded || ledger.OriginalStatus != workflowruntime.RunFailed {
 		t.Fatalf("ledger = %#v, %v", ledger, err)
 	}
-	if _, err := store.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: runFailure.Run.ID, NodeID: "undo"}); !errors.Is(err, workflowruntime.ErrNotFound) {
-		t.Fatalf("forward phase materialized dormant handler: %v", err)
+	if _, loadErr := store.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: runFailure.Run.ID, NodeID: "undo"}); !errors.Is(loadErr, workflowruntime.ErrNotFound) {
+		t.Fatalf("forward phase materialized dormant handler: %v", loadErr)
 	}
 	entries, err := store.ListCompensationEntries(t.Context(), runFailure.Run.ID)
 	if err != nil || len(entries) != 1 || entries[0].Handler.Iteration == "" || entries[0].Status != workflowruntime.CompensationSucceeded {

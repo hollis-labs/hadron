@@ -66,9 +66,9 @@ func TestPinnedChildRunMaterializerKeepsCompensationHandlerDormantUntilChildLedg
 	rootDefinition.Compensation = &graph.CompensationSpec{Handler: "undo"}
 	fixture.request.Definition.Graph.Nodes = []graph.Node{rootDefinition, {ID: "undo", Kind: "noop", KindVersion: "v1"}}
 	fixture.request.Definition.Graph.Edges = nil
-	materializer, err := NewPinnedChildRunMaterializer(ChildRunMaterializerOptions{State: fixture.store, Clock: ClockFunc(func() time.Time { return fixture.now.Add(time.Second) })})
-	if err != nil {
-		t.Fatal(err)
+	materializer, materializerErr := NewPinnedChildRunMaterializer(ChildRunMaterializerOptions{State: fixture.store, Clock: ClockFunc(func() time.Time { return fixture.now.Add(time.Second) })})
+	if materializerErr != nil {
+		t.Fatal(materializerErr)
 	}
 	if err := materializer.MaterializeChildRun(t.Context(), fixture.request); err != nil {
 		t.Fatal(err)
@@ -96,11 +96,11 @@ func TestPinnedChildRunMaterializerKeepsCompensationHandlerDormantUntilChildLedg
 		t.Fatal(err)
 	}
 	evidence := stepkind.ReversibilityEvidence{Operation: "fixture.child", ReceiptSchema: graph.Schema{}}
-	if _, err := fixture.store.FinishCompensableAttempt(t.Context(), runtime.FinishCompensableAttemptRequest{
+	if _, finishErr := fixture.store.FinishCompensableAttempt(t.Context(), runtime.FinishCompensableAttemptRequest{
 		Finish:      runtime.FinishNodeAttemptRequest{InvocationID: rootID, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: runtime.NodeSucceeded, NextNodeStatus: runtime.NodeSucceeded, At: fixture.now.Add(4 * time.Second)},
 		Eligibility: runtime.CompensationEligibility{PlanDigest: fixture.request.Plan.Digest, HandlerNodeID: "undo", Evidence: evidence, Receipt: stepkind.CompensationReceipt{Operation: evidence.Operation, Values: values.ValueSet{}}},
-	}); err != nil {
-		t.Fatal(err)
+	}); finishErr != nil {
+		t.Fatal(finishErr)
 	}
 	run, err := fixture.store.LoadRun(t.Context(), fixture.request.ChildRunID)
 	if err != nil {

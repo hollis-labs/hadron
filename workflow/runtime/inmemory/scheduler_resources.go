@@ -270,11 +270,6 @@ func (s *Store) schedulerClaimLiveLocked(id workflowruntime.NodeInvocationID, le
 	return true
 }
 
-func (s *Store) runActiveLocked(id workflowruntime.RunID) bool {
-	run, exists := s.runs[id]
-	return exists && run.Status.Active()
-}
-
 func fanOutResourceID(id workflowruntime.NodeInvocationID) workflowruntime.SchedulerResourceID {
 	return workflowruntime.SchedulerResourceID{Kind: workflowruntime.SchedulerResourceFanOut, RunID: id.RunID, NodeID: id.NodeID}
 }
