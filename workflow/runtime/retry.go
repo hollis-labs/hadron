@@ -328,10 +328,11 @@ func requireRetryIdempotency(request RetryEvaluationRequest) error {
 	if err != nil {
 		return err
 	}
-	if mode == graph.IdempotencyKeyed && strings.TrimSpace(request.IdempotencyKey) == "" {
+	keyed := mode == graph.IdempotencyKeyed && strings.TrimSpace(request.IdempotencyKey) != ""
+	if mode == graph.IdempotencyKeyed && !keyed {
 		return ErrRetryDenied
 	}
-	if request.Spec.RetrySafety == stepkind.RetryRequiresIdempotency && mode != graph.IdempotencyIntrinsic && strings.TrimSpace(request.IdempotencyKey) == "" {
+	if request.Spec.RetrySafety == stepkind.RetryRequiresIdempotency && mode != graph.IdempotencyIntrinsic && !keyed {
 		return ErrRetryDenied
 	}
 	return nil

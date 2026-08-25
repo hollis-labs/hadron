@@ -86,7 +86,7 @@ func TestRetryEvaluatorUsesTrustedEffectUnion(t *testing.T) {
 	request.IdempotencyKey = "delete:42"
 	request.Spec.Idempotency = graph.IdempotencyNone
 	decision, err = authorized.Evaluate(context.Background(), request)
-	if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonEffectDenied {
+	if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonIdempotencyMissing {
 		t.Fatalf("untrusted key did not preserve destructive denial: %#v, %v", decision, err)
 	}
 	request.Spec.Idempotency = graph.IdempotencyKeyed
@@ -126,6 +126,16 @@ func TestRetryEvaluatorDoesNotTrustGraphIdempotencyUpgrade(t *testing.T) {
 		decision, err = (workflowruntime.RetryEvaluator{}).Evaluate(context.Background(), request)
 		if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonEffectDenied {
 			t.Fatalf("raw key bypassed unprotected %s: %#v, %v", effect, decision, err)
+		}
+	}
+
+	request.Spec.RetrySafety = stepkind.RetryRequiresIdempotency
+	authorized := workflowruntime.RetryEvaluator{Authorizer: retryAuthorizerFunc(func(context.Context, workflowruntime.RetryAuthorizationRequest) error { return nil })}
+	for _, effect := range []graph.Effect{graph.EffectRead, graph.EffectMaterialize, graph.EffectMutate} {
+		request.Spec.Effects = graph.EffectSet{effect}
+		decision, err = authorized.Evaluate(context.Background(), request)
+		if err != nil || decision.Retry || decision.Reason != workflowruntime.RetryReasonIdempotencyMissing {
+			t.Fatalf("raw key and effect grant bypassed executor idempotency mode for %s: %#v, %v", effect, decision, err)
 		}
 	}
 }
