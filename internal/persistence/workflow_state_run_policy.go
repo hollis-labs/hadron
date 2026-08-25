@@ -86,7 +86,7 @@ func (s *WorkflowStateStore) ApplyRunFailurePolicy(ctx context.Context, request 
 		if validationErr := workflowruntime.ValidateNodeControlErrorValues(request.ErrorValues, source.ID, attempt, source.Status, expectedFailure); validationErr != nil {
 			return workflowInvalid(validationErr)
 		}
-		begin, err := beginWorkflowTerminalIntent(ctx, query, workflowruntime.BeginTerminalIntentRequest{RunID: request.RunID, ExpectedRunGeneration: request.ExpectedRunGeneration, IntendedStatus: request.IntendedStatus, Reason: &request.Reason, ErrorValues: request.ErrorValues, IdempotencyKey: request.IdempotencyKey, Finalizers: request.Finalizers, At: request.At})
+		begin, err := beginWorkflowTerminalIntent(ctx, query, workflowruntime.BeginTerminalIntentRequest{RunID: request.RunID, ExpectedRunGeneration: request.ExpectedRunGeneration, IntendedStatus: request.IntendedStatus, Reason: &request.Reason, ErrorValues: request.ErrorValues, CompensationRequired: request.CompensationRequired, IdempotencyKey: request.IdempotencyKey, Finalizers: request.Finalizers, At: request.At})
 		if err != nil {
 			return err
 		}

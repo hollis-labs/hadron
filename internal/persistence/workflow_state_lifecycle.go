@@ -263,7 +263,11 @@ func (s *WorkflowStateStore) FinishNodeAttempt(ctx context.Context, request work
 		if runLoadErr != nil {
 			return runLoadErr
 		}
-		if !run.Status.Active() {
+		allowedRun, admissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, currentNode)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		if !allowedRun {
 			return workflowInvalid(errors.New("terminal run fences attempt completion"))
 		}
 		allowed, err := workflowControlAdmissionAllowed(ctx, query, currentNode.ID)

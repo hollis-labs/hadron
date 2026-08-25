@@ -108,6 +108,9 @@ func validateSpec(spec StepKindSpec) []diagnostic.Diagnostic {
 	if !spec.Memoization.Valid() {
 		add("memoization", fmt.Sprintf("has unsupported value %q", spec.Memoization))
 	}
+	if !spec.Compensation.Valid() {
+		add("compensation", fmt.Sprintf("has unsupported value %q", spec.Compensation))
+	}
 	if !spec.Cancellation.Mode.Valid() {
 		add("cancellation.mode", fmt.Sprintf("has unsupported value %q", spec.Cancellation.Mode))
 	}
@@ -205,6 +208,11 @@ func validateImplementation(kind StepKind, spec StepKindSpec) error {
 	wantCanceler := spec.Cancellation.Mode == CancellationExplicit
 	if spec.Cancellation.Mode.Valid() && !spec.Lifecycle.Service && cancels != wantCanceler {
 		add("cancellation.mode", matchOptionalInterface(wantCanceler, "Canceler"))
+	}
+	_, reversible := kind.(ReversibilityProvider)
+	wantReversible := spec.Compensation == CompensationReceiptRequired
+	if spec.Compensation.Valid() && reversible != wantReversible {
+		add("compensation", matchOptionalInterface(wantReversible, "ReversibilityProvider"))
 	}
 
 	if len(findings) == 0 {

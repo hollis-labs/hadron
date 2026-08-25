@@ -19,8 +19,34 @@ import (
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
+	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
+
+type reversibleCallFixtureKind struct{ *stepkindtest.Kind }
+
+func (k *reversibleCallFixtureKind) DescribeReversibility(context.Context, stepkind.ReversibilityRequest) (stepkind.ReversibilityEvidence, error) {
+	return stepkind.ReversibilityEvidence{Operation: "fixture.create", ReceiptSchema: graph.Schema{"type": "object", "required": []any{"token"}, "properties": map[string]any{"token": map[string]any{"type": "string"}}, "additionalProperties": false}}, nil
+}
+
+type callCompensationPlans struct{ graph graph.Graph }
+
+func (s callCompensationPlans) LoadRecoveryPlan(_ context.Context, run workflowruntime.RunSnapshot) (workflowruntime.RecoveryPlan, error) {
+	plan := workflowcompile.ExecutionPlan{SchemaVersion: run.Plan.SchemaVersion, ID: run.Plan.ID, Digest: run.Plan.Digest, Graph: s.graph}
+	inferred := workflowcompile.InferValueDependencies(&plan, workflowcompile.DependencyOptions{})
+	return workflowruntime.RecoveryPlan{Ref: run.Plan, Plan: plan, Visibility: inferred.Visibility}, nil
+}
+
+type compensationInlineRecorder struct{ requests []calladapter.InlineRequest }
+
+func (r *compensationInlineRecorder) ExecuteInline(_ context.Context, request calladapter.InlineRequest) (calladapter.InlineResult, error) {
+	r.requests = append(r.requests, cloneInlineRequest(request))
+	message, ok := request.Inputs["message"]
+	if !ok {
+		return calladapter.InlineResult{}, errors.New("rollback child message is missing")
+	}
+	return calladapter.InlineResult{Outputs: values.ValueSet{"result": message}}, nil
+}
 
 func TestNestedInlineAndRunCallsDriveRealRuntimeDispatch(t *testing.T) {
 	for _, test := range []struct {
@@ -94,6 +120,112 @@ func TestRuntimeDispatchRejectsMissingCallLineageBeforeStartingAttempt(t *testin
 	if !errors.Is(err, workflowruntime.ErrInvalidDispatch) || result.Node.Status != workflowruntime.NodeReady ||
 		result.Node.LatestAttempt != 0 || result.Node.Lease != nil {
 		t.Fatalf("Dispatch() = %#v, %v", result, err)
+	}
+}
+
+func TestDormantInlineCallHandlerMapsDurableCompensationEvidenceIntoChildInputs(t *testing.T) {
+	host := newRuntimeCallHost(t, graph.CallInline)
+	inline := &compensationInlineRecorder{}
+	callExecutor := mustExecutor(t, calladapter.Options{Resolver: host.resolver, State: host.journal, Context: host.contexts, Inline: inline, Runs: host.runs})
+	host.registry = stepkind.NewRegistry()
+	if err := host.registry.Register(callExecutor); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{Store: host.store, Registry: host.registry, Now: host.nextTime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.dispatcher = dispatcher
+	effect := &reversibleCallFixtureKind{Kind: stepkindtest.NewNoopKind("fixture-effect", "v1")}
+	effect.SpecValue.Effects = graph.EffectSet{graph.EffectMutate}
+	effect.SpecValue.Idempotency = graph.IdempotencyIntrinsic
+	effect.SpecValue.RetrySafety = stepkind.RetrySafe
+	effect.SpecValue.Compensation = stepkind.CompensationReceiptRequired
+	if err := host.registry.Register(effect); err != nil {
+		t.Fatal(err)
+	}
+	receiptName, err := workflowruntime.CompensationHandlerInputName(workflowruntime.CompensationHandlerReceipt, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := graph.Node{
+		ID: "rollback-call", Kind: calladapter.KindName, KindVersion: calladapter.KindVersion, Config: graph.Config{},
+		Call:          &graph.CallSpec{Definition: graph.DefinitionRef{Authority: "package", Kind: "package", ID: "leaf", Locator: "pkg://fixture/leaf", Version: "v1"}, Mode: graph.CallInline, OnParentClose: graph.ParentCloseCancel},
+		InputBindings: map[string]graph.Binding{"message": {Kind: graph.BindingExpression, Expression: &graph.Expression{Text: fmt.Sprintf("compensation[%q]", receiptName)}}},
+		Outputs:       outputDeclarations(host.resolver.definitions["leaf"].Graph.Outputs),
+	}
+	workflow := graph.Graph{ID: "root", Version: "v1", Compensation: &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationManual}}, Nodes: []graph.Node{
+		{ID: "create", Kind: "fixture-effect", KindVersion: "v1", Compensation: &graph.CompensationSpec{Handler: handler.ID}}, handler,
+	}}
+	if findings := workflowcompile.ValidateGraph(t.Context(), workflow, workflowcompile.ValidationOptions{StepKinds: host.registry}); len(findings) != 0 {
+		t.Fatalf("valid call compensation diagnostics = %#v", findings)
+	}
+
+	id, readyClaim, err := host.materializeReady(t.Context(), workflow.Nodes[0], values.ValueSet{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := workflowruntime.ClaimProof{Owner: readyClaim.Lease.Owner, Token: readyClaim.Lease.Token, Generation: readyClaim.Lease.Generation}
+	source, err := host.store.LoadNodeInvocation(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := host.store.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: id, ExpectedNodeGeneration: source.Generation, Claim: proof, Executor: workflowruntime.ExecutorMetadata{Kind: "fixture-effect", Version: "v1"}, At: host.nextTime()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := inlineValue(t, "rollback-token", "effect-receipt", values.RedactionPrivate, values.RetentionRun)
+	evidence, err := effect.DescribeReversibility(t.Context(), stepkind.ReversibilityRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished, err := host.store.FinishCompensableAttempt(t.Context(), workflowruntime.FinishCompensableAttemptRequest{
+		Finish:      workflowruntime.FinishNodeAttemptRequest{InvocationID: id, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: workflowruntime.NodeSucceeded, NextNodeStatus: workflowruntime.NodeSucceeded, At: host.nextTime()},
+		Eligibility: workflowruntime.CompensationEligibility{PlanDigest: rootDefinition().Digest, HandlerNodeID: handler.ID, Evidence: evidence, Receipt: stepkind.CompensationReceipt{Operation: "fixture.create", Values: values.ValueSet{"token": token}}},
+	})
+	if err != nil || finished.Entry.Handler.NodeID != handler.ID {
+		t.Fatalf("eligibility = %#v, %v", finished, err)
+	}
+	run, _ := host.store.LoadRun(t.Context(), host.runID)
+	succeeded, err := host.store.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunSucceeded, At: host.nextTime()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual, err := host.store.BeginManualCompensation(t.Context(), workflowruntime.BeginManualCompensationRequest{RunID: run.ID, PlanDigest: run.Plan.Digest, ExpectedRunGeneration: succeeded.Snapshot.Generation, OriginalStatus: workflowruntime.RunSucceeded, IdempotencyKey: "call-handler-manual", Authorization: values.SHA256Digest([]byte("call-handler-manual")), At: host.nextTime()})
+	if err != nil || manual.Ledger.Status != workflowruntime.CompensationFrozen {
+		t.Fatalf("manual = %#v, %v", manual, err)
+	}
+	coordinator := workflowruntime.CompensationCoordinator{Store: host.store, Compensation: host.store, Plans: callCompensationPlans{graph: workflow}}
+	progress, err := coordinator.Progress(t.Context(), run.ID, host.nextTime())
+	if err != nil || len(progress.Activated) != 1 {
+		t.Fatalf("call handler activation = %#v, %v", progress, err)
+	}
+	activated := progress.Activated[0].Node
+	inputs, err := host.store.LoadValues(t.Context(), *activated.Inputs)
+	if err != nil || len(inputs) != 1 || inputs["message"].Inline != "rollback-token" {
+		t.Fatalf("mapped handler inputs = %#v, %v", inputs, err)
+	}
+	// A recovery replay must reuse the already-persisted activation and inputs.
+	if replayed, replayErr := coordinator.Progress(t.Context(), run.ID, host.nextTime()); replayErr != nil || len(replayed.Activated) != 0 {
+		t.Fatalf("activation replay = %#v, %v", replayed, replayErr)
+	}
+	host.contexts.put(calladapter.CallSiteIdentity{RunID: string(run.ID), NodeID: activated.ID.NodeID, Iteration: activated.ID.Iteration}, values.ExpressionContext{Inputs: values.ValueSet{}})
+	queue := workflowruntime.NewReadyQueueCoordinator(host.store, nil)
+	claim, ok, err := queue.ClaimNext(t.Context(), workflowruntime.ReadyClaimRequest{RunID: run.ID, Owner: "rollback-call-worker", Token: "rollback-call-token", IdempotencyKey: "rollback-call-claim", Now: host.nextTime(), LeaseUntil: host.nextTime().Add(time.Hour)})
+	if err != nil || !ok || claim.Candidate.InvocationID != activated.ID {
+		t.Fatalf("handler claim = %#v, %t, %v", claim, ok, err)
+	}
+	result, err := host.dispatcher.Dispatch(t.Context(), workflowruntime.DispatchRequest{Claim: claim, Node: handler, CallLineage: []graph.DefinitionRef{rootDefinition()}})
+	if err != nil || result.Node.Status != workflowruntime.NodeSucceeded {
+		t.Fatalf("handler dispatch = %#v, %v", result, err)
+	}
+	requests := inline.requests
+	if len(requests) != 1 || requests[0].Inputs["message"].Inline != "rollback-token" {
+		t.Fatalf("rollback child inputs = %#v", requests)
+	}
+	progress, err = coordinator.Progress(t.Context(), run.ID, host.nextTime())
+	if err != nil || progress.Ledger.Outcome != workflowruntime.CompensationOutcomeSucceeded {
+		t.Fatalf("call handler ledger = %#v, %v", progress, err)
 	}
 }
 

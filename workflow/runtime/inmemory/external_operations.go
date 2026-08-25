@@ -202,7 +202,7 @@ func (s *Store) ApplyExternalOperation(ctx context.Context, request workflowrunt
 		return workflowruntime.ApplyExternalOperationResult{}, casMismatch("external operation attempt", request.ExpectedAttemptGeneration, currentAttempt.Generation)
 	}
 	allowedCanceledResolution := request.Status == stepkind.ObservationCanceled && request.NextNodeStatus == workflowruntime.NodeCanceled && s.pendingExternalCancellationLocked(request.Attempt)
-	if run, ok := s.runs[request.Attempt.Invocation.RunID]; ok && !run.Status.Active() {
+	if run, ok := s.runs[request.Attempt.Invocation.RunID]; ok && !s.runAllowsExecutionLocked(request.Attempt.Invocation) {
 		if run.Status != workflowruntime.RunCanceled || !allowedCanceledResolution {
 			return workflowruntime.ApplyExternalOperationResult{}, invalid(errors.New("terminal run fences external mutation"))
 		}

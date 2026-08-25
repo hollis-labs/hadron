@@ -51,7 +51,7 @@ func (s *Store) AdmitNode(ctx context.Context, request workflowruntime.AdmitNode
 		}
 	}
 	result := workflowruntime.AdmitNodeResult{}
-	if current.Status != workflowruntime.NodeReady || !s.runActiveLocked(current.ID.RunID) || !s.controlAdmissionAllowedLocked(current.ID) || current.Lease != nil && current.Lease.ExpiresAt.After(request.Claim.Now) {
+	if current.Status != workflowruntime.NodeReady || !s.runAllowsExecutionLocked(current.ID) || !s.controlAdmissionAllowedLocked(current.ID) || current.Lease != nil && current.Lease.ExpiresAt.After(request.Claim.Now) {
 		s.recordSchedulerDefinitionsLocked(request.Requirements)
 		s.expireSchedulerHoldersLocked(request.Claim.Now)
 		delete(s.schedulerWaiters, current.ID)
@@ -144,7 +144,7 @@ func (s *Store) InspectSchedulerResources(ctx context.Context, query workflowrun
 	}
 	for id, waiter := range s.schedulerWaiters {
 		node, exists := s.nodes[id]
-		if !exists || node.Status != workflowruntime.NodeReady || node.Lease != nil && node.Lease.ExpiresAt.After(query.Now) || !s.runActiveLocked(id.RunID) || !s.controlAdmissionAllowedLocked(id) {
+		if !exists || node.Status != workflowruntime.NodeReady || node.Lease != nil && node.Lease.ExpiresAt.After(query.Now) || !s.runAllowsExecutionLocked(id) || !s.controlAdmissionAllowedLocked(id) {
 			delete(s.schedulerWaiters, id)
 			continue
 		}

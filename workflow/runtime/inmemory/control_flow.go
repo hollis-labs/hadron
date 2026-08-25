@@ -34,7 +34,7 @@ func cancellationTreePlans(request workflowruntime.RequestRunCancellationWithFin
 	plans := make([]workflowruntime.CancellationDescendantPlan, 0, len(request.Descendants)+1)
 	plans = append(plans, workflowruntime.CancellationDescendantPlan{
 		RunID: request.Cancellation.RunID, ExpectedRunGeneration: request.Cancellation.ExpectedGeneration,
-		IdempotencyKey: request.Cancellation.IdempotencyKey, Finalizers: request.Finalizers, ErrorValues: request.ErrorValues,
+		IdempotencyKey: request.Cancellation.IdempotencyKey, Finalizers: request.Finalizers, CompensationRequired: request.CompensationRequired, ErrorValues: request.ErrorValues,
 	})
 	plans = append(plans, request.Descendants...)
 	return plans
@@ -69,7 +69,7 @@ func (s *Store) directCancelDescendantsLocked(root workflowruntime.RunID) ([]wor
 
 func cloneControlCancellationTree(request workflowruntime.RequestRunCancellationWithFinalizersRequest) (workflowruntime.RequestRunCancellationWithFinalizersRequest, error) {
 	result := workflowruntime.RequestRunCancellationWithFinalizersRequest{
-		Cancellation: cloneCancellationRequest(request.Cancellation), Finalizers: cloneFinalizerScopes(request.Finalizers),
+		Cancellation: cloneCancellationRequest(request.Cancellation), Finalizers: cloneFinalizerScopes(request.Finalizers), CompensationRequired: request.CompensationRequired,
 		Descendants: make([]workflowruntime.CancellationDescendantPlan, len(request.Descendants)),
 	}
 	var err error
@@ -79,7 +79,7 @@ func cloneControlCancellationTree(request workflowruntime.RequestRunCancellation
 	for index, descendant := range request.Descendants {
 		result.Descendants[index] = workflowruntime.CancellationDescendantPlan{
 			RunID: descendant.RunID, ExpectedRunGeneration: descendant.ExpectedRunGeneration,
-			IdempotencyKey: descendant.IdempotencyKey, Finalizers: cloneFinalizerScopes(descendant.Finalizers),
+			IdempotencyKey: descendant.IdempotencyKey, Finalizers: cloneFinalizerScopes(descendant.Finalizers), CompensationRequired: descendant.CompensationRequired,
 		}
 		if result.Descendants[index].ErrorValues, err = cloneValueSet(descendant.ErrorValues); err != nil {
 			return workflowruntime.RequestRunCancellationWithFinalizersRequest{}, err
@@ -103,7 +103,7 @@ func (s *Store) cancellationTreeIntentsLocked(request workflowruntime.RequestRun
 	intents := make([]workflowruntime.TerminalIntentSnapshot, 0)
 	var root workflowruntime.TerminalIntentSnapshot
 	for index, plan := range cancellationTreePlans(request) {
-		if len(plan.Finalizers) == 0 {
+		if len(plan.Finalizers) == 0 && !plan.CompensationRequired {
 			continue
 		}
 		intent, exists := s.terminalIntents[plan.RunID]
@@ -260,7 +260,7 @@ func (s *Store) BeginTerminalIntent(ctx context.Context, request workflowruntime
 		return workflowruntime.BeginTerminalIntentResult{}, err
 	}
 	request.At = request.At.UTC()
-	if len(request.Finalizers) == 0 {
+	if len(request.Finalizers) == 0 && !request.CompensationRequired {
 		return workflowruntime.BeginTerminalIntentResult{}, invalid(errors.New("public terminal intent requires at least one finalizer"))
 	}
 	s.mu.Lock()
@@ -269,7 +269,7 @@ func (s *Store) BeginTerminalIntent(ctx context.Context, request workflowruntime
 }
 
 func (s *Store) beginTerminalIntentLocked(request workflowruntime.BeginTerminalIntentRequest) (workflowruntime.BeginTerminalIntentResult, error) {
-	candidate := workflowruntime.TerminalIntentSnapshot{RunID: request.RunID, IntendedStatus: request.IntendedStatus, SuccessOutputsRequired: request.SuccessOutputsRequired, Reason: cloneFailure(request.Reason), IdempotencyKey: request.IdempotencyKey, Finalizers: cloneFinalizerScopes(request.Finalizers), Status: workflowruntime.TerminalIntentPending, Generation: 1, CreatedAt: request.At, UpdatedAt: request.At}
+	candidate := workflowruntime.TerminalIntentSnapshot{RunID: request.RunID, IntendedStatus: request.IntendedStatus, SuccessOutputsRequired: request.SuccessOutputsRequired, CompensationRequired: request.CompensationRequired, Reason: cloneFailure(request.Reason), IdempotencyKey: request.IdempotencyKey, Finalizers: cloneFinalizerScopes(request.Finalizers), Status: workflowruntime.TerminalIntentPending, Generation: 1, CreatedAt: request.At, UpdatedAt: request.At}
 	if request.ExpectedRunGeneration == 0 || request.At.IsZero() {
 		return workflowruntime.BeginTerminalIntentResult{}, invalid(errors.New("terminal intent requires run generation and timestamp"))
 	}
@@ -435,7 +435,7 @@ func (s *Store) RequestRunCancellationWithFinalizers(ctx context.Context, reques
 		if err := workflowruntime.ValidateRunStatusTransition(run.Status, workflowruntime.RunCanceled); err != nil {
 			return workflowruntime.RequestRunCancellationWithFinalizersResult{}, err
 		}
-		if len(plan.Finalizers) != 0 {
+		if len(plan.Finalizers) != 0 || plan.CompensationRequired {
 			if err := workflowruntime.ValidateRunStatusTransition(run.Status, workflowruntime.RunFailed); err != nil {
 				return workflowruntime.RequestRunCancellationWithFinalizersResult{}, err
 			}
@@ -454,9 +454,9 @@ func (s *Store) RequestRunCancellationWithFinalizers(ctx context.Context, reques
 		for _, finalizer := range plan.Finalizers {
 			excluded[finalizer.Invocation] = struct{}{}
 		}
-		terminalize := len(plan.Finalizers) == 0
+		terminalize := len(plan.Finalizers) == 0 && !plan.CompensationRequired
 		if !terminalize {
-			begin, beginErr := s.beginTerminalIntentLocked(workflowruntime.BeginTerminalIntentRequest{RunID: plan.RunID, ExpectedRunGeneration: plan.ExpectedRunGeneration, IntendedStatus: workflowruntime.RunCanceled, Reason: &request.Cancellation.Reason, ErrorValues: plan.ErrorValues, IdempotencyKey: plan.IdempotencyKey, Finalizers: plan.Finalizers, At: request.Cancellation.At})
+			begin, beginErr := s.beginTerminalIntentLocked(workflowruntime.BeginTerminalIntentRequest{RunID: plan.RunID, ExpectedRunGeneration: plan.ExpectedRunGeneration, IntendedStatus: workflowruntime.RunCanceled, Reason: &request.Cancellation.Reason, ErrorValues: plan.ErrorValues, IdempotencyKey: plan.IdempotencyKey, Finalizers: plan.Finalizers, CompensationRequired: plan.CompensationRequired, At: request.Cancellation.At})
 			if beginErr != nil {
 				s.restoreCancellationStateLocked(backup)
 				return workflowruntime.RequestRunCancellationWithFinalizersResult{}, beginErr
@@ -523,6 +523,15 @@ func (s *Store) CompleteTerminalIntent(ctx context.Context, request workflowrunt
 	}
 	if intent.Status != workflowruntime.TerminalIntentPending || !run.Status.Active() || request.At.Before(run.UpdatedAt) || request.At.Before(intent.UpdatedAt) {
 		return workflowruntime.CompleteTerminalIntentResult{}, invalid(errors.New("terminal intent is not pending or completion time regresses"))
+	}
+	if intent.CompensationRequired {
+		ledger, exists := s.compensationLedgers[run.ID]
+		if !exists || ledger.Status != workflowruntime.CompensationTerminal {
+			return workflowruntime.CompleteTerminalIntentResult{}, workflowruntime.ErrCompensationPending
+		}
+		if request.At.Before(ledger.UpdatedAt) {
+			return workflowruntime.CompleteTerminalIntentResult{}, invalid(errors.New("terminal completion time must not precede compensation completion"))
+		}
 	}
 	to := intent.IntendedStatus
 	cleanupFailure := ""
@@ -600,9 +609,16 @@ func (s *Store) controlAdmissionAllowedLocked(id workflowruntime.NodeInvocationI
 	if !exists || intent.Status != workflowruntime.TerminalIntentPending {
 		return true
 	}
+	if node, ok := s.nodes[id]; ok && node.Phase == workflowruntime.InvocationCompensation {
+		return true
+	}
 	for _, finalizer := range intent.Finalizers {
 		if finalizer.Invocation == id {
-			return true
+			if !intent.CompensationRequired {
+				return true
+			}
+			ledger, exists := s.compensationLedgers[id.RunID]
+			return exists && ledger.Status == workflowruntime.CompensationTerminal
 		}
 	}
 	return false
@@ -692,7 +708,7 @@ func cloneTerminalIntent(input workflowruntime.TerminalIntentSnapshot) workflowr
 	return input
 }
 func equalTerminalIntentImmutable(left, right workflowruntime.TerminalIntentSnapshot) bool {
-	if left.RunID != right.RunID || left.IntendedStatus != right.IntendedStatus || left.SuccessOutputsRequired != right.SuccessOutputsRequired || left.IdempotencyKey != right.IdempotencyKey || !equalFailurePointers(left.Reason, right.Reason) || !equalValueSetRef(left.Error, right.Error) || len(left.Finalizers) != len(right.Finalizers) || !left.CreatedAt.Equal(right.CreatedAt) {
+	if left.RunID != right.RunID || left.IntendedStatus != right.IntendedStatus || left.SuccessOutputsRequired != right.SuccessOutputsRequired || left.CompensationRequired != right.CompensationRequired || left.IdempotencyKey != right.IdempotencyKey || !equalFailurePointers(left.Reason, right.Reason) || !equalValueSetRef(left.Error, right.Error) || len(left.Finalizers) != len(right.Finalizers) || !left.CreatedAt.Equal(right.CreatedAt) {
 		return false
 	}
 	for index := range left.Finalizers {

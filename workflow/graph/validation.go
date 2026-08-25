@@ -98,6 +98,12 @@ func (g Graph) ValidateEnums() error {
 		add("durability.mode", string(g.Durability.Mode), g.Durability.Mode.Valid())
 		validateExtension("durability.extension", g.Durability.Extension, add)
 	}
+	if g.Compensation != nil {
+		add("compensation.mode", string(g.Compensation.Mode), g.Compensation.Mode.Valid())
+		for i, trigger := range g.Compensation.Triggers {
+			add(fmt.Sprintf("compensation.triggers[%d]", i), string(trigger), trigger.Valid())
+		}
+	}
 	validateExtension("concurrency.extension", g.Concurrency.Extension, add)
 	validateSourceRef("source", g.Source, add)
 	validateSourceRef("source_map.graph", g.SourceMap.Graph, add)
@@ -209,9 +215,6 @@ func (g Graph) ValidateEnums() error {
 				add(path+".service.teardown_of", node.Service.TeardownOf, ValidateID(node.Service.TeardownOf) == nil)
 			}
 			validateExtension(path+".service.extension", node.Service.Extension, add)
-		}
-		if node.Compensation != nil {
-			validateExtension(path+".compensation.extension", node.Compensation.Extension, add)
 		}
 		validateExtensionMap(path+".extensions", node.Extensions, add)
 		validateSourceRef(path+".source", node.Source, add)

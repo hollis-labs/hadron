@@ -1,6 +1,7 @@
 package stepkind_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -14,6 +15,25 @@ import (
 	"github.com/hollis-labs/hadron/workflow/verification"
 	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
 )
+
+type retainedReversibilityProvider struct{ schema graph.Schema }
+
+func (p *retainedReversibilityProvider) DescribeReversibility(context.Context, stepkind.ReversibilityRequest) (stepkind.ReversibilityEvidence, error) {
+	return stepkind.ReversibilityEvidence{Operation: "fixture.retained", ReceiptSchema: p.schema}, nil
+}
+
+func TestResolveReversibilityOwnsProviderEvidence(t *testing.T) {
+	provider := &retainedReversibilityProvider{schema: graph.Schema{"type": "object", "properties": map[string]any{"token": map[string]any{"type": "string"}}}}
+	evidence, err := stepkind.ResolveReversibility(t.Context(), provider, stepkind.ReversibilityRequest{Config: graph.Config{"operation": "create"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.schema["type"] = "array"
+	provider.schema["properties"].(map[string]any)["token"].(map[string]any)["type"] = "integer"
+	if evidence.ReceiptSchema["type"] != "object" || evidence.ReceiptSchema["properties"].(map[string]any)["token"].(map[string]any)["type"] != "string" {
+		t.Fatalf("retained provider mutated admitted evidence = %#v", evidence)
+	}
+}
 
 func TestExecutionContractsValidateTypedEnvelopes(t *testing.T) {
 	value := stepKindValue(t, "input", "hello")

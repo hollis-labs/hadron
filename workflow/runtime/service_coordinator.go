@@ -340,10 +340,16 @@ func (c *ServiceCoordinator) fenceRunFailure(ctx context.Context, service Servic
 	if err != nil {
 		return err
 	}
+	_, compensationRequired := compensationTriggerForStatus(plan.Plan.Graph.Compensation, RunFailed)
+	if compensationRequired {
+		if compensation, ok := c.state.(CompensationStore); !ok || compensation == nil {
+			return fmt.Errorf("%w: compensation store is required before service failure intent", ErrInvalidService)
+		}
+	}
 	_, err = c.control.BeginTerminalIntent(ctx, BeginTerminalIntentRequest{
 		RunID: run.ID, ExpectedRunGeneration: run.Generation, IntendedStatus: RunFailed,
 		Reason: &failure, ErrorValues: values.ValueSet{"error": typed},
-		IdempotencyKey: "service-failure:" + serviceStopKey(service.Start.Invocation), Finalizers: finalizers, At: at,
+		CompensationRequired: compensationRequired, IdempotencyKey: "service-failure:" + serviceStopKey(service.Start.Invocation), Finalizers: finalizers, At: at,
 	})
 	if errors.Is(err, ErrAlreadyExists) || errors.Is(err, ErrIdempotencyConflict) {
 		existing, loadErr := c.control.LoadTerminalIntent(ctx, run.ID)

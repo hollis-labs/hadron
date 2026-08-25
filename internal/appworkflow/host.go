@@ -60,6 +60,7 @@ type Host struct {
 	registry           *stepkind.MemoryRegistry
 	verifiers          *verification.MemoryRegistry
 	dispatcher         *runtime.StepDispatcher
+	plans              runtime.RecoveryPlanSource
 	pins               *runtime.PinCoordinator
 	interval           time.Duration
 	batchLimit         int
@@ -185,6 +186,7 @@ func New(options Options) (*Host, error) {
 		hooks: append([]RecoveryHook(nil), options.RecoveryHooks...), telemetry: options.Telemetry,
 		childSource: childSource, childDefs: childDefs, childRuns: options.ChildRuns,
 		artifacts: options.Artifacts, clock: clock, registry: registry, verifiers: verifiers, dispatcher: dispatcher, pins: pinCoordinator,
+		plans:    planSource,
 		interval: interval, batchLimit: options.RecoveryBatchLimit,
 	}
 	if hooks, ok := options.Journal.(hoststate.FailureHookJournal); ok && !nilInterface(hooks) {

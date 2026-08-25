@@ -78,7 +78,12 @@ func (v *validator) validateKindConfig(node graph.Node, kind stepkind.StepKind, 
 	if config == nil {
 		config = graph.Config{}
 	}
-	for _, finding := range kind.ValidateConfig(v.ctx, config) {
+	validationConfig, err := cloneValidationConfig(config)
+	if err != nil {
+		v.add(CodeInvalidStepConfig, v.nodeSource(node), fmt.Sprintf("node %q config could not be isolated for step-kind validation", node.ID), "Keep executor config JSON-compatible.")
+		return
+	}
+	for _, finding := range kind.ValidateConfig(v.ctx, validationConfig) {
 		v.diagnostics = append(v.diagnostics, normalizeFinding(
 			finding,
 			v.nodeSource(node),
@@ -87,6 +92,20 @@ func (v *validator) validateKindConfig(node graph.Node, kind stepkind.StepKind, 
 			"Update the node config to satisfy the registered step-kind contract.",
 		))
 	}
+}
+
+func cloneValidationConfig(input graph.Config) (graph.Config, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var result graph.Config
+	if err := decoder.Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (v *validator) validateMemoizationSafety(node graph.Node, spec stepkind.StepKindSpec) {

@@ -267,6 +267,9 @@
           },
           "type": "array"
         },
+        "compensation": {
+          "$ref": "#/$defs/StepkindCompensationReceipt"
+        },
         "expected_inputs": {
           "$ref": "#/$defs/ValuesValueSet"
         },
@@ -636,6 +639,9 @@
     "AppworkflowRerunWorkflowRequest": {
       "additionalProperties": false,
       "properties": {
+        "compensation_attestation": {
+          "type": "string"
+        },
         "from_node_id": {
           "type": "string"
         },
@@ -3794,6 +3800,9 @@
       ],
       "type": "object"
     },
+    "RuntimeCompensationOutcome": {
+      "type": "string"
+    },
     "RuntimeControlDecisionKind": {
       "type": "string"
     },
@@ -3877,6 +3886,9 @@
     "RuntimeInvocationOrigin": {
       "type": "string"
     },
+    "RuntimeInvocationPhase": {
+      "type": "string"
+    },
     "RuntimeNodeInvocationID": {
       "additionalProperties": false,
       "properties": {
@@ -3932,6 +3944,9 @@
         },
         "outputs": {
           "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "phase": {
+          "$ref": "#/$defs/RuntimeInvocationPhase"
         },
         "priority": {
           "type": "integer"
@@ -4068,6 +4083,28 @@
       ],
       "type": "object"
     },
+    "RuntimeReplayCompensationAuthorization": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "ledger_generation": {
+          "type": "integer"
+        },
+        "ledger_outcome": {
+          "$ref": "#/$defs/RuntimeCompensationOutcome"
+        },
+        "risk_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "ledger_generation"
+      ],
+      "type": "object"
+    },
     "RuntimeReplayNodePolicy": {
       "additionalProperties": false,
       "properties": {
@@ -4090,6 +4127,9 @@
     "RuntimeReplayProvenance": {
       "additionalProperties": false,
       "properties": {
+        "compensation_authorization": {
+          "$ref": "#/$defs/RuntimeReplayCompensationAuthorization"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"
@@ -4354,6 +4394,25 @@
     },
     "SearchWorkflowCatalogRequest": {
       "$ref": "#/$defs/AppworkflowSearchWorkflowCatalogRequest"
+    },
+    "StepkindCompensationReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "child_run_id": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/ValuesValueSet"
+        }
+      },
+      "required": [
+        "operation",
+        "values"
+      ],
+      "type": "object"
     },
     "StepkindExecutionError": {
       "additionalProperties": false,

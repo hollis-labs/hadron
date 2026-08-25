@@ -99,9 +99,25 @@ func (e *Executor) Spec() stepkind.StepKindSpec {
 		Cancellation:          stepkind.CancellationSpec{Mode: stepkind.CancellationContext},
 		Observation:           stepkind.ObservationSpec{Mode: stepkind.ObservationNone},
 		Lifecycle:             stepkind.LifecycleSpec{Prepare: true},
+		Compensation:          stepkind.CompensationReceiptRequired,
 		CanSuspend:            false,
 		EmbeddedModeSupported: false,
 	}
+}
+
+// DescribeReversibility accepts only child-run calls: the durable child
+// identity is truthful parent-side evidence, while the child retains and
+// completes its own compensation ledger first.
+func (e *Executor) DescribeReversibility(_ context.Context, request stepkind.ReversibilityRequest) (stepkind.ReversibilityEvidence, error) {
+	if request.Call == nil || request.Call.Mode != graph.CallRun {
+		return stepkind.ReversibilityEvidence{}, fmt.Errorf("call compensation requires mode run")
+	}
+	return stepkind.ReversibilityEvidence{
+		Operation: "workflow.child_run",
+		ReceiptSchema: graph.Schema{"type": "object", "required": []any{OutputRunID}, "properties": map[string]any{
+			OutputRunID: map[string]any{"type": "string"},
+		}, "additionalProperties": false},
+	}, nil
 }
 
 // ValidateConfig rejects adapter config fields. Call semantics are represented
@@ -175,6 +191,9 @@ func (e *Executor) Prepare(ctx context.Context, invocation stepkind.Invocation) 
 	if contextErr := ctx.Err(); contextErr != nil {
 		return stepkind.PreparedInvocation{}, contextErr
 	}
+	// Compensation evidence is scoped to the dormant handler's authored with
+	// bindings. It must not become an ambient root for child defaults/imports.
+	expressionContext.Compensation = nil
 	bound := BindInputs(BindInputsRequest{
 		Invocation: invocation.Identity, Resolved: resolved,
 		LocalInputs: invocation.Inputs, Context: expressionContext, Options: expressionOptions,
@@ -310,7 +329,13 @@ func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvoca
 		if err != nil {
 			return stepkind.StepResult{}, callError(CodeResultInvalid, "child workflow handle is invalid", stepkind.RetryPermanent, err)
 		}
-		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: outputs}, nil
+		stepResult := stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: outputs}
+		if prepared.Invocation.Compensation != nil {
+			stepResult.Compensation = &stepkind.CompensationReceipt{
+				Operation: "workflow.child_run", ChildRunID: string(result.Run.ID), Values: values.ValueSet{OutputRunID: outputs[OutputRunID]},
+			}
+		}
+		return stepResult, nil
 	default:
 		return stepkind.StepResult{}, callError(CodeInvalidInvocation, "call mode is invalid", stepkind.RetryPermanent, ErrInvalidCall)
 	}

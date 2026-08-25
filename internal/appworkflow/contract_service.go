@@ -65,12 +65,13 @@ type ContractToolCall struct {
 // canonicalized to one for compact single-attempt suites. ExpectedInputs, when
 // present, overrides the mock-level expectation for fan-out items and retries.
 type ContractMockResult struct {
-	Iteration      string                   `json:"iteration,omitempty"`
-	Attempt        int                      `json:"attempt,omitempty"`
-	ExpectedInputs *values.ValueSet         `json:"expected_inputs,omitempty"`
-	Outputs        values.ValueSet          `json:"outputs"`
-	Failure        *stepkind.ExecutionError `json:"failure,omitempty"`
-	Calls          []ContractToolCall       `json:"calls,omitempty"`
+	Iteration      string                        `json:"iteration,omitempty"`
+	Attempt        int                           `json:"attempt,omitempty"`
+	ExpectedInputs *values.ValueSet              `json:"expected_inputs,omitempty"`
+	Outputs        values.ValueSet               `json:"outputs"`
+	Failure        *stepkind.ExecutionError      `json:"failure,omitempty"`
+	Compensation   *stepkind.CompensationReceipt `json:"compensation,omitempty"`
+	Calls          []ContractToolCall            `json:"calls,omitempty"`
 }
 
 // MarshalJSON preserves the meaningful distinction between a successful
@@ -78,12 +79,13 @@ type ContractMockResult struct {
 // values.ValueSet deliberately rejects marshaling a nil map on its own.
 func (r ContractMockResult) MarshalJSON() ([]byte, error) {
 	type wire struct {
-		Iteration      string                   `json:"iteration,omitempty"`
-		Attempt        int                      `json:"attempt,omitempty"`
-		ExpectedInputs *values.ValueSet         `json:"expected_inputs,omitempty"`
-		Outputs        *values.ValueSet         `json:"outputs"`
-		Failure        *stepkind.ExecutionError `json:"failure,omitempty"`
-		Calls          []ContractToolCall       `json:"calls,omitempty"`
+		Iteration      string                        `json:"iteration,omitempty"`
+		Attempt        int                           `json:"attempt,omitempty"`
+		ExpectedInputs *values.ValueSet              `json:"expected_inputs,omitempty"`
+		Outputs        *values.ValueSet              `json:"outputs"`
+		Failure        *stepkind.ExecutionError      `json:"failure,omitempty"`
+		Compensation   *stepkind.CompensationReceipt `json:"compensation,omitempty"`
+		Calls          []ContractToolCall            `json:"calls,omitempty"`
 	}
 	var outputs *values.ValueSet
 	if r.Outputs != nil {
@@ -92,18 +94,19 @@ func (r ContractMockResult) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(wire{
 		Iteration: r.Iteration, Attempt: r.Attempt, ExpectedInputs: r.ExpectedInputs,
-		Outputs: outputs, Failure: r.Failure, Calls: r.Calls,
+		Outputs: outputs, Failure: r.Failure, Compensation: r.Compensation, Calls: r.Calls,
 	})
 }
 
 func (r *ContractMockResult) UnmarshalJSON(data []byte) error {
 	type wire struct {
-		Iteration      string                   `json:"iteration,omitempty"`
-		Attempt        int                      `json:"attempt,omitempty"`
-		ExpectedInputs *values.ValueSet         `json:"expected_inputs,omitempty"`
-		Outputs        *values.ValueSet         `json:"outputs"`
-		Failure        *stepkind.ExecutionError `json:"failure,omitempty"`
-		Calls          []ContractToolCall       `json:"calls,omitempty"`
+		Iteration      string                        `json:"iteration,omitempty"`
+		Attempt        int                           `json:"attempt,omitempty"`
+		ExpectedInputs *values.ValueSet              `json:"expected_inputs,omitempty"`
+		Outputs        *values.ValueSet              `json:"outputs"`
+		Failure        *stepkind.ExecutionError      `json:"failure,omitempty"`
+		Compensation   *stepkind.CompensationReceipt `json:"compensation,omitempty"`
+		Calls          []ContractToolCall            `json:"calls,omitempty"`
 	}
 	var decoded wire
 	if err := decodeContractJSON(data, &decoded); err != nil {
@@ -111,7 +114,7 @@ func (r *ContractMockResult) UnmarshalJSON(data []byte) error {
 	}
 	*r = ContractMockResult{
 		Iteration: decoded.Iteration, Attempt: decoded.Attempt, ExpectedInputs: decoded.ExpectedInputs,
-		Failure: decoded.Failure, Calls: decoded.Calls,
+		Failure: decoded.Failure, Compensation: decoded.Compensation, Calls: decoded.Calls,
 	}
 	if decoded.Outputs != nil {
 		r.Outputs = *decoded.Outputs
@@ -891,6 +894,15 @@ func canonicalContractSuite(input WorkflowContractSuite) (WorkflowContractSuite,
 					return WorkflowContractSuite{}, nil, fmt.Errorf("%w: case %s node %s result failure cannot carry a process-local cause", ErrInvalidContractService, name, mock.NodeID)
 				} else if err := result.Failure.Validate(); err != nil {
 					return WorkflowContractSuite{}, nil, fmt.Errorf("%w: case %s node %s result failure: %w", ErrInvalidContractService, name, mock.NodeID, err)
+				}
+				if result.Compensation != nil {
+					probeOutputs := result.Outputs
+					if probeOutputs == nil {
+						probeOutputs = values.ValueSet{}
+					}
+					if err := (stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: probeOutputs, Compensation: result.Compensation}).Validate(); err != nil {
+						return WorkflowContractSuite{}, nil, fmt.Errorf("%w: case %s node %s result compensation: %w", ErrInvalidContractService, name, mock.NodeID, err)
+					}
 				}
 				for callIndex := range result.Calls {
 					if err := validateContractToolCall(result.Calls[callIndex], mockNodes, current.ExpectedEffects, mock.NodeID); err != nil {

@@ -11,6 +11,8 @@ import (
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/offline"
+	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -106,6 +108,99 @@ func TestMinimalExternalHostAdoption(t *testing.T) {
 	if got := executed.Outputs["result"].Inline; got != json.Number("7") {
 		t.Fatalf("result = %#v, want json.Number(7)", got)
 	}
+}
+
+type offlineReversibleKind struct{ *stepkindtest.Kind }
+
+func (*offlineReversibleKind) DescribeReversibility(context.Context, stepkind.ReversibilityRequest) (stepkind.ReversibilityEvidence, error) {
+	return stepkind.ReversibilityEvidence{Operation: "fixture.offline.effect", ReceiptSchema: graph.Schema{}}, nil
+}
+
+func TestExternalOfflineExecutionDrivesCompensationBeforeReturningOriginalFailure(t *testing.T) {
+	plan := customExternalPlan(t, "offline-effect")
+	plan.Graph.Nodes = []graph.Node{
+		{ID: "a-effect", Kind: "offline-effect", KindVersion: "v1", Compensation: &graph.CompensationSpec{Handler: "undo"}},
+		{ID: "z-fail", Kind: "offline-fail", KindVersion: "v1", Needs: []graph.Need{{Node: "a-effect", Kind: graph.EdgeControl}}},
+		{ID: "undo", Kind: "offline-undo", KindVersion: "v1"},
+	}
+	plan.Graph.Edges = []graph.Edge{{From: "a-effect", To: "z-fail", Kind: graph.EdgeControl}}
+	plan.Graph.Compensation = &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationOnFailure}, Mode: graph.CompensationBestEffort}
+	var err error
+	plan.Graph.Digest, err = compile.GraphDigest(plan.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Digest, err = compile.PlanDigest(*plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect := &offlineReversibleKind{Kind: stepkindtest.NewNoopKind("offline-effect", "v1")}
+	effect.SpecValue.Effects = graph.EffectSet{graph.EffectMaterialize}
+	effect.SpecValue.Idempotency = graph.IdempotencyIntrinsic
+	effect.SpecValue.RetrySafety = stepkind.RetrySafe
+	effect.SpecValue.Compensation = stepkind.CompensationReceiptRequired
+	effect.SpecValue.EmbeddedModeSupported = true
+	effect.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Compensation: &stepkind.CompensationReceipt{Operation: "fixture.offline.effect", Values: values.ValueSet{}}}, nil
+	}
+	failing := stepkindtest.NewNoopKind("offline-fail", "v1")
+	failing.SpecValue.Effects = graph.EffectSet{graph.EffectCompute}
+	failing.SpecValue.Idempotency = graph.IdempotencyIntrinsic
+	failing.SpecValue.RetrySafety = stepkind.RetrySafe
+	failing.SpecValue.EmbeddedModeSupported = true
+	failing.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+		return stepkind.StepResult{}, &stepkind.ExecutionError{Code: "fixture_failed", Message: "forward failure", Classification: stepkind.RetryPermanent}
+	}
+	undoCalls := 0
+	undo := stepkindtest.NewNoopKind("offline-undo", "v1")
+	undo.SpecValue.Effects = graph.EffectSet{graph.EffectMaterialize}
+	undo.SpecValue.Idempotency = graph.IdempotencyIntrinsic
+	undo.SpecValue.RetrySafety = stepkind.RetrySafe
+	undo.SpecValue.EmbeddedModeSupported = true
+	undo.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+		undoCalls++
+		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{}}, nil
+	}
+	registry := stepkind.NewRegistry()
+	for _, kind := range []stepkind.StepKind{effect, failing, undo} {
+		if err := registry.Register(kind); err != nil {
+			t.Fatal(err)
+		}
+	}
+	built, err := offline.Build(t.Context(), plan, offline.BuildOptions{Registry: registry, Mode: offline.ModeCLI})
+	if err != nil || len(built.Diagnostics) != 0 || built.Manifest == nil {
+		t.Fatalf("Build = %#v, %v", built.Diagnostics, err)
+	}
+	store := inmemory.NewStore()
+	_, executeErr := offline.ExecuteWithStore(t.Context(), *built.Manifest, offline.ExecuteOptions{Registry: registry, RunID: "offline-compensation-run", IdempotencyKey: "offline-compensation-start"}, store)
+	var runFailure *offline.RunFailureError
+	if !errors.As(executeErr, &runFailure) || runFailure.Run.Status != workflowruntime.RunFailed || undoCalls != 1 {
+		t.Fatalf("ExecuteWithStore failure=%#v undo_calls=%d", executeErr, undoCalls)
+	}
+	ledger, err := store.LoadCompensationLedger(t.Context(), runFailure.Run.ID)
+	if err != nil || ledger.Status != workflowruntime.CompensationTerminal || ledger.Outcome != workflowruntime.CompensationOutcomeSucceeded || ledger.OriginalStatus != workflowruntime.RunFailed {
+		t.Fatalf("ledger = %#v, %v", ledger, err)
+	}
+	if _, err := store.LoadNodeInvocation(t.Context(), workflowruntime.NodeInvocationID{RunID: runFailure.Run.ID, NodeID: "undo"}); !errors.Is(err, workflowruntime.ErrNotFound) {
+		t.Fatalf("forward phase materialized dormant handler: %v", err)
+	}
+	entries, err := store.ListCompensationEntries(t.Context(), runFailure.Run.ID)
+	if err != nil || len(entries) != 1 || entries[0].Handler.Iteration == "" || entries[0].Status != workflowruntime.CompensationSucceeded {
+		t.Fatalf("entries = %#v, %v", entries, err)
+	}
+}
+
+func customExternalPlan(t *testing.T, kind string) *compile.ExecutionPlan {
+	t.Helper()
+	loaded := compile.LoadBytes("offline-compensation.workflow.yaml", []byte("workflow: {name: Offline Compensation, version: 1.0.0}\nsteps:\n  - id: work\n    kind: "+kind+"\n    kind_version: v1\n    config: {}\n"))
+	if len(loaded.Diagnostics) != 0 || loaded.Source == nil {
+		t.Fatal(loaded.Diagnostics)
+	}
+	compiled := compile.Compile(loaded.Source)
+	if len(compiled.Diagnostics) != 0 || compiled.Plan == nil {
+		t.Fatal(compiled.Diagnostics)
+	}
+	return compiled.Plan
 }
 
 // TestCompleteConformanceEntryPointIsCallableFromExternalPackage demonstrates

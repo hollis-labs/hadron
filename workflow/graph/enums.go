@@ -158,6 +158,28 @@ func (m RunCompletionMode) Valid() bool {
 	return oneOf(m, CompletionFailFast, CompletionRunToCompletion)
 }
 
+// CompensationTrigger selects an explicit run outcome that starts rollback.
+type CompensationTrigger string
+
+const (
+	CompensationOnFailure CompensationTrigger = "failure"
+	CompensationOnCancel  CompensationTrigger = "cancel"
+	CompensationOnTimeout CompensationTrigger = "timeout"
+	CompensationManual    CompensationTrigger = "manual"
+)
+
+func (t CompensationTrigger) Valid() bool {
+	return oneOf(t, CompensationOnFailure, CompensationOnCancel, CompensationOnTimeout, CompensationManual)
+}
+
+// CompensationMode selects handler failure behavior. Best effort preserves
+// remaining independent work after one handler exhausts its normal retry.
+type CompensationMode string
+
+const CompensationBestEffort CompensationMode = "best_effort"
+
+func (m CompensationMode) Valid() bool { return m == "" || m == CompensationBestEffort }
+
 // DurabilityMode selects the workflow persistence contract.
 type DurabilityMode string
 

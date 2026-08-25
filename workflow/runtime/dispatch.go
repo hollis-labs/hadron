@@ -137,25 +137,33 @@ type DispatchResult struct {
 	Verification *VerificationRecord
 	Diagnostics  []diagnostic.Diagnostic
 	Warnings     []DispatchWarning
+	compensation *dispatchCompensation
+}
+
+type dispatchCompensation struct {
+	planDigest string
+	handler    string
+	evidence   stepkind.ReversibilityEvidence
 }
 
 // StepDispatcher executes claimed nodes exclusively through a step-kind
 // registry and the atomic StateStore attempt lifecycle.
 type StepDispatcher struct {
-	store       StateStore
-	registry    stepkind.Registry
-	now         func() time.Time
-	disposition FailureDisposition
-	retention   RetentionHook
-	redactor    *values.Redactor
-	waits       *WaitCoordinator
-	retry       *RetryCoordinator
-	verifiers   verification.Registry
-	memo        MemoStore
-	pins        PinStore
-	reuse       OutputReuseStore
-	reusePolicy ReuseAuthorizer
-	services    ServiceStore
+	store        StateStore
+	registry     stepkind.Registry
+	now          func() time.Time
+	disposition  FailureDisposition
+	retention    RetentionHook
+	redactor     *values.Redactor
+	waits        *WaitCoordinator
+	retry        *RetryCoordinator
+	verifiers    verification.Registry
+	memo         MemoStore
+	pins         PinStore
+	reuse        OutputReuseStore
+	reusePolicy  ReuseAuthorizer
+	services     ServiceStore
+	compensation CompensationStore
 }
 
 // DispatcherOptions supplies extraction-safe dispatcher collaborators.
@@ -234,6 +242,9 @@ func NewStepDispatcher(options DispatcherOptions) (*StepDispatcher, error) {
 	if serviceStore, ok := options.Store.(ServiceStore); ok {
 		dispatcher.services = serviceStore
 	}
+	if compensation, ok := options.Store.(CompensationStore); ok {
+		dispatcher.compensation = compensation
+	}
 	return dispatcher, nil
 }
 
@@ -256,6 +267,16 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 		return DispatchResult{}, dispatchError(DispatchStartAttempt, request, loadErr)
 	}
 	prestart := DispatchResult{Node: node}
+	if node.Phase == InvocationCompensation {
+		if d.compensation == nil {
+			return d.releasePrestartClaim(durableCtx, request, prestart, fmt.Errorf("%w: compensation store is required for handler invocation", ErrInvalidCompensation))
+		}
+		entry, entryErr := d.compensation.LoadCompensationEntryByHandler(durableCtx, node.ID)
+		if entryErr != nil || entry.Handler != node.ID || graph.NormalizeID(request.Node.ID) != graph.NormalizeID(entry.Handler.NodeID) {
+			return d.releasePrestartClaim(durableCtx, request, prestart, fmt.Errorf("%w: compensation handler identity: %w", ErrInvalidCompensation, entryErr))
+		}
+		request.IdempotencyKey = "compensation:" + entry.ID
+	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return d.releasePrestartClaim(durableCtx, request, prestart, contextErr)
 	}
@@ -265,14 +286,17 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 
 	kind, spec, err := stepkind.Resolve(d.registry, request.Node.Kind, request.Node.KindVersion)
 	if err != nil {
-		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchError(DispatchResolve, request, err))
+		return d.failCompensationPrestart(durableCtx, request, prestart, DispatchResolve, err)
+	}
+	if node.Phase == InvocationCompensation && request.Node.Call != nil && request.Node.Call.Mode != graph.CallInline {
+		return d.failCompensationPrestart(durableCtx, request, prestart, DispatchValidateConfig, errors.New("compensation call handler must complete inline before the ledger can succeed"))
 	}
 	config, err := cloneGraphConfig(request.Node.Config)
 	if err != nil {
-		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchError(DispatchValidateConfig, request, err))
+		return d.failCompensationPrestart(durableCtx, request, prestart, DispatchValidateConfig, err)
 	}
 	if schemaErr := validateRuntimeObjectSchema(spec.ConfigSchema, config); schemaErr != nil {
-		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchValidationError(DispatchValidateConfig, request, schemaErr))
+		return d.failCompensationPrestart(durableCtx, request, prestart, DispatchValidateConfig, schemaErr)
 	}
 	configForValidation, err := cloneGraphConfig(config)
 	if err != nil {
@@ -281,13 +305,41 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	diagnostics := kind.ValidateConfig(ctx, configForValidation)
 	if diagnosticsErr := validateAdapterDiagnostics(diagnostics); diagnosticsErr != nil {
 		prestart.Diagnostics = cloneDiagnostics(diagnostics)
-		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchValidationError(DispatchValidateConfig, request, diagnosticsErr))
+		return d.failCompensationPrestart(durableCtx, request, prestart, DispatchValidateConfig, diagnosticsErr)
 	}
 	verificationDiagnostics := verification.ValidateSpec(ctx, d.verifiers, request.Node.Verification)
 	diagnostics = append(diagnostics, verificationDiagnostics...)
 	prestart.Diagnostics = cloneDiagnostics(diagnostics)
 	if diagnosticsErr := verificationDiagnosticsError(verificationDiagnostics); diagnosticsErr != nil {
-		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchValidationError(DispatchValidateConfig, request, diagnosticsErr))
+		return d.failCompensationPrestart(durableCtx, request, prestart, DispatchValidateConfig, diagnosticsErr)
+	}
+	if request.Node.Compensation != nil {
+		if node.Phase != InvocationForward || d.compensation == nil {
+			return d.releasePrestartClaim(durableCtx, request, prestart, fmt.Errorf("%w: compensable forward execution requires durable compensation", ErrInvalidCompensation))
+		}
+		if spec.CanSuspend || spec.Observation.Mode != stepkind.ObservationNone || spec.Lifecycle.Service || request.Node.Service != nil {
+			return d.releasePrestartClaim(durableCtx, request, prestart, fmt.Errorf("%w: suspension, external observation, or service lifecycle has no atomic compensation receipt boundary", ErrInvalidCompensation))
+		}
+		provider, ok := kind.(stepkind.ReversibilityProvider)
+		if !ok || spec.Compensation != stepkind.CompensationReceiptRequired {
+			return d.releasePrestartClaim(durableCtx, request, prestart, fmt.Errorf("%w: kind does not provide reversibility evidence", ErrInvalidCompensation))
+		}
+		configForEvidence, cloneErr := cloneGraphConfig(config)
+		if cloneErr != nil {
+			return d.releasePrestartClaim(durableCtx, request, prestart, fmt.Errorf("%w: isolate reversibility config: %w", ErrInvalidCompensation, cloneErr))
+		}
+		evidence, evidenceErr := stepkind.ResolveReversibility(ctx, provider, stepkind.ReversibilityRequest{Config: configForEvidence, Call: request.Node.Call})
+		if evidenceErr != nil {
+			return d.releasePrestartClaim(durableCtx, request, prestart, fmt.Errorf("%w: describe reversibility: %w", ErrInvalidCompensation, evidenceErr))
+		}
+		if _, evidenceErr = CompensationEvidenceDigest(evidence); evidenceErr != nil {
+			return d.releasePrestartClaim(durableCtx, request, prestart, evidenceErr)
+		}
+		run, runErr := d.store.LoadRun(durableCtx, node.ID.RunID)
+		if runErr != nil {
+			return d.releasePrestartClaim(durableCtx, request, prestart, runErr)
+		}
+		prestart.compensation = &dispatchCompensation{planDigest: run.Plan.Digest, handler: request.Node.Compensation.Handler, evidence: evidence}
 	}
 
 	inputs := values.ValueSet{}
@@ -298,10 +350,10 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 		}
 	}
 	if inputsErr := inputs.Validate(); inputsErr != nil {
-		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchValidationError(DispatchValidateInput, request, inputsErr))
+		return d.failCompensationPrestart(durableCtx, request, prestart, DispatchValidateInput, inputsErr)
 	}
 	if schemaErr := values.ValidateValueSetSchema(spec.InputSchema, inputs); schemaErr != nil {
-		return d.releasePrestartClaim(durableCtx, request, prestart, dispatchValidationError(DispatchValidateInput, request, schemaErr))
+		return d.failCompensationPrestart(durableCtx, request, prestart, DispatchValidateInput, schemaErr)
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return d.releasePrestartClaim(durableCtx, request, prestart, contextErr)
@@ -311,7 +363,13 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 		Owner: request.Claim.Lease.Owner, Token: request.Claim.Lease.Token,
 		Generation: request.Claim.Lease.Generation,
 	}
-	reused, handled, reuseDiagnostics, reuseErr := d.tryReuseOutputs(ctx, durableCtx, request, node, spec, claim)
+	var reused DispatchResult
+	var handled bool
+	var reuseDiagnostics []diagnostic.Diagnostic
+	var reuseErr error
+	if request.Node.Compensation == nil && node.Phase != InvocationCompensation {
+		reused, handled, reuseDiagnostics, reuseErr = d.tryReuseOutputs(ctx, durableCtx, request, node, spec, claim)
+	}
 	diagnostics = append(diagnostics, reuseDiagnostics...)
 	if reuseErr != nil {
 		prestart.Diagnostics = cloneDiagnostics(diagnostics)
@@ -329,7 +387,7 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	if err != nil {
 		return DispatchResult{Node: node, Diagnostics: cloneDiagnostics(diagnostics)}, dispatchError(DispatchStartAttempt, request, err)
 	}
-	result := DispatchResult{Node: started.Node, Attempt: started.Attempt, Diagnostics: cloneDiagnostics(diagnostics)}
+	result := DispatchResult{Node: started.Node, Attempt: started.Attempt, Diagnostics: cloneDiagnostics(diagnostics), compensation: prestart.compensation}
 
 	invocation := stepkind.Invocation{
 		Identity: stepkind.InvocationIdentity{
@@ -337,6 +395,10 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 			Iteration: started.Attempt.ID.Invocation.Iteration, Attempt: started.Attempt.ID.Number,
 		},
 		Config: config, Inputs: cloneValueSet(inputs), IdempotencyKey: request.IdempotencyKey,
+	}
+	if result.compensation != nil {
+		evidence := result.compensation.evidence
+		invocation.Compensation = &evidence
 	}
 	if request.Node.Verification != nil {
 		invocation.Verification, err = cloneVerificationSpec(request.Node.Verification)
@@ -443,22 +505,51 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 
 	stepResult, err := kind.Execute(ctx, prepared)
 	if err != nil {
+		if result.compensation == nil && stepResult.Compensation != nil {
+			return d.finishIndeterminateCompensable(durableCtx, request, kind, result, claim, prepared, stepResult, "unrequested_receipt", errors.Join(err, errors.New("step returned an unrequested compensation receipt")))
+		}
 		if serviceLaunchPending {
 			return result, dispatchError(DispatchExecute, request, err)
+		}
+		if result.compensation != nil && stepResult.Outcome == stepkind.StepCompleted && stepResult.Compensation == nil {
+			return d.finishIndeterminateCompensable(durableCtx, request, kind, result, claim, prepared, stepResult, "missing_receipt", errors.Join(err, errors.New("compensable effect reported completion without a compensation receipt")))
 		}
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchExecute, failureExecute, err)
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
+		if result.compensation == nil && stepResult.Compensation != nil {
+			return d.finishIndeterminateCompensable(durableCtx, request, kind, result, claim, prepared, stepResult, "unrequested_receipt", errors.Join(contextErr, errors.New("step returned an unrequested compensation receipt")))
+		}
 		if serviceLaunchPending {
 			return result, dispatchError(DispatchExecute, request, contextErr)
+		}
+		if result.compensation != nil && stepResult.Outcome == stepkind.StepCompleted && stepResult.Compensation == nil {
+			return d.finishIndeterminateCompensable(durableCtx, request, kind, result, claim, prepared, stepResult, "missing_receipt", errors.Join(contextErr, errors.New("compensable effect reported completion without a compensation receipt")))
 		}
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchExecute, failureExecute, contextErr)
 	}
 	if resultErr := stepResult.Validate(); resultErr != nil {
+		if result.compensation == nil && stepResult.Compensation != nil {
+			return d.finishIndeterminateCompensable(durableCtx, request, kind, result, claim, prepared, stepResult, "unrequested_receipt", errors.Join(resultErr, errors.New("step returned an unrequested compensation receipt")))
+		}
 		if serviceLaunchPending {
 			return result, dispatchError(DispatchValidateOutput, request, resultErr)
 		}
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, resultErr)
+	}
+	if result.compensation == nil && stepResult.Compensation != nil {
+		return d.finishIndeterminateCompensable(durableCtx, request, kind, result, claim, prepared, stepResult, "unrequested_receipt", errors.New("step returned an unrequested compensation receipt"))
+	}
+	if result.compensation != nil && stepResult.Compensation == nil {
+		return d.finishIndeterminateCompensable(durableCtx, request, kind, result, claim, prepared, stepResult, "missing_receipt", errors.New("compensable effect completed without a compensation receipt"))
+	}
+	if result.compensation != nil {
+		if receiptErr := validateAppliedCompensationReceipt(result.compensation.evidence, *stepResult.Compensation); receiptErr != nil {
+			return d.finishIndeterminateCompensable(durableCtx, request, kind, result, claim, prepared, stepResult, "unverified_receipt", errors.Join(receiptErr, errors.New("compensable effect returned an unverified receipt")))
+		}
+		if persistableErr := values.ValidatePersistableSet(stepResult.Outputs); persistableErr != nil {
+			return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchValidateOutput, failureInvalidResult, fmt.Errorf("applied compensable outputs are not persistable: %w", persistableErr))
+		}
 	}
 	if invocation.Verification != nil && (stepResult.Outcome == stepkind.StepWaiting || stepResult.Outcome == stepkind.StepExternal) {
 		// Activity evidence is intentionally process-local. A suspension may
@@ -613,12 +704,23 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	if err != nil {
 		return d.finishFailure(durableCtx, request, spec, kind, result, claim, prepared, stepResult, DispatchPersistOutput, failurePersistOutput, err)
 	}
-	finished, err := d.store.FinishNodeAttempt(durableCtx, FinishNodeAttemptRequest{
+	finishRequest := FinishNodeAttemptRequest{
 		InvocationID: started.Attempt.ID.Invocation, AttemptNumber: started.Attempt.ID.Number,
 		ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation,
 		Claim: claim, AttemptStatus: NodeSucceeded, NextNodeStatus: NodeSucceeded,
 		Outputs: &outputRef, At: d.atOrAfter(started.Attempt.StartedAt),
-	})
+	}
+	var finished FinishNodeAttemptResult
+	if result.compensation != nil {
+		compensable, finishErr := d.compensation.FinishCompensableAttempt(durableCtx, FinishCompensableAttemptRequest{
+			Finish: finishRequest,
+			Eligibility: CompensationEligibility{PlanDigest: result.compensation.planDigest, HandlerNodeID: result.compensation.handler,
+				Evidence: result.compensation.evidence, Receipt: *stepResult.Compensation, OriginalOutputs: stepResult.Outputs, ChildRunID: RunID(stepResult.Compensation.ChildRunID)},
+		})
+		finished, err = compensable.Finish, finishErr
+	} else {
+		finished, err = d.store.FinishNodeAttempt(durableCtx, finishRequest)
+	}
 	if err != nil {
 		return result, dispatchError(DispatchFinishAttempt, request, err)
 	}
@@ -627,7 +729,7 @@ func (d *StepDispatcher) Dispatch(ctx context.Context, request DispatchRequest) 
 	if fanOutErr := d.reconcileFanOutTerminal(durableCtx, finished.Node.ID, finished.Node.UpdatedAt); fanOutErr != nil {
 		return result, dispatchError(DispatchFinishAttempt, request, &PostCommitError{Operation: "reconcile fan-out completion", Err: fanOutErr})
 	}
-	if request.Node.Memoization != nil {
+	if request.Node.Memoization != nil && finished.Node.Phase != InvocationCompensation {
 		if warning := d.publishMemoResult(durableCtx, request, spec, inputs, finished, outputRef); warning != nil {
 			result.Warnings = append(result.Warnings, *warning)
 		}
@@ -729,6 +831,45 @@ func (d *StepDispatcher) releasePrestartClaim(
 	return result, dispatchErr
 }
 
+// failCompensationPrestart converts an immutable handler contract failure into
+// an ordinary terminal attempt. Releasing the claim would leave the active
+// saga entry permanently Ready because the pinned graph cannot become valid on
+// retry. Forward invocations retain the existing release-before-attempt path.
+func (d *StepDispatcher) failCompensationPrestart(ctx context.Context, request DispatchRequest, result DispatchResult, stage DispatchStage, cause error) (DispatchResult, error) {
+	dispatchErr := dispatchValidationError(stage, request, cause)
+	if result.Node.Phase != InvocationCompensation {
+		return d.releasePrestartClaim(ctx, request, result, dispatchErr)
+	}
+	claim := ClaimProof{Owner: request.Claim.Lease.Owner, Token: request.Claim.Lease.Token, Generation: request.Claim.Lease.Generation}
+	started, _, startErr := d.startOrResumeAttempt(ctx, result.Node, claim, ExecutorMetadata{Kind: request.Node.Kind, Version: request.Node.KindVersion, Target: request.Target, Attributes: cloneDispatchStringMap(request.ExecutorAttributes)})
+	if startErr != nil {
+		return d.releasePrestartClaim(ctx, request, result, errors.Join(dispatchErr, startErr))
+	}
+	failure := Failure{Code: "compensation_handler_contract_invalid", Message: "compensation handler contract validation failed", Retryable: false, Details: map[string]string{"stage": string(stage), "retry_classification": string(stepkind.RetryPermanent)}}
+	failure = maskDispatchFailure(failure, d.redactor)
+	finished, finishErr := d.store.FinishNodeAttempt(ctx, FinishNodeAttemptRequest{InvocationID: started.Attempt.ID.Invocation, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: claim, AttemptStatus: NodeFailed, NextNodeStatus: NodeFailed, Failure: &failure, At: d.atOrAfter(started.Attempt.StartedAt)})
+	if finishErr != nil {
+		return DispatchResult{Node: started.Node, Attempt: started.Attempt, Diagnostics: result.Diagnostics}, dispatchError(DispatchFinishAttempt, request, errors.Join(cause, finishErr))
+	}
+	return DispatchResult{Node: finished.Node, Attempt: finished.Attempt, Diagnostics: result.Diagnostics}, dispatchErr
+}
+
+func (d *StepDispatcher) finishIndeterminateCompensable(ctx context.Context, request DispatchRequest, kind stepkind.StepKind, result DispatchResult, claim ClaimProof, prepared stepkind.PreparedInvocation, produced stepkind.StepResult, marker string, cause error) (DispatchResult, error) {
+	failure := Failure{Code: failureInvalidResult, Message: dispatchFailureMessage(failureInvalidResult), Retryable: false, Details: map[string]string{"retry_classification": string(stepkind.RetryPermanent), "effect_applied": marker}}
+	failure = maskDispatchFailure(failure, d.redactor)
+	finished, finishErr := d.store.FinishNodeAttempt(ctx, FinishNodeAttemptRequest{InvocationID: result.Attempt.ID.Invocation, AttemptNumber: result.Attempt.ID.Number, ExpectedNodeGeneration: result.Node.Generation, ExpectedAttemptGeneration: result.Attempt.Generation, Claim: claim, AttemptStatus: NodeFailed, NextNodeStatus: NodeFailed, Failure: &failure, At: d.atOrAfter(result.Attempt.StartedAt)})
+	if finishErr != nil {
+		return result, dispatchError(DispatchFinishAttempt, request, errors.Join(cause, finishErr))
+	}
+	result.Node, result.Attempt = finished.Node, finished.Attempt
+	returnCause := cause
+	if fanOutErr := d.reconcileFanOutTerminal(ctx, finished.Node.ID, finished.Node.UpdatedAt); fanOutErr != nil {
+		returnCause = errors.Join(returnCause, &PostCommitError{Operation: "reconcile fan-out completion", Err: fanOutErr})
+	}
+	d.finalize(ctx, request, kind, prepared, produced, returnCause, &result)
+	return result, dispatchError(DispatchValidateOutput, request, errors.Join(ErrStepValidation, returnCause))
+}
+
 func (d *StepDispatcher) finishFailure(
 	ctx context.Context,
 	request DispatchRequest,
@@ -742,6 +883,9 @@ func (d *StepDispatcher) finishFailure(
 	code string,
 	cause error,
 ) (DispatchResult, error) {
+	if result.compensation != nil && produced.Compensation != nil {
+		return d.finishAppliedCompensationFailure(ctx, request, spec, kind, result, claim, prepared, produced, stage, code, cause)
+	}
 	failure, attemptStatus := executionFailure(code, cause)
 	next := attemptStatus
 	var policyErr error
@@ -806,6 +950,136 @@ func (d *StepDispatcher) finishFailure(
 		returnCause = errors.Join(ErrStepValidation, returnCause)
 	}
 	return result, dispatchError(stage, request, returnCause)
+}
+
+// finishAppliedCompensationFailure is the point-of-no-return fence for an
+// adapter that reports a compensation receipt together with an execution
+// error. The receipt means the forward effect may already exist: validation
+// failures can never return the attempt to authored retry or leave it running.
+func (d *StepDispatcher) finishAppliedCompensationFailure(
+	ctx context.Context,
+	request DispatchRequest,
+	spec stepkind.StepKindSpec,
+	kind stepkind.StepKind,
+	result DispatchResult,
+	claim ClaimProof,
+	prepared stepkind.PreparedInvocation,
+	produced stepkind.StepResult,
+	stage DispatchStage,
+	code string,
+	cause error,
+) (DispatchResult, error) {
+	receiptErr := validateAppliedCompensationReceipt(result.compensation.evidence, *produced.Compensation)
+	resultErr := validateAppliedCompensationResult(spec.OutputSchema, produced)
+	if receiptErr != nil {
+		permanentCause := errors.Join(cause, fmt.Errorf("reported compensation receipt is invalid: %w", receiptErr))
+		failure, _ := executionFailure(failureInvalidResult, permanentCause)
+		failure.Retryable = false
+		failure.Details["retry_classification"] = string(stepkind.RetryPermanent)
+		failure.Details["effect_applied"] = "unverified_receipt"
+		persisted := maskDispatchFailure(failure, d.redactor)
+		finished, finishErr := d.store.FinishNodeAttempt(ctx, FinishNodeAttemptRequest{
+			InvocationID: result.Attempt.ID.Invocation, AttemptNumber: result.Attempt.ID.Number,
+			ExpectedNodeGeneration: result.Node.Generation, ExpectedAttemptGeneration: result.Attempt.Generation,
+			Claim: claim, AttemptStatus: NodeFailed, NextNodeStatus: NodeFailed,
+			Failure: &persisted, At: d.atOrAfter(result.Attempt.StartedAt),
+		})
+		if finishErr != nil {
+			return result, dispatchError(DispatchFinishAttempt, request, errors.Join(permanentCause, finishErr))
+		}
+		result.Node, result.Attempt = finished.Node, finished.Attempt
+		if fanOutErr := d.reconcileFanOutTerminal(ctx, finished.Node.ID, finished.Node.UpdatedAt); fanOutErr != nil {
+			permanentCause = errors.Join(permanentCause, &PostCommitError{Operation: "reconcile fan-out completion", Err: fanOutErr})
+		}
+		d.finalize(ctx, request, kind, prepared, produced, permanentCause, &result)
+		return result, dispatchError(DispatchValidateOutput, request, errors.Join(ErrStepValidation, permanentCause))
+	}
+
+	persistStage, persistCode, persistCause := stage, code, cause
+	if resultErr != nil {
+		persistStage, persistCode = DispatchValidateOutput, failureInvalidResult
+		persistCause = errors.Join(cause, fmt.Errorf("applied compensable result is invalid: %w", resultErr))
+	}
+	failure, attemptStatus := executionFailure(persistCode, persistCause)
+	if resultErr != nil {
+		failure.Code = failureInvalidResult
+		failure.Message = dispatchFailureMessage(failureInvalidResult)
+		attemptStatus = NodeFailed
+	}
+	failure.Retryable = false
+	if failure.Details == nil {
+		failure.Details = make(map[string]string)
+	}
+	failure.Details["retry_classification"] = string(stepkind.RetryPermanent)
+	failure.Details["effect_applied"] = "true"
+	persisted := maskDispatchFailure(failure, d.redactor)
+	timeoutKind := TimeoutKind(persisted.Details["timeout_kind"])
+	if !timeoutKind.Valid() {
+		timeoutKind = ""
+	}
+	attemptID := result.Attempt.ID
+	typed, typedErr := NewFailureValue(attemptID.Invocation, &attemptID, attemptStatus, timeoutKind, persisted)
+	if typedErr != nil {
+		return result, dispatchError(DispatchFinishAttempt, request, errors.Join(persistCause, typedErr))
+	}
+	originalOutputs := produced.Outputs
+	if values.ValidatePersistableSet(originalOutputs) != nil {
+		// The receipt remains the truthful effect-applied boundary even when the
+		// adapter's public output envelope itself cannot cross persistence.
+		originalOutputs = nil
+	}
+	finished, finishErr := d.compensation.FinishCompensableAttempt(ctx, FinishCompensableAttemptRequest{
+		Finish: FinishNodeAttemptRequest{
+			InvocationID: attemptID.Invocation, AttemptNumber: attemptID.Number,
+			ExpectedNodeGeneration: result.Node.Generation, ExpectedAttemptGeneration: result.Attempt.Generation,
+			Claim: claim, AttemptStatus: attemptStatus, NextNodeStatus: attemptStatus,
+			Failure: &persisted, At: d.atOrAfter(result.Attempt.StartedAt),
+		},
+		Eligibility: CompensationEligibility{PlanDigest: result.compensation.planDigest, HandlerNodeID: result.compensation.handler,
+			Evidence: result.compensation.evidence, Receipt: *produced.Compensation, OriginalOutputs: originalOutputs,
+			OriginalError: values.ValueSet{"error": typed}, ChildRunID: RunID(produced.Compensation.ChildRunID)},
+	})
+	if finishErr != nil {
+		return result, dispatchError(DispatchFinishAttempt, request, errors.Join(persistCause, finishErr))
+	}
+	result.Node, result.Attempt = finished.Finish.Node, finished.Finish.Attempt
+	if fanOutErr := d.reconcileFanOutTerminal(ctx, finished.Finish.Node.ID, finished.Finish.Node.UpdatedAt); fanOutErr != nil {
+		persistCause = errors.Join(persistCause, &PostCommitError{Operation: "reconcile fan-out completion", Err: fanOutErr})
+	}
+	d.finalize(ctx, request, kind, prepared, produced, persistCause, &result)
+	if persistStage == DispatchValidateOutput {
+		persistCause = errors.Join(ErrStepValidation, persistCause)
+	}
+	return result, dispatchError(persistStage, request, persistCause)
+}
+
+func validateAppliedCompensationReceipt(evidence stepkind.ReversibilityEvidence, receipt stepkind.CompensationReceipt) error {
+	probe := stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{}, Compensation: &receipt}
+	if err := probe.Validate(); err != nil {
+		return err
+	}
+	if receipt.Operation != evidence.Operation {
+		return errors.New("receipt operation differs from admitted reversibility evidence")
+	}
+	if err := values.ValidateValueSetSchema(evidence.ReceiptSchema, receipt.Values); err != nil {
+		return fmt.Errorf("receipt schema: %w", err)
+	}
+	return nil
+}
+
+func validateAppliedCompensationResult(schema graph.Schema, produced stepkind.StepResult) error {
+	probe := produced
+	probe.Compensation = nil
+	if err := probe.Validate(); err != nil {
+		return err
+	}
+	if err := values.ValidateValueSetSchema(schema, produced.Outputs); err != nil {
+		return err
+	}
+	if err := values.ValidatePersistableSet(produced.Outputs); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *StepDispatcher) reconcileFanOutTerminal(ctx context.Context, child NodeInvocationID, at time.Time) error {
@@ -1156,6 +1430,9 @@ func cloneValueSet(set values.ValueSet) values.ValueSet {
 
 func cloneStepResult(result stepkind.StepResult) stepkind.StepResult {
 	cloned := stepkind.StepResult{Outcome: result.Outcome, Outputs: cloneValueSet(result.Outputs)}
+	if result.Compensation != nil {
+		cloned.Compensation = &stepkind.CompensationReceipt{Operation: result.Compensation.Operation, Values: cloneValueSet(result.Compensation.Values), ChildRunID: result.Compensation.ChildRunID}
+	}
 	if result.Wait != nil {
 		waitResult := *result.Wait
 		encoded, err := json.Marshal(result.Wait.Record)
@@ -1200,6 +1477,14 @@ func cloneStepInvocation(invocation stepkind.Invocation) stepkind.Invocation {
 	}
 	if invocation.Call != nil {
 		cloned.Call, _ = cloneCallInvocation(&invocation.Call.Spec, invocation.Call.Lineage)
+	}
+	if invocation.Compensation != nil {
+		evidence := *invocation.Compensation
+		encoded, err := json.Marshal(invocation.Compensation.ReceiptSchema)
+		if err == nil {
+			_ = decodeDispatchJSONUseNumber(encoded, &evidence.ReceiptSchema)
+		}
+		cloned.Compensation = &evidence
 	}
 	if invocation.Continuation != nil {
 		continuation := *invocation.Continuation

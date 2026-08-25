@@ -81,10 +81,18 @@ type ServiceNodeSpec struct {
 	Extension  Extension `json:"extension,omitempty" yaml:"extension,omitempty"`
 }
 
-// CompensationSpec is intentionally opaque until the compensation ADR selects
-// registration, ordering, persistence, replay, and cancellation semantics.
+// CompensationPolicy selects the explicit run outcomes that freeze and drive
+// the run-owned saga ledger. Manual is opt-in and never inferred from effects.
+type CompensationPolicy struct {
+	Triggers []CompensationTrigger `json:"triggers" yaml:"triggers"`
+	Mode     CompensationMode      `json:"mode,omitempty" yaml:"mode,omitempty"`
+}
+
+// CompensationSpec registers an ordinary graph node as the dormant handler
+// for this forward node. The handler is materialized only from a frozen saga
+// entry; it is never eligible during forward scheduling.
 type CompensationSpec struct {
-	Extension Extension `json:"extension" yaml:"extension"`
+	Handler string `json:"handler" yaml:"handler"`
 }
 
 // PolicyRequirement names a host-resolved policy or grant requirement without

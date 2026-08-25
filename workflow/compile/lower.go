@@ -25,7 +25,7 @@ func CompileWithOptions(source *Source, options CompileOptions) CompileResult {
 	}
 
 	root := source.Document.Content[0]
-	rootFields := l.mapping(root, nil, "workflow", "on", "inputs", "outputs", "steps", "finally", "sequential_groups", "durability")
+	rootFields := l.mapping(root, nil, "workflow", "on", "inputs", "outputs", "steps", "finally", "sequential_groups", "durability", "compensation")
 	headerField, ok := rootFields["workflow"]
 	if !ok {
 		l.invalidShape(root, nil, "required graph-native workflow marker is missing")
@@ -64,6 +64,9 @@ func CompileWithOptions(source *Source, options CompileOptions) CompileResult {
 	if field, exists := rootFields["durability"]; exists {
 		compiledGraph.Durability = l.lowerDurability(field.value, field.path)
 	}
+	if field, exists := rootFields["compensation"]; exists {
+		compiledGraph.Compensation = l.lowerCompensationPolicy(field.value, field.path)
+	}
 	if field, exists := rootFields["steps"]; exists {
 		compiledGraph.Nodes, compiledGraph.Edges = l.lowerNodes(field.value, field.path, &sourceMap, false)
 	} else {
@@ -101,6 +104,22 @@ func CompileWithOptions(source *Source, options CompileOptions) CompileResult {
 		return result
 	}
 	return result
+}
+
+func (l *lowerer) lowerCompensationPolicy(node *yaml.Node, path []string) *graph.CompensationPolicy {
+	fields := l.mapping(node, path, "triggers", "mode")
+	policy := &graph.CompensationPolicy{Mode: graph.CompensationBestEffort}
+	if field, ok := fields["mode"]; ok {
+		policy.Mode = graph.CompensationMode(l.string(field.value, field.path))
+	}
+	if field, ok := fields["triggers"]; ok {
+		items := l.sequence(field.value, field.path)
+		policy.Triggers = make([]graph.CompensationTrigger, 0, len(items))
+		for _, item := range items {
+			policy.Triggers = append(policy.Triggers, graph.CompensationTrigger(l.string(item, field.path)))
+		}
+	}
+	return policy
 }
 
 type loweredHeader struct {

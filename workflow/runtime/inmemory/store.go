@@ -29,35 +29,39 @@ import (
 type Store struct {
 	mu sync.RWMutex
 
-	runs                map[workflowruntime.RunID]workflowruntime.RunSnapshot
-	runStarts           map[string]runStartRecord
-	nodes               map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot
-	attempts            map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
-	waits               map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
-	waitAttempts        map[workflowruntime.WaitID]workflowruntime.AttemptID
-	suspends            map[workflowruntime.WaitID]suspendRecord
-	waitResumes         map[string]waitResumeRecord
-	waitResumeResults   map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult
-	timeouts            map[string]timeoutRecord
-	externalOperations  map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot
-	services            map[workflowruntime.NodeInvocationID]workflowruntime.ServiceSnapshot
-	retryActivations    map[string]workflowruntime.RetryActivationSnapshot
-	retryActivationKeys map[string]retryActivationRecord
-	fanOuts             map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot
-	childRuns           map[workflowruntime.RunID][]workflowruntime.ChildRunLink
-	cancellationIntents map[string]workflowruntime.CancellationIntentSnapshot
-	cancellationKeys    map[string]cancellationRecord
-	controlDecisions    map[workflowruntime.ControlDecisionID]workflowruntime.ControlDecisionSnapshot
-	terminalIntents     map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot
-	terminalKeys        map[string]workflowruntime.RunID
-	controlCancelTrees  map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest
-	runPolicyDecisions  map[workflowruntime.RunID]workflowruntime.RunPolicyDecisionSnapshot
-	runPolicyRequests   map[string]workflowruntime.ApplyRunFailurePolicyRequest
-	crashRecoveries     map[string]crashRecoveryRecord
-	nodeInputBindings   map[string]nodeInputBindingRecord
-	nodeInputOwners     map[workflowruntime.NodeInvocationID]string
-	replays             map[workflowruntime.RunID]workflowruntime.ReplayProvenance
-	replayKeys          map[string]replayRecord
+	runs                 map[workflowruntime.RunID]workflowruntime.RunSnapshot
+	runStarts            map[string]runStartRecord
+	nodes                map[workflowruntime.NodeInvocationID]workflowruntime.NodeInvocationSnapshot
+	attempts             map[workflowruntime.AttemptID]workflowruntime.AttemptSnapshot
+	waits                map[workflowruntime.WaitID]workflowruntime.WaitSnapshot
+	waitAttempts         map[workflowruntime.WaitID]workflowruntime.AttemptID
+	suspends             map[workflowruntime.WaitID]suspendRecord
+	waitResumes          map[string]waitResumeRecord
+	waitResumeResults    map[workflowruntime.WaitID]workflowruntime.ResumeWaitResult
+	timeouts             map[string]timeoutRecord
+	externalOperations   map[workflowruntime.AttemptID]workflowruntime.ExternalOperationSnapshot
+	services             map[workflowruntime.NodeInvocationID]workflowruntime.ServiceSnapshot
+	retryActivations     map[string]workflowruntime.RetryActivationSnapshot
+	retryActivationKeys  map[string]retryActivationRecord
+	fanOuts              map[workflowruntime.NodeInvocationID]workflowruntime.FanOutSnapshot
+	childRuns            map[workflowruntime.RunID][]workflowruntime.ChildRunLink
+	cancellationIntents  map[string]workflowruntime.CancellationIntentSnapshot
+	cancellationKeys     map[string]cancellationRecord
+	controlDecisions     map[workflowruntime.ControlDecisionID]workflowruntime.ControlDecisionSnapshot
+	terminalIntents      map[workflowruntime.RunID]workflowruntime.TerminalIntentSnapshot
+	terminalKeys         map[string]workflowruntime.RunID
+	controlCancelTrees   map[string]workflowruntime.RequestRunCancellationWithFinalizersRequest
+	runPolicyDecisions   map[workflowruntime.RunID]workflowruntime.RunPolicyDecisionSnapshot
+	runPolicyRequests    map[string]workflowruntime.ApplyRunFailurePolicyRequest
+	crashRecoveries      map[string]crashRecoveryRecord
+	nodeInputBindings    map[string]nodeInputBindingRecord
+	nodeInputOwners      map[workflowruntime.NodeInvocationID]string
+	replays              map[workflowruntime.RunID]workflowruntime.ReplayProvenance
+	replayKeys           map[string]replayRecord
+	compensationLedgers  map[workflowruntime.RunID]workflowruntime.CompensationLedgerSnapshot
+	compensationEntries  map[workflowruntime.RunID]map[string]workflowruntime.CompensationEntrySnapshot
+	compensationHandlers map[workflowruntime.NodeInvocationID]string
+	compensationKeys     map[string]compensationIdempotencyRecord
 
 	valueSets    map[string]storedValues
 	nextValueSet uint64
@@ -175,6 +179,10 @@ func NewStore() *Store {
 		nodeInputOwners:      make(map[workflowruntime.NodeInvocationID]string),
 		replays:              make(map[workflowruntime.RunID]workflowruntime.ReplayProvenance),
 		replayKeys:           make(map[string]replayRecord),
+		compensationLedgers:  make(map[workflowruntime.RunID]workflowruntime.CompensationLedgerSnapshot),
+		compensationEntries:  make(map[workflowruntime.RunID]map[string]workflowruntime.CompensationEntrySnapshot),
+		compensationHandlers: make(map[workflowruntime.NodeInvocationID]string),
+		compensationKeys:     make(map[string]compensationIdempotencyRecord),
 		valueSets:            make(map[string]storedValues),
 		plans:                make(map[string]workflowruntime.PlanRef),
 		events:               make(map[workflowruntime.RunID][]workflowruntime.Event),
@@ -289,6 +297,9 @@ func (s *Store) CreateNodeInvocation(ctx context.Context, request workflowruntim
 		return workflowruntime.NodeInvocationSnapshot{}, err
 	}
 	next := cloneNode(request.Snapshot)
+	if next.Phase != workflowruntime.InvocationForward {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("compensation nodes require atomic saga materialization"))
+	}
 	if next.Generation != 0 || next.ClaimGeneration != 0 || next.Lease != nil {
 		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("new node must have zero generations and no lease"))
 	}
@@ -354,6 +365,9 @@ func (s *Store) SaveNodeInvocation(ctx context.Context, request workflowruntime.
 	}
 	if request.Snapshot.Status != current.Status || !equalBlockedReason(request.Snapshot.Blocked, current.Blocked) {
 		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("node lifecycle changes require TransitionNode"))
+	}
+	if request.Snapshot.Phase != current.Phase {
+		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("node invocation phase is immutable"))
 	}
 	if request.Snapshot.LatestAttempt != current.LatestAttempt {
 		return workflowruntime.NodeInvocationSnapshot{}, invalid(errors.New("latest attempt is lifecycle-managed"))
@@ -626,7 +640,7 @@ func (s *Store) ClaimNode(ctx context.Context, request workflowruntime.ClaimNode
 		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
 		return result, nil
 	}
-	if run, exists := s.runs[current.ID.RunID]; exists && !run.Status.Active() {
+	if !s.runAllowsExecutionLocked(current.ID) {
 		result := workflowruntime.ClaimResult{Acquired: false}
 		s.claims[request.IdempotencyKey] = claimRecord{request: request, result: result}
 		return result, nil

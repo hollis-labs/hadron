@@ -371,9 +371,6 @@ func rebindAgentNode(node *graph.Node, locator string, provenance *graph.Provena
 		rebindAgentVerification(node.Service.ReadyCheck, locator)
 		rebindAgentExtension(&node.Service.Extension, locator)
 	}
-	if node.Compensation != nil {
-		rebindAgentExtension(&node.Compensation.Extension, locator)
-	}
 	for name, extension := range node.Extensions {
 		rebindAgentExtension(&extension, locator)
 		node.Extensions[name] = extension

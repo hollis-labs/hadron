@@ -81,7 +81,11 @@ func (s *WorkflowStateStore) AdmitNode(ctx context.Context, request workflowrunt
 		if err != nil {
 			return err
 		}
-		if current.Status != workflowruntime.NodeReady || !run.Status.Active() || !allowed || current.Lease != nil && current.Lease.ExpiresAt.After(request.Claim.Now) {
+		allowedRun, admissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, current)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		if current.Status != workflowruntime.NodeReady || !allowedRun || !allowed || current.Lease != nil && current.Lease.ExpiresAt.After(request.Claim.Now) {
 			if waiterErr := deleteWorkflowSchedulerWaiter(ctx, query, current.ID); waiterErr != nil {
 				return waiterErr
 			}
@@ -215,7 +219,11 @@ func (s *WorkflowStateStore) InspectSchedulerResources(ctx context.Context, requ
 			if admissionErr != nil {
 				return admissionErr
 			}
-			if node.Status != workflowruntime.NodeReady || !run.Status.Active() || !allowed || node.Lease != nil && node.Lease.ExpiresAt.After(request.Now) {
+			allowedRun, runAdmissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, node)
+			if runAdmissionErr != nil {
+				return runAdmissionErr
+			}
+			if node.Status != workflowruntime.NodeReady || !allowedRun || !allowed || node.Lease != nil && node.Lease.ExpiresAt.After(request.Now) {
 				if err := deleteWorkflowSchedulerWaiter(ctx, query, waiter.Invocation); err != nil {
 					return err
 				}

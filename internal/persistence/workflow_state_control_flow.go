@@ -211,7 +211,7 @@ func (s *WorkflowStateStore) LoadTerminalIntent(ctx context.Context, runID workf
 
 func (s *WorkflowStateStore) BeginTerminalIntent(ctx context.Context, request workflowruntime.BeginTerminalIntentRequest) (workflowruntime.BeginTerminalIntentResult, error) {
 	request.At = request.At.UTC()
-	if len(request.Finalizers) == 0 {
+	if len(request.Finalizers) == 0 && !request.CompensationRequired {
 		return workflowruntime.BeginTerminalIntentResult{}, workflowInvalid(errors.New("public terminal intent requires at least one finalizer"))
 	}
 	var result workflowruntime.BeginTerminalIntentResult
@@ -240,8 +240,8 @@ func beginWorkflowTerminalIntent(ctx context.Context, query workflowSQL, request
 	}
 	candidate := workflowruntime.TerminalIntentSnapshot{
 		RunID: request.RunID, IntendedStatus: request.IntendedStatus,
-		SuccessOutputsRequired: request.SuccessOutputsRequired,
-		Reason:                 cloneWorkflowFailure(request.Reason), IdempotencyKey: request.IdempotencyKey,
+		SuccessOutputsRequired: request.SuccessOutputsRequired, CompensationRequired: request.CompensationRequired,
+		Reason: cloneWorkflowFailure(request.Reason), IdempotencyKey: request.IdempotencyKey,
 		Finalizers: cloneWorkflowFinalizerScopes(request.Finalizers), Status: workflowruntime.TerminalIntentPending,
 		Generation: 1, CreatedAt: request.At, UpdatedAt: request.At,
 	}
@@ -407,6 +407,18 @@ func (s *WorkflowStateStore) CompleteTerminalIntent(ctx context.Context, request
 		}
 		if intent.Status != workflowruntime.TerminalIntentPending || !run.Status.Active() || request.At.Before(run.UpdatedAt) || request.At.Before(intent.UpdatedAt) {
 			return workflowInvalid(errors.New("terminal intent is not pending or completion time regresses"))
+		}
+		if intent.CompensationRequired {
+			ledger, ledgerErr := loadWorkflowCompensationLedger(ctx, query, run.ID)
+			if errors.Is(ledgerErr, workflowruntime.ErrNotFound) || ledgerErr == nil && ledger.Status != workflowruntime.CompensationTerminal {
+				return workflowruntime.ErrCompensationPending
+			}
+			if ledgerErr != nil {
+				return ledgerErr
+			}
+			if request.At.Before(ledger.UpdatedAt) {
+				return workflowInvalid(errors.New("terminal completion time must not precede compensation completion"))
+			}
 		}
 		to := intent.IntendedStatus
 		cleanupFailure := ""
@@ -607,7 +619,7 @@ func (s *WorkflowStateStore) RequestRunCancellationWithFinalizers(ctx context.Co
 			if err := workflowruntime.ValidateRunStatusTransition(run.Status, workflowruntime.RunCanceled); err != nil {
 				return err
 			}
-			if len(plan.Finalizers) != 0 {
+			if len(plan.Finalizers) != 0 || plan.CompensationRequired {
 				if err := workflowruntime.ValidateRunStatusTransition(run.Status, workflowruntime.RunFailed); err != nil {
 					return err
 				}
@@ -628,13 +640,13 @@ func (s *WorkflowStateStore) RequestRunCancellationWithFinalizers(ctx context.Co
 			for _, finalizer := range plan.Finalizers {
 				excluded[finalizer.Invocation] = struct{}{}
 			}
-			terminalize := len(plan.Finalizers) == 0
+			terminalize := len(plan.Finalizers) == 0 && !plan.CompensationRequired
 			if !terminalize {
 				begin, err := beginWorkflowTerminalIntent(ctx, query, workflowruntime.BeginTerminalIntentRequest{
 					RunID: plan.RunID, ExpectedRunGeneration: plan.ExpectedRunGeneration,
 					IntendedStatus: workflowruntime.RunCanceled, Reason: &request.Cancellation.Reason,
 					ErrorValues: plan.ErrorValues, IdempotencyKey: plan.IdempotencyKey,
-					Finalizers: plan.Finalizers, At: request.Cancellation.At,
+					Finalizers: plan.Finalizers, CompensationRequired: plan.CompensationRequired, At: request.Cancellation.At,
 				})
 				if err != nil {
 					return err
@@ -688,7 +700,7 @@ func workflowCancellationTreePlans(request workflowruntime.RequestRunCancellatio
 	plans := make([]workflowruntime.CancellationDescendantPlan, 0, len(request.Descendants)+1)
 	plans = append(plans, workflowruntime.CancellationDescendantPlan{
 		RunID: request.Cancellation.RunID, ExpectedRunGeneration: request.Cancellation.ExpectedGeneration,
-		IdempotencyKey: request.Cancellation.IdempotencyKey, Finalizers: request.Finalizers, ErrorValues: request.ErrorValues,
+		IdempotencyKey: request.Cancellation.IdempotencyKey, Finalizers: request.Finalizers, CompensationRequired: request.CompensationRequired, ErrorValues: request.ErrorValues,
 	})
 	plans = append(plans, request.Descendants...)
 	return plans
@@ -745,7 +757,7 @@ func loadWorkflowCancellationTreeIntents(ctx context.Context, query workflowSQL,
 	intents := make([]workflowruntime.TerminalIntentSnapshot, 0)
 	var root workflowruntime.TerminalIntentSnapshot
 	for index, plan := range workflowCancellationTreePlans(request) {
-		if len(plan.Finalizers) == 0 {
+		if len(plan.Finalizers) == 0 && !plan.CompensationRequired {
 			continue
 		}
 		intent, err := loadWorkflowTerminalIntent(ctx, query, plan.RunID)
@@ -868,6 +880,7 @@ type workflowTerminalImmutable struct {
 	RunID                  workflowruntime.RunID
 	IntendedStatus         workflowruntime.RunStatus
 	SuccessOutputsRequired bool `json:"SuccessOutputsRequired,omitempty"`
+	CompensationRequired   bool `json:"CompensationRequired,omitempty"`
 	Reason                 *workflowruntime.Failure
 	Error                  *values.ValueSetRef
 	IdempotencyKey         string
@@ -878,8 +891,8 @@ type workflowTerminalImmutable struct {
 func encodeWorkflowTerminalImmutable(snapshot workflowruntime.TerminalIntentSnapshot) (string, error) {
 	return encodeWorkflowJSON(workflowTerminalImmutable{
 		RunID: snapshot.RunID, IntendedStatus: snapshot.IntendedStatus,
-		SuccessOutputsRequired: snapshot.SuccessOutputsRequired,
-		Reason:                 cloneWorkflowFailure(snapshot.Reason), Error: cloneWorkflowValueRef(snapshot.Error),
+		SuccessOutputsRequired: snapshot.SuccessOutputsRequired, CompensationRequired: snapshot.CompensationRequired,
+		Reason: cloneWorkflowFailure(snapshot.Reason), Error: cloneWorkflowValueRef(snapshot.Error),
 		IdempotencyKey: snapshot.IdempotencyKey, Finalizers: cloneWorkflowFinalizerScopes(snapshot.Finalizers),
 		CreatedAt: snapshot.CreatedAt.UTC(),
 	})
@@ -941,9 +954,26 @@ func workflowControlAdmissionAllowed(ctx context.Context, query workflowSQL, id 
 	if intent.Status != workflowruntime.TerminalIntentPending {
 		return true, nil
 	}
+	node, nodeErr := loadWorkflowNode(ctx, query, id)
+	if nodeErr != nil {
+		return false, nodeErr
+	}
+	if node.Phase == workflowruntime.InvocationCompensation {
+		return true, nil
+	}
 	for _, finalizer := range intent.Finalizers {
 		if finalizer.Invocation == id {
-			return true, nil
+			if !intent.CompensationRequired {
+				return true, nil
+			}
+			ledger, ledgerErr := loadWorkflowCompensationLedger(ctx, query, id.RunID)
+			if errors.Is(ledgerErr, workflowruntime.ErrNotFound) {
+				return false, nil
+			}
+			if ledgerErr != nil {
+				return false, ledgerErr
+			}
+			return ledger.Status == workflowruntime.CompensationTerminal, nil
 		}
 	}
 	return false, nil

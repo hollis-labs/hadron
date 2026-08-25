@@ -113,8 +113,12 @@ func (m *PinnedChildRunMaterializer) loadPinnedChild(ctx context.Context, reques
 
 func (m *PinnedChildRunMaterializer) materializeChildNodes(ctx context.Context, request calladapter.ChildRunRequest, run runtime.RunSnapshot) (bool, error) {
 	nodes := append([]graph.Node(nil), request.Definition.Graph.Nodes...)
+	handlers := runtime.CompensationHandlers(request.Definition.Graph)
 	sort.Slice(nodes, func(left, right int) bool { return nodes[left].ID < nodes[right].ID })
 	for _, node := range nodes {
+		if _, dormant := handlers[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
@@ -268,8 +272,12 @@ func (m *PinnedChildRunMaterializer) advanceChildRun(ctx context.Context, reques
 func (m *PinnedChildRunMaterializer) readyChildRoots(ctx context.Context, request calladapter.ChildRunRequest) error {
 	coordinator := runtime.NewProgressionCoordinator(m.state, nil)
 	nodes := append([]graph.Node(nil), request.Definition.Graph.Nodes...)
+	handlers := runtime.CompensationHandlers(request.Definition.Graph)
 	sort.Slice(nodes, func(left, right int) bool { return nodes[left].ID < nodes[right].ID })
 	for _, node := range nodes {
+		if _, dormant := handlers[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		if hasDependencies(request.Definition.Graph, node.ID) {
 			continue
 		}

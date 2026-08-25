@@ -1,7 +1,12 @@
 package stepkind
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
@@ -119,6 +124,89 @@ func (m MemoizationSupport) Valid() bool {
 	return m == MemoizationDefault || m == MemoizationApproved || m == MemoizationDisabled
 }
 
+// CompensationSupport is a kind's immutable opt-in to operation-specific
+// reversibility discovery. Receipt requires ReversibilityProvider and a
+// truthful StepResult receipt whenever an applied effect is compensable.
+type CompensationSupport string
+
+const (
+	CompensationUnsupported     CompensationSupport = ""
+	CompensationReceiptRequired CompensationSupport = "receipt"
+)
+
+func (s CompensationSupport) Valid() bool {
+	return s == CompensationUnsupported || s == CompensationReceiptRequired
+}
+
+// ReversibilityEvidence is the config-specific, non-secret claim returned by
+// the registered adapter before an operation is admitted as compensable.
+type ReversibilityEvidence struct {
+	Operation     string       `json:"operation"`
+	ReceiptSchema graph.Schema `json:"receipt_schema"`
+}
+
+// ReversibilityRequest supplies the exact immutable graph declaration that
+// can affect operation semantics. Config alone is insufficient for native
+// modifiers such as call mode.
+type ReversibilityRequest struct {
+	Config graph.Config    `json:"config"`
+	Call   *graph.CallSpec `json:"call,omitempty"`
+}
+
+// ResolveReversibility obtains one deterministic, validated operation claim
+// from a registered kind. Separate deep-cloned calls prevent a provider from
+// mutating the compiler/runtime request and make descriptor drift fail closed
+// before an effect is admitted.
+func ResolveReversibility(ctx context.Context, provider ReversibilityProvider, request ReversibilityRequest) (ReversibilityEvidence, error) {
+	if ctx == nil || provider == nil {
+		return ReversibilityEvidence{}, fmt.Errorf("reversibility requires context and provider")
+	}
+	resolve := func() (ReversibilityEvidence, error) {
+		encoded, err := json.Marshal(request)
+		if err != nil {
+			return ReversibilityEvidence{}, err
+		}
+		var cloned ReversibilityRequest
+		if err := json.Unmarshal(encoded, &cloned); err != nil {
+			return ReversibilityEvidence{}, err
+		}
+		evidence, err := provider.DescribeReversibility(ctx, cloned)
+		if err != nil {
+			return ReversibilityEvidence{}, err
+		}
+		encodedEvidence, err := json.Marshal(evidence)
+		if err != nil {
+			return ReversibilityEvidence{}, err
+		}
+		decoder := json.NewDecoder(bytes.NewReader(encodedEvidence))
+		decoder.UseNumber()
+		var owned ReversibilityEvidence
+		if err := decoder.Decode(&owned); err != nil {
+			return ReversibilityEvidence{}, err
+		}
+		evidence = owned
+		if strings.TrimSpace(evidence.Operation) == "" || evidence.Operation != strings.TrimSpace(evidence.Operation) {
+			return ReversibilityEvidence{}, fmt.Errorf("reversibility operation is required without surrounding whitespace")
+		}
+		if err := values.ValidateSchema(evidence.ReceiptSchema); err != nil {
+			return ReversibilityEvidence{}, fmt.Errorf("reversibility receipt schema: %w", err)
+		}
+		return evidence, nil
+	}
+	first, err := resolve()
+	if err != nil {
+		return ReversibilityEvidence{}, err
+	}
+	second, err := resolve()
+	if err != nil {
+		return ReversibilityEvidence{}, err
+	}
+	if !reflect.DeepEqual(first, second) {
+		return ReversibilityEvidence{}, fmt.Errorf("reversibility evidence is nondeterministic")
+	}
+	return first, nil
+}
+
 // StepKindSpec is immutable metadata used by compilers, policy evaluators, and
 // runtimes before adapter execution. Empty schemas are valid JSON Schemas;
 // nil schemas are missing metadata.
@@ -136,6 +224,7 @@ type StepKindSpec struct {
 	Observation           ObservationSpec       `json:"observation"`
 	Lifecycle             LifecycleSpec         `json:"lifecycle,omitempty"`
 	Memoization           MemoizationSupport    `json:"memoization,omitempty"`
+	Compensation          CompensationSupport   `json:"compensation,omitempty"`
 	CanSuspend            bool                  `json:"can_suspend,omitempty"`
 	EmbeddedModeSupported bool                  `json:"embedded_mode_supported,omitempty"`
 }
@@ -144,12 +233,13 @@ type StepKindSpec struct {
 // extends it with runtime context and typed values without replacing the
 // executor interfaces.
 type Invocation struct {
-	Identity     InvocationIdentity `json:"identity"`
-	Config       graph.Config       `json:"config"`
-	Inputs       values.ValueSet    `json:"inputs"`
-	Call         *CallInvocation    `json:"call,omitempty"`
-	Continuation *WaitContinuation  `json:"continuation,omitempty"`
-	Service      *ServiceBinding    `json:"service,omitempty"`
+	Identity     InvocationIdentity     `json:"identity"`
+	Config       graph.Config           `json:"config"`
+	Inputs       values.ValueSet        `json:"inputs"`
+	Call         *CallInvocation        `json:"call,omitempty"`
+	Continuation *WaitContinuation      `json:"continuation,omitempty"`
+	Service      *ServiceBinding        `json:"service,omitempty"`
+	Compensation *ReversibilityEvidence `json:"compensation,omitempty"`
 	// Verification is the immutable graph modifier carried through durable
 	// external-operation recovery. Activity is a runtime-issued, process-local
 	// recorder; it is deliberately excluded from durable invocation JSON.
@@ -234,6 +324,17 @@ type StepResult struct {
 	Outputs  values.ValueSet       `json:"outputs,omitempty"`
 	Wait     *WaitResult           `json:"wait,omitempty"`
 	External *ExternalOperationRef `json:"external,omitempty"`
+	// Compensation is durable proof that the forward effect was applied and
+	// carries the exact typed receipt required by its dormant handler.
+	Compensation *CompensationReceipt `json:"compensation,omitempty"`
+}
+
+// CompensationReceipt is adapter-produced effect evidence. Values are
+// persistable typed data; raw credentials and process-local handles are not.
+type CompensationReceipt struct {
+	Operation  string          `json:"operation"`
+	Values     values.ValueSet `json:"values"`
+	ChildRunID string          `json:"child_run_id,omitempty"`
 }
 
 // ExternalOperationRef identifies adapter-owned work for observation or
@@ -288,6 +389,12 @@ type StepKind interface {
 	Spec() StepKindSpec
 	ValidateConfig(ctx context.Context, config graph.Config) []diagnostic.Diagnostic
 	Execute(ctx context.Context, invocation PreparedInvocation) (StepResult, error)
+}
+
+// ReversibilityProvider describes reversibility for the exact immutable node
+// config. It must be deterministic and must not perform an external effect.
+type ReversibilityProvider interface {
+	DescribeReversibility(context.Context, ReversibilityRequest) (ReversibilityEvidence, error)
 }
 
 // Preparer optionally prepares an invocation before Execute.

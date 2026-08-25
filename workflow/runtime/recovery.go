@@ -201,6 +201,7 @@ type RecoveryResult struct {
 	Progressed       []ProgressNodeResult
 	FanOuts          []CompleteFanOutResult
 	FanOutCanceled   []NodeInvocationSnapshot
+	Compensations    []CompensationProgressResult
 }
 
 // RecoveryCoordinator reconstructs work exclusively from durable facts. Its
@@ -227,6 +228,21 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context, request RecoveryReque
 		return RecoveryResult{}, err
 	}
 	result := RecoveryResult{}
+	if compensation, ok := c.Store.(CompensationStore); ok {
+		ledgers, compensationErr := compensation.RecoverCompensation(ctx, request.Limit)
+		if compensationErr != nil {
+			return result, compensationErr
+		}
+		for _, ledger := range ledgers {
+			progressed, progressErr := (CompensationCoordinator{Store: c.Store, Compensation: compensation, Plans: c.Plans}).Progress(context.WithoutCancel(ctx), ledger.RunID, maxRecoveryTime(request.Now, ledger.UpdatedAt))
+			if progressErr != nil && !recoveryConcurrentProgress(progressErr) {
+				return result, progressErr
+			}
+			if progressErr == nil {
+				result.Compensations = append(result.Compensations, progressed)
+			}
+		}
+	}
 	// Service launch intent is persisted before a provider call. Reacquire it
 	// before generic crashed-attempt handling so a conservative repeat policy
 	// cannot terminalize the attempt and strand a provider resource between
@@ -420,6 +436,18 @@ func (c *RecoveryCoordinator) Recover(ctx context.Context, request RecoveryReque
 			return result, timeErr
 		}
 		completedRun, intent, completionErr := NewControlFlowCoordinator(c.Store, c.Control, c.Evaluator).ReconcileRunCompletion(ctx, plan.Plan.Graph, run.ID, "recover-complete:"+string(run.ID), completionAt)
+		if errors.Is(completionErr, ErrCompensationPending) {
+			if compensation, ok := c.Store.(CompensationStore); ok {
+				progressed, progressCompensationErr := (CompensationCoordinator{Store: c.Store, Compensation: compensation, Plans: c.Plans}).Progress(context.WithoutCancel(ctx), run.ID, completionAt)
+				if progressCompensationErr != nil && !errors.Is(progressCompensationErr, ErrCASMismatch) && !errors.Is(progressCompensationErr, ErrCompensationPending) {
+					return result, progressCompensationErr
+				}
+				if progressCompensationErr == nil {
+					result.Compensations = append(result.Compensations, progressed)
+				}
+			}
+			completionErr = ErrControlFlowPending
+		}
 		if errors.Is(completionErr, ErrRunOutputsPending) {
 			expression, expressionErr := BuildExpressionContext(ctx, c.Store, c.Control, plan.Plan.Graph, run.ID)
 			if expressionErr != nil {
@@ -502,7 +530,7 @@ func (c *RecoveryCoordinator) restoreRunPolicy(ctx context.Context, run RunSnaps
 }
 
 func recoveryConcurrentProgress(err error) bool {
-	return errors.Is(err, ErrCASMismatch) || errors.Is(err, ErrTransitionConflict) || errors.Is(err, ErrAttemptConflict) || errors.Is(err, ErrAlreadyExists)
+	return errors.Is(err, ErrCASMismatch) || errors.Is(err, ErrTransitionConflict) || errors.Is(err, ErrAttemptConflict) || errors.Is(err, ErrAlreadyExists) || errors.Is(err, ErrCompensationPending)
 }
 
 func (c *RecoveryCoordinator) recoveryCompletionAt(ctx context.Context, run RunSnapshot) (time.Time, error) {
@@ -743,6 +771,9 @@ func (c *RecoveryCoordinator) restoreControl(ctx context.Context, run RunSnapsho
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	var decisions []ControlDecisionSnapshot
 	for _, definition := range nodes {
+		if isCompensationHandler(workflow, definition.ID) {
+			continue
+		}
 		id := NodeInvocationID{RunID: run.ID, NodeID: definition.ID}
 		snapshot, loadErr := c.Store.LoadNodeInvocation(ctx, id)
 		if loadErr != nil {
@@ -831,7 +862,7 @@ func (c *RecoveryCoordinator) rebuildReady(ctx context.Context, run RunSnapshot,
 		}
 		changed := false
 		for _, definition := range nodes {
-			if definition.Finally != nil {
+			if definition.Finally != nil || isCompensationHandler(plan.Plan.Graph, definition.ID) {
 				continue
 			}
 			id := NodeInvocationID{RunID: run.ID, NodeID: definition.ID}

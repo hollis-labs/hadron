@@ -100,6 +100,14 @@ func ExecuteWithStore(ctx context.Context, manifest Manifest, options ExecuteOpt
 	if nilExecutionStore(store) {
 		return ExecutionResult{}, fmt.Errorf("%w: execution store is required", ErrInvalidBuild)
 	}
+	var compensation runtime.CompensationStore
+	if manifest.Plan.Graph.Compensation != nil {
+		var ok bool
+		compensation, ok = store.(runtime.CompensationStore)
+		if !ok || compensation == nil {
+			return ExecutionResult{}, fmt.Errorf("%w: compensated graph requires the optional durable compensation store extension", ErrInvalidBuild)
+		}
+	}
 	if err := validateExecutableManifest(manifest, options.Registry); err != nil {
 		return ExecutionResult{}, err
 	}
@@ -174,6 +182,9 @@ func ExecuteWithStore(ctx context.Context, manifest Manifest, options ExecuteOpt
 		return ExecutionResult{}, err
 	}
 	for _, node := range sortedNodes(manifest.Plan.Graph.Nodes) {
+		if _, dormant := runtime.CompensationHandlers(manifest.Plan.Graph)[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		_, err = store.CreateNodeInvocation(ctx, runtime.CreateNodeInvocationRequest{Snapshot: runtime.NodeInvocationSnapshot{
 			ID: runtime.NodeInvocationID{RunID: runID, NodeID: node.ID}, Status: runtime.NodePending, CreatedAt: tick(), UpdatedAt: clock,
 		}})
@@ -289,6 +300,13 @@ func ExecuteWithStore(ctx context.Context, manifest Manifest, options ExecuteOpt
 		}
 		completionAt := tick()
 		completed, _, completionErr := runtime.NewControlFlowCoordinator(store, store, nil).ReconcileRunCompletion(ctx, manifest.Plan.Graph, runID, "offline-complete:"+string(runID), completionAt)
+		if errors.Is(completionErr, runtime.ErrCompensationPending) {
+			_, progressErr := (runtime.CompensationCoordinator{Store: store, Compensation: compensation, Plans: fixedPlanSource{plan: recoveryPlan}}).Progress(ctx, runID, tick())
+			if progressErr != nil && !concurrentProgress(progressErr) {
+				return ExecutionResult{}, progressErr
+			}
+			continue
+		}
 		if errors.Is(completionErr, runtime.ErrControlFlowPending) {
 			continue
 		}
@@ -502,7 +520,7 @@ func sortedNodes(input []graph.Node) []graph.Node {
 }
 
 func concurrentProgress(err error) bool {
-	return errors.Is(err, runtime.ErrCASMismatch) || errors.Is(err, runtime.ErrTransitionConflict) || errors.Is(err, runtime.ErrAttemptConflict) || errors.Is(err, runtime.ErrAlreadyExists) || errors.Is(err, runtime.ErrControlFlowPending)
+	return errors.Is(err, runtime.ErrCASMismatch) || errors.Is(err, runtime.ErrTransitionConflict) || errors.Is(err, runtime.ErrAttemptConflict) || errors.Is(err, runtime.ErrAlreadyExists) || errors.Is(err, runtime.ErrControlFlowPending) || errors.Is(err, runtime.ErrCompensationPending)
 }
 
 func summarizeInvocations(input []runtime.NodeInvocationSnapshot) []string {

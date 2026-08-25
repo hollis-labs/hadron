@@ -58,11 +58,11 @@ func (s *Store) BindNodeInputs(ctx context.Context, request workflowruntime.Bind
 	if !exists {
 		return workflowruntime.BindNodeInputsResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
 	}
-	run, exists := s.runs[request.InvocationID.RunID]
+	_, exists = s.runs[request.InvocationID.RunID]
 	if !exists {
 		return workflowruntime.BindNodeInputsResult{}, fmt.Errorf("%w: run", workflowruntime.ErrNotFound)
 	}
-	if !run.Status.Active() || !s.controlAdmissionAllowedLocked(node.ID) {
+	if !s.runAllowsExecutionLocked(node.ID) || !s.controlAdmissionAllowedLocked(node.ID) {
 		return workflowruntime.BindNodeInputsResult{}, invalid(errors.New("run admission fences node input binding"))
 	}
 	if node.Generation != request.ExpectedGeneration {
@@ -142,11 +142,11 @@ func (s *Store) ReconcileCrashedAttempt(ctx context.Context, request workflowrun
 	if node.Generation != request.ExpectedNodeGeneration {
 		return workflowruntime.ReconcileCrashedAttemptResult{}, casMismatch("node invocation", request.ExpectedNodeGeneration, node.Generation)
 	}
-	run, ok := s.runs[node.ID.RunID]
+	_, ok = s.runs[node.ID.RunID]
 	if !ok {
 		return workflowruntime.ReconcileCrashedAttemptResult{}, fmt.Errorf("%w: run", workflowruntime.ErrNotFound)
 	}
-	if !run.Status.Active() || !s.controlAdmissionAllowedLocked(node.ID) {
+	if !s.runAllowsExecutionLocked(node.ID) || !s.controlAdmissionAllowedLocked(node.ID) {
 		return workflowruntime.ReconcileCrashedAttemptResult{}, invalid(errors.New("run admission fences crash reconciliation"))
 	}
 	if node.Status != workflowruntime.NodeRunning || node.LatestAttempt != request.Attempt.Number {
@@ -454,6 +454,10 @@ func equalAttemptSemantic(a, b workflowruntime.AttemptSnapshot) bool {
 }
 
 func cloneReplayProvenance(p workflowruntime.ReplayProvenance) workflowruntime.ReplayProvenance {
+	if p.CompensationAuthorization != nil {
+		copy := *p.CompensationAuthorization
+		p.CompensationAuthorization = &copy
+	}
 	p.Policy = append([]workflowruntime.ReplayNodePolicy(nil), p.Policy...)
 	for i := range p.Policy {
 		p.Policy[i].Attempt = cloneAttemptID(p.Policy[i].Attempt)

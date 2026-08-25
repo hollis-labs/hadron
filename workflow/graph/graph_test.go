@@ -189,7 +189,7 @@ func TestValidateEnumsTraversesNestedSourceRefs(t *testing.T) {
 				},
 				Extension: Extension{Source: invalidRef()},
 			},
-			Compensation: &CompensationSpec{Extension: Extension{Source: invalidRef()}},
+			Compensation: &CompensationSpec{Handler: "Invalid Handler"},
 			Extensions: map[string]Extension{
 				"node-extension": {Source: invalidRef()},
 			},
@@ -224,7 +224,6 @@ func TestValidateEnumsTraversesNestedSourceRefs(t *testing.T) {
 		"nodes[0].service.ready_check.checks[0].source.format",
 		"nodes[0].service.ready_check.extension.source.format",
 		"nodes[0].service.extension.source.format",
-		"nodes[0].compensation.extension.source.format",
 		`nodes[0].extensions["node-extension"].source.format`,
 	} {
 		if !strings.Contains(err.Error(), path) {
@@ -444,7 +443,7 @@ func TestCanonicalExtensionEnvelopesRemainApplicationNeutral(t *testing.T) {
 			Memoization:  &MemoizationSpec{Key: Expression{Text: "inputs.request_id"}, MaxAge: "1h"},
 			Durability:   &DurabilitySpec{Mode: DurabilitySteps},
 			Service:      &ServiceNodeSpec{HeartbeatTimeout: "30s", TeardownNodes: []string{"cleanup"}},
-			Compensation: &CompensationSpec{Extension: Extension{Version: "unresolved", Config: Config{"reserved": true}}},
+			Compensation: &CompensationSpec{Handler: "rollback"},
 			Policy:       []PolicyRequirement{{Name: "mutate"}},
 			Target:       ExecutionTargetRequirements{Capabilities: []string{"network"}},
 		}},
@@ -456,8 +455,8 @@ func TestCanonicalExtensionEnvelopesRemainApplicationNeutral(t *testing.T) {
 	if got := graph.Nodes[0].Config["adapter-owned"]; got == nil {
 		t.Fatal("opaque adapter config was not retained")
 	}
-	if graph.Nodes[0].Compensation.Extension.Config["reserved"] != true {
-		t.Fatal("compensation extension envelope was not retained")
+	if graph.Nodes[0].Compensation.Handler != "rollback" {
+		t.Fatal("compensation handler was not retained")
 	}
 }
 

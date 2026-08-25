@@ -176,17 +176,50 @@
       ],
       "type": "object"
     },
-    "CompensationSpec": {
+    "CompensationMode": {
+      "enum": [
+        "best_effort"
+      ],
+      "type": "string"
+    },
+    "CompensationPolicy": {
       "additionalProperties": false,
       "properties": {
-        "extension": {
-          "$ref": "#/$defs/Extension"
+        "mode": {
+          "$ref": "#/$defs/CompensationMode"
+        },
+        "triggers": {
+          "items": {
+            "$ref": "#/$defs/CompensationTrigger"
+          },
+          "type": "array"
         }
       },
       "required": [
-        "extension"
+        "triggers"
       ],
       "type": "object"
+    },
+    "CompensationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "handler": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "handler"
+      ],
+      "type": "object"
+    },
+    "CompensationTrigger": {
+      "enum": [
+        "failure",
+        "cancel",
+        "timeout",
+        "manual"
+      ],
+      "type": "string"
     },
     "ConcurrencyClaim": {
       "additionalProperties": false,
@@ -452,6 +485,9 @@
             "$ref": "#/$defs/ActivationDeclaration"
           },
           "type": "array"
+        },
+        "compensation": {
+          "$ref": "#/$defs/CompensationPolicy"
         },
         "completion": {
           "$ref": "#/$defs/RunCompletionPolicy"

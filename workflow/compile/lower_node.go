@@ -33,6 +33,7 @@ var supportedNodeFields = []string{
 	"if", "for_each", "matrix", "join", "concurrency", "config", "with", "outputs", "effects", "retry",
 	"idempotency", "timeout", "catch", "finally", "switch", "call", "metadata",
 	"continue_on_error", "verify",
+	"compensation",
 	"agent_launch", "checkpoint", "cmd", "emit", "http", "http_call", "human_gate",
 	"llm", "mcp", "mcp_call", "message_wait", "script", "sleep", "transform", "wait_for",
 	"service",
@@ -242,6 +243,15 @@ func (l *lowerer) lowerNode(node *yaml.Node, path []string) (graph.Node, []graph
 	}
 	if verify, exists := fields["verify"]; exists {
 		compiled.Verification = l.lowerVerification(verify.value, verify.path)
+	}
+	if compensation, exists := fields["compensation"]; exists {
+		fields := l.mapping(compensation.value, compensation.path, "handler")
+		handler, ok := fields["handler"]
+		if !ok {
+			l.invalidShape(compensation.value, compensation.path, "compensation.handler is required")
+		} else {
+			compiled.Compensation = &graph.CompensationSpec{Handler: l.normalizeID(handler.value, handler.path)}
+		}
 	}
 	if metadata, exists := fields["metadata"]; exists {
 		compiled.Metadata = l.metadata(metadata.value, metadata.path)

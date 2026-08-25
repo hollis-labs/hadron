@@ -157,6 +157,7 @@ const OutputRunID = "run-id"
 const OutputStatus = "status"
 const ResolutionApplied ResolutionOutcome = "applied"
 const ResolutionReplayed ResolutionOutcome = "replayed"
+func (e *Executor) DescribeReversibility(_ context.Context, request stepkind.ReversibilityRequest) (stepkind.ReversibilityEvidence, error)
 func (e *Executor) Execute(ctx context.Context, prepared stepkind.PreparedInvocation) (stepkind.StepResult, error)
 func (e *Executor) Prepare(ctx context.Context, invocation stepkind.Invocation) (stepkind.PreparedInvocation, error)
 func (e *Executor) Spec() stepkind.StepKindSpec
@@ -1453,6 +1454,7 @@ const CodeInvalidBindingSource diagnostic.Code = "HADR-SOURCE-013"
 const CodeInvalidCallMode diagnostic.Code = "HADR-SOURCE-023"
 const CodeInvalidCallShape diagnostic.Code = "HADR-SOURCE-029"
 const CodeInvalidCatch diagnostic.Code = "HADR-SOURCE-030"
+const CodeInvalidCompensation diagnostic.Code = "HADR-SOURCE-038"
 const CodeInvalidDurability diagnostic.Code = "HADR-SOURCE-037"
 const CodeInvalidFinally diagnostic.Code = "HADR-SOURCE-032"
 const CodeInvalidForEach diagnostic.Code = "HADR-SOURCE-025"
@@ -1646,6 +1648,7 @@ var ErrBundledDefinitionNotFound = errors.New("bundled workflow definition not f
 var ErrInvalidBundledDefinition = errors.New("invalid bundled workflow definition")
 
 package github.com/hollis-labs/hadron/workflow/conformance conformance
+const CompensationFixtures FixtureSet = "compensation"
 const ControlFlowFixtures FixtureSet = "control-flow"
 const ExecutorMetadataFixtures FixtureSet = "executor-metadata"
 const ExpectFail Expectation = "fail"
@@ -1658,6 +1661,7 @@ const ValueFixtures FixtureSet = "values"
 const VerificationFixtures FixtureSet = "verification"
 const WaitFixtures FixtureSet = "waits"
 func (f RunnerFunc) Run(ctx context.Context, fixture Fixture) error
+func CompensationSuite(t *testing.T, store FixtureStore, factory Factory)
 func CompilerSuite(t *testing.T, store FixtureStore, factory Factory)
 func ControlFlowSuite(t *testing.T, store FixtureStore, factory Factory)
 func EmbeddedFixtures() FixtureStore
@@ -1665,12 +1669,17 @@ func GraphValidationSuite(t *testing.T, store FixtureStore, factory Factory)
 func MemoizationSuite(t *testing.T, store FixtureStore, factory Factory)
 func RunAll(t *testing.T, store FixtureStore, host Host)
 func RunComplete(t *testing.T, store FixtureStore, host CompleteHost)
+func RunExhaustive(t *testing.T, store FixtureStore, host CompensationHost)
 func RunRequired(t *testing.T, store FixtureStore, host RequiredHost)
 func SchedulerSuite(t *testing.T, store FixtureStore, factory Factory)
 func StateStoreSuite(t *testing.T, store FixtureStore, factory Factory)
 func StepKindRegistrySuite(t *testing.T, store FixtureStore, factory Factory)
 func VerificationSuite(t *testing.T, store FixtureStore, factory Factory)
 func WaitSuite(t *testing.T, store FixtureStore, factory Factory)
+type CompensationHost interface {
+	CompleteHost
+	CompensationFactory() Factory
+}
 type CompleteHost interface {
 	RequiredHost
 	VerificationFactory() Factory
@@ -1844,6 +1853,11 @@ const BindingLiteral BindingKind = "literal"
 const CallInline CallMode = "inline"
 const CallRun CallMode = "run"
 const CatchAllErrors = "*"
+const CompensationBestEffort CompensationMode = "best_effort"
+const CompensationManual CompensationTrigger = "manual"
+const CompensationOnCancel CompensationTrigger = "cancel"
+const CompensationOnFailure CompensationTrigger = "failure"
+const CompensationOnTimeout CompensationTrigger = "timeout"
 const CompletionFailFast RunCompletionMode = "fail_fast"
 const CompletionRunToCompletion RunCompletionMode = "run_to_completion"
 const DurabilityNone DurabilityMode = "none"
@@ -1888,6 +1902,7 @@ func (g Graph) ValidateEnums() error
 func (k BindingKind) Valid() bool
 func (k EdgeKind) Valid() bool
 func (m CallMode) Valid() bool
+func (m CompensationMode) Valid() bool
 func (m DurabilityMode) Valid() bool
 func (m IdempotencyMode) Valid() bool
 func (m RunCompletionMode) Valid() bool
@@ -1897,6 +1912,7 @@ func (p RunIDReusePolicy) Valid() bool
 func (r CatchRule) ContinueOnError() bool
 func (r ReadyRule) Valid() bool
 func (s BackoffStrategy) Valid() bool
+func (t CompensationTrigger) Valid() bool
 func NormalizeID(value string) string
 func ValidateID(value string) error
 type ActivationDeclaration struct {
@@ -1946,9 +1962,15 @@ type CatchRule struct {
 	BindAs  string      `json:"bind_as,omitempty" yaml:"bind_as,omitempty"`
 	Source  *SourceRef  `json:"source,omitempty" yaml:"source,omitempty"`
 }
-type CompensationSpec struct {
-	Extension Extension `json:"extension" yaml:"extension"`
+type CompensationMode string
+type CompensationPolicy struct {
+	Triggers []CompensationTrigger `json:"triggers" yaml:"triggers"`
+	Mode     CompensationMode      `json:"mode,omitempty" yaml:"mode,omitempty"`
 }
+type CompensationSpec struct {
+	Handler string `json:"handler" yaml:"handler"`
+}
+type CompensationTrigger string
 type ConcurrencyClaim struct {
 	Resource string `json:"resource" yaml:"resource"`
 	Amount   int    `json:"amount,omitempty" yaml:"amount,omitempty"`
@@ -2022,25 +2044,26 @@ type ForEachSpec struct {
 	Tolerate *ToleratedFailurePolicy `json:"tolerate,omitempty" yaml:"tolerate,omitempty"`
 }
 type Graph struct {
-	ID          string                      `json:"id" yaml:"id"`
-	Namespace   string                      `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Version     string                      `json:"version" yaml:"version"`
-	Digest      string                      `json:"digest" yaml:"digest"`
-	Provenance  Provenance                  `json:"provenance,omitempty" yaml:"provenance,omitempty"`
-	Inputs      []InputSpec                 `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Outputs     []OutputSpec                `json:"outputs,omitempty" yaml:"outputs,omitempty"`
-	Nodes       []Node                      `json:"nodes" yaml:"nodes"`
-	Edges       []Edge                      `json:"edges,omitempty" yaml:"edges,omitempty"`
-	Activations []ActivationDeclaration     `json:"activations,omitempty" yaml:"activations,omitempty"`
-	Source      *SourceRef                  `json:"source,omitempty" yaml:"source,omitempty"`
-	SourceMap   SourceMap                   `json:"source_map,omitempty" yaml:"source_map,omitempty"`
-	Concurrency ConcurrencySpec             `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
-	Completion  *RunCompletionPolicy        `json:"completion,omitempty" yaml:"completion,omitempty"`
-	Durability  *DurabilitySpec             `json:"durability,omitempty" yaml:"durability,omitempty"`
-	Policy      []PolicyRequirement         `json:"policy_requirements,omitempty" yaml:"policy_requirements,omitempty"`
-	Target      ExecutionTargetRequirements `json:"execution_target,omitempty" yaml:"execution_target,omitempty"`
-	Extensions  map[string]Extension        `json:"extensions,omitempty" yaml:"extensions,omitempty"`
-	Metadata    Metadata                    `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	ID           string                      `json:"id" yaml:"id"`
+	Namespace    string                      `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Version      string                      `json:"version" yaml:"version"`
+	Digest       string                      `json:"digest" yaml:"digest"`
+	Provenance   Provenance                  `json:"provenance,omitempty" yaml:"provenance,omitempty"`
+	Inputs       []InputSpec                 `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Outputs      []OutputSpec                `json:"outputs,omitempty" yaml:"outputs,omitempty"`
+	Nodes        []Node                      `json:"nodes" yaml:"nodes"`
+	Edges        []Edge                      `json:"edges,omitempty" yaml:"edges,omitempty"`
+	Activations  []ActivationDeclaration     `json:"activations,omitempty" yaml:"activations,omitempty"`
+	Source       *SourceRef                  `json:"source,omitempty" yaml:"source,omitempty"`
+	SourceMap    SourceMap                   `json:"source_map,omitempty" yaml:"source_map,omitempty"`
+	Concurrency  ConcurrencySpec             `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
+	Completion   *RunCompletionPolicy        `json:"completion,omitempty" yaml:"completion,omitempty"`
+	Compensation *CompensationPolicy         `json:"compensation,omitempty" yaml:"compensation,omitempty"`
+	Durability   *DurabilitySpec             `json:"durability,omitempty" yaml:"durability,omitempty"`
+	Policy       []PolicyRequirement         `json:"policy_requirements,omitempty" yaml:"policy_requirements,omitempty"`
+	Target       ExecutionTargetRequirements `json:"execution_target,omitempty" yaml:"execution_target,omitempty"`
+	Extensions   map[string]Extension        `json:"extensions,omitempty" yaml:"extensions,omitempty"`
+	Metadata     Metadata                    `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 type IDValidationError struct {
 	ID         string
@@ -2383,6 +2406,32 @@ const CodeUnknownWorkflowInput diagnostic.Code = "HADR-VALUE-011"
 const CodeWorkflowInputSchema diagnostic.Code = "HADR-VALUE-015"
 const CodeWorkflowOutputBinding diagnostic.Code = "HADR-VALUE-017"
 const CodeWorkflowOutputSchema diagnostic.Code = "HADR-VALUE-018"
+const CompensationActive CompensationEntryStatus = "active"
+const CompensationCanceled CompensationEntryStatus = "canceled"
+const CompensationChildCanceled CompensationChildResolution = "canceled"
+const CompensationChildFailed CompensationChildResolution = "failed"
+const CompensationChildNoLedger CompensationChildResolution = "no_ledger"
+const CompensationChildPartial CompensationChildResolution = "partial"
+const CompensationChildSucceeded CompensationChildResolution = "succeeded"
+const CompensationCollecting CompensationLedgerStatus = "collecting"
+const CompensationEligible CompensationEntryStatus = "eligible"
+const CompensationFailed CompensationEntryStatus = "failed"
+const CompensationFrozen CompensationLedgerStatus = "frozen"
+const CompensationHandlerChildResolutionInput = "compensation.child.resolution"
+const CompensationHandlerChildRunIDInput = "compensation.child.run_id"
+const CompensationHandlerOriginalError CompensationHandlerInputNamespace = "original.error"
+const CompensationHandlerOriginalInputs CompensationHandlerInputNamespace = "original.inputs"
+const CompensationHandlerOriginalOutputs CompensationHandlerInputNamespace = "original.outputs"
+const CompensationHandlerReceipt CompensationHandlerInputNamespace = "receipt"
+const CompensationOutcomeCanceled CompensationOutcome = "canceled"
+const CompensationOutcomeFailed CompensationOutcome = "failed"
+const CompensationOutcomePartial CompensationOutcome = "partial"
+const CompensationOutcomeSucceeded CompensationOutcome = "succeeded"
+const CompensationPartial CompensationEntryStatus = "partial"
+const CompensationPending CompensationEntryStatus = "pending"
+const CompensationRunning CompensationLedgerStatus = "running"
+const CompensationSucceeded CompensationEntryStatus = "succeeded"
+const CompensationTerminal CompensationLedgerStatus = "terminal"
 const ContinueAsNewExtensionVersion = "reactor/v1"
 const ControlCatch ControlDecisionKind = "catch"
 const ControlContinued ControlDecisionOutcome = "continued"
@@ -2412,6 +2461,12 @@ const DispatchValidateOutput DispatchStage = "validate_output"
 const DispatchVerify DispatchStage = "verify"
 const EventCancellationResolved = "cancellation.resolved"
 const EventCatchDecided = "control.catch_decided"
+const EventCompensationCanceled = "compensation.canceled"
+const EventCompensationCompleted = "compensation.completed"
+const EventCompensationEligible = "compensation.entry_eligible"
+const EventCompensationFinished = "compensation.entry_finished"
+const EventCompensationFrozen = "compensation.frozen"
+const EventCompensationReady = "compensation.entry_ready"
 const EventCrashReconciled = "node.crash_reconciled"
 const EventExternalOperationCancelRequested = "external_operation.cancel_requested"
 const EventExternalOperationObserved = "external_operation.observed"
@@ -2448,6 +2503,8 @@ const FanOutFailed FanOutStatus = "failed"
 const FanOutSucceeded FanOutStatus = "succeeded"
 const IdempotencyApplied IdempotencyOutcome = "applied"
 const IdempotencyReplayed IdempotencyOutcome = "replayed"
+const InvocationCompensation InvocationPhase = "compensation"
+const InvocationForward InvocationPhase = ""
 const MaximumReactorRecoveryLimit = 1000
 const MaximumRunQueryLimit = 1000
 const NodeBlocked NodeStatus = "blocked"
@@ -2547,6 +2604,7 @@ const WaitCanceled = workflowwait.StatusCanceled
 const WaitOpen = workflowwait.StatusOpen
 const WaitResumed = workflowwait.StatusResumed
 const WaitTimedOut = workflowwait.StatusTimedOut
+func (a ReplayCompensationAuthorization) Validate() error
 func (a ReuseAuthority) Validate() error
 func (b FanOutItemBinding) Validate(parent NodeInvocationID) error
 func (b PinBinding) Validate() error
@@ -2576,6 +2634,7 @@ func (c *ServiceCoordinator) Recover(ctx context.Context, query ServiceQuery) ([
 func (c CancellationCoordinator) Recover(ctx context.Context, query CancellationIntentQuery) ([]CancellationIntentSnapshot, []error, error)
 func (c CancellationCoordinator) Request(ctx context.Context, request RequestRunCancellationRequest) (RequestRunCancellationResult, []error, error)
 func (c ChildTerminalWait) Validate() error
+func (c CompensationCoordinator) Progress(ctx context.Context, runID RunID, at time.Time) (CompensationProgressResult, error)
 func (c ExternalVerificationCompletion) Validate() error
 func (c FanOutCoordinator) Collect(ctx context.Context, parent NodeInvocationID, at time.Time) (CompleteFanOutResult, values.ValueSet, []FanOutItemResult, error)
 func (c FanOutCoordinator) Expand(ctx context.Context, command FanOutExpandCommand) (ExpandFanOutResult, error)
@@ -2647,11 +2706,13 @@ func (k TimeoutKind) Valid() bool
 func (l ChildRunLink) Validate() error
 func (l ClaimLease) Validate() error
 func (m ExecutorMetadata) Validate() error
+func (o CompensationOutcome) Valid() bool
 func (o ControlDecisionOutcome) Valid() bool
 func (o InvocationOrigin) Valid() bool
 func (o ValueOwner) Validate() error
 func (p CancellationDescendantPlan) Validate(reason Failure) error
 func (p ClaimProof) Validate() error
+func (p InvocationPhase) Valid() bool
 func (p PinnedValue) Validate() error
 func (p RecoveryPlan) Validate() error
 func (p ReplayProvenance) Validate() error
@@ -2666,6 +2727,7 @@ func (r BindNodeInputsRequest) Validate() error
 func (r BindPinRequest) Validate() error
 func (r BlockedReason) Validate() error
 func (r BoundRun) Validate() error
+func (r CompensationChildResolution) Valid() bool
 func (r CompleteFanOutRequest) Validate() error
 func (r ExpandFanOutRequest) Validate() error
 func (r FailReactorRequest) Validate() error
@@ -2693,6 +2755,11 @@ func (s *ReplayService) Rerun(ctx context.Context, request ReplayRequest) (Begin
 func (s AttemptSnapshot) Validate() error
 func (s CancellationIntentSnapshot) Validate() error
 func (s CancellationIntentStatus) Valid() bool
+func (s CompensationEntrySnapshot) Validate() error
+func (s CompensationEntryStatus) Terminal() bool
+func (s CompensationEntryStatus) Valid() bool
+func (s CompensationLedgerSnapshot) Validate() error
+func (s CompensationLedgerStatus) Valid() bool
 func (s ControlDecisionSnapshot) Validate() error
 func (s ExplainService) Explain(ctx context.Context, runID RunID, now time.Time) (RunExplanation, error)
 func (s ExternalOperationSnapshot) Validate() error
@@ -2735,6 +2802,13 @@ func BuildExpressionContext(ctx context.Context, store StateStore, control Contr
 func BuildSchedulerRequirements(runID RunID, limits SchedulerLimits, demand SchedulerDemand) ([]SchedulerResourceRequirement, error)
 func CalculateBackoff(policy graph.BackoffPolicy, failedAttempt int) (time.Duration, error)
 func CatchBinding(ctx context.Context, store StateStore, control ControlFlowStore, id ControlDecisionID) (string, values.ValueSet, error)
+func CompensationDependencies(workflow graph.Graph) map[string][]string
+func CompensationEntryID(attempt AttemptID) string
+func CompensationEvidenceDigest(evidence stepkind.ReversibilityEvidence) (string, error)
+func CompensationHandlerID(runID RunID, nodeID, entryID string) NodeInvocationID
+func CompensationHandlerInputName(namespace CompensationHandlerInputNamespace, sourceName string) (string, error)
+func CompensationHandlers(workflow graph.Graph) map[string]struct{}
+func CompensationRequestDigest(input any) (string, error)
 func DigestSchema(schema graph.Schema) (string, error)
 func EffectiveDurability(workflow graph.Graph) graph.DurabilityMode
 func EncodeAttemptIdentity(id AttemptID) (string, error)
@@ -2759,6 +2833,7 @@ func ParseContinueAsNew(workflow graph.Graph) (ContinueAsNewPolicy, bool, error)
 func PlanFinalizerScopes(workflow graph.Graph, runID RunID) ([]FinalizerScope, error)
 func RebindReplayControlDecision(decision ControlDecisionSnapshot, targetRun RunID, at time.Time) (ControlDecisionSnapshot, error)
 func RenderEvent(event Event, policy values.DisplayPolicy) (RenderedEvent, error)
+func ReplayCompensationRiskDigest(ctx context.Context, store StateStore, replay ReplayStore, runID RunID) (string, error)
 func RetryActivation(snapshot RetryActivationSnapshot) workflowwait.Activation
 func SaveValuesWithRetention(
 	ctx context.Context,
@@ -2772,6 +2847,10 @@ func SemanticallyEqualReuseRequest(left, right ReuseNodeOutputsRequest) bool
 func StartBoundRun(ctx context.Context, store StateStore, run BoundRun, startIdempotencyKey string) (RunSnapshot, IdempotencyOutcome, error)
 func TimeoutFailure(kind TimeoutKind, deadline time.Time) Failure
 func TimerActivation(snapshot WaitSnapshot) workflowwait.Activation
+func ValidateCompensationChildRunID(runID RunID) error
+func ValidateCompensationEntryDependencies(entries []CompensationEntrySnapshot) error
+func ValidateCompensationHandlerNodeID(nodeID string) error
+func ValidateCompensationTerminalEvidence(status NodeStatus, originalError values.ValueSet) error
 func ValidateControlErrorValues(input values.ValueSet) error
 func ValidateFanOutTolerance(policy *graph.ToleratedFailurePolicy) error
 func ValidateMemoizableValueSet(set values.ValueSet) error
@@ -2783,6 +2862,20 @@ func ValidateRunControlErrorValues(input values.ValueSet, runID RunID, status Ru
 func ValidateRunStatusTransition(from, to RunStatus) error
 func ValidateTerminalControlErrorValues(input values.ValueSet, runID RunID, status RunStatus, reason *Failure) (ControlErrorOrigin, error)
 func WaitTimeoutFailure(deadline time.Time) Failure
+type ActivateCompensationEntryRequest struct {
+	RunID                    RunID
+	EntryID                  string
+	ExpectedLedgerGeneration uint64
+	ExpectedEntryGeneration  uint64
+	Inputs                   values.ValueSet
+	ChildResolution          CompensationChildResolution
+	At                       time.Time
+}
+type ActivateCompensationEntryResult struct {
+	Ledger CompensationLedgerSnapshot
+	Entry  CompensationEntrySnapshot
+	Node   NodeInvocationSnapshot
+}
 type ActivateNodeRetryRequest struct {
 	ActivationID                 string
 	ExpectedActivationGeneration uint64
@@ -2846,6 +2939,7 @@ type ApplyRunFailurePolicyRequest struct {
 	IntendedStatus           RunStatus        `json:"intended_status"`
 	Reason                   Failure          `json:"reason"`
 	ErrorValues              values.ValueSet  `json:"error_values"`
+	CompensationRequired     bool             `json:"compensation_required,omitempty"`
 	IdempotencyKey           string           `json:"idempotency_key"`
 	Finalizers               []FinalizerScope `json:"finalizers"`
 	At                       time.Time        `json:"at"`
@@ -2927,6 +3021,16 @@ type AttemptSnapshot struct {
 	CreatedAt  time.Time           `json:"created_at"`
 	UpdatedAt  time.Time           `json:"updated_at"`
 }
+type BeginManualCompensationRequest struct {
+	RunID                 RunID
+	PlanDigest            string
+	ExpectedRunGeneration uint64
+	OriginalStatus        RunStatus
+	Dependencies          map[string][]string
+	IdempotencyKey        string
+	Authorization         string
+	At                    time.Time
+}
 type BeginReactorDeliveryRequest struct {
 	Identity            ReactorIdentity        `json:"identity"`
 	InitialRunID        RunID                  `json:"initial_run_id"`
@@ -2963,6 +3067,7 @@ type BeginTerminalIntentRequest struct {
 	IntendedStatus        RunStatus
 
 	SuccessOutputsRequired bool
+	CompensationRequired   bool
 	Reason                 *Failure
 
 	ErrorValues    values.ValueSet
@@ -3038,6 +3143,13 @@ type CacheEntry struct {
 	CreatedAt   time.Time          `json:"created_at"`
 	ExpiresAt   time.Time          `json:"expires_at,omitempty"`
 }
+type CancelCompensationRequest struct {
+	RunID                    RunID
+	ExpectedLedgerGeneration uint64
+	IdempotencyKey           string
+	Reason                   string
+	At                       time.Time
+}
 type CancellationCoordinator struct {
 	Store    StateStore
 	Registry stepkind.Registry
@@ -3055,6 +3167,7 @@ type CancellationDescendantPlan struct {
 	ExpectedRunGeneration uint64
 	IdempotencyKey        string
 	Finalizers            []FinalizerScope
+	CompensationRequired  bool
 	ErrorValues           values.ValueSet
 }
 type CancellationIntentKind string
@@ -3133,6 +3246,101 @@ type ClaimResult struct {
 	Replayed bool
 	Lease    *ClaimLease
 }
+type CompensationChildResolution string
+type CompensationCoordinator struct {
+	Store        StateStore
+	Compensation CompensationStore
+	Plans        RecoveryPlanSource
+}
+type CompensationCycle struct {
+	Number       int                 `json:"number"`
+	Attestation  string              `json:"attestation,omitempty"`
+	CancelReason string              `json:"cancel_reason,omitempty"`
+	Outcome      CompensationOutcome `json:"outcome,omitempty"`
+	StartedAt    time.Time           `json:"started_at"`
+	CompletedAt  time.Time           `json:"completed_at,omitempty"`
+}
+type CompensationEligibility struct {
+	PlanDigest      string
+	HandlerNodeID   string
+	Evidence        stepkind.ReversibilityEvidence
+	Receipt         stepkind.CompensationReceipt
+	OriginalOutputs values.ValueSet
+	OriginalError   values.ValueSet
+	ChildRunID      RunID
+}
+type CompensationEntryHistory struct {
+	Cycle           int                         `json:"cycle"`
+	Handler         NodeInvocationID            `json:"handler"`
+	Status          CompensationEntryStatus     `json:"status"`
+	ChildResolution CompensationChildResolution `json:"child_resolution,omitempty"`
+	Outputs         *values.ValueSetRef         `json:"outputs,omitempty"`
+	Failure         *Failure                    `json:"failure,omitempty"`
+	CompletedAt     time.Time                   `json:"completed_at"`
+}
+type CompensationEntrySnapshot struct {
+	ID              string                      `json:"id"`
+	RunID           RunID                       `json:"run_id"`
+	PlanDigest      string                      `json:"plan_digest"`
+	Source          NodeInvocationID            `json:"source"`
+	SourceAttempt   AttemptID                   `json:"source_attempt"`
+	Handler         NodeInvocationID            `json:"handler"`
+	Status          CompensationEntryStatus     `json:"status"`
+	Operation       string                      `json:"operation"`
+	EvidenceDigest  string                      `json:"evidence_digest"`
+	OriginalInputs  *values.ValueSetRef         `json:"original_inputs,omitempty"`
+	OriginalOutputs *values.ValueSetRef         `json:"original_outputs,omitempty"`
+	OriginalError   *values.ValueSetRef         `json:"original_error,omitempty"`
+	Receipt         values.ValueSetRef          `json:"receipt"`
+	Prerequisites   []string                    `json:"prerequisites,omitempty"`
+	HandlerOutputs  *values.ValueSetRef         `json:"handler_outputs,omitempty"`
+	HandlerFailure  *Failure                    `json:"handler_failure,omitempty"`
+	ChildRunID      RunID                       `json:"child_run_id,omitempty"`
+	ChildResolution CompensationChildResolution `json:"child_resolution,omitempty"`
+	History         []CompensationEntryHistory  `json:"history,omitempty"`
+	Generation      uint64                      `json:"generation"`
+	CreatedAt       time.Time                   `json:"created_at"`
+	UpdatedAt       time.Time                   `json:"updated_at"`
+	CompletedAt     time.Time                   `json:"completed_at,omitempty"`
+}
+type CompensationEntryStatus string
+type CompensationHandlerInputNamespace string
+type CompensationLedgerSnapshot struct {
+	RunID           RunID                     `json:"run_id"`
+	PlanDigest      string                    `json:"plan_digest"`
+	Status          CompensationLedgerStatus  `json:"status"`
+	Outcome         CompensationOutcome       `json:"outcome,omitempty"`
+	Trigger         graph.CompensationTrigger `json:"trigger,omitempty"`
+	OriginalStatus  RunStatus                 `json:"original_status,omitempty"`
+	OriginalFailure *values.ValueSetRef       `json:"original_failure,omitempty"`
+	CancelReason    string                    `json:"cancel_reason,omitempty"`
+	Cycles          []CompensationCycle       `json:"cycles,omitempty"`
+	Generation      uint64                    `json:"generation"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+	CompletedAt     time.Time                 `json:"completed_at,omitempty"`
+}
+type CompensationLedgerStatus string
+type CompensationOutcome string
+type CompensationProgressResult struct {
+	Ledger    CompensationLedgerSnapshot        `json:"ledger"`
+	Activated []ActivateCompensationEntryResult `json:"activated,omitempty"`
+	Sealed    []SealCompensationEntryResult     `json:"sealed,omitempty"`
+}
+type CompensationStore interface {
+	FinishCompensableAttempt(context.Context, FinishCompensableAttemptRequest) (FinishCompensableAttemptResult, error)
+	FreezeCompensation(context.Context, FreezeCompensationRequest) (FreezeCompensationResult, error)
+	BeginManualCompensation(context.Context, BeginManualCompensationRequest) (FreezeCompensationResult, error)
+	LoadCompensationLedger(context.Context, RunID) (CompensationLedgerSnapshot, error)
+	ListCompensationEntries(context.Context, RunID) ([]CompensationEntrySnapshot, error)
+	LoadCompensationEntryByHandler(context.Context, NodeInvocationID) (CompensationEntrySnapshot, error)
+	ActivateCompensationEntry(context.Context, ActivateCompensationEntryRequest) (ActivateCompensationEntryResult, error)
+	FailCompensationEntry(context.Context, FailCompensationEntryRequest) (SealCompensationEntryResult, error)
+	SealCompensationEntry(context.Context, SealCompensationEntryRequest) (SealCompensationEntryResult, error)
+	CancelCompensation(context.Context, CancelCompensationRequest) (CompensationLedgerSnapshot, error)
+	RetryCompensation(context.Context, RetryCompensationRequest) (CompensationLedgerSnapshot, error)
+	RecoverCompensation(context.Context, int) ([]CompensationLedgerSnapshot, error)
+}
 type CompleteFanOutRequest struct {
 	Parent                   NodeInvocationID
 	ExpectedParentGeneration uint64
@@ -3202,9 +3410,10 @@ type ControlErrorOrigin struct {
 	Attempt    *AttemptID
 }
 type ControlFlowCoordinator struct {
-	Store     StateStore
-	Control   ControlFlowStore
-	Evaluator PredicateEvaluator
+	Store        StateStore
+	Control      ControlFlowStore
+	Evaluator    PredicateEvaluator
+	Compensation CompensationStore
 }
 type ControlFlowStore interface {
 	LoadControlDecision(context.Context, ControlDecisionID) (ControlDecisionSnapshot, error)
@@ -3433,6 +3642,15 @@ type ExternalVerificationCompletion struct {
 	Values     values.ValueSetRef
 	Attributes map[string]string
 }
+type FailCompensationEntryRequest struct {
+	RunID                    RunID
+	EntryID                  string
+	ExpectedLedgerGeneration uint64
+	ExpectedEntryGeneration  uint64
+	Failure                  Failure
+	ChildResolution          CompensationChildResolution
+	At                       time.Time
+}
 type FailReactorRequest struct {
 	ReactorID          string    `json:"reactor_id"`
 	ExpectedGeneration uint64    `json:"expected_generation"`
@@ -3539,6 +3757,15 @@ type FinalizerScope struct {
 	Scope      []NodeInvocationID `json:"scope"`
 	Order      int                `json:"order"`
 }
+type FinishCompensableAttemptRequest struct {
+	Finish      FinishNodeAttemptRequest
+	Eligibility CompensationEligibility
+}
+type FinishCompensableAttemptResult struct {
+	Finish FinishNodeAttemptResult
+	Ledger CompensationLedgerSnapshot
+	Entry  CompensationEntrySnapshot
+}
 type FinishNodeAttemptRequest struct {
 	InvocationID              NodeInvocationID
 	AttemptNumber             int
@@ -3555,6 +3782,23 @@ type FinishNodeAttemptResult struct {
 	Node    NodeInvocationSnapshot
 	Attempt AttemptSnapshot
 	Event   Event
+}
+type FreezeCompensationRequest struct {
+	RunID                    RunID
+	PlanDigest               string
+	ExpectedRunGeneration    uint64
+	ExpectedIntentGeneration uint64
+	Trigger                  graph.CompensationTrigger
+	OriginalStatus           RunStatus
+	OriginalFailure          *values.ValueSetRef
+	Dependencies             map[string][]string
+	IdempotencyKey           string
+	At                       time.Time
+}
+type FreezeCompensationResult struct {
+	Outcome IdempotencyOutcome
+	Ledger  CompensationLedgerSnapshot
+	Entries []CompensationEntrySnapshot
 }
 type HandleRunFailureRequest struct {
 	Workflow       graph.Graph
@@ -3573,6 +3817,7 @@ type InvocationExplanation struct {
 	Attempts []AttemptSnapshot      `json:"attempts"`
 }
 type InvocationOrigin string
+type InvocationPhase string
 type MemoEntry struct {
 	Key                string              `json:"key"`
 	PlanDigest         string              `json:"plan_digest"`
@@ -3613,6 +3858,7 @@ type NodeInvocationID struct {
 }
 type NodeInvocationSnapshot struct {
 	ID      NodeInvocationID    `json:"id"`
+	Phase   InvocationPhase     `json:"phase,omitempty"`
 	Status  NodeStatus          `json:"status"`
 	Blocked *BlockedReason      `json:"blocked,omitempty"`
 	Inputs  *values.ValueSetRef `json:"inputs,omitempty"`
@@ -3934,6 +4180,7 @@ type RecoveryResult struct {
 	Progressed       []ProgressNodeResult
 	FanOuts          []CompleteFanOutResult
 	FanOutCanceled   []NodeInvocationSnapshot
+	Compensations    []CompensationProgressResult
 }
 type RecoverySnapshot struct {
 	ActiveRuns    []RunSnapshot
@@ -4005,6 +4252,12 @@ type RepeatPolicyDecision struct {
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 type RepeatPolicyFunc func(context.Context, RepeatCandidate) (RepeatPolicyDecision, error)
+type ReplayCompensationAuthorization struct {
+	LedgerGeneration uint64              `json:"ledger_generation"`
+	LedgerOutcome    CompensationOutcome `json:"ledger_outcome,omitempty"`
+	RiskDigest       string              `json:"risk_digest,omitempty"`
+	Digest           string              `json:"digest"`
+}
 type ReplayFanOutBinding struct {
 	Source  FanOutSnapshot     `json:"source"`
 	Target  FanOutSnapshot     `json:"target"`
@@ -4023,20 +4276,22 @@ type ReplayNodePolicy struct {
 	Decision   RepeatPolicyDecision `json:"decision"`
 }
 type ReplayProvenance struct {
-	RunID          RunID              `json:"run_id"`
-	SourceRunID    RunID              `json:"source_run_id"`
-	FromNodeID     string             `json:"from_node_id"`
-	PlanDigest     string             `json:"plan_digest"`
-	IdempotencyKey string             `json:"idempotency_key"`
-	Policy         []ReplayNodePolicy `json:"policy"`
-	CreatedAt      time.Time          `json:"created_at"`
+	RunID                     RunID                            `json:"run_id"`
+	SourceRunID               RunID                            `json:"source_run_id"`
+	FromNodeID                string                           `json:"from_node_id"`
+	PlanDigest                string                           `json:"plan_digest"`
+	IdempotencyKey            string                           `json:"idempotency_key"`
+	Policy                    []ReplayNodePolicy               `json:"policy"`
+	CompensationAuthorization *ReplayCompensationAuthorization `json:"compensation_authorization,omitempty"`
+	CreatedAt                 time.Time                        `json:"created_at"`
 }
 type ReplayRequest struct {
-	SourceRunID    RunID
-	RunID          RunID
-	FromNodeID     string
-	IdempotencyKey string
-	At             time.Time
+	SourceRunID               RunID
+	RunID                     RunID
+	FromNodeID                string
+	IdempotencyKey            string
+	CompensationAuthorization *ReplayCompensationAuthorization
+	At                        time.Time
 }
 type ReplayService struct {
 	Store     StateStore
@@ -4077,9 +4332,10 @@ type RequestRunCancellationResult struct {
 	Events  []Event
 }
 type RequestRunCancellationWithFinalizersRequest struct {
-	Cancellation RequestRunCancellationRequest
-	Finalizers   []FinalizerScope
-	ErrorValues  values.ValueSet
+	Cancellation         RequestRunCancellationRequest
+	Finalizers           []FinalizerScope
+	CompensationRequired bool
+	ErrorValues          values.ValueSet
 
 	Descendants []CancellationDescendantPlan
 }
@@ -4183,6 +4439,13 @@ type RetryAuthorizationRequest struct {
 }
 type RetryAuthorizer interface {
 	AuthorizeRetry(context.Context, RetryAuthorizationRequest) error
+}
+type RetryCompensationRequest struct {
+	RunID                    RunID
+	ExpectedLedgerGeneration uint64
+	IdempotencyKey           string
+	Attestation              string
+	At                       time.Time
 }
 type RetryCoordinator struct {
 	Store     RetryStore
@@ -4449,6 +4712,18 @@ type SchedulerResourceWaiter struct {
 	EnqueuedAt   time.Time                      `json:"enqueued_at"`
 	UpdatedAt    time.Time                      `json:"updated_at"`
 }
+type SealCompensationEntryRequest struct {
+	RunID                    RunID
+	EntryID                  string
+	ExpectedLedgerGeneration uint64
+	ExpectedEntryGeneration  uint64
+	ExpectedNodeGeneration   uint64
+	At                       time.Time
+}
+type SealCompensationEntryResult struct {
+	Ledger CompensationLedgerSnapshot
+	Entry  CompensationEntrySnapshot
+}
 type ServiceCoordinator struct {
 }
 type ServiceCoordinatorOptions struct {
@@ -4632,16 +4907,18 @@ type TerminalIntentSnapshot struct {
 	RunID          RunID     `json:"run_id"`
 	IntendedStatus RunStatus `json:"intended_status"`
 
-	SuccessOutputsRequired bool                 `json:"success_outputs_required,omitempty"`
-	Reason                 *Failure             `json:"reason,omitempty"`
-	Error                  *values.ValueSetRef  `json:"error,omitempty"`
-	IdempotencyKey         string               `json:"idempotency_key"`
-	Finalizers             []FinalizerScope     `json:"finalizers"`
-	Status                 TerminalIntentStatus `json:"status"`
-	Generation             uint64               `json:"generation"`
-	CreatedAt              time.Time            `json:"created_at"`
-	UpdatedAt              time.Time            `json:"updated_at"`
-	CompletedAt            time.Time            `json:"completed_at,omitempty"`
+	SuccessOutputsRequired bool `json:"success_outputs_required,omitempty"`
+
+	CompensationRequired bool                 `json:"compensation_required,omitempty"`
+	Reason               *Failure             `json:"reason,omitempty"`
+	Error                *values.ValueSetRef  `json:"error,omitempty"`
+	IdempotencyKey       string               `json:"idempotency_key"`
+	Finalizers           []FinalizerScope     `json:"finalizers"`
+	Status               TerminalIntentStatus `json:"status"`
+	Generation           uint64               `json:"generation"`
+	CreatedAt            time.Time            `json:"created_at"`
+	UpdatedAt            time.Time            `json:"updated_at"`
+	CompletedAt          time.Time            `json:"completed_at,omitempty"`
 }
 type TerminalIntentStatus string
 type TimeoutAnchor struct {
@@ -4776,12 +5053,15 @@ var ErrAttemptConflict = errors.New("workflow attempt lifecycle conflict")
 var ErrCASMismatch = errors.New("workflow state compare-and-swap mismatch")
 var ErrCancellationUnsupported = errors.New("workflow cancellation is unsupported by executor")
 var ErrClaimMismatch = errors.New("workflow claim token or generation mismatch")
+var ErrCompensationConflict = errors.New("compensation state conflict")
+var ErrCompensationPending = errors.New("compensation is pending")
 var ErrControlFlowConflict = errors.New("workflow control flow conflict")
 var ErrControlFlowPending = errors.New("workflow control flow is pending")
 var ErrFanOutIncomplete = errors.New("workflow fan-out is incomplete")
 var ErrFanOutLimit = errors.New("workflow fan-out concurrency limit reached")
 var ErrIdempotencyConflict = errors.New("workflow idempotency conflict")
 var ErrInvalidCancellation = errors.New("invalid workflow cancellation")
+var ErrInvalidCompensation = errors.New("invalid compensation request")
 var ErrInvalidControlFlow = errors.New("invalid workflow control flow")
 var ErrInvalidDispatch = errors.New("invalid step dispatch request")
 var ErrInvalidFanOut = errors.New("invalid workflow fan-out")
@@ -4824,6 +5104,7 @@ var ErrWaitWakeNotDue = errors.New("workflow timer wake is not due")
 var ErrWaitWakePending = errors.New("workflow timer wake precedes timeout")
 
 package github.com/hollis-labs/hadron/workflow/runtime/inmemory inmemory
+func (s *Store) ActivateCompensationEntry(ctx context.Context, request workflowruntime.ActivateCompensationEntryRequest) (workflowruntime.ActivateCompensationEntryResult, error)
 func (s *Store) ActivateNodeRetry(ctx context.Context, request workflowruntime.ActivateNodeRetryRequest) (workflowruntime.ActivateNodeRetryResult, error)
 func (s *Store) AdmitNode(ctx context.Context, request workflowruntime.AdmitNodeRequest) (workflowruntime.AdmitNodeResult, error)
 func (s *Store) AppendEvent(ctx context.Context, request workflowruntime.AppendEventRequest) (workflowruntime.Event, error)
@@ -4832,26 +5113,34 @@ func (s *Store) ApplyRunFailurePolicy(ctx context.Context, request workflowrunti
 func (s *Store) ApplyServiceHeartbeat(ctx context.Context, request workflowruntime.ApplyServiceHeartbeatRequest) (workflowruntime.ServiceSnapshot, error)
 func (s *Store) ApplyServiceReady(ctx context.Context, request workflowruntime.ApplyServiceReadyRequest) (workflowruntime.ApplyServiceReadyResult, error)
 func (s *Store) ApplyServiceStop(ctx context.Context, request workflowruntime.ApplyServiceStopRequest) (workflowruntime.ApplyServiceStopResult, error)
+func (s *Store) BeginManualCompensation(ctx context.Context, request workflowruntime.BeginManualCompensationRequest) (workflowruntime.FreezeCompensationResult, error)
 func (s *Store) BeginReplay(ctx context.Context, request workflowruntime.BeginReplayRequest) (workflowruntime.BeginReplayResult, error)
 func (s *Store) BeginTerminalIntent(ctx context.Context, request workflowruntime.BeginTerminalIntentRequest) (workflowruntime.BeginTerminalIntentResult, error)
 func (s *Store) BindNodeInputs(ctx context.Context, request workflowruntime.BindNodeInputsRequest) (workflowruntime.BindNodeInputsResult, error)
 func (s *Store) BindPin(ctx context.Context, request workflowruntime.BindPinRequest) (workflowruntime.BindPinResult, error)
+func (s *Store) CancelCompensation(ctx context.Context, request workflowruntime.CancelCompensationRequest) (workflowruntime.CompensationLedgerSnapshot, error)
 func (s *Store) ClaimNode(ctx context.Context, request workflowruntime.ClaimNodeRequest) (workflowruntime.ClaimResult, error)
 func (s *Store) CompleteFanOut(ctx context.Context, request workflowruntime.CompleteFanOutRequest) (workflowruntime.CompleteFanOutResult, error)
 func (s *Store) CompleteTerminalIntent(ctx context.Context, request workflowruntime.CompleteTerminalIntentRequest) (workflowruntime.CompleteTerminalIntentResult, error)
 func (s *Store) CreateNodeInvocation(ctx context.Context, request workflowruntime.CreateNodeInvocationRequest) (workflowruntime.NodeInvocationSnapshot, error)
 func (s *Store) CreateRun(ctx context.Context, request workflowruntime.CreateRunRequest) (workflowruntime.RunSnapshot, workflowruntime.IdempotencyOutcome, error)
 func (s *Store) ExpandFanOut(ctx context.Context, request workflowruntime.ExpandFanOutRequest) (workflowruntime.ExpandFanOutResult, error)
+func (s *Store) FailCompensationEntry(ctx context.Context, request workflowruntime.FailCompensationEntryRequest) (workflowruntime.SealCompensationEntryResult, error)
+func (s *Store) FinishCompensableAttempt(ctx context.Context, request workflowruntime.FinishCompensableAttemptRequest) (workflowruntime.FinishCompensableAttemptResult, error)
 func (s *Store) FinishNodeAttempt(ctx context.Context, request workflowruntime.FinishNodeAttemptRequest) (workflowruntime.FinishNodeAttemptResult, error)
+func (s *Store) FreezeCompensation(ctx context.Context, request workflowruntime.FreezeCompensationRequest) (workflowruntime.FreezeCompensationResult, error)
 func (s *Store) GetCacheEntry(ctx context.Context, key string, now time.Time) (workflowruntime.CacheEntry, bool, error)
 func (s *Store) GetPinnedValue(ctx context.Context, key string, now time.Time) (workflowruntime.PinnedValue, bool, error)
 func (s *Store) InspectSchedulerResources(ctx context.Context, query workflowruntime.SchedulerResourceQuery) (workflowruntime.SchedulerResourceState, error)
 func (s *Store) ListAttempts(ctx context.Context, id workflowruntime.NodeInvocationID) ([]workflowruntime.AttemptSnapshot, error)
 func (s *Store) ListChildRuns(ctx context.Context, parent workflowruntime.RunID) ([]workflowruntime.ChildRunLink, error)
+func (s *Store) ListCompensationEntries(ctx context.Context, runID workflowruntime.RunID) ([]workflowruntime.CompensationEntrySnapshot, error)
 func (s *Store) ListEvents(ctx context.Context, query workflowruntime.EventQuery) ([]workflowruntime.Event, error)
 func (s *Store) ListPinnedValues(ctx context.Context, now time.Time) ([]workflowruntime.PinnedValue, error)
 func (s *Store) ListRunInvocations(ctx context.Context, runID workflowruntime.RunID) ([]workflowruntime.NodeInvocationSnapshot, error)
 func (s *Store) LoadAttempt(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.AttemptSnapshot, error)
+func (s *Store) LoadCompensationEntryByHandler(ctx context.Context, id workflowruntime.NodeInvocationID) (workflowruntime.CompensationEntrySnapshot, error)
+func (s *Store) LoadCompensationLedger(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.CompensationLedgerSnapshot, error)
 func (s *Store) LoadControlDecision(ctx context.Context, id workflowruntime.ControlDecisionID) (workflowruntime.ControlDecisionSnapshot, error)
 func (s *Store) LoadExternalOperation(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.ExternalOperationSnapshot, error)
 func (s *Store) LoadFanOut(ctx context.Context, parent workflowruntime.NodeInvocationID) (workflowruntime.FanOutSnapshot, error)
@@ -4880,6 +5169,7 @@ func (s *Store) RecordExternalActivation(ctx context.Context, request workflowru
 func (s *Store) RecordMemoEntry(ctx context.Context, entry workflowruntime.MemoEntry) (workflowruntime.MemoEntry, workflowruntime.IdempotencyOutcome, error)
 func (s *Store) RecordPlan(ctx context.Context, plan workflowruntime.PlanRef) error
 func (s *Store) RecoverCancellationIntents(ctx context.Context, query workflowruntime.CancellationIntentQuery) ([]workflowruntime.CancellationIntentSnapshot, error)
+func (s *Store) RecoverCompensation(ctx context.Context, limit int) ([]workflowruntime.CompensationLedgerSnapshot, error)
 func (s *Store) RecoverExternalOperations(ctx context.Context, query workflowruntime.ExternalOperationQuery) ([]workflowruntime.ExternalOperationSnapshot, error)
 func (s *Store) RecoverOpenWaits(ctx context.Context, query workflowruntime.OpenWaitQuery) ([]workflowruntime.WaitSnapshot, error)
 func (s *Store) RecoverRetryActivations(ctx context.Context, query workflowruntime.RetryActivationQuery) ([]workflowruntime.RetryActivationSnapshot, error)
@@ -4893,11 +5183,13 @@ func (s *Store) RequestRunCancellation(ctx context.Context, request workflowrunt
 func (s *Store) RequestRunCancellationWithFinalizers(ctx context.Context, request workflowruntime.RequestRunCancellationWithFinalizersRequest) (workflowruntime.RequestRunCancellationWithFinalizersResult, error)
 func (s *Store) ResolveCancellationIntent(ctx context.Context, request workflowruntime.ResolveCancellationIntentRequest) (workflowruntime.ResolveCancellationIntentResult, error)
 func (s *Store) ResumeNodeWait(ctx context.Context, request workflowruntime.ResumeNodeWaitRequest) (workflowruntime.ResumeWaitResult, error)
+func (s *Store) RetryCompensation(ctx context.Context, request workflowruntime.RetryCompensationRequest) (workflowruntime.CompensationLedgerSnapshot, error)
 func (s *Store) ReuseNodeOutputs(ctx context.Context, request workflowruntime.ReuseNodeOutputsRequest) (workflowruntime.ReuseNodeOutputsResult, error)
 func (s *Store) SaveNodeInvocation(ctx context.Context, request workflowruntime.SaveNodeInvocationRequest) (workflowruntime.NodeInvocationSnapshot, error)
 func (s *Store) SaveRun(ctx context.Context, request workflowruntime.SaveRunRequest) (workflowruntime.RunSnapshot, error)
 func (s *Store) SaveValues(ctx context.Context, request workflowruntime.SaveValuesRequest) (values.ValueSetRef, error)
 func (s *Store) ScheduleNodeRetry(ctx context.Context, request workflowruntime.ScheduleNodeRetryRequest) (workflowruntime.ScheduleNodeRetryResult, error)
+func (s *Store) SealCompensationEntry(ctx context.Context, request workflowruntime.SealCompensationEntryRequest) (workflowruntime.SealCompensationEntryResult, error)
 func (s *Store) StartNodeAttempt(ctx context.Context, request workflowruntime.StartNodeAttemptRequest) (workflowruntime.StartNodeAttemptResult, error)
 func (s *Store) SuspendExternalOperation(ctx context.Context, request workflowruntime.SuspendExternalOperationRequest) (workflowruntime.SuspendExternalOperationResult, error)
 func (s *Store) SuspendNodeWait(ctx context.Context, request workflowruntime.SuspendNodeWaitRequest) (workflowruntime.SuspendWaitResult, error)
@@ -4921,6 +5213,8 @@ const CancellationNone CancellationMode = "none"
 const CodeInvalidConfig diagnostic.Code = "HADR-SOURCE-100"
 const CodeInvalidSpec diagnostic.Code = "HADR-HOST-001"
 const CodeLifecycleMismatch diagnostic.Code = "HADR-HOST-002"
+const CompensationReceiptRequired CompensationSupport = "receipt"
+const CompensationUnsupported CompensationSupport = ""
 const MemoizationApproved MemoizationSupport = "approved"
 const MemoizationDefault MemoizationSupport = ""
 const MemoizationDisabled MemoizationSupport = "disabled"
@@ -4971,12 +5265,14 @@ func (r *MemoryRegistry) Register(kind StepKind) error
 func (r ExternalOperationRef) Validate() error
 func (r StepResult) Validate() error
 func (r WaitResult) Validate() error
+func (s CompensationSupport) Valid() bool
 func (s ObservationState) Valid() bool
 func (s RetrySafety) Valid() bool
 func (s ServiceObservationState) Valid() bool
 func ClassifyError(err error) RetryClassification
 func NewRegistry() *MemoryRegistry
 func Resolve(registry Registry, name, version string) (StepKind, StepKindSpec, error)
+func ResolveReversibility(ctx context.Context, provider ReversibilityProvider, request ReversibilityRequest) (ReversibilityEvidence, error)
 func ValidateSpec(spec StepKindSpec) error
 type CallInvocation struct {
 	Spec    graph.CallSpec        `json:"spec"`
@@ -4989,6 +5285,12 @@ type CancellationMode string
 type CancellationSpec struct {
 	Mode CancellationMode `json:"mode"`
 }
+type CompensationReceipt struct {
+	Operation  string          `json:"operation"`
+	Values     values.ValueSet `json:"values"`
+	ChildRunID string          `json:"child_run_id,omitempty"`
+}
+type CompensationSupport string
 type DuplicateRegistrationError struct {
 	Name    string
 	Version string
@@ -5017,12 +5319,13 @@ type Heartbeater interface {
 	Heartbeat(ctx context.Context, ref ExternalOperationRef) error
 }
 type Invocation struct {
-	Identity     InvocationIdentity `json:"identity"`
-	Config       graph.Config       `json:"config"`
-	Inputs       values.ValueSet    `json:"inputs"`
-	Call         *CallInvocation    `json:"call,omitempty"`
-	Continuation *WaitContinuation  `json:"continuation,omitempty"`
-	Service      *ServiceBinding    `json:"service,omitempty"`
+	Identity     InvocationIdentity     `json:"identity"`
+	Config       graph.Config           `json:"config"`
+	Inputs       values.ValueSet        `json:"inputs"`
+	Call         *CallInvocation        `json:"call,omitempty"`
+	Continuation *WaitContinuation      `json:"continuation,omitempty"`
+	Service      *ServiceBinding        `json:"service,omitempty"`
+	Compensation *ReversibilityEvidence `json:"compensation,omitempty"`
 
 	Verification   *graph.VerificationSpec        `json:"verification,omitempty"`
 	Activity       *verification.ActivityRecorder `json:"-"`
@@ -5083,6 +5386,17 @@ type RetryClassifier interface {
 	RetryClassification() RetryClassification
 }
 type RetrySafety string
+type ReversibilityEvidence struct {
+	Operation     string       `json:"operation"`
+	ReceiptSchema graph.Schema `json:"receipt_schema"`
+}
+type ReversibilityProvider interface {
+	DescribeReversibility(context.Context, ReversibilityRequest) (ReversibilityEvidence, error)
+}
+type ReversibilityRequest struct {
+	Config graph.Config    `json:"config"`
+	Call   *graph.CallSpec `json:"call,omitempty"`
+}
 type ServiceBinding struct {
 	Phase           ServicePhase         `json:"phase"`
 	StartInvocation InvocationIdentity   `json:"start_invocation"`
@@ -5125,6 +5439,7 @@ type StepKindSpec struct {
 	Observation           ObservationSpec       `json:"observation"`
 	Lifecycle             LifecycleSpec         `json:"lifecycle,omitempty"`
 	Memoization           MemoizationSupport    `json:"memoization,omitempty"`
+	Compensation          CompensationSupport   `json:"compensation,omitempty"`
 	CanSuspend            bool                  `json:"can_suspend,omitempty"`
 	EmbeddedModeSupported bool                  `json:"embedded_mode_supported,omitempty"`
 }
@@ -5134,6 +5449,8 @@ type StepResult struct {
 	Outputs  values.ValueSet       `json:"outputs,omitempty"`
 	Wait     *WaitResult           `json:"wait,omitempty"`
 	External *ExternalOperationRef `json:"external,omitempty"`
+
+	Compensation *CompensationReceipt `json:"compensation,omitempty"`
 }
 type WaitContinuation struct {
 	ID     string              `json:"id"`
@@ -5432,6 +5749,7 @@ type DisplayPolicy struct {
 type ExpressionContext struct {
 	Inputs          ValueSet
 	Outputs         ValueSet
+	Compensation    ValueSet
 	Steps           map[string]StepContext
 	Item            *Value
 	Index           *int

@@ -47,6 +47,16 @@ type WorkflowSignalOperations interface {
 	SignalWorkflowRun(context.Context, SignalWorkflowRunRequest) (ResumeWorkflowRunResult, error)
 }
 
+// WorkflowCompensationOperations is a source-compatible optional extension.
+// Manual rollback and rollback cancellation are never inferred from run-ID
+// possession and always traverse the host identity and policy boundary.
+type WorkflowCompensationOperations interface {
+	CompensateWorkflowRun(context.Context, CompensateWorkflowRunRequest) (WorkflowCompensationResult, error)
+	CancelWorkflowCompensation(context.Context, CancelWorkflowCompensationRequest) (WorkflowCompensationResult, error)
+	RetryWorkflowCompensation(context.Context, RetryWorkflowCompensationRequest) (WorkflowCompensationResult, error)
+	InspectWorkflowCompensation(context.Context, InspectWorkflowCompensationRequest) (WorkflowCompensationResult, error)
+}
+
 type RunID = workflowruntime.RunID
 type WaitID = workflowruntime.WaitID
 type WorkflowResumeOutcome = workflowruntime.ResumeOutcome
@@ -262,12 +272,49 @@ type SignalWorkflowRunRequest struct {
 	Confirmed      bool                  `json:"confirmed,omitempty"`
 }
 
-type RerunWorkflowRequest struct {
-	SourceRunID    workflowruntime.RunID `json:"source_run_id"`
+type CompensateWorkflowRunRequest struct {
 	RunID          workflowruntime.RunID `json:"run_id"`
-	FromNodeID     string                `json:"from_node_id"`
-	IdempotencyKey string                `json:"idempotency_key"`
 	Identity       IdentityRequest       `json:"identity"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
+
+type CancelWorkflowCompensationRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Identity       IdentityRequest       `json:"identity"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Reason         string                `json:"reason"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
+
+type RetryWorkflowCompensationRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Identity       IdentityRequest       `json:"identity"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Attestation    string                `json:"attestation"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
+
+type InspectWorkflowCompensationRequest struct {
+	RunID    workflowruntime.RunID `json:"run_id"`
+	Identity IdentityRequest       `json:"identity"`
+	Limit    int                   `json:"limit,omitempty"`
+}
+
+type WorkflowCompensationResult struct {
+	Present   bool                                        `json:"present"`
+	Ledger    *workflowruntime.CompensationLedgerSnapshot `json:"ledger,omitempty"`
+	Entries   []workflowruntime.CompensationEntrySnapshot `json:"entries,omitempty"`
+	Truncated bool                                        `json:"truncated,omitempty"`
+}
+
+type RerunWorkflowRequest struct {
+	SourceRunID             workflowruntime.RunID `json:"source_run_id"`
+	RunID                   workflowruntime.RunID `json:"run_id"`
+	FromNodeID              string                `json:"from_node_id"`
+	IdempotencyKey          string                `json:"idempotency_key"`
+	Identity                IdentityRequest       `json:"identity"`
+	CompensationAttestation string                `json:"compensation_attestation,omitempty"`
 }
 
 type GraphRunInspector interface {
@@ -495,7 +542,55 @@ func (s *WorkflowOperator) RerunWorkflow(ctx context.Context, request RerunWorkf
 	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: RunOperationRerun, RunID: request.SourceRunID, FromNode: request.FromNodeID}, request.Identity); err != nil {
 		return workflowruntime.BeginReplayResult{}, err
 	}
-	return s.replay.Rerun(ctx, workflowruntime.ReplayRequest{SourceRunID: request.SourceRunID, RunID: request.RunID, FromNodeID: request.FromNodeID, IdempotencyKey: request.IdempotencyKey, At: s.host.now()})
+	var compensationAuthorization *workflowruntime.ReplayCompensationAuthorization
+	source, err := s.host.state.LoadRun(ctx, request.SourceRunID)
+	if err != nil {
+		return workflowruntime.BeginReplayResult{}, err
+	}
+	plan, err := s.host.plans.LoadRecoveryPlan(ctx, source)
+	if err != nil {
+		return workflowruntime.BeginReplayResult{}, err
+	}
+	replayStore, ok := s.host.state.(workflowruntime.ReplayStore)
+	if !ok || nilInterface(replayStore) {
+		return workflowruntime.BeginReplayResult{}, fmt.Errorf("%w: replay requires durable invocation state", ErrInvalidHost)
+	}
+	riskDigest, riskErr := workflowruntime.ReplayCompensationRiskDigest(ctx, s.host.state, replayStore, source.ID)
+	if riskErr != nil {
+		return workflowruntime.BeginReplayResult{}, riskErr
+	}
+	var ledgerGeneration uint64
+	var ledgerOutcome workflowruntime.CompensationOutcome
+	if plan.Plan.Graph.Compensation != nil {
+		store, ok := s.host.state.(workflowruntime.CompensationStore)
+		if !ok || nilInterface(store) {
+			return workflowruntime.BeginReplayResult{}, fmt.Errorf("%w: compensated replay requires durable compensation state", ErrInvalidHost)
+		}
+		ledger, ledgerErr := store.LoadCompensationLedger(ctx, source.ID)
+		if ledgerErr == nil {
+			unsafe := ledger.Status != workflowruntime.CompensationTerminal || ledger.Outcome == workflowruntime.CompensationOutcomePartial || ledger.Outcome == workflowruntime.CompensationOutcomeFailed || ledger.Outcome == workflowruntime.CompensationOutcomeCanceled
+			if unsafe {
+				ledgerGeneration, ledgerOutcome = ledger.Generation, ledger.Outcome
+			}
+		} else if !errors.Is(ledgerErr, workflowruntime.ErrNotFound) {
+			return workflowruntime.BeginReplayResult{}, ledgerErr
+		}
+	}
+	if ledgerGeneration != 0 || riskDigest != "" {
+		if !boundedAttestation(request.CompensationAttestation) {
+			return workflowruntime.BeginReplayResult{}, fmt.Errorf("%w: replay requires a bounded compensation attestation", ErrPolicyDenied)
+		}
+		identity, bindErr := s.host.bindIdentity(ctx, request.Identity)
+		if bindErr != nil {
+			return workflowruntime.BeginReplayResult{}, bindErr
+		}
+		digest := compensationAuthorizationDigest("replay_compensation", identity, request.IdempotencyKey,
+			string(source.ID), source.Plan.Digest, fmt.Sprint(source.Generation), fmt.Sprint(ledgerGeneration), string(ledgerOutcome), riskDigest, string(request.RunID), values.SHA256Digest([]byte(request.CompensationAttestation)))
+		compensationAuthorization = &workflowruntime.ReplayCompensationAuthorization{LedgerGeneration: ledgerGeneration, LedgerOutcome: ledgerOutcome, RiskDigest: riskDigest, Digest: digest}
+	} else if request.CompensationAttestation != "" {
+		return workflowruntime.BeginReplayResult{}, fmt.Errorf("%w: replay compensation attestation is not applicable", ErrPolicyDenied)
+	}
+	return s.replay.Rerun(ctx, workflowruntime.ReplayRequest{SourceRunID: request.SourceRunID, RunID: request.RunID, FromNodeID: request.FromNodeID, IdempotencyKey: request.IdempotencyKey, CompensationAuthorization: compensationAuthorization, At: s.host.now()})
 }
 
 func (s *WorkflowOperator) SignalWorkflowRun(ctx context.Context, request SignalWorkflowRunRequest) (ResumeWorkflowRunResult, error) {
@@ -508,6 +603,36 @@ func (s *WorkflowOperator) SignalWorkflowRun(ctx context.Context, request Signal
 	})
 	return safeResumeWorkflowRunResult(result), err
 }
+
+func (s *WorkflowOperator) CompensateWorkflowRun(ctx context.Context, request CompensateWorkflowRunRequest) (WorkflowCompensationResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return WorkflowCompensationResult{}, err
+	}
+	return s.host.CompensateWorkflowRun(ctx, request)
+}
+
+func (s *WorkflowOperator) CancelWorkflowCompensation(ctx context.Context, request CancelWorkflowCompensationRequest) (WorkflowCompensationResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return WorkflowCompensationResult{}, err
+	}
+	return s.host.CancelWorkflowCompensation(ctx, request)
+}
+
+func (s *WorkflowOperator) RetryWorkflowCompensation(ctx context.Context, request RetryWorkflowCompensationRequest) (WorkflowCompensationResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return WorkflowCompensationResult{}, err
+	}
+	return s.host.RetryWorkflowCompensation(ctx, request)
+}
+
+func (s *WorkflowOperator) InspectWorkflowCompensation(ctx context.Context, request InspectWorkflowCompensationRequest) (WorkflowCompensationResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return WorkflowCompensationResult{}, err
+	}
+	return s.host.InspectWorkflowCompensation(ctx, request)
+}
+
+var _ WorkflowCompensationOperations = (*WorkflowOperator)(nil)
 
 func (s *WorkflowOperator) ready(ctx context.Context) error {
 	if ctx == nil || s == nil || s.host == nil || nilInterface(s.diagnostics) || nilInterface(s.replay) || nilInterface(s.runAccess) {

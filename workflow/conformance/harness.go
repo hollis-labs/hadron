@@ -40,6 +40,8 @@ const (
 	VerificationFixtures FixtureSet = "verification"
 	// MemoizationFixtures contains memo/pin provenance and safety cases.
 	MemoizationFixtures FixtureSet = "memoization"
+	// CompensationFixtures contains durable saga ordering and recovery cases.
+	CompensationFixtures FixtureSet = "compensation"
 )
 
 // Fixture is a conformance-only test case. Input remains opaque to the harness
@@ -91,12 +93,21 @@ type RequiredHost interface {
 // Deprecated: use RequiredHost for RunRequired or CompleteHost for RunComplete.
 type Host = RequiredHost
 
-// CompleteHost supplies factories for every required and optional conformance
-// family published by this package.
+// CompleteHost supplies the complete pre-compensation conformance family. It
+// remains source-compatible for existing hosts; CompensationHost is the
+// exhaustive extension.
 type CompleteHost interface {
 	RequiredHost
 	VerificationFactory() Factory
 	MemoizationFactory() Factory
+}
+
+// CompensationHost is the source-compatible exhaustive extension for hosts
+// that implement the durable compensation fixture family. CompleteHost is
+// intentionally unchanged.
+type CompensationHost interface {
+	CompleteHost
+	CompensationFactory() Factory
 }
 
 // RunRequired invokes the stable required conformance suite set using one
@@ -127,7 +138,7 @@ func RunRequired(t *testing.T, store FixtureStore, host RequiredHost) {
 	})
 }
 
-// RunComplete invokes every conformance suite published by this package,
+// RunComplete invokes the source-compatible pre-compensation suite family,
 // including verification and memoization.
 func RunComplete(t *testing.T, store FixtureStore, host CompleteHost) {
 	t.Helper()
@@ -143,11 +154,23 @@ func RunComplete(t *testing.T, store FixtureStore, host CompleteHost) {
 	})
 }
 
+// RunExhaustive invokes every current suite, including durable compensation.
+func RunExhaustive(t *testing.T, store FixtureStore, host CompensationHost) {
+	t.Helper()
+	if host == nil {
+		t.Fatal("conformance: compensation host is nil")
+	}
+	RunComplete(t, store, host)
+	t.Run("compensation", func(t *testing.T) {
+		CompensationSuite(t, store, host.CompensationFactory())
+	})
+}
+
 // RunAll invokes the original required conformance suite set.
 //
 // Deprecated: its historical name predates optional verification and
 // memoization families. Use RunRequired for that exact compatibility contract
-// or RunComplete for the exhaustive current suite set.
+// or RunComplete for the complete pre-compensation suite set.
 func RunAll(t *testing.T, store FixtureStore, host Host) {
 	t.Helper()
 	RunRequired(t, store, host)
@@ -171,6 +194,12 @@ func GraphValidationSuite(t *testing.T, store FixtureStore, factory Factory) {
 func StateStoreSuite(t *testing.T, store FixtureStore, factory Factory) {
 	t.Helper()
 	runSuite(t, "state-store", store, factory, ValueFixtures)
+}
+
+// CompensationSuite runs graph-visible durable saga fixtures.
+func CompensationSuite(t *testing.T, store FixtureStore, factory Factory) {
+	t.Helper()
+	runSuite(t, "compensation", store, factory, CompensationFixtures)
 }
 
 // SchedulerSuite runs ready-queue and scheduling fixtures.

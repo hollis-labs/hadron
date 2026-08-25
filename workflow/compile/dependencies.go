@@ -223,38 +223,41 @@ type inferredEdge struct {
 }
 
 type expressionUse struct {
-	consumer     ValueConsumer
-	expression   graph.Expression
-	scope        *mutableValueScope
-	nodeID       string
-	allowSteps   bool
-	allowLocals  bool
-	allowOutputs bool
-	addEdge      bool
+	consumer          ValueConsumer
+	expression        graph.Expression
+	scope             *mutableValueScope
+	nodeID            string
+	allowSteps        bool
+	allowLocals       bool
+	allowOutputs      bool
+	allowCompensation bool
+	addEdge           bool
 }
 
 type dependencyAnalyzer struct {
-	plan        *ExecutionPlan
-	options     DependencyOptions
-	nodes       map[string]graph.Node
-	optional    map[string]bool
-	nodeScopes  map[string]*mutableValueScope
-	outputScope *mutableValueScope
-	activations map[string]*mutableValueScope
-	inferred    []inferredEdge
-	deferred    []DeferredDependency
-	diagnostics []diagnostic.Diagnostic
+	plan                 *ExecutionPlan
+	options              DependencyOptions
+	nodes                map[string]graph.Node
+	optional             map[string]bool
+	nodeScopes           map[string]*mutableValueScope
+	outputScope          *mutableValueScope
+	activations          map[string]*mutableValueScope
+	compensationHandlers map[string]struct{}
+	inferred             []inferredEdge
+	deferred             []DeferredDependency
+	diagnostics          []diagnostic.Diagnostic
 }
 
 func newDependencyAnalyzer(plan *ExecutionPlan, options DependencyOptions) *dependencyAnalyzer {
 	a := &dependencyAnalyzer{
-		plan:        plan,
-		options:     options,
-		nodes:       make(map[string]graph.Node, len(plan.Graph.Nodes)),
-		optional:    make(map[string]bool, len(plan.Graph.Nodes)),
-		nodeScopes:  make(map[string]*mutableValueScope, len(plan.Graph.Nodes)),
-		outputScope: newMutableValueScope(false),
-		activations: make(map[string]*mutableValueScope, len(plan.Graph.Activations)),
+		plan:                 plan,
+		options:              options,
+		nodes:                make(map[string]graph.Node, len(plan.Graph.Nodes)),
+		optional:             make(map[string]bool, len(plan.Graph.Nodes)),
+		nodeScopes:           make(map[string]*mutableValueScope, len(plan.Graph.Nodes)),
+		outputScope:          newMutableValueScope(false),
+		activations:          make(map[string]*mutableValueScope, len(plan.Graph.Activations)),
+		compensationHandlers: make(map[string]struct{}),
 	}
 	for _, node := range plan.Graph.Nodes {
 		identity := graph.NormalizeID(node.ID)
@@ -262,6 +265,11 @@ func newDependencyAnalyzer(plan *ExecutionPlan, options DependencyOptions) *depe
 		a.nodeScopes[identity] = newMutableValueScope(node.ForEach != nil)
 		if node.If != nil || node.ForEach != nil {
 			a.optional[identity] = true
+		}
+	}
+	for _, node := range plan.Graph.Nodes {
+		if node.Compensation != nil {
+			a.compensationHandlers[graph.NormalizeID(node.Compensation.Handler)] = struct{}{}
 		}
 	}
 	for _, node := range plan.Graph.Nodes {
@@ -326,7 +334,7 @@ func (a *dependencyAnalyzer) walk() {
 			Kind: ValueConsumerWorkflowOutput, ID: output.Name,
 			Surface: "workflow.outputs." + output.Name,
 			Source:  firstSource(output.Value.Source, output.Source, graphSource(a.plan.Graph)),
-		}, a.outputScope, "", true, false, false, false)
+		}, a.outputScope, "", true, false, false, false, false)
 	}
 	for _, activation := range a.plan.Graph.Activations {
 		a.walkActivation(activation)
@@ -339,12 +347,13 @@ func (a *dependencyAnalyzer) walkNode(node graph.Node) {
 	fallback := a.sourceForNode(node)
 
 	bindingNames := sortedBindingNames(node.InputBindings)
+	_, compensationHandler := a.compensationHandlers[identity]
 	for _, name := range bindingNames {
 		binding := node.InputBindings[name]
 		a.walkBinding(binding, ValueConsumer{
 			Kind: ValueConsumerNode, ID: identity, Surface: "with." + name,
 			Source: firstSource(binding.Source, fallback),
-		}, scope, identity, true, node.ForEach != nil, false, true)
+		}, scope, identity, !compensationHandler, node.ForEach != nil, false, compensationHandler, !compensationHandler)
 	}
 	if node.If != nil {
 		a.walkExpression(expressionUseForNode(node, identity, "if", *node.If, scope, fallback, true))
@@ -377,7 +386,7 @@ func (a *dependencyAnalyzer) walkNode(node graph.Node) {
 		a.walkBinding(*output.Value, ValueConsumer{
 			Kind: ValueConsumerNode, ID: identity, Surface: "outputs." + output.Name,
 			Source: firstSource(output.Value.Source, output.Source, fallback),
-		}, scope, identity, false, node.ForEach != nil, true, false)
+		}, scope, identity, false, node.ForEach != nil, true, false, false)
 	}
 	if node.Idempotency != nil && node.Idempotency.Key != nil {
 		a.walkExpression(expressionUseForNode(node, identity, "idempotency.key", *node.Idempotency.Key, scope, fallback, true))
@@ -405,7 +414,7 @@ func expressionUseForNode(node graph.Node, identity, surface string, expression 
 	}
 }
 
-func (a *dependencyAnalyzer) walkBinding(binding graph.Binding, consumer ValueConsumer, scope *mutableValueScope, nodeID string, allowSteps, allowLocals, allowOutputs, addEdge bool) {
+func (a *dependencyAnalyzer) walkBinding(binding graph.Binding, consumer ValueConsumer, scope *mutableValueScope, nodeID string, allowSteps, allowLocals, allowOutputs, allowCompensation, addEdge bool) {
 	source := firstSource(binding.Source, consumer.Source)
 	consumer.Source = cloneSource(source)
 	switch binding.Kind {
@@ -422,14 +431,14 @@ func (a *dependencyAnalyzer) walkBinding(binding graph.Binding, consumer ValueCo
 		consumer.Source = cloneSource(expression.Source)
 		a.walkExpression(expressionUse{
 			consumer: consumer, expression: expression, scope: scope, nodeID: nodeID,
-			allowSteps: allowSteps, allowLocals: allowLocals, allowOutputs: allowOutputs, addEdge: addEdge,
+			allowSteps: allowSteps, allowLocals: allowLocals, allowOutputs: allowOutputs, allowCompensation: allowCompensation, addEdge: addEdge,
 		})
 	case graph.BindingInterpolation:
 		expression := graph.Expression{Text: binding.Interpolation, Source: cloneSource(source)}
 		references, err := values.ParseInterpolationReferences(binding.Interpolation, source)
 		use := expressionUse{
 			consumer: consumer, expression: expression, scope: scope, nodeID: nodeID,
-			allowSteps: allowSteps, allowLocals: allowLocals, allowOutputs: allowOutputs, addEdge: addEdge,
+			allowSteps: allowSteps, allowLocals: allowLocals, allowOutputs: allowOutputs, allowCompensation: allowCompensation, addEdge: addEdge,
 		}
 		if err != nil {
 			a.addExpressionError(use, err)
@@ -463,6 +472,11 @@ func (a *dependencyAnalyzer) walkReferences(use expressionUse, references []valu
 			if !use.allowOutputs {
 				a.addUnavailableReference(use, reference, "raw adapter outputs exist only while projecting a node's declared outputs",
 					"Use outputs only in a node output value binding; use steps.<node>.outputs from downstream or workflow outputs.")
+			}
+		case "compensation":
+			if !use.allowCompensation {
+				a.addUnavailableReference(use, reference, "compensation evidence exists only while binding a dormant compensation handler",
+					"Use compensation only in a dormant handler's with bindings.")
 			}
 		}
 	}
@@ -498,6 +512,18 @@ func (a *dependencyAnalyzer) walkStepReference(use expressionUse, reference valu
 		return
 	}
 	producerID = graph.NormalizeID(producer.ID)
+	if _, dormant := a.compensationHandlers[producerID]; dormant {
+		a.diagnostics = append(a.diagnostics, diagnostic.Diagnostic{
+			Severity: diagnostic.SeverityError,
+			Code:     CodeInvalidCompensation,
+			Message:  fmt.Sprintf("%s %q cannot reference dormant compensation handler %q in %s", use.consumer.Kind, use.consumer.ID, producerID, use.consumer.Surface),
+			Source:   cloneSource(use.consumer.Source),
+			Remediation: &diagnostic.Remediation{
+				Message: "Keep compensation handlers graph-dormant and consume their results only through bounded compensation inspection.",
+			},
+		})
+		return
+	}
 	use.scope.producers[producerID] = struct{}{}
 	if use.addEdge {
 		a.inferred = append(a.inferred, inferredEdge{
@@ -647,7 +673,7 @@ func (a *dependencyAnalyzer) walkActivation(activation graph.ActivationDeclarati
 		a.walkBinding(binding, ValueConsumer{
 			Kind: ValueConsumerActivation, ID: identity, Surface: "inputs." + name,
 			Source: firstSource(binding.Source, activation.Source, graphSource(a.plan.Graph)),
-		}, scope, "", false, false, false, false)
+		}, scope, "", false, false, false, false, false)
 	}
 	if activation.Policy.DeduplicationKey != nil {
 		expression := *activation.Policy.DeduplicationKey

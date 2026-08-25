@@ -247,6 +247,9 @@ func (s *WorkflowStateStore) TransitionRun(ctx context.Context, request workflow
 // CreateNodeInvocation implements runtime.StateStore.
 func (s *WorkflowStateStore) CreateNodeInvocation(ctx context.Context, request workflowruntime.CreateNodeInvocationRequest) (workflowruntime.NodeInvocationSnapshot, error) {
 	next := cloneWorkflowNode(request.Snapshot)
+	if next.Phase != workflowruntime.InvocationForward {
+		return workflowruntime.NodeInvocationSnapshot{}, workflowInvalid(errors.New("compensation nodes require atomic saga materialization"))
+	}
 	if next.Generation != 0 || next.ClaimGeneration != 0 || next.Lease != nil {
 		return workflowruntime.NodeInvocationSnapshot{}, workflowInvalid(errors.New("new node must have zero generations and no lease"))
 	}
@@ -314,6 +317,9 @@ func (s *WorkflowStateStore) SaveNodeInvocation(ctx context.Context, request wor
 		}
 		if request.Snapshot.Status != current.Status || !equalWorkflowBlocked(request.Snapshot.Blocked, current.Blocked) {
 			return workflowInvalid(errors.New("node lifecycle changes require TransitionNode"))
+		}
+		if request.Snapshot.Phase != current.Phase {
+			return workflowInvalid(errors.New("node invocation phase is immutable"))
 		}
 		if request.Snapshot.LatestAttempt != current.LatestAttempt {
 			return workflowInvalid(errors.New("latest attempt is lifecycle-managed"))

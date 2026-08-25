@@ -21,9 +21,16 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
+	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
 	"github.com/hollis-labs/hadron/workflow/values"
 	"github.com/hollis-labs/hadron/workflow/verification"
 )
+
+type contractReversibleFixtureKind struct{ *stepkindtest.Kind }
+
+func (*contractReversibleFixtureKind) DescribeReversibility(context.Context, stepkind.ReversibilityRequest) (stepkind.ReversibilityEvidence, error) {
+	return stepkind.ReversibilityEvidence{Operation: "fixture.contract.effect", ReceiptSchema: graph.Schema{}}, nil
+}
 
 func TestContractRegistrationPathEndToEnd(t *testing.T) {
 	service, ref, source := newContractServiceFixture(t, nil, func(_ context.Context, request NamespaceAuthorization) error {
@@ -132,6 +139,80 @@ func TestContractRegistrationPathEndToEnd(t *testing.T) {
 	}
 	if _, err := service.Publish(t.Context(), query, "principal:test"); err == nil {
 		t.Fatal("Publish accepted an unpinned version")
+	}
+}
+
+func TestCanonicalContractRunnerExecutesCompensationBeforeReportingOriginalFailure(t *testing.T) {
+	plan := compileContractPlan(t, `workflow:
+  name: compensation-contract
+  version: v1
+steps:
+  - id: placeholder
+    transform: {result: "'placeholder'"}
+    outputs:
+      result: {type: string}
+`)
+	plan.Graph.Nodes = []graph.Node{
+		{ID: "a-effect", Kind: "contract-effect", KindVersion: "v1", Config: graph.Config{}, Compensation: &graph.CompensationSpec{Handler: "undo"}},
+		{ID: "z-fail", Kind: "contract-fail", KindVersion: "v1", Config: graph.Config{}, Needs: []graph.Need{{Node: "a-effect", Kind: graph.EdgeControl}}},
+		{ID: "undo", Kind: "contract-undo", KindVersion: "v1", Config: graph.Config{}},
+	}
+	plan.Graph.Edges = nil
+	plan.Graph.Outputs = nil
+	plan.Graph.Compensation = &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationOnFailure}, Mode: graph.CompensationBestEffort}
+	plan.Graph.Digest, plan.Digest = "", ""
+	inferred := compile.InferValueDependencies(plan, compile.DependencyOptions{})
+	if inferred.Plan == nil || len(inferred.Diagnostics) != 0 {
+		t.Fatalf("InferValueDependencies = %#v", inferred.Diagnostics)
+	}
+	plan = inferred.Plan
+	for index := range plan.Graph.Nodes {
+		plan.Graph.Nodes[index].Config = graph.Config{}
+	}
+
+	effect := &contractReversibleFixtureKind{Kind: stepkindtest.NewNoopKind("contract-effect", "v1")}
+	effect.SpecValue.Effects = graph.EffectSet{graph.EffectMaterialize}
+	effect.SpecValue.Compensation = stepkind.CompensationReceiptRequired
+	failing := stepkindtest.NewNoopKind("contract-fail", "v1")
+	undo := stepkindtest.NewNoopKind("contract-undo", "v1")
+	undo.SpecValue.Effects = graph.EffectSet{graph.EffectMaterialize}
+	kinds := stepkind.NewRegistry()
+	for _, kind := range []stepkind.StepKind{effect, failing, undo} {
+		if err := kinds.Register(kind); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if findings := compile.ValidatePlan(t.Context(), plan, compile.ValidationOptions{StepKinds: kinds}); len(findings) != 0 {
+		t.Fatalf("ValidatePlan = %#v", findings)
+	}
+
+	suite := executableContractSuite(t, plan, kinds, values.ValueSet{}, values.ValueSet{})
+	contractCase := &suite.Cases[0]
+	contractCase.Name = "compensation-before-terminal-failure"
+	contractCase.ExpectedOutputs = nil
+	contractCase.ExpectedError = &ContractExpectedError{Code: "fixture_failed", Message: "forward failure"}
+	for index := range contractCase.Mocks {
+		mock := &contractCase.Mocks[index]
+		mock.ExpectedInputs = values.ValueSet{}
+		switch mock.NodeID {
+		case "a-effect":
+			mock.Results = []ContractMockResult{{Outputs: values.ValueSet{}, Compensation: &stepkind.CompensationReceipt{Operation: "fixture.contract.effect", Values: values.ValueSet{}}}}
+		case "z-fail":
+			mock.Results = []ContractMockResult{{Failure: &stepkind.ExecutionError{Code: "fixture_failed", Message: "forward failure", Classification: stepkind.RetryPermanent}}}
+		case "undo":
+			mock.Results = []ContractMockResult{{Outputs: values.ValueSet{}}}
+		}
+	}
+	canonical, _, err := canonicalContractSuite(suite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateContractSuiteForPlan(plan, kinds, canonical, false); err != nil {
+		t.Fatal(err)
+	}
+	report, err := newCanonicalContractRunner(compile.DependencyOptions{}, verification.NewDefaultRegistry()).Execute(t.Context(), plan, kinds, canonical, 2)
+	if err != nil || !report.Passed || len(report.Cases) != 1 || report.Cases[0].Failure == nil || report.Cases[0].Failure.Code != "fixture_failed" || !reflect.DeepEqual(report.Cases[0].Effects, graph.EffectSet{graph.EffectCompute, graph.EffectMaterialize}) {
+		t.Fatalf("compensation contract report = %#v, %v", report, err)
 	}
 }
 

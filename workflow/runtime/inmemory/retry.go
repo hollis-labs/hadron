@@ -35,11 +35,11 @@ func (s *Store) ScheduleNodeRetry(ctx context.Context, request workflowruntime.S
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	run, ok := s.runs[request.Activation.Attempt.Invocation.RunID]
+	_, ok := s.runs[request.Activation.Attempt.Invocation.RunID]
 	if !ok {
 		return workflowruntime.ScheduleNodeRetryResult{}, fmt.Errorf("%w: run", workflowruntime.ErrNotFound)
 	}
-	if !run.Status.Active() {
+	if !s.runAllowsExecutionLocked(request.Activation.Attempt.Invocation) {
 		return workflowruntime.ScheduleNodeRetryResult{}, invalid(errors.New("terminal run cannot schedule retry"))
 	}
 	if !s.controlAdmissionAllowedLocked(request.Activation.Attempt.Invocation) {
@@ -172,8 +172,7 @@ func (s *Store) ActivateNodeRetry(ctx context.Context, request workflowruntime.A
 	if request.Now.Before(activation.FireAt) {
 		return workflowruntime.ActivateNodeRetryResult{}, fmt.Errorf("%w: fire_at %s", workflowruntime.ErrRetryNotDue, activation.FireAt.Format(timeLayout))
 	}
-	run := s.runs[activation.Attempt.Invocation.RunID]
-	if !run.Status.Active() {
+	if !s.runAllowsExecutionLocked(activation.Attempt.Invocation) {
 		return workflowruntime.ActivateNodeRetryResult{}, invalid(errors.New("terminal run fences retry activation"))
 	}
 	if !s.controlAdmissionAllowedLocked(activation.Attempt.Invocation) {

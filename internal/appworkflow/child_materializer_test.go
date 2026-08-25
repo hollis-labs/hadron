@@ -12,6 +12,7 @@ import (
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
+	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
 
@@ -55,6 +56,67 @@ func TestPinnedChildRunMaterializerCreatesAndReplaysRunnableGraphState(t *testin
 	changed.Inputs["message"] = inlineValueForTest(t, "changed")
 	if err := materializer.MaterializeChildRun(t.Context(), changed); !errors.Is(err, runtime.ErrInvalidRecord) {
 		t.Fatalf("changed request error = %v", err)
+	}
+}
+
+func TestPinnedChildRunMaterializerKeepsCompensationHandlerDormantUntilChildLedgerActivatesIt(t *testing.T) {
+	fixture := newChildMaterializerFixture(t)
+	fixture.request.Definition.Graph.Compensation = &graph.CompensationPolicy{Triggers: []graph.CompensationTrigger{graph.CompensationManual}}
+	rootDefinition := fixture.request.Definition.Graph.Nodes[0]
+	rootDefinition.Compensation = &graph.CompensationSpec{Handler: "undo"}
+	fixture.request.Definition.Graph.Nodes = []graph.Node{rootDefinition, {ID: "undo", Kind: "noop", KindVersion: "v1"}}
+	fixture.request.Definition.Graph.Edges = nil
+	materializer, err := NewPinnedChildRunMaterializer(ChildRunMaterializerOptions{State: fixture.store, Clock: ClockFunc(func() time.Time { return fixture.now.Add(time.Second) })})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := materializer.MaterializeChildRun(t.Context(), fixture.request); err != nil {
+		t.Fatal(err)
+	}
+	handlerID := runtime.NodeInvocationID{RunID: fixture.request.ChildRunID, NodeID: "undo"}
+	if _, err := fixture.store.LoadNodeInvocation(t.Context(), handlerID); !errors.Is(err, runtime.ErrNotFound) {
+		t.Fatalf("dormant child handler was materialized in forward phase: %v", err)
+	}
+	rootID := runtime.NodeInvocationID{RunID: fixture.request.ChildRunID, NodeID: "root"}
+	root, err := fixture.store.LoadNodeInvocation(t.Context(), rootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := fixture.store.ClaimNode(t.Context(), runtime.ClaimNodeRequest{InvocationID: rootID, ExpectedClaimGeneration: root.ClaimGeneration, Owner: "child-forward", Token: "child-forward-token", IdempotencyKey: "child-forward-claim", Now: fixture.now.Add(2 * time.Second), LeaseUntil: fixture.now.Add(time.Hour)})
+	if err != nil || claim.Lease == nil {
+		t.Fatalf("claim = %#v, %v", claim, err)
+	}
+	proof := runtime.ClaimProof{Owner: claim.Lease.Owner, Token: claim.Lease.Token, Generation: claim.Lease.Generation}
+	root, err = fixture.store.LoadNodeInvocation(t.Context(), rootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := fixture.store.StartNodeAttempt(t.Context(), runtime.StartNodeAttemptRequest{InvocationID: rootID, ExpectedNodeGeneration: root.Generation, Claim: proof, Executor: runtime.ExecutorMetadata{Kind: "noop", Version: "v1"}, Inputs: root.Inputs, At: fixture.now.Add(3 * time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := stepkind.ReversibilityEvidence{Operation: "fixture.child", ReceiptSchema: graph.Schema{}}
+	if _, err := fixture.store.FinishCompensableAttempt(t.Context(), runtime.FinishCompensableAttemptRequest{
+		Finish:      runtime.FinishNodeAttemptRequest{InvocationID: rootID, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: runtime.NodeSucceeded, NextNodeStatus: runtime.NodeSucceeded, At: fixture.now.Add(4 * time.Second)},
+		Eligibility: runtime.CompensationEligibility{PlanDigest: fixture.request.Plan.Digest, HandlerNodeID: "undo", Evidence: evidence, Receipt: stepkind.CompensationReceipt{Operation: evidence.Operation, Values: values.ValueSet{}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := fixture.store.LoadRun(t.Context(), fixture.request.ChildRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	succeeded, err := fixture.store.TransitionRun(t.Context(), runtime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: runtime.RunSucceeded, At: fixture.now.Add(5 * time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual, err := fixture.store.BeginManualCompensation(t.Context(), runtime.BeginManualCompensationRequest{RunID: run.ID, PlanDigest: run.Plan.Digest, ExpectedRunGeneration: succeeded.Snapshot.Generation, OriginalStatus: runtime.RunSucceeded, IdempotencyKey: "child-manual", Authorization: values.SHA256Digest([]byte("child-manual-authorization")), At: fixture.now.Add(6 * time.Second)})
+	if err != nil || manual.Ledger.Status != runtime.CompensationFrozen {
+		t.Fatalf("manual = %#v, %v", manual, err)
+	}
+	progress, err := (runtime.CompensationCoordinator{Store: fixture.store, Compensation: fixture.store, Plans: childMaterializerPlanSource{graph: fixture.request.Definition.Graph}}).Progress(t.Context(), run.ID, fixture.now.Add(7*time.Second))
+	if err != nil || len(progress.Activated) != 1 || progress.Activated[0].Node.ID.RunID != handlerID.RunID || progress.Activated[0].Node.ID.NodeID != handlerID.NodeID || progress.Activated[0].Node.ID.Iteration == "" || progress.Activated[0].Node.Phase != runtime.InvocationCompensation {
+		t.Fatalf("ledger handler activation = %#v, %v", progress, err)
 	}
 }
 
@@ -251,6 +313,14 @@ type childMaterializerFixture struct {
 	store   *inmemory.Store
 	request calladapter.ChildRunRequest
 	now     time.Time
+}
+
+type childMaterializerPlanSource struct{ graph graph.Graph }
+
+func (s childMaterializerPlanSource) LoadRecoveryPlan(_ context.Context, run runtime.RunSnapshot) (runtime.RecoveryPlan, error) {
+	plan := compile.ExecutionPlan{SchemaVersion: run.Plan.SchemaVersion, ID: run.Plan.ID, Digest: run.Plan.Digest, Graph: s.graph}
+	inferred := compile.InferValueDependencies(&plan, compile.DependencyOptions{})
+	return runtime.RecoveryPlan{Ref: run.Plan, Plan: plan, Visibility: inferred.Visibility}, nil
 }
 
 func newChildMaterializerFixture(t *testing.T) childMaterializerFixture {

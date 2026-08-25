@@ -136,6 +136,9 @@ func executeContractRepetition(ctx context.Context, plan *compile.ExecutionPlan,
 	nodes := append([]graph.Node(nil), plan.Graph.Nodes...)
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	for _, node := range nodes {
+		if _, dormant := runtime.CompensationHandlers(plan.Graph)[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		id := runtime.NodeInvocationID{RunID: runID, NodeID: node.ID}
 		if _, createErr := store.CreateNodeInvocation(ctx, runtime.CreateNodeInvocationRequest{Snapshot: runtime.NodeInvocationSnapshot{ID: id, Status: runtime.NodePending, CreatedAt: base, UpdatedAt: base}}); createErr != nil {
 			return contractObservation{}, createErr
@@ -230,6 +233,9 @@ func (e *contractExecution) applyControl(ctx context.Context, run runtime.RunSna
 		return false, err
 	}
 	for _, node := range sortedGraphNodes(e.plan.Graph.Nodes) {
+		if _, dormant := runtime.CompensationHandlers(e.plan.Graph)[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		if node.Finally != nil {
 			continue
 		}
@@ -287,6 +293,9 @@ func (e *contractExecution) driveNodes(ctx context.Context, run runtime.RunSnaps
 	driver := runtime.NodeDriver{Store: e.store, Inputs: e.store, Control: e.store, Registry: e.registry}
 	changed := false
 	for _, node := range sortedGraphNodes(e.plan.Graph.Nodes) {
+		if _, dormant := runtime.CompensationHandlers(e.plan.Graph)[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		node, err = exactContractNode(e.registry, node)
 		if err != nil {
 			return false, err
@@ -462,6 +471,13 @@ func (e *contractExecution) completeRun(ctx context.Context) (bool, error) {
 	}
 	if finalizers || !allSucceeded || len(e.plan.Graph.Outputs) == 0 {
 		reconciled, _, reconcileErr := coordinator.ReconcileRunCompletion(ctx, e.plan.Graph, e.runID, "contract-complete:"+string(e.runID), e.tick())
+		if errors.Is(reconcileErr, runtime.ErrCompensationPending) {
+			progress, progressErr := (runtime.CompensationCoordinator{Store: e.store, Compensation: e.store, Plans: contractRecoveryPlanSource{plan: e.recovery}}).Progress(ctx, e.runID, e.tick())
+			if progressErr != nil && !errors.Is(progressErr, runtime.ErrCASMismatch) && !errors.Is(progressErr, runtime.ErrCompensationPending) {
+				return false, progressErr
+			}
+			return progress.Ledger.Generation != 0, nil
+		}
 		if errors.Is(reconcileErr, runtime.ErrControlFlowPending) {
 			return true, nil
 		}
@@ -490,6 +506,9 @@ func (e *contractExecution) ordinaryOutcome(ctx context.Context) (bool, bool, er
 		if node.Finally != nil {
 			continue
 		}
+		if _, dormant := runtime.CompensationHandlers(e.plan.Graph)[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		snapshot, err := e.store.LoadNodeInvocation(ctx, runtime.NodeInvocationID{RunID: e.runID, NodeID: node.ID})
 		if err != nil {
 			return false, false, err
@@ -510,6 +529,12 @@ func (e *contractExecution) ordinaryOutcome(ctx context.Context) (bool, bool, er
 		}
 	}
 	return true, allSucceeded, nil
+}
+
+type contractRecoveryPlanSource struct{ plan runtime.RecoveryPlan }
+
+func (s contractRecoveryPlanSource) LoadRecoveryPlan(context.Context, runtime.RunSnapshot) (runtime.RecoveryPlan, error) {
+	return s.plan, nil
 }
 
 func (e *contractExecution) observe(ctx context.Context, run runtime.RunSnapshot) (contractObservation, error) {
@@ -590,6 +615,13 @@ type contractMockKind struct {
 
 type contractPreparedMockKind struct{ *contractMockKind }
 
+type contractReversibleMockKind struct {
+	*contractMockKind
+	provider stepkind.ReversibilityProvider
+}
+
+type contractPreparedReversibleMockKind struct{ *contractReversibleMockKind }
+
 func contractMockRegistry(kinds stepkind.Registry, workflow graph.Graph, contractCase WorkflowContractCase) (*stepkind.MemoryRegistry, *contractMockCatalog, error) {
 	catalog := &contractMockCatalog{mocks: make(map[string]ContractExecutorMock, len(contractCase.Mocks)), nodes: make(map[string]graph.EffectSet, len(workflow.Nodes)), effects: make(map[graph.Effect]struct{})}
 	for _, mock := range contractCase.Mocks {
@@ -598,7 +630,7 @@ func contractMockRegistry(kinds stepkind.Registry, workflow graph.Graph, contrac
 	registry := stepkind.NewRegistry()
 	registered := make(map[string]struct{})
 	for _, node := range workflow.Nodes {
-		_, spec, err := stepkind.Resolve(kinds, node.Kind, node.KindVersion)
+		kind, spec, err := stepkind.Resolve(kinds, node.Kind, node.KindVersion)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -609,7 +641,14 @@ func contractMockRegistry(kinds stepkind.Registry, workflow graph.Graph, contrac
 		}
 		base := &contractMockKind{spec: spec, catalog: catalog}
 		var controlled stepkind.StepKind = base
-		if spec.Lifecycle.Prepare {
+		provider, reversible := kind.(stepkind.ReversibilityProvider)
+		if reversible {
+			reversibleMock := &contractReversibleMockKind{contractMockKind: base, provider: provider}
+			controlled = reversibleMock
+			if spec.Lifecycle.Prepare {
+				controlled = &contractPreparedReversibleMockKind{contractReversibleMockKind: reversibleMock}
+			}
+		} else if spec.Lifecycle.Prepare {
 			controlled = &contractPreparedMockKind{contractMockKind: base}
 		}
 		if err := registry.Register(controlled); err != nil {
@@ -630,6 +669,14 @@ func (k *contractMockKind) ValidateConfig(context.Context, graph.Config) []diagn
 // keeping qualification execution fully controlled by the literal mock.
 func (k *contractPreparedMockKind) Prepare(_ context.Context, invocation stepkind.Invocation) (stepkind.PreparedInvocation, error) {
 	return stepkind.PreparedInvocation{Invocation: invocation}, nil
+}
+
+func (k *contractPreparedReversibleMockKind) Prepare(_ context.Context, invocation stepkind.Invocation) (stepkind.PreparedInvocation, error) {
+	return stepkind.PreparedInvocation{Invocation: invocation}, nil
+}
+
+func (k *contractReversibleMockKind) DescribeReversibility(ctx context.Context, request stepkind.ReversibilityRequest) (stepkind.ReversibilityEvidence, error) {
+	return k.provider.DescribeReversibility(ctx, request)
 }
 
 func (k *contractMockKind) Execute(ctx context.Context, prepared stepkind.PreparedInvocation) (stepkind.StepResult, error) {
@@ -672,16 +719,27 @@ func (k *contractMockKind) Execute(ctx context.Context, prepared stepkind.Prepar
 		}
 		k.catalog.calls = append(k.catalog.calls, cloned)
 	}
+	produced := stepkind.StepResult{}
+	if result.Outputs != nil {
+		outputs, err := cloneContractValueSet(result.Outputs)
+		if err != nil {
+			return stepkind.StepResult{}, contractMockFailure("contract_mock_output", "controlled output is not JSON-compatible")
+		}
+		produced.Outcome, produced.Outputs = stepkind.StepCompleted, outputs
+	}
+	if result.Compensation != nil {
+		receipt, err := cloneContractCompensationReceipt(*result.Compensation)
+		if err != nil {
+			return stepkind.StepResult{}, contractMockFailure("contract_mock_compensation", "controlled compensation receipt is not persistable")
+		}
+		produced.Outcome, produced.Compensation = stepkind.StepCompleted, &receipt
+	}
 	if result.Failure != nil {
 		failureCopy := *result.Failure
 		failureCopy.Details = cloneContractStrings(result.Failure.Details)
-		return stepkind.StepResult{}, &failureCopy
+		return produced, &failureCopy
 	}
-	outputs, err := cloneContractValueSet(result.Outputs)
-	if err != nil {
-		return stepkind.StepResult{}, contractMockFailure("contract_mock_output", "controlled output is not JSON-compatible")
-	}
-	return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: outputs}, nil
+	return produced, nil
 }
 
 func contractMockResult(results []ContractMockResult, iteration string, attempt int) (ContractMockResult, bool) {
@@ -834,6 +892,14 @@ func cloneContractValueSet(input values.ValueSet) (values.ValueSet, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+func cloneContractCompensationReceipt(input stepkind.CompensationReceipt) (stepkind.CompensationReceipt, error) {
+	valuesCopy, err := cloneContractValueSet(input.Values)
+	if err != nil {
+		return stepkind.CompensationReceipt{}, err
+	}
+	return stepkind.CompensationReceipt{Operation: input.Operation, Values: valuesCopy, ChildRunID: input.ChildRunID}, nil
 }
 
 func cloneContractStrings(input map[string]string) map[string]string {

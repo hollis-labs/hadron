@@ -227,6 +227,7 @@ func (s RunSnapshot) Validate() error {
 // the record CAS revision; ClaimGeneration changes only on successful claims.
 type NodeInvocationSnapshot struct {
 	ID      NodeInvocationID    `json:"id"`
+	Phase   InvocationPhase     `json:"phase,omitempty"`
 	Status  NodeStatus          `json:"status"`
 	Blocked *BlockedReason      `json:"blocked,omitempty"`
 	Inputs  *values.ValueSetRef `json:"inputs,omitempty"`
@@ -254,6 +255,9 @@ func (s NodeInvocationSnapshot) Validate() error {
 	}
 	if !s.Status.Valid() {
 		return fmt.Errorf("unsupported node status %q", s.Status)
+	}
+	if !s.Phase.Valid() {
+		return fmt.Errorf("unsupported invocation phase %q", s.Phase)
 	}
 	if err := validateBlocked(s.Status == NodeBlocked, s.Blocked); err != nil {
 		return err

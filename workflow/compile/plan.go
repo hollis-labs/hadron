@@ -330,9 +330,6 @@ func stripNodeLocations(node *graph.Node) {
 		stripVerification(node.Service.ReadyCheck)
 		stripExtension(&node.Service.Extension)
 	}
-	if node.Compensation != nil {
-		stripExtension(&node.Compensation.Extension)
-	}
 	for name, extension := range node.Extensions {
 		stripExtension(&extension)
 		node.Extensions[name] = extension

@@ -92,6 +92,20 @@ func (s NodeStatus) Valid() bool {
 	}
 }
 
+// InvocationPhase is the durable lifecycle lane for an invocation. Empty is
+// the ordinary forward lane for source compatibility; compensation is created
+// only by the saga store after the terminal intent fence is established.
+type InvocationPhase string
+
+const (
+	InvocationForward      InvocationPhase = ""
+	InvocationCompensation InvocationPhase = "compensation"
+)
+
+func (p InvocationPhase) Valid() bool {
+	return p == InvocationForward || p == InvocationCompensation
+}
+
 // Terminal reports whether an aggregate node status cannot be reopened.
 func (s NodeStatus) Terminal() bool {
 	switch s {

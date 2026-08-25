@@ -126,6 +126,12 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 	if len(findings) != 0 {
 		return StartRunResult{Diagnostics: findings}, nil
 	}
+	if plan.Graph.Compensation != nil {
+		compensation, ok := h.state.(runtime.CompensationStore)
+		if !ok || nilInterface(compensation) {
+			return StartRunResult{}, fmt.Errorf("start workflow: compensated plan requires durable compensation state: %w", runtime.ErrInvalidCompensation)
+		}
+	}
 	if planSnapshot == nil {
 		sealed, sealErr := hoststate.SealPlanSnapshot(hoststate.PlanSnapshot{
 			SchemaVersion: hoststate.PlanSnapshotSchemaVersion, Plan: *plan,
@@ -524,7 +530,11 @@ func (h *Host) verifyRejectedPinnedStart(ctx context.Context, record hoststate.S
 	if run.Status != runtime.RunCanceled {
 		return errors.New("rejected pins require a canceled runtime run")
 	}
+	handlers := runtime.CompensationHandlers(record.Plan.Graph)
 	for _, planNode := range record.Plan.Graph.Nodes {
+		if _, dormant := handlers[graph.NormalizeID(planNode.ID)]; dormant {
+			continue
+		}
 		node, loadErr := h.state.LoadNodeInvocation(ctx, runtime.NodeInvocationID{RunID: run.ID, NodeID: planNode.ID})
 		if loadErr != nil {
 			return fmt.Errorf("load rejected pinned start node %s: %w", planNode.ID, loadErr)
@@ -614,6 +624,9 @@ func (h *Host) materializeNodes(ctx context.Context, record hoststate.StartRecor
 	nodes := append([]graph.Node(nil), record.Plan.Graph.Nodes...)
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	for _, node := range nodes {
+		if _, dormant := runtime.CompensationHandlers(record.Plan.Graph)[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		id := runtime.NodeInvocationID{RunID: record.Run.ID, NodeID: node.ID}
 		if _, loadErr := h.state.LoadNodeInvocation(ctx, id); loadErr == nil {
 			continue
@@ -650,6 +663,9 @@ func (h *Host) readyRootNodes(ctx context.Context, record hoststate.StartRecord)
 	nodes := append([]graph.Node(nil), record.Plan.Graph.Nodes...)
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	for _, node := range nodes {
+		if _, dormant := runtime.CompensationHandlers(record.Plan.Graph)[graph.NormalizeID(node.ID)]; dormant {
+			continue
+		}
 		if hasDependencies(record.Plan.Graph, node.ID) {
 			continue
 		}

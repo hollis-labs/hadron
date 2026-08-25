@@ -219,7 +219,11 @@ func (s *WorkflowStateStore) ApplyExternalOperation(ctx context.Context, request
 		if runErr != nil {
 			return runErr
 		}
-		if !run.Status.Active() {
+		allowedRun, runAdmissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, currentNode)
+		if runAdmissionErr != nil {
+			return runAdmissionErr
+		}
+		if !allowedRun {
 			if run.Status != workflowruntime.RunCanceled || !allowedCanceledResolution {
 				return workflowInvalid(errors.New("terminal run fences external mutation"))
 			}

@@ -77,7 +77,11 @@ func (s *WorkflowStateStore) ClaimNode(ctx context.Context, request workflowrunt
 		if err != nil {
 			return err
 		}
-		if !run.Status.Active() || !eligible || current.Status != workflowruntime.NodeReady ||
+		allowedRun, admissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, current)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		if !allowedRun || !eligible || current.Status != workflowruntime.NodeReady ||
 			(current.Lease != nil && current.Lease.ExpiresAt.After(now)) {
 			result = workflowruntime.ClaimResult{Acquired: false}
 			return recordWorkflowClaimIdempotency(ctx, query, request.IdempotencyKey, requestJSON, result)

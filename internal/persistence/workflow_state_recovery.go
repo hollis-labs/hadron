@@ -74,7 +74,11 @@ func (s *WorkflowStateStore) BindNodeInputs(ctx context.Context, request workflo
 		if loadErr != nil {
 			return loadErr
 		}
-		if !run.Status.Active() {
+		allowedRun, runAdmissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, node)
+		if runAdmissionErr != nil {
+			return runAdmissionErr
+		}
+		if !allowedRun {
 			return workflowInvalid(errors.New("terminal run fences node input binding"))
 		}
 		allowed, loadErr := workflowControlAdmissionAllowed(ctx, query, node.ID)
@@ -173,8 +177,12 @@ func (s *WorkflowStateStore) ReconcileCrashedAttempt(ctx context.Context, reques
 		if loadErr != nil {
 			return loadErr
 		}
-		if !run.Status.Active() {
-			return workflowInvalid(errors.New("terminal run fences crash reconciliation"))
+		allowedRun, admissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, node)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		if !allowedRun {
+			return workflowInvalid(errors.New("run admission fences crash reconciliation"))
 		}
 		allowed, loadErr := workflowControlAdmissionAllowed(ctx, query, node.ID)
 		if loadErr != nil {
@@ -558,6 +566,10 @@ func canonicalWorkflowReplayRequest(r workflowruntime.BeginReplayRequest) workfl
 
 func cloneWorkflowReplayRequest(r workflowruntime.BeginReplayRequest) workflowruntime.BeginReplayRequest {
 	r.Inputs = cloneWorkflowValueRef(r.Inputs)
+	if r.Provenance.CompensationAuthorization != nil {
+		copy := *r.Provenance.CompensationAuthorization
+		r.Provenance.CompensationAuthorization = &copy
+	}
 	r.Provenance.Policy = append([]workflowruntime.ReplayNodePolicy(nil), r.Provenance.Policy...)
 	for i := range r.Provenance.Policy {
 		r.Provenance.Policy[i].Attempt = cloneWorkflowAttemptID(r.Provenance.Policy[i].Attempt)

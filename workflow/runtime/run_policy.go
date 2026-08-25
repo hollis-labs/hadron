@@ -62,6 +62,7 @@ type ApplyRunFailurePolicyRequest struct {
 	IntendedStatus           RunStatus        `json:"intended_status"`
 	Reason                   Failure          `json:"reason"`
 	ErrorValues              values.ValueSet  `json:"error_values"`
+	CompensationRequired     bool             `json:"compensation_required,omitempty"`
 	IdempotencyKey           string           `json:"idempotency_key"`
 	Finalizers               []FinalizerScope `json:"finalizers"`
 	At                       time.Time        `json:"at"`
@@ -215,10 +216,16 @@ func (c *RunPolicyCoordinator) HandleRunFailure(ctx context.Context, request Han
 	if err != nil {
 		return ApplyRunFailurePolicyResult{}, err
 	}
+	_, compensationRequired := compensationTriggerForStatus(request.Workflow.Compensation, status)
+	if compensationRequired {
+		if compensation, ok := c.Store.(CompensationStore); !ok || compensation == nil {
+			return ApplyRunFailurePolicyResult{}, fmt.Errorf("%w: compensation store is required before fail-fast intent", ErrInvalidRunPolicy)
+		}
+	}
 	return c.Policies.ApplyRunFailurePolicy(context.WithoutCancel(ctx), ApplyRunFailurePolicyRequest{
 		RunID: request.Source.RunID, ExpectedRunGeneration: run.Generation, Trigger: request.Source, ExpectedSourceGeneration: node.Generation,
 		IntendedStatus: status, Reason: failure, ErrorValues: values.ValueSet{"error": typed}, IdempotencyKey: request.IdempotencyKey,
-		Finalizers: finalizers, At: request.At,
+		CompensationRequired: compensationRequired, Finalizers: finalizers, At: request.At,
 	})
 }
 

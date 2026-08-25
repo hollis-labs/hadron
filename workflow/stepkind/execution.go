@@ -146,6 +146,14 @@ func (i Invocation) Validate() error {
 			return fmt.Errorf("invocation service binding: %w", err)
 		}
 	}
+	if i.Compensation != nil {
+		if err := validateRuntimeText("compensation operation", i.Compensation.Operation); err != nil {
+			return err
+		}
+		if err := values.ValidateSchema(i.Compensation.ReceiptSchema); err != nil {
+			return fmt.Errorf("compensation receipt schema: %w", err)
+		}
+	}
 	if i.Verification != nil {
 		if err := validateRuntimeJSON(i.Verification); err != nil {
 			return fmt.Errorf("invocation verification must be JSON-compatible: %w", err)
@@ -223,6 +231,20 @@ func (r StepResult) Validate() error {
 			return fmt.Errorf("external outcome requires only an external operation reference")
 		}
 		if err := r.External.Validate(); err != nil {
+			return err
+		}
+	}
+	if r.Compensation != nil {
+		if r.Outcome != StepCompleted {
+			return fmt.Errorf("compensation receipt requires a completed outcome")
+		}
+		if err := validateRuntimeText("compensation operation", r.Compensation.Operation); err != nil {
+			return err
+		}
+		if err := values.ValidatePersistableSet(r.Compensation.Values); err != nil {
+			return fmt.Errorf("compensation receipt: %w", err)
+		}
+		if err := validateOptionalRuntimeText("compensation child run id", r.Compensation.ChildRunID); err != nil {
 			return err
 		}
 	}

@@ -19,25 +19,26 @@ type Metadata map[string]any
 // Graph is the canonical in-memory workflow graph shared by all engine
 // frontends and hosts.
 type Graph struct {
-	ID          string                      `json:"id" yaml:"id"`
-	Namespace   string                      `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Version     string                      `json:"version" yaml:"version"`
-	Digest      string                      `json:"digest" yaml:"digest"`
-	Provenance  Provenance                  `json:"provenance,omitempty" yaml:"provenance,omitempty"`
-	Inputs      []InputSpec                 `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Outputs     []OutputSpec                `json:"outputs,omitempty" yaml:"outputs,omitempty"`
-	Nodes       []Node                      `json:"nodes" yaml:"nodes"`
-	Edges       []Edge                      `json:"edges,omitempty" yaml:"edges,omitempty"`
-	Activations []ActivationDeclaration     `json:"activations,omitempty" yaml:"activations,omitempty"`
-	Source      *SourceRef                  `json:"source,omitempty" yaml:"source,omitempty"`
-	SourceMap   SourceMap                   `json:"source_map,omitempty" yaml:"source_map,omitempty"`
-	Concurrency ConcurrencySpec             `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
-	Completion  *RunCompletionPolicy        `json:"completion,omitempty" yaml:"completion,omitempty"`
-	Durability  *DurabilitySpec             `json:"durability,omitempty" yaml:"durability,omitempty"`
-	Policy      []PolicyRequirement         `json:"policy_requirements,omitempty" yaml:"policy_requirements,omitempty"`
-	Target      ExecutionTargetRequirements `json:"execution_target,omitempty" yaml:"execution_target,omitempty"`
-	Extensions  map[string]Extension        `json:"extensions,omitempty" yaml:"extensions,omitempty"`
-	Metadata    Metadata                    `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	ID           string                      `json:"id" yaml:"id"`
+	Namespace    string                      `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Version      string                      `json:"version" yaml:"version"`
+	Digest       string                      `json:"digest" yaml:"digest"`
+	Provenance   Provenance                  `json:"provenance,omitempty" yaml:"provenance,omitempty"`
+	Inputs       []InputSpec                 `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Outputs      []OutputSpec                `json:"outputs,omitempty" yaml:"outputs,omitempty"`
+	Nodes        []Node                      `json:"nodes" yaml:"nodes"`
+	Edges        []Edge                      `json:"edges,omitempty" yaml:"edges,omitempty"`
+	Activations  []ActivationDeclaration     `json:"activations,omitempty" yaml:"activations,omitempty"`
+	Source       *SourceRef                  `json:"source,omitempty" yaml:"source,omitempty"`
+	SourceMap    SourceMap                   `json:"source_map,omitempty" yaml:"source_map,omitempty"`
+	Concurrency  ConcurrencySpec             `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
+	Completion   *RunCompletionPolicy        `json:"completion,omitempty" yaml:"completion,omitempty"`
+	Compensation *CompensationPolicy         `json:"compensation,omitempty" yaml:"compensation,omitempty"`
+	Durability   *DurabilitySpec             `json:"durability,omitempty" yaml:"durability,omitempty"`
+	Policy       []PolicyRequirement         `json:"policy_requirements,omitempty" yaml:"policy_requirements,omitempty"`
+	Target       ExecutionTargetRequirements `json:"execution_target,omitempty" yaml:"execution_target,omitempty"`
+	Extensions   map[string]Extension        `json:"extensions,omitempty" yaml:"extensions,omitempty"`
+	Metadata     Metadata                    `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // InputSpec declares a named, schema-bearing workflow input.

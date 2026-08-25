@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/hollis-labs/hadron/workflow/graph"
@@ -137,13 +138,73 @@ func (b ReplayFanOutBinding) Validate(source, target RunID) error {
 
 // ReplayProvenance is the immutable durable explanation of one replay run.
 type ReplayProvenance struct {
-	RunID          RunID              `json:"run_id"`
-	SourceRunID    RunID              `json:"source_run_id"`
-	FromNodeID     string             `json:"from_node_id"`
-	PlanDigest     string             `json:"plan_digest"`
-	IdempotencyKey string             `json:"idempotency_key"`
-	Policy         []ReplayNodePolicy `json:"policy"`
-	CreatedAt      time.Time          `json:"created_at"`
+	RunID                     RunID                            `json:"run_id"`
+	SourceRunID               RunID                            `json:"source_run_id"`
+	FromNodeID                string                           `json:"from_node_id"`
+	PlanDigest                string                           `json:"plan_digest"`
+	IdempotencyKey            string                           `json:"idempotency_key"`
+	Policy                    []ReplayNodePolicy               `json:"policy"`
+	CompensationAuthorization *ReplayCompensationAuthorization `json:"compensation_authorization,omitempty"`
+	CreatedAt                 time.Time                        `json:"created_at"`
+}
+
+// ReplayCompensationAuthorization is the bounded host-issued proof for
+// replaying a source whose rollback is indeterminate or did not succeed. It
+// binds the exact immutable source-ledger observation without retaining the
+// caller's free-form justification.
+type ReplayCompensationAuthorization struct {
+	LedgerGeneration uint64              `json:"ledger_generation"`
+	LedgerOutcome    CompensationOutcome `json:"ledger_outcome,omitempty"`
+	RiskDigest       string              `json:"risk_digest,omitempty"`
+	Digest           string              `json:"digest"`
+}
+
+func (a ReplayCompensationAuthorization) Validate() error {
+	ledgerProof := a.LedgerGeneration != 0 && (a.LedgerOutcome == "" || a.LedgerOutcome.Valid())
+	if a.LedgerGeneration == 0 && a.LedgerOutcome != "" || !ledgerProof && a.RiskDigest == "" {
+		return fmt.Errorf("replay compensation authorization requires exact ledger or risk evidence")
+	}
+	if a.RiskDigest != "" {
+		if err := values.ValidateDigest(a.RiskDigest); err != nil {
+			return err
+		}
+	}
+	return values.ValidateDigest(a.Digest)
+}
+
+// ReplayCompensationRiskDigest returns a stable digest for terminal
+// compensable attempts whose receipt contract left application indeterminate.
+// An empty result proves that no such durable failure fact exists.
+func ReplayCompensationRiskDigest(ctx context.Context, store StateStore, replay ReplayStore, runID RunID) (string, error) {
+	invocations, err := replay.ListRunInvocations(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	var facts []string
+	for _, invocation := range invocations {
+		if invocation.Phase == InvocationCompensation {
+			continue
+		}
+		attempts, loadErr := store.ListAttempts(ctx, invocation.ID)
+		if loadErr != nil {
+			return "", loadErr
+		}
+		for _, attempt := range attempts {
+			if attempt.Failure == nil {
+				continue
+			}
+			marker := attempt.Failure.Details["effect_applied"]
+			if marker != "missing_receipt" && marker != "unverified_receipt" && marker != "unrequested_receipt" {
+				continue
+			}
+			facts = append(facts, fmt.Sprintf("%s\x00%d\x00%s\x00%s\x00%s\x00%d", attempt.ID.Invocation, attempt.ID.Number, marker, attempt.Failure.Code, attempt.FinishedAt.UTC().Format(time.RFC3339Nano), attempt.Generation))
+		}
+	}
+	if len(facts) == 0 {
+		return "", nil
+	}
+	sort.Strings(facts)
+	return values.SHA256Digest([]byte(strings.Join(facts, "\n"))), nil
 }
 
 func (p ReplayProvenance) Validate() error {
@@ -164,6 +225,11 @@ func (p ReplayProvenance) Validate() error {
 	}
 	if p.CreatedAt.IsZero() {
 		return fmt.Errorf("replay created_at is required")
+	}
+	if p.CompensationAuthorization != nil {
+		if err := p.CompensationAuthorization.Validate(); err != nil {
+			return err
+		}
 	}
 	var previous NodeInvocationID
 	for index, item := range p.Policy {
@@ -259,11 +325,12 @@ type ReplayStore interface {
 }
 
 type ReplayRequest struct {
-	SourceRunID    RunID
-	RunID          RunID
-	FromNodeID     string
-	IdempotencyKey string
-	At             time.Time
+	SourceRunID               RunID
+	RunID                     RunID
+	FromNodeID                string
+	IdempotencyKey            string
+	CompensationAuthorization *ReplayCompensationAuthorization
+	At                        time.Time
 }
 
 // ReplayService validates the complete downstream effect surface before the
@@ -303,7 +370,49 @@ func (s *ReplayService) Rerun(ctx context.Context, request ReplayRequest) (Begin
 	if _, ok := graphNode(plan.Plan.Graph, request.FromNodeID); !ok {
 		return BeginReplayResult{}, fmt.Errorf("%w: selected node is absent from graph", ErrInvalidReplay)
 	}
+	if _, dormant := CompensationHandlers(plan.Plan.Graph)[request.FromNodeID]; dormant {
+		return BeginReplayResult{}, fmt.Errorf("%w: compensation handler cannot be a forward replay boundary", ErrInvalidReplay)
+	}
 	fresh := replayDownstream(plan.Plan.Graph, request.FromNodeID)
+	riskDigest, riskErr := ReplayCompensationRiskDigest(ctx, s.Store, s.Replay, source.ID)
+	if riskErr != nil {
+		return BeginReplayResult{}, riskErr
+	}
+	requiresAuthorization := riskDigest != ""
+	var requiredLedgerGeneration uint64
+	var requiredLedgerOutcome CompensationOutcome
+	compensation, compensationOK := s.Store.(CompensationStore)
+	if plan.Plan.Graph.Compensation != nil && (!compensationOK || compensation == nil) {
+		return BeginReplayResult{}, fmt.Errorf("%w: compensated source plan requires a compensation store", ErrRecoveryUnsafe)
+	}
+	if compensationOK && compensation != nil {
+		ledger, ledgerErr := compensation.LoadCompensationLedger(ctx, source.ID)
+		if ledgerErr == nil {
+			entries, entryErr := compensation.ListCompensationEntries(ctx, source.ID)
+			if entryErr != nil {
+				return BeginReplayResult{}, entryErr
+			}
+			for _, entry := range entries {
+				if entry.Status == CompensationSucceeded {
+					markReplayDownstream(plan.Plan.Graph, entry.Source.NodeID, fresh)
+				}
+			}
+			if ledger.Status != CompensationTerminal || ledger.Outcome == CompensationOutcomePartial || ledger.Outcome == CompensationOutcomeFailed || ledger.Outcome == CompensationOutcomeCanceled {
+				requiresAuthorization = true
+				requiredLedgerGeneration, requiredLedgerOutcome = ledger.Generation, ledger.Outcome
+			}
+		} else if !errors.Is(ledgerErr, ErrNotFound) {
+			return BeginReplayResult{}, ledgerErr
+		}
+	}
+	if requiresAuthorization {
+		authorization := request.CompensationAuthorization
+		if authorization == nil || authorization.Validate() != nil || authorization.LedgerGeneration != requiredLedgerGeneration || authorization.LedgerOutcome != requiredLedgerOutcome || authorization.RiskDigest != riskDigest {
+			return BeginReplayResult{}, fmt.Errorf("%w: source compensation risk requires explicit exact attestation", ErrRecoveryUnsafe)
+		}
+	} else if request.CompensationAuthorization != nil {
+		return BeginReplayResult{}, fmt.Errorf("%w: source compensation authorization is not applicable", ErrInvalidReplay)
+	}
 	bindings := make([]ReplayNodeBinding, 0, len(plan.Plan.Graph.Nodes))
 	policies := make([]ReplayNodePolicy, 0)
 	var fanOuts []ReplayFanOutBinding
@@ -341,6 +450,9 @@ func (s *ReplayService) Rerun(ctx context.Context, request ReplayRequest) (Begin
 	sort.Slice(fanOuts, func(i, j int) bool { return invocationLess(fanOuts[i].Target.Parent, fanOuts[j].Target.Parent) })
 	sort.Slice(invocations, func(i, j int) bool { return invocationLess(invocations[i].ID, invocations[j].ID) })
 	for _, node := range invocations {
+		if node.Phase == InvocationCompensation {
+			continue
+		}
 		definition, exists := graphNode(plan.Plan.Graph, node.ID.NodeID)
 		if !exists {
 			return BeginReplayResult{}, fmt.Errorf("%w: source invocation is absent from pinned graph", ErrInvalidReplay)
@@ -403,7 +515,7 @@ func (s *ReplayService) Rerun(ctx context.Context, request ReplayRequest) (Begin
 		}
 		policies = append(policies, ReplayNodePolicy{Invocation: id, Attempt: attemptID, Decision: decision})
 	}
-	provenance := ReplayProvenance{RunID: request.RunID, SourceRunID: source.ID, FromNodeID: request.FromNodeID, PlanDigest: source.Plan.Digest, IdempotencyKey: request.IdempotencyKey, Policy: policies, CreatedAt: request.At.UTC()}
+	provenance := ReplayProvenance{RunID: request.RunID, SourceRunID: source.ID, FromNodeID: request.FromNodeID, PlanDigest: source.Plan.Digest, IdempotencyKey: request.IdempotencyKey, Policy: policies, CompensationAuthorization: cloneReplayCompensationAuthorization(request.CompensationAuthorization), CreatedAt: request.At.UTC()}
 	result, beginErr := s.Replay.BeginReplay(context.WithoutCancel(ctx), BeginReplayRequest{Provenance: provenance, Plan: source.Plan, Inputs: source.Inputs, ExpectedSourceGeneration: source.Generation, Nodes: bindings, FanOuts: fanOuts})
 	if beginErr != nil {
 		return BeginReplayResult{}, beginErr
@@ -416,6 +528,14 @@ func (s *ReplayService) Rerun(ctx context.Context, request ReplayRequest) (Begin
 		return result, rebuildErr
 	}
 	return result, nil
+}
+
+func cloneReplayCompensationAuthorization(input *ReplayCompensationAuthorization) *ReplayCompensationAuthorization {
+	if input == nil {
+		return nil
+	}
+	copy := *input
+	return &copy
 }
 
 func (s *ReplayService) validate(ctx context.Context, request ReplayRequest) error {
@@ -493,4 +613,11 @@ func replayDownstream(workflow graph.Graph, from string) map[string]bool {
 		}
 	}
 	return result
+}
+
+func markReplayDownstream(workflow graph.Graph, from string, result map[string]bool) {
+	marked := replayDownstream(workflow, from)
+	for nodeID := range marked {
+		result[nodeID] = true
+	}
 }

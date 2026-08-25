@@ -13,6 +13,7 @@ import (
 var standardExpressionRoots = map[string]struct{}{
 	"inputs":           {},
 	"outputs":          {},
+	"compensation":     {},
 	"steps":            {},
 	"item":             {},
 	"index":            {},

@@ -46,7 +46,8 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_external_activations": "table",
 		"workflow_services":             "table",
 		"workflow_exposure_profiles":    "table", "workflow_mcp_principals": "table",
-		"workflow_a2a_tasks":         "table",
+		"workflow_a2a_tasks":            "table",
+		"workflow_compensation_ledgers": "table", "workflow_compensation_entries": "table", "workflow_compensation_idempotency": "table",
 		"idx_workflow_runs_recovery": "index", "idx_workflow_nodes_recovery": "index",
 		"idx_workflow_node_leases_expiry": "index", "idx_workflow_attempts_invocation": "index",
 		"idx_workflow_waits_recovery": "index", "idx_workflow_waits_deadline": "index",
@@ -64,7 +65,8 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"idx_workflow_scheduler_holders_capacity": "index", "idx_workflow_scheduler_holders_invocation": "index",
 		"idx_workflow_scheduler_waiters_order": "index",
 		"idx_workflow_crash_recovery_attempt":  "index", "idx_workflow_replay_source": "index",
-		"idx_workflow_memo_lookup":         "index",
+		"idx_workflow_memo_lookup":           "index",
+		"idx_workflow_compensation_recovery": "index", "idx_workflow_compensation_entries_status": "index",
 		"idx_workflow_plan_snapshots_plan": "index", "idx_workflow_host_start_plan_snapshot_ref": "index",
 		"workflow_events_reject_update": "trigger", "workflow_events_reject_delete": "trigger",
 		"workflow_external_operations_immutable_binding": "trigger", "workflow_external_operations_reject_delete": "trigger",
@@ -85,6 +87,11 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_services_reject_delete":       "trigger",
 		"workflow_plan_snapshots_reject_update": "trigger", "workflow_host_start_plan_snapshots_reject_update": "trigger",
 		"workflow_host_start_plan_snapshots_reject_delete": "trigger",
+		"workflow_compensation_ledgers_immutable_identity": "trigger", "workflow_compensation_entries_immutable_evidence": "trigger",
+		"workflow_compensation_ledgers_cycles_append_only": "trigger", "workflow_compensation_entries_history_append_only": "trigger",
+		"workflow_compensation_ledgers_reject_delete": "trigger", "workflow_compensation_entries_reject_delete": "trigger",
+		"workflow_compensation_idempotency_reject_update": "trigger", "workflow_compensation_idempotency_reject_delete": "trigger",
+		"workflow_node_invocations_phase_valid_insert": "trigger", "workflow_node_invocations_phase_immutable": "trigger",
 	}
 	for name, kind := range objects {
 		var found string
@@ -141,6 +148,15 @@ SELECT name FROM sqlite_master WHERE type = ? AND name = ?`, kind, name).Scan(&f
 	}
 	if migrations != 1 {
 		t.Fatalf("migration 28 count = %d, want 1", migrations)
+	}
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 29`).Scan(&migrations); err != nil {
+		t.Fatalf("read migration version 29: %v", err)
+	}
+	if migrations != 1 {
+		t.Fatalf("migration 29 count = %d, want 1", migrations)
+	}
+	if !hasColumn(t, store, "workflow_node_invocations", "phase") {
+		t.Fatal("workflow_node_invocations missing compensation phase")
 	}
 	if !hasColumn(t, store, "workflow_fanouts", "fail_fast") {
 		t.Fatal("workflow_fanouts missing fail_fast persistence")

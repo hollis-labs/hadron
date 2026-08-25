@@ -54,6 +54,9 @@ const (
 	// CodeInvalidDurability identifies a durability mode or reactor policy that
 	// cannot be implemented truthfully by the selected graph and executor set.
 	CodeInvalidDurability diagnostic.Code = "HADR-SOURCE-037"
+	// CodeInvalidCompensation identifies a structurally or operationally
+	// unsupported compensation declaration.
+	CodeInvalidCompensation diagnostic.Code = "HADR-SOURCE-038"
 
 	// CodeUnknownDependency identifies an explicit dependency endpoint absent
 	// from the graph.
@@ -206,6 +209,7 @@ func validate(ctx context.Context, value graph.Graph, root graph.DefinitionRef, 
 	}
 	v.validateStructure()
 	v.validateNodes()
+	v.validateCompensation()
 	v.validateDurability()
 	v.validateCalls()
 	sortDiagnostics(v.diagnostics)

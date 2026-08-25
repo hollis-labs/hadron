@@ -45,11 +45,19 @@ func (s *WorkflowStateStore) ScheduleNodeRetry(ctx context.Context, request work
 	}
 	var result workflowruntime.ScheduleNodeRetryResult
 	writeErr := s.write(ctx, "schedule workflow node retry", func(query workflowSQL) error {
+		node, nodeErr := loadWorkflowNode(ctx, query, request.Activation.Attempt.Invocation)
+		if nodeErr != nil {
+			return nodeErr
+		}
 		run, runErr := loadWorkflowRun(ctx, query, request.Activation.Attempt.Invocation.RunID)
 		if runErr != nil {
 			return runErr
 		}
-		if !run.Status.Active() {
+		allowedRun, runAdmissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, node)
+		if runAdmissionErr != nil {
+			return runAdmissionErr
+		}
+		if !allowedRun {
 			return workflowInvalid(errors.New("terminal run cannot schedule retry"))
 		}
 		allowed, err := workflowControlAdmissionAllowed(ctx, query, request.Activation.Attempt.Invocation)
@@ -59,7 +67,7 @@ func (s *WorkflowStateStore) ScheduleNodeRetry(ctx context.Context, request work
 		if !allowed {
 			return workflowInvalid(errors.New("pending terminal intent fences retry scheduling"))
 		}
-		node, nodeErr := loadWorkflowNode(ctx, query, request.Activation.Attempt.Invocation)
+		node, nodeErr = loadWorkflowNode(ctx, query, request.Activation.Attempt.Invocation)
 		if nodeErr != nil {
 			return nodeErr
 		}
@@ -218,7 +226,15 @@ func (s *WorkflowStateStore) ActivateNodeRetry(ctx context.Context, request work
 		if runErr != nil {
 			return runErr
 		}
-		if !run.Status.Active() {
+		node, nodeErr := loadWorkflowNode(ctx, query, activation.Attempt.Invocation)
+		if nodeErr != nil {
+			return nodeErr
+		}
+		allowedRun, runAdmissionErr := workflowRunAllowsCompensationExecution(ctx, query, run, node)
+		if runAdmissionErr != nil {
+			return runAdmissionErr
+		}
+		if !allowedRun {
 			return workflowInvalid(errors.New("terminal run fences retry activation"))
 		}
 		allowed, err := workflowControlAdmissionAllowed(ctx, query, activation.Attempt.Invocation)
@@ -227,10 +243,6 @@ func (s *WorkflowStateStore) ActivateNodeRetry(ctx context.Context, request work
 		}
 		if !allowed {
 			return workflowInvalid(errors.New("pending terminal intent fences retry activation"))
-		}
-		node, nodeErr := loadWorkflowNode(ctx, query, activation.Attempt.Invocation)
-		if nodeErr != nil {
-			return nodeErr
 		}
 		if node.Generation != request.ExpectedNodeGeneration {
 			return workflowCAS("node invocation", request.ExpectedNodeGeneration, node.Generation)

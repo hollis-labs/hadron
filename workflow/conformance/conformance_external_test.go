@@ -21,6 +21,30 @@ type fakeHost struct {
 
 type completeFakeHost struct{ fakeHost }
 
+type compensationFakeHost struct{ completeFakeHost }
+
+func (h compensationFakeHost) CompensationFactory() conformance.Factory {
+	return func() (conformance.Runner, error) {
+		return conformance.RunnerFunc(func(_ context.Context, fixture conformance.Fixture) error {
+			var input struct {
+				Scenario string `json:"scenario"`
+			}
+			if err := json.Unmarshal(fixture.Input, &input); err != nil {
+				return err
+			}
+			(*h.calls)++
+			switch input.Scenario {
+			case "reverse_order", "independent_parallel", "crash_recovery", "stable_retry", "separate_cancel", "nested_child", "partial", "failed", "replay":
+				return nil
+			case "unsupported_claim":
+				return errors.New("reversibility evidence is unsupported")
+			default:
+				return fmt.Errorf("unsupported compensation scenario %q", input.Scenario)
+			}
+		}), nil
+	}
+}
+
 func (h completeFakeHost) VerificationFactory() conformance.Factory {
 	return func() (conformance.Runner, error) {
 		return conformance.RunnerFunc(func(ctx context.Context, fixture conformance.Fixture) error {
@@ -204,6 +228,17 @@ func TestExternalHostRunsCompleteSuites(t *testing.T) {
 	}
 }
 
+func TestExternalHostRunsExhaustiveCompensationSuiteWithoutWideningCompleteHost(t *testing.T) {
+	calls := 0
+	conformance.RunExhaustive(t, conformance.EmbeddedFixtures(), compensationFakeHost{completeFakeHost{fakeHost{calls: &calls}}})
+
+	const wantCalls = 64
+	if calls != wantCalls {
+		t.Fatalf("fixture calls = %d, want %d", calls, wantCalls)
+	}
+	var _ conformance.CompleteHost = completeFakeHost{}
+}
+
 func TestEmbeddedFixtureTopology(t *testing.T) {
 	sets := []conformance.FixtureSet{
 		conformance.GraphValidationFixtures,
@@ -215,6 +250,7 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 		conformance.ExecutorMetadataFixtures,
 		conformance.VerificationFixtures,
 		conformance.MemoizationFixtures,
+		conformance.CompensationFixtures,
 	}
 	store := conformance.EmbeddedFixtures()
 
@@ -246,6 +282,9 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 			if set == conformance.MemoizationFixtures {
 				wantCount = 4
 			}
+			if set == conformance.CompensationFixtures {
+				wantCount = 10
+			}
 			if len(fixtures) != wantCount {
 				t.Fatalf("fixture count = %d, want %d", len(fixtures), wantCount)
 			}
@@ -269,6 +308,21 @@ func TestEmbeddedFixtureTopology(t *testing.T) {
 					if fixture := byName[name]; fixture.Expectation != conformance.ExpectPass {
 						t.Fatalf("%s fixture = %#v, want scheduler policy pass fixture", name, fixture)
 					}
+				}
+				return
+			}
+			if set == conformance.CompensationFixtures {
+				for _, name := range []string{
+					"compensation-reverse-order", "compensation-independent-parallel", "compensation-crash-recovery",
+					"compensation-stable-retry", "compensation-separate-cancel", "compensation-nested-child-ledger",
+					"compensation-partial-best-effort", "compensation-all-handlers-failed", "compensation-forward-replay-fence",
+				} {
+					if byName[name].Expectation != conformance.ExpectPass {
+						t.Fatalf("%s fixture = %#v", name, byName[name])
+					}
+				}
+				if byName["compensation-unsupported-reversibility"].Expectation != conformance.ExpectFail {
+					t.Fatalf("unsupported compensation fixture = %#v", byName["compensation-unsupported-reversibility"])
 				}
 				return
 			}

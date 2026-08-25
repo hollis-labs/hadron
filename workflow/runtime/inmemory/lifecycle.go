@@ -299,6 +299,10 @@ func (s *Store) FinishNodeAttempt(ctx context.Context, request workflowruntime.F
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.finishNodeAttemptLocked(request)
+}
+
+func (s *Store) finishNodeAttemptLocked(request workflowruntime.FinishNodeAttemptRequest) (workflowruntime.FinishNodeAttemptResult, error) {
 	currentNode, ok := s.nodes[request.InvocationID]
 	if !ok {
 		return workflowruntime.FinishNodeAttemptResult{}, fmt.Errorf("%w: node invocation", workflowruntime.ErrNotFound)
@@ -306,7 +310,7 @@ func (s *Store) FinishNodeAttempt(ctx context.Context, request workflowruntime.F
 	if currentNode.Generation != request.ExpectedNodeGeneration {
 		return workflowruntime.FinishNodeAttemptResult{}, casMismatch("node invocation", request.ExpectedNodeGeneration, currentNode.Generation)
 	}
-	if run, exists := s.runs[currentNode.ID.RunID]; exists && !run.Status.Active() {
+	if !s.runAllowsExecutionLocked(currentNode.ID) {
 		return workflowruntime.FinishNodeAttemptResult{}, invalid(errors.New("terminal run fences attempt completion"))
 	}
 	if !s.controlAdmissionAllowedLocked(currentNode.ID) {

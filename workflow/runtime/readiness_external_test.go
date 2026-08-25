@@ -514,7 +514,7 @@ func makeTerminalNode(t *testing.T, store workflowruntime.StateStore, id workflo
 		}
 		return
 	}
-	claim := claimNode(t, store, id, node.ClaimGeneration, "terminal-worker", "terminal-token-"+id.NodeID, "terminal-claim-"+id.NodeID, at, at.Add(time.Hour))
+	claim := claimNode(t, store, id, node.ClaimGeneration, "terminal-worker", "terminal-token-"+id.NodeID+"-"+id.Iteration, "terminal-claim-"+id.NodeID+"-"+id.Iteration, at, at.Add(time.Hour))
 	claimed, err := store.LoadNodeInvocation(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)

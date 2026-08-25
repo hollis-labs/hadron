@@ -220,16 +220,19 @@ type TerminalIntentSnapshot struct {
 	IntendedStatus RunStatus `json:"intended_status"`
 	// SuccessOutputsRequired is derived from the exact graph when the intent
 	// is created and is immutable across cleanup, recovery, and replay.
-	SuccessOutputsRequired bool                 `json:"success_outputs_required,omitempty"`
-	Reason                 *Failure             `json:"reason,omitempty"`
-	Error                  *values.ValueSetRef  `json:"error,omitempty"`
-	IdempotencyKey         string               `json:"idempotency_key"`
-	Finalizers             []FinalizerScope     `json:"finalizers"`
-	Status                 TerminalIntentStatus `json:"status"`
-	Generation             uint64               `json:"generation"`
-	CreatedAt              time.Time            `json:"created_at"`
-	UpdatedAt              time.Time            `json:"updated_at"`
-	CompletedAt            time.Time            `json:"completed_at,omitempty"`
+	SuccessOutputsRequired bool `json:"success_outputs_required,omitempty"`
+	// CompensationRequired is graph-derived and fences terminal completion
+	// until an exact plan-bound ledger reaches a terminal summary.
+	CompensationRequired bool                 `json:"compensation_required,omitempty"`
+	Reason               *Failure             `json:"reason,omitempty"`
+	Error                *values.ValueSetRef  `json:"error,omitempty"`
+	IdempotencyKey       string               `json:"idempotency_key"`
+	Finalizers           []FinalizerScope     `json:"finalizers"`
+	Status               TerminalIntentStatus `json:"status"`
+	Generation           uint64               `json:"generation"`
+	CreatedAt            time.Time            `json:"created_at"`
+	UpdatedAt            time.Time            `json:"updated_at"`
+	CompletedAt          time.Time            `json:"completed_at,omitempty"`
 }
 
 func (s TerminalIntentSnapshot) Validate() error {
@@ -300,6 +303,7 @@ type BeginTerminalIntentRequest struct {
 	// SuccessOutputsRequired must be derived from the exact graph and may be
 	// true only for a successful intent with declared workflow outputs.
 	SuccessOutputsRequired bool
+	CompensationRequired   bool
 	Reason                 *Failure
 	// ErrorValues is atomically persisted and bound for unsuccessful intent.
 	ErrorValues    values.ValueSet
@@ -316,9 +320,10 @@ type BeginTerminalIntentResult struct {
 }
 
 type RequestRunCancellationWithFinalizersRequest struct {
-	Cancellation RequestRunCancellationRequest
-	Finalizers   []FinalizerScope
-	ErrorValues  values.ValueSet
+	Cancellation         RequestRunCancellationRequest
+	Finalizers           []FinalizerScope
+	CompensationRequired bool
+	ErrorValues          values.ValueSet
 	// Descendants is the canonical RunID-ordered plan for every recursively
 	// reachable ParentCloseCancel child. Entries with no finalizers are
 	// explicit so the store can validate the complete local cancellation tree
@@ -334,6 +339,7 @@ type CancellationDescendantPlan struct {
 	ExpectedRunGeneration uint64
 	IdempotencyKey        string
 	Finalizers            []FinalizerScope
+	CompensationRequired  bool
 	ErrorValues           values.ValueSet
 }
 
@@ -349,16 +355,21 @@ func (p CancellationDescendantPlan) Validate(reason Failure) error {
 	if err := validateRequiredText("cancellation descendant idempotency key", p.IdempotencyKey); err != nil {
 		return err
 	}
-	if len(p.Finalizers) == 0 {
+	if len(p.Finalizers) == 0 && !p.CompensationRequired {
 		if len(p.ErrorValues) != 0 {
-			return fmt.Errorf("cancellation descendant without finalizers cannot carry error values")
+			return fmt.Errorf("cancellation descendant without cleanup cannot carry error values")
 		}
 		return nil
 	}
-	if err := validateFinalizerScopes(p.RunID, p.Finalizers); err != nil {
+	if len(p.Finalizers) != 0 {
+		if err := validateFinalizerScopes(p.RunID, p.Finalizers); err != nil {
+			return err
+		}
+	}
+	if err := ValidateRunControlErrorValues(p.ErrorValues, p.RunID, RunCanceled); err != nil {
 		return err
 	}
-	return ValidateRunControlErrorValues(p.ErrorValues, p.RunID, RunCanceled)
+	return nil
 }
 
 // Validate reports malformed cancellation-tree transport. State stores also
@@ -367,15 +378,17 @@ func (r RequestRunCancellationWithFinalizersRequest) Validate() error {
 	if err := r.Cancellation.Validate(); err != nil {
 		return err
 	}
-	if len(r.Finalizers) != 0 {
-		if err := validateFinalizerScopes(r.Cancellation.RunID, r.Finalizers); err != nil {
-			return err
+	if len(r.Finalizers) != 0 || r.CompensationRequired {
+		if len(r.Finalizers) != 0 {
+			if err := validateFinalizerScopes(r.Cancellation.RunID, r.Finalizers); err != nil {
+				return err
+			}
 		}
 		if err := ValidateRunControlErrorValues(r.ErrorValues, r.Cancellation.RunID, RunCanceled); err != nil {
 			return err
 		}
 	} else if len(r.ErrorValues) != 0 {
-		return fmt.Errorf("cancellation root without finalizers cannot carry error values")
+		return fmt.Errorf("cancellation root without cleanup cannot carry error values")
 	}
 	keys := map[string]struct{}{r.Cancellation.IdempotencyKey: {}}
 	var previous RunID
@@ -461,16 +474,21 @@ type ControlFlowStore interface {
 // ControlFlowCoordinator evaluates expressions outside storage transactions
 // and persists only their deterministic selected-route facts.
 type ControlFlowCoordinator struct {
-	Store     StateStore
-	Control   ControlFlowStore
-	Evaluator PredicateEvaluator
+	Store        StateStore
+	Control      ControlFlowStore
+	Evaluator    PredicateEvaluator
+	Compensation CompensationStore
 }
 
 func NewControlFlowCoordinator(store StateStore, control ControlFlowStore, evaluator PredicateEvaluator) *ControlFlowCoordinator {
 	if evaluator == nil {
 		evaluator = values.NewExpressionEngine()
 	}
-	return &ControlFlowCoordinator{Store: store, Control: control, Evaluator: evaluator}
+	coordinator := &ControlFlowCoordinator{Store: store, Control: control, Evaluator: evaluator}
+	if compensation, ok := store.(CompensationStore); ok {
+		coordinator.Compensation = compensation
+	}
+	return coordinator
 }
 
 type DecideSwitchRequest struct {

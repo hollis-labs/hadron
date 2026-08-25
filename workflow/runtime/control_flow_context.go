@@ -362,6 +362,7 @@ func PlanFinalizerScopes(workflow graph.Graph, runID RunID) ([]FinalizerScope, e
 		members  map[string]struct{}
 	}
 	definitions := make(map[string]graph.Node, len(workflow.Nodes))
+	handlers := CompensationHandlers(workflow)
 	var finalizers []planned
 	for _, node := range workflow.Nodes {
 		if err := graph.ValidateID(node.ID); err != nil {
@@ -377,7 +378,7 @@ func PlanFinalizerScopes(workflow graph.Graph, runID RunID) ([]FinalizerScope, e
 			scope := make(map[string]struct{}, len(node.Finally.Scope))
 			if len(node.Finally.Scope) == 0 {
 				for _, member := range workflow.Nodes {
-					if member.Finally == nil {
+					if member.Finally == nil && !isCompensationHandler(workflow, member.ID) {
 						scope[member.ID] = struct{}{}
 					}
 				}
@@ -385,6 +386,9 @@ func PlanFinalizerScopes(workflow graph.Graph, runID RunID) ([]FinalizerScope, e
 				for _, member := range node.Finally.Scope {
 					if _, exists := definitions[member]; !exists {
 						return nil, fmt.Errorf("%w: finally %q scopes unknown node %q", ErrInvalidControlFlow, node.ID, member)
+					}
+					if _, handler := handlers[graph.NormalizeID(member)]; handler {
+						return nil, fmt.Errorf("%w: finally %q scopes dormant compensation handler %q", ErrInvalidControlFlow, node.ID, member)
 					}
 					scope[member] = struct{}{}
 				}
@@ -532,6 +536,18 @@ func (c *ControlFlowCoordinator) PreviewFinally(ctx context.Context, workflow gr
 	if intent.Status != TerminalIntentPending {
 		return FinalizerPreview{}, fmt.Errorf("%w: terminal intent is complete", ErrControlFlowConflict)
 	}
+	if intent.CompensationRequired {
+		if c.Compensation == nil {
+			return FinalizerPreview{}, fmt.Errorf("%w: compensation store is required", ErrInvalidControlFlow)
+		}
+		ledger, ledgerErr := c.Compensation.LoadCompensationLedger(ctx, invocation.RunID)
+		if errors.Is(ledgerErr, ErrNotFound) || ledgerErr == nil && ledger.Status != CompensationTerminal {
+			return FinalizerPreview{}, ErrCompensationPending
+		}
+		if ledgerErr != nil {
+			return FinalizerPreview{}, ledgerErr
+		}
+	}
 	var selected *FinalizerScope
 	for index := range intent.Finalizers {
 		if intent.Finalizers[index].Invocation == invocation {
@@ -669,8 +685,12 @@ func (c *ControlFlowCoordinator) RequestRunCancellationTree(ctx context.Context,
 	if planErr != nil {
 		return RequestRunCancellationWithFinalizersResult{}, planErr
 	}
+	_, rootCompensation := compensationTriggerForStatus(workflow.Compensation, RunCanceled)
+	if rootCompensation && c.Compensation == nil {
+		return RequestRunCancellationWithFinalizersResult{}, fmt.Errorf("%w: compensation store is required before cancellation intent", ErrInvalidControlFlow)
+	}
 	rootValues := values.ValueSet{}
-	if len(scopes) != 0 {
+	if len(scopes) != 0 || rootCompensation {
 		typed, valueErr := NewRunFailureValue(request.RunID, RunCanceled, request.Reason)
 		if valueErr != nil {
 			return RequestRunCancellationWithFinalizersResult{}, valueErr
@@ -695,11 +715,15 @@ func (c *ControlFlowCoordinator) RequestRunCancellationTree(ctx context.Context,
 		if planErr != nil {
 			return RequestRunCancellationWithFinalizersResult{}, planErr
 		}
+		_, childCompensation := compensationTriggerForStatus(descendant.Graph.Compensation, RunCanceled)
+		if childCompensation && c.Compensation == nil {
+			return RequestRunCancellationWithFinalizersResult{}, fmt.Errorf("%w: compensation store is required before descendant cancellation intent", ErrInvalidControlFlow)
+		}
 		plan := CancellationDescendantPlan{
 			RunID: descendant.Run.ID, ExpectedRunGeneration: descendant.Run.Generation,
-			IdempotencyKey: cancellationTreeKey(request.IdempotencyKey, descendant.Run.ID), Finalizers: childScopes, ErrorValues: values.ValueSet{},
+			IdempotencyKey: cancellationTreeKey(request.IdempotencyKey, descendant.Run.ID), Finalizers: childScopes, CompensationRequired: childCompensation, ErrorValues: values.ValueSet{},
 		}
-		if len(childScopes) != 0 {
+		if len(childScopes) != 0 || childCompensation {
 			typed, valueErr := NewRunFailureValue(descendant.Run.ID, RunCanceled, request.Reason)
 			if valueErr != nil {
 				return RequestRunCancellationWithFinalizersResult{}, valueErr
@@ -710,7 +734,7 @@ func (c *ControlFlowCoordinator) RequestRunCancellationTree(ctx context.Context,
 		previous = descendant.Run.ID
 	}
 	return c.Control.RequestRunCancellationWithFinalizers(context.WithoutCancel(ctx), RequestRunCancellationWithFinalizersRequest{
-		Cancellation: request, Finalizers: scopes, ErrorValues: rootValues, Descendants: descendantPlans,
+		Cancellation: request, Finalizers: scopes, CompensationRequired: rootCompensation, ErrorValues: rootValues, Descendants: descendantPlans,
 	})
 }
 
@@ -746,7 +770,11 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 		if accountErr != nil {
 			return RunSnapshot{}, nil, accountErr
 		}
-		if len(scopes) == 0 {
+		trigger, compensate := compensationTriggerForStatus(workflow.Compensation, status)
+		if compensate && c.Compensation == nil {
+			return RunSnapshot{}, nil, fmt.Errorf("%w: compensation store is required before terminal intent", ErrInvalidControlFlow)
+		}
+		if len(scopes) == 0 && !compensate {
 			if status == RunSucceeded && len(workflow.Outputs) != 0 {
 				return run, nil, ErrRunOutputsPending
 			}
@@ -768,18 +796,24 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 		begin, beginErr := c.Control.BeginTerminalIntent(context.WithoutCancel(ctx), BeginTerminalIntentRequest{
 			RunID: runID, ExpectedRunGeneration: run.Generation, IntendedStatus: status, Reason: reason,
 			SuccessOutputsRequired: status == RunSucceeded && len(workflow.Outputs) != 0,
+			CompensationRequired:   compensate,
 			ErrorValues:            errorValues, IdempotencyKey: idempotencyKey, Finalizers: scopes, At: at,
 		})
 		if beginErr != nil {
 			return RunSnapshot{}, nil, beginErr
 		}
 		intent, run = begin.Intent, begin.Run
+		_ = trigger
 	} else if intentErr != nil {
 		return RunSnapshot{}, nil, intentErr
 	}
 	expectedOutputs := intent.IntendedStatus == RunSucceeded && len(workflow.Outputs) != 0
 	if intent.SuccessOutputsRequired != expectedOutputs {
 		return RunSnapshot{}, nil, fmt.Errorf("%w: terminal intent output requirement differs from the exact graph", ErrControlFlowConflict)
+	}
+	expectedTrigger, expectedCompensation := compensationTriggerForStatus(workflow.Compensation, intent.IntendedStatus)
+	if intent.CompensationRequired != expectedCompensation {
+		return RunSnapshot{}, nil, fmt.Errorf("%w: terminal intent compensation requirement differs from the exact graph", ErrControlFlowConflict)
 	}
 	if intent.Status == TerminalIntentCompleted {
 		// The run and intent are independent reads. A concurrent recovery worker
@@ -795,6 +829,25 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 		}
 		return currentRun, &intent, nil
 	}
+	if intent.CompensationRequired {
+		if c.Compensation == nil {
+			return RunSnapshot{}, nil, fmt.Errorf("%w: compensation store is required", ErrInvalidControlFlow)
+		}
+		ledger, ledgerErr := c.Compensation.LoadCompensationLedger(ctx, runID)
+		if errors.Is(ledgerErr, ErrNotFound) || ledgerErr == nil && ledger.Status == CompensationCollecting {
+			freeze, freezeErr := c.Compensation.FreezeCompensation(context.WithoutCancel(ctx), FreezeCompensationRequest{RunID: runID, PlanDigest: run.Plan.Digest, ExpectedRunGeneration: run.Generation, ExpectedIntentGeneration: intent.Generation, Trigger: expectedTrigger, OriginalStatus: intent.IntendedStatus, OriginalFailure: intent.Error, Dependencies: compensationDependencies(workflow), IdempotencyKey: "compensation-freeze:" + idempotencyKey, At: at})
+			if freezeErr != nil {
+				return RunSnapshot{}, nil, freezeErr
+			}
+			ledger = freeze.Ledger
+		} else if ledgerErr != nil {
+			return RunSnapshot{}, nil, ledgerErr
+		}
+		if ledger.Status != CompensationTerminal {
+			return run, &intent, ErrCompensationPending
+		}
+		at = maxRecoveryTime(at, ledger.UpdatedAt)
+	}
 	cleanupFailed := false
 	for _, finalizer := range intent.Finalizers {
 		node, loadErr := c.Store.LoadNodeInvocation(ctx, finalizer.Invocation)
@@ -804,6 +857,7 @@ func (c *ControlFlowCoordinator) ReconcileRunCompletion(ctx context.Context, wor
 		if !node.Status.Terminal() {
 			return run, &intent, ErrControlFlowPending
 		}
+		at = maxRecoveryTime(at, node.UpdatedAt)
 		cleanupFailed = cleanupFailed || hardFailure(node.Status)
 	}
 	if intent.SuccessOutputsRequired && !cleanupFailed {
@@ -853,7 +907,7 @@ func (c *ControlFlowCoordinator) accountOrdinaryNodes(ctx context.Context, workf
 	priority := map[NodeStatus]int{NodeCanceled: 1, NodeFailed: 2, NodeTimedOut: 3, NodeCrashed: 4}
 	selectedPriority := 0
 	for _, definition := range workflow.Nodes {
-		if definition.Finally != nil {
+		if definition.Finally != nil || isCompensationHandler(workflow, definition.ID) {
 			continue
 		}
 		node, err := c.Store.LoadNodeInvocation(ctx, NodeInvocationID{RunID: runID, NodeID: definition.ID})
@@ -921,4 +975,27 @@ func (c *ControlFlowCoordinator) accountOrdinaryNodes(ctx context.Context, workf
 		}
 	}
 	return status, reason, origin, nil
+}
+
+func compensationTriggerForStatus(policy *graph.CompensationPolicy, status RunStatus) (graph.CompensationTrigger, bool) {
+	if policy == nil {
+		return "", false
+	}
+	var trigger graph.CompensationTrigger
+	switch status {
+	case RunFailed, RunCrashed:
+		trigger = graph.CompensationOnFailure
+	case RunCanceled:
+		trigger = graph.CompensationOnCancel
+	case RunTimedOut:
+		trigger = graph.CompensationOnTimeout
+	default:
+		return "", false
+	}
+	for _, candidate := range policy.Triggers {
+		if candidate == trigger {
+			return trigger, true
+		}
+	}
+	return "", false
 }

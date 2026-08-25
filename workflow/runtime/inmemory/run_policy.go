@@ -79,7 +79,7 @@ func (s *Store) ApplyRunFailurePolicy(ctx context.Context, request workflowrunti
 		return workflowruntime.ApplyRunFailurePolicyResult{}, invalid(err)
 	}
 	backup := s.backupCancellationStateLocked()
-	begin, err := s.beginTerminalIntentLocked(workflowruntime.BeginTerminalIntentRequest{RunID: request.RunID, ExpectedRunGeneration: request.ExpectedRunGeneration, IntendedStatus: request.IntendedStatus, Reason: &request.Reason, ErrorValues: request.ErrorValues, IdempotencyKey: request.IdempotencyKey, Finalizers: request.Finalizers, At: request.At})
+	begin, err := s.beginTerminalIntentLocked(workflowruntime.BeginTerminalIntentRequest{RunID: request.RunID, ExpectedRunGeneration: request.ExpectedRunGeneration, IntendedStatus: request.IntendedStatus, Reason: &request.Reason, ErrorValues: request.ErrorValues, CompensationRequired: request.CompensationRequired, IdempotencyKey: request.IdempotencyKey, Finalizers: request.Finalizers, At: request.At})
 	if err != nil {
 		return workflowruntime.ApplyRunFailurePolicyResult{}, err
 	}
