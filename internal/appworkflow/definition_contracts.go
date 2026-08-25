@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	DefinitionKindFile     = "file"
-	DefinitionKindRegistry = "registry"
-	DefinitionKindPackage  = "package"
+	DefinitionKindFile      = "file"
+	DefinitionKindRegistry  = "registry"
+	DefinitionKindPackage   = "package"
+	DefinitionKindAuthoring = "authoring"
 
 	CodeDefinitionInvalid      diagnostic.Code = "HADR-HOST-020"
 	CodeDefinitionUnauthorized diagnostic.Code = "HADR-HOST-021"
@@ -73,12 +74,15 @@ func (f DefinitionAuthorizerFunc) AuthorizeDefinition(ctx context.Context, reque
 // provenance are defensively copied by resolver boundaries. Digest always
 // hashes selected source bytes, never a package/container.
 type ResolvedSource struct {
-	Requested  graph.DefinitionRef
-	Definition graph.DefinitionRef
-	Bytes      []byte
-	Digest     string
-	TrustClass string
-	Movable    bool
+	Requested           graph.DefinitionRef
+	Definition          graph.DefinitionRef
+	Bytes               []byte
+	Digest              string
+	SourceFormat        graph.SourceFormat
+	SourceSchemaID      string
+	SourceSchemaVersion string
+	TrustClass          string
+	Movable             bool
 }
 
 type DefinitionCompileOptions struct {
@@ -109,6 +113,7 @@ type DefinitionResolverOptions struct {
 	PackageAuthority  string
 	PackageTrustClass string
 	Registry          hadronregistry.WorkflowResolver
+	Authoring         AuthoringSourceResolver
 	Authorizer        DefinitionAuthorizer
 	// BundledDefinitions resolves exact generated children from durable plan
 	// snapshots. It is optional only for hosts that do not admit bundled calls.
@@ -120,6 +125,18 @@ type DefinitionResolverOptions struct {
 	MaxArchiveBytes      int64
 	MaxArchiveEntries    int
 	MaxArchiveTotalBytes int64
+}
+
+// AuthoringSourceResolver exposes only exact, immutable, pre-registration
+// material staged for validation and contract qualification.
+type AuthoringSourceResolver interface {
+	ResolveAuthoringSource(context.Context, graph.DefinitionRef) (ResolvedSource, error)
+}
+
+type AuthoringSourceResolverFunc func(context.Context, graph.DefinitionRef) (ResolvedSource, error)
+
+func (f AuthoringSourceResolverFunc) ResolveAuthoringSource(ctx context.Context, ref graph.DefinitionRef) (ResolvedSource, error) {
+	return f(ctx, ref)
 }
 
 // DefinitionDiagnosticError preserves graph-native diagnostics through host

@@ -65,10 +65,10 @@ export function FlowBuilderPage() {
   const [validation, setValidation] = useState<WorkflowValidateResult>();
   const [runLookup, setRunLookup] = useState('');
 
-  const sourceReady = definition.id.trim() !== '' && (definition.kind === 'registry' || definition.locator?.trim() !== '');
+  const sourceReady = (definition.id ?? '').trim() !== '' && (definition.kind === 'registry' || definition.locator?.trim() !== '');
   const normalizedDefinition = useMemo<WorkflowDefinitionRef>(() => ({
     kind: definition.kind,
-    id: definition.id.trim(),
+    id: (definition.id ?? '').trim(),
     ...(definition.authority?.trim() ? { authority: definition.authority.trim() } : {}),
     ...(definition.locator?.trim() ? { locator: definition.locator.trim() } : {}),
     ...(definition.version?.trim() ? { version: definition.version.trim() } : {}),

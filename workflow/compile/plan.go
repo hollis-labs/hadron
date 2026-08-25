@@ -80,6 +80,28 @@ type CompileResult struct {
 	Diagnostics []diagnostic.Diagnostic
 }
 
+// SemanticPlanFingerprint is a tooling-only equivalence identity. Its struct
+// shape deliberately prevents accidental use as a runtime PlanRef or
+// definition digest, both of which must retain exact source identity.
+type SemanticPlanFingerprint struct {
+	SchemaVersion  string             `json:"schema_version"`
+	SemanticDigest SemanticPlanDigest `json:"semantic_digest"`
+}
+
+// SemanticPlanDigest is not assignment-compatible with source-bound digest
+// strings accepted by DefinitionRef, PlanRef, or ExecutionPlan.
+type SemanticPlanDigest string
+
+// SemanticPlanDocument is canonical comparison material for authoring-tool
+// conformance tests. It is deliberately not an ExecutionPlan and cannot be
+// passed to a runtime, registry, or definition API.
+type SemanticPlanDocument struct {
+	SchemaVersion string          `json:"schema_version"`
+	CanonicalJSON json.RawMessage `json:"canonical_json"`
+}
+
+const semanticPlanFingerprintSchemaVersion = "workflow.semantic-plan/v1"
+
 // EdgeSourceKey returns the stable compact key used by SourceMap.Edges.
 func EdgeSourceKey(from, to string, kind graph.EdgeKind) string {
 	return from + "->" + to + ":" + string(kind)
@@ -116,6 +138,57 @@ func GraphDigest(value graph.Graph) (string, error) {
 // ignored when Compile originally assigns ExecutionPlan.Digest.
 func PlanDigest(value ExecutionPlan) (string, error) {
 	return digestPlan(value)
+}
+
+// FingerprintPlanSemantics compares plans produced by different authoring
+// front ends. It removes exact source identity in addition to ordinary source
+// locations, but preserves executable graph and bundled-definition semantics.
+// The result is never accepted by runtime or registry APIs.
+func FingerprintPlanSemantics(value ExecutionPlan) (SemanticPlanFingerprint, error) {
+	document, err := CanonicalPlanSemantics(value)
+	if err != nil {
+		return SemanticPlanFingerprint{}, err
+	}
+	return SemanticPlanFingerprint{SchemaVersion: document.SchemaVersion, SemanticDigest: SemanticPlanDigest(sourceDigest(document.CanonicalJSON))}, nil
+}
+
+// CanonicalPlanSemantics returns source-identity-free comparison material for
+// cross-front-end conformance. Runtime plan and definition digests must always
+// use PlanDigest and their exact source-bound identities instead.
+func CanonicalPlanSemantics(value ExecutionPlan) (SemanticPlanDocument, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return SemanticPlanDocument{}, fmt.Errorf("clone plan for semantic document: %w", err)
+	}
+	var canonical ExecutionPlan
+	if decodeErr := decodeCanonicalJSON(encoded, &canonical); decodeErr != nil {
+		return SemanticPlanDocument{}, fmt.Errorf("clone plan for semantic document: %w", decodeErr)
+	}
+	canonical.Digest = ""
+	canonical.Provenance = graph.Provenance{}
+	canonical.SourceMap = graph.SourceMap{}
+	canonical.SourceDigests = nil
+	canonical.Definition.Authority = ""
+	canonical.Definition.Locator = ""
+	canonical.Definition.Digest = ""
+	canonical.Definition.Provenance = nil
+	stripGraphLocations(&canonical.Graph)
+	for index := range canonical.BundledDefinitions {
+		canonical.BundledDefinitions[index].Definition.Authority = ""
+		canonical.BundledDefinitions[index].Definition.Locator = ""
+		canonical.BundledDefinitions[index].Definition.Digest = ""
+		canonical.BundledDefinitions[index].Definition.Provenance = nil
+		stripGraphLocations(&canonical.BundledDefinitions[index].Graph)
+		for name, binding := range canonical.BundledDefinitions[index].InputBindings {
+			stripBinding(&binding)
+			canonical.BundledDefinitions[index].InputBindings[name] = binding
+		}
+	}
+	encoded, err = json.Marshal(canonical)
+	if err != nil {
+		return SemanticPlanDocument{}, fmt.Errorf("marshal semantic plan: %w", err)
+	}
+	return SemanticPlanDocument{SchemaVersion: semanticPlanFingerprintSchemaVersion, CanonicalJSON: append(json.RawMessage(nil), encoded...)}, nil
 }
 
 func digestPlan(value ExecutionPlan) (string, error) {

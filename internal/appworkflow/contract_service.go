@@ -531,6 +531,7 @@ func (s *ContractRegistrationService) Register(ctx context.Context, request Regi
 	record := hadronregistry.WorkflowRecord{
 		Name: name, Namespace: namespace, Version: source.Definition.Version,
 		Digest: source.Digest, Source: source.Bytes, Authority: source.Definition.Authority,
+		SourceFormat: source.SourceFormat, SourceSchemaID: source.SourceSchemaID, SourceSchemaVersion: source.SourceSchemaVersion,
 		TrustClass: source.TrustClass, Provenance: provenance, PlanDigest: validation.Plan.Digest,
 		ContractSuiteDigest: request.Report.SuiteDigest, ContractTestDigest: request.Report.Digest, TestsPassed: request.Report.Passed,
 		PublisherPrincipal: principal,

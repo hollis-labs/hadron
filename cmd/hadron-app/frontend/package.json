@@ -9,7 +9,9 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "lint:eslint": "eslint .",
-    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "generate:workflow": "cd ../../.. && go generate ./internal/api",
+    "check:workflow-generated": "cd ../../.. && go test ./internal/api -run '^TestGeneratedWorkflowSchemasAreCurrent$'",
+    "test": "npm run check:workflow-generated && node --import tsx --test \"src/**/*.test.ts\"",
     "test:e2e": "playwright test",
     "preview": "vite preview"
   },

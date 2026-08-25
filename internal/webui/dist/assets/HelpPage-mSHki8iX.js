@@ -1,4 +1,4 @@
-import{G as e,U as t,V as n,n as r,q as i,t as a}from"./button-C_7cUJsy.js";import{t as o}from"./folder-plus-ocD-qMO2.js";import{B as s,c,d as l,f as u,it as d,k as f,o as p,s as m,u as h}from"./index-BzYXrXue.js";var g=i(e(),1),_=n(),v=[{key:`general`,label:`General`},{key:`blueprints`,label:`Blueprints`},{key:`pipelines`,label:`Pipelines`},{key:`examples`,label:`Examples`}],y=[{kind:`blueprint`,title:`Hello World`,description:`Minimal blueprint that echoes a greeting. Great starting point.`,filename:`hello-world.yaml`,yaml:`version: "0.4"
+import{G as e,U as t,V as n,n as r,q as i,t as a}from"./button-C_7cUJsy.js";import{t as o}from"./folder-plus-ocD-qMO2.js";import{B as s,c,d as l,f as u,it as d,k as f,o as p,s as m,u as h}from"./index-BboCKVAR.js";var g=i(e(),1),_=n(),v=[{key:`general`,label:`General`},{key:`blueprints`,label:`Blueprints`},{key:`pipelines`,label:`Pipelines`},{key:`examples`,label:`Examples`}],y=[{kind:`blueprint`,title:`Hello World`,description:`Minimal blueprint that echoes a greeting. Great starting point.`,filename:`hello-world.yaml`,yaml:`version: "0.4"
 blueprint:
   name: hello-world
   slug: hello-world

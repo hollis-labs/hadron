@@ -185,11 +185,13 @@ const (
 	SourceSDK SourceFormat = "sdk"
 	// SourceUI is graph material emitted through a user interface.
 	SourceUI SourceFormat = "ui"
+	// SourceAgent is graph material emitted by an agent authoring surface.
+	SourceAgent SourceFormat = "agent"
 )
 
 // Valid reports whether f is a supported source format.
 func (f SourceFormat) Valid() bool {
-	return oneOf(f, SourceWorkflow, SourceArchivedBlueprint, SourceArchivedPipeline, SourceSDK, SourceUI)
+	return oneOf(f, SourceWorkflow, SourceArchivedBlueprint, SourceArchivedPipeline, SourceSDK, SourceUI, SourceAgent)
 }
 
 // OverlapPolicy controls overlapping source activations.

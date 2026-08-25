@@ -89,19 +89,6 @@ func CompileWithOptions(source *Source, options CompileOptions) CompileResult {
 	if len(l.diagnostics) != 0 {
 		return CompileResult{Diagnostics: l.diagnostics}
 	}
-	bundled, expansionDiagnostics := expandGraph(compiledGraph, options)
-	if len(expansionDiagnostics) != 0 {
-		return CompileResult{Diagnostics: expansionDiagnostics}
-	}
-	compiledGraph = bundled.Graph
-	sourceMap = compiledGraph.SourceMap
-	graphDigest, err := digestGraph(compiledGraph)
-	if err != nil {
-		l.invalidShape(root, nil, err.Error())
-		return CompileResult{Diagnostics: l.diagnostics}
-	}
-	compiledGraph.Digest = graphDigest
-
 	definition := graph.DefinitionRef{
 		Authority: header.provenance.Authority,
 		Kind:      "workflow",
@@ -109,23 +96,11 @@ func CompileWithOptions(source *Source, options CompileOptions) CompileResult {
 		Version:   header.version,
 		Digest:    rawDigest,
 	}
-	plan := ExecutionPlan{
-		SchemaVersion:      ExecutionPlanSchemaVersion,
-		ID:                 header.id,
-		Definition:         definition,
-		Provenance:         header.provenance,
-		SourceDigests:      []SourceDigest{{Format: graph.SourceWorkflow, Digest: rawDigest}},
-		Graph:              compiledGraph,
-		SourceMap:          sourceMap,
-		BundledDefinitions: bundled.Definitions,
+	result := finalizeGraph(compiledGraph, definition, []SourceDigest{{Format: graph.SourceWorkflow, Digest: rawDigest}}, options)
+	if len(result.Diagnostics) != 0 {
+		return result
 	}
-	planDigest, err := digestPlan(plan)
-	if err != nil {
-		l.invalidShape(root, nil, err.Error())
-		return CompileResult{Diagnostics: l.diagnostics}
-	}
-	plan.Digest = planDigest
-	return CompileResult{Plan: &plan}
+	return result
 }
 
 type loweredHeader struct {

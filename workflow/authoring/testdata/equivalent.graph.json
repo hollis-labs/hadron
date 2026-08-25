@@ -1,0 +1,13 @@
+{
+  "id": "equivalent",
+  "version": "v1",
+  "digest": "",
+  "nodes": [
+    {
+      "id": "work",
+      "kind": "fixture",
+      "kind_version": "v1",
+      "config": {}
+    }
+  ]
+}

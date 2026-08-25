@@ -227,6 +227,7 @@ export function getDemoWorkflowDiagnostic(runId: string): WorkflowGraphDiagnosti
       id: 'release-workflow', version: '2.4.0', digest: digest('c'), schema_version: '1', graph_digest: digest('d'),
       definition: { authority: 'registry', kind: 'workflow', id: 'release/publish', version: '2.4.0', digest: digest('e') },
       provenance: { authority: 'project', origin: 'registry', locator: '/workflows/release.workflow.yaml', revision: 'release-24', digest: digest('e') },
+      source_digests: [{ format: 'workflow', digest: digest('e') }],
       source: { format: 'workflow', locator: '/workflows/release.workflow.yaml', start_line: 1 },
       nodes: PLAN_NODES,
       edges: [
@@ -246,7 +247,14 @@ export function getDemoWorkflowDiagnostic(runId: string): WorkflowGraphDiagnosti
     ],
     control: {
       decisions: scenario === 'failed' ? [{ source: nodes[1].id, kind: 'catch', outcome: 'selected', targets: [nodes[4].id], generation: 1, created_at: at(10) }] : [],
-      terminal_intent: scenario === 'failed' || scenario === 'completed' ? { intended_status: status, status: 'completed', finalizers: [{ invocation: nodes[4].id, scope: nodes.slice(0, 4).map(item => item.id), order: 0 }] } : undefined,
+      terminal_intent: scenario === 'failed' || scenario === 'completed' ? {
+        intended_status: status,
+        status: 'completed',
+        finalizers: [{ invocation: nodes[4].id, scope: nodes.slice(0, 4).map(item => item.id), order: 0 }],
+        generation: 1,
+        created_at: at(10),
+        updated_at: at(12),
+      } : undefined,
     },
     replay: scenario === 'completed' ? { source_run_id: 'run-release-previous', from_node_id: 'qualify', plan_digest: digest('c'), created_at: at(-30), policy: [{ invocation: nodes[0].id, allow: true, code: 'reused', reason: 'immutable output reused' }] } : undefined,
     resources: scenario === 'active' ? {

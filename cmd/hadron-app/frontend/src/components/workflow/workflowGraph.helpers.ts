@@ -96,7 +96,7 @@ export function sortWorkflowInvocations(invocations: WorkflowNodeDiagnostic[]): 
     if (priority !== 0) return priority;
     const updated = Date.parse(right.updated_at) - Date.parse(left.updated_at);
     if (Number.isFinite(updated) && updated !== 0) return updated;
-    const iteration = (right.id.iteration ?? -1) - (left.id.iteration ?? -1);
+    const iteration = (right.id.iteration ?? '').localeCompare(left.id.iteration ?? '', undefined, { numeric: true });
     if (iteration !== 0) return iteration;
     return invocationKey(left).localeCompare(invocationKey(right));
   });

@@ -14,6 +14,7 @@ test('canonicalJSONStringify rejects integers that cannot cross JSON losslessly'
 test('buildInlineResumeValue produces the strict private typed envelope', async () => {
   const result = await buildInlineResumeValue('{"decision":"approve"}', 'wait-one');
   assert.equal(result.type, 'object');
+  assert.ok('inline' in result);
   assert.deepEqual(result.inline, { decision: 'approve' });
   assert.equal(result.producer.reference, 'wait-one');
   assert.equal(result.redaction, 'private');

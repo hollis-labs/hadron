@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/workflow/authoring"
 	"github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
@@ -218,7 +219,9 @@ func (r *DefinitionResolver) authorizeRequested(ctx context.Context, requested g
 
 func (r *DefinitionResolver) resolveAuthorizedSource(ctx context.Context, requested graph.DefinitionRef) (ResolvedSource, error) {
 	exactKey := ""
-	if exactDefinitionReference(requested) {
+	exactReference := exactDefinitionReference(requested)
+	cacheExactSource := exactReference && requested.Kind != DefinitionKindAuthoring
+	if cacheExactSource {
 		var cloneErr error
 		exactKey, cloneErr = exactSourceKey(requested)
 		if cloneErr != nil {
@@ -240,6 +243,7 @@ func (r *DefinitionResolver) resolveAuthorizedSource(ctx context.Context, reques
 	if resolutionErr != nil {
 		return ResolvedSource{}, resolutionErr
 	}
+	resolved = normalizeResolvedSourceSchema(resolved)
 	if validationErr := validateResolvedSourceTransport(resolved); validationErr != nil {
 		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, validationErr), requested.Locator, "resolved workflow source contains invalid transported identity or provenance", "Repair the source provider so all identities are valid UTF-8 and metadata is JSON-compatible.")
 	}
@@ -250,7 +254,7 @@ func (r *DefinitionResolver) resolveAuthorizedSource(ctx context.Context, reques
 	if resolved.Digest != values.SHA256Digest(resolved.Bytes) || resolved.Definition.Digest != resolved.Digest || resolved.Definition.Provenance == nil || resolved.Definition.Provenance.Digest != resolved.Digest {
 		return ResolvedSource{}, definitionError(CodeDefinitionPinConflict, ErrDefinitionPinConflict, requested.Locator, "resolved workflow identity does not match exact source bytes", "Repair the source provider so source digest and provenance are coherent.")
 	}
-	if exactKey != "" && resolved.Movable {
+	if exactReference && resolved.Movable {
 		return ResolvedSource{}, definitionError(CodeDefinitionPinConflict, ErrDefinitionPinConflict, requested.Locator, "exact workflow reference resolved as a movable source", "Repair the source provider so pinned registry versions and digests are immutable.")
 	}
 	if requested.Authority != "" && requested.Authority != resolved.Definition.Authority {
@@ -259,7 +263,7 @@ func (r *DefinitionResolver) resolveAuthorizedSource(ctx context.Context, reques
 	if err := r.authorizeResolved(ctx, requested, resolved); err != nil {
 		return ResolvedSource{}, err
 	}
-	if exactKey != "" {
+	if cacheExactSource {
 		r.mu.Lock()
 		if prior, exists := r.exactSources[exactKey]; exists {
 			r.mu.Unlock()
@@ -308,8 +312,15 @@ func (r *DefinitionResolver) ResolvePlan(ctx context.Context, requested graph.De
 	if err != nil {
 		return nil, err
 	}
+	definitions := compile.DefinitionResolver(r)
+	if resolved.Definition.Kind == DefinitionKindAuthoring {
+		definitions, err = r.authoringValidationResolver(plan)
+		if err != nil {
+			return nil, err
+		}
+	}
 	findings := compile.ValidatePlan(ctx, plan, compile.ValidationOptions{
-		StepKinds: r.kinds, Verifiers: r.verifiers, PolicyHooks: r.policyHooks, Definitions: r,
+		StepKinds: r.kinds, Verifiers: r.verifiers, PolicyHooks: r.policyHooks, Definitions: definitions,
 		MaxCallDepth: r.maxCallDepth,
 	})
 	if len(findings) != 0 {
@@ -318,6 +329,12 @@ func (r *DefinitionResolver) ResolvePlan(ctx context.Context, requested graph.De
 	cloned, err := cloneExecutionPlan(plan)
 	if err != nil {
 		return nil, err
+	}
+	if resolved.Definition.Kind == DefinitionKindAuthoring {
+		// Authoring plans exist only while their exact staged source is being
+		// qualified. Registration resolves the durable registry record through
+		// the ordinary cache path after qualification succeeds.
+		return cloned, nil
 	}
 	r.mu.Lock()
 	variants := r.planByDigest[cloned.Digest]
@@ -360,6 +377,10 @@ func (r *DefinitionResolver) ResolveDefinition(ctx context.Context, requested gr
 	if err != nil {
 		return compile.ResolvedDefinition{}, err
 	}
+	return r.resolveAuthorizedDefinition(ctx, requested)
+}
+
+func (r *DefinitionResolver) resolveAuthorizedDefinition(ctx context.Context, requested graph.DefinitionRef) (compile.ResolvedDefinition, error) {
 	if bundled, found, bundleErr := r.resolveAuthorizedBundle(ctx, requested); bundleErr != nil {
 		return compile.ResolvedDefinition{}, bundleErr
 	} else if found {
@@ -388,6 +409,45 @@ func (r *DefinitionResolver) ResolveDefinition(ctx context.Context, requested gr
 	definition.Digest = cloned.Graph.Digest
 	definition.Provenance = &provenance
 	return compile.ResolvedDefinition{Definition: definition, Graph: cloned.Graph}, nil
+}
+
+// authoringValidationResolver exposes only the current ephemeral plan's
+// bundled children while ValidatePlan traverses calls. It deliberately does
+// not publish those children through the resolver's process-wide caches.
+func (r *DefinitionResolver) authoringValidationResolver(plan *compile.ExecutionPlan) (compile.DefinitionResolver, error) {
+	bundled, err := compile.NewBundledDefinitionResolver(plan)
+	if err != nil {
+		return nil, definitionError(CodeDefinitionPinConflict, errors.Join(ErrDefinitionPinConflict, err), "", "authoring plan contains invalid bundled definitions", "Repair the deterministic source expander or change its semantic revision.")
+	}
+	container := planReference(plan)
+	trustClass, _ := plan.Provenance.Metadata["trust_class"].(string)
+	return compile.DefinitionResolverFunc(func(ctx context.Context, requested graph.DefinitionRef) (compile.ResolvedDefinition, error) {
+		authorized, authorizeErr := r.authorizeRequested(ctx, requested)
+		if authorizeErr != nil {
+			return compile.ResolvedDefinition{}, authorizeErr
+		}
+		resolved, resolveErr := bundled.ResolveDefinition(ctx, authorized)
+		if errors.Is(resolveErr, compile.ErrBundledDefinitionNotFound) {
+			return r.resolveAuthorizedDefinition(ctx, authorized)
+		}
+		if resolveErr != nil {
+			return compile.ResolvedDefinition{}, resolveErr
+		}
+		definition, cloneErr := cloneDefinitionReference(resolved.Definition)
+		if cloneErr != nil {
+			return compile.ResolvedDefinition{}, cloneErr
+		}
+		if authorizationErr := r.callAuthorizer(ctx, DefinitionAuthorization{
+			Stage: AuthorizationResolved, Requested: authorized, Resolved: &definition,
+			Container: &container, TrustClass: trustClass,
+		}); authorizationErr != nil {
+			return compile.ResolvedDefinition{}, definitionError(CodeDefinitionUnauthorized, errors.Join(ErrDefinitionUnauthorized, authorizationErr), "", "resolved bundled workflow definition is not authorized", "Use a plan and generated child allowed for the current principal, authority, trust class, and scope.")
+		}
+		if contextErr := ctx.Err(); contextErr != nil {
+			return compile.ResolvedDefinition{}, contextErr
+		}
+		return cloneResolvedDefinition(resolved)
+	}), nil
 }
 
 func (r *DefinitionResolver) resolveAuthorizedBundle(ctx context.Context, requested graph.DefinitionRef) (compile.ResolvedDefinition, bool, error) {
@@ -553,6 +613,12 @@ func (r *DefinitionResolver) CacheStats() DefinitionCacheStats {
 }
 
 func (r *DefinitionResolver) localPlan(ctx context.Context, source ResolvedSource) (*compile.ExecutionPlan, error) {
+	if source.Definition.Kind == DefinitionKindAuthoring {
+		// Raw agent material is deliberately outside the shared plan and flight
+		// caches. Every authoring request is bounded independently and removal
+		// from the stager makes the material immediately unreachable.
+		return r.compileLocalPlan(ctx, source)
+	}
 	contextKey, err := resolvedSourceContextKey(source)
 	if err != nil {
 		return nil, err
@@ -614,6 +680,9 @@ func (r *DefinitionResolver) localPlan(ctx context.Context, source ResolvedSourc
 
 func (r *DefinitionResolver) compileLocalPlan(ctx context.Context, source ResolvedSource) (*compile.ExecutionPlan, error) {
 	r.compilations.Add(1)
+	if source.SourceFormat != graph.SourceWorkflow {
+		return r.compileGraphIRPlan(ctx, source)
+	}
 	loaded := compile.LoadBytes(source.Definition.Locator, source.Bytes)
 	if len(loaded.Diagnostics) != 0 {
 		return nil, diagnosticsError(ErrDefinitionUnresolved, loaded.Diagnostics)
@@ -660,6 +729,62 @@ func (r *DefinitionResolver) compileLocalPlan(ctx context.Context, source Resolv
 	if len(findings) != 0 {
 		return nil, diagnosticsError(ErrDefinitionUnresolved, findings)
 	}
+	return plan, nil
+}
+
+func (r *DefinitionResolver) compileGraphIRPlan(ctx context.Context, source ResolvedSource) (*compile.ExecutionPlan, error) {
+	var graphValue graph.Graph
+	decoder := json.NewDecoder(bytes.NewReader(source.Bytes))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&graphValue); err != nil {
+		return nil, definitionError(CodeDefinitionInvalid, errors.Join(ErrDefinitionUnresolved, err), source.Definition.Locator, "graph IR could not be decoded", "Use the negotiated generated graph type without unknown fields.")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return nil, definitionError(CodeDefinitionInvalid, ErrDefinitionUnresolved, source.Definition.Locator, "graph IR contains trailing JSON", "Send exactly one canonical graph object.")
+	}
+	graphValue.Provenance = *source.Definition.Provenance
+	graphValue.Provenance.Digest = source.Digest
+	graphValue.Source = &graph.SourceRef{Format: source.SourceFormat, Locator: source.Definition.Locator}
+	if source.SourceFormat == graph.SourceAgent {
+		rebindAgentGraph(&graphValue, source.Definition.Locator, &graphValue.Provenance)
+	}
+	authored := authoring.Envelope{
+		SchemaID: authoring.EnvelopeSchemaID, SchemaVersion: authoring.EnvelopeSchemaVersion,
+		MaterialSchemaID: source.SourceSchemaID, MaterialSchemaVersion: source.SourceSchemaVersion,
+		Format: authoring.FormatGraphIR, Graph: &graphValue,
+	}
+	definition := source.Definition
+	definition.Kind = "workflow"
+	encoded, err := json.Marshal(authored)
+	if err != nil {
+		return nil, err
+	}
+	// resolveFreshSource already enforced maxSourceBytes over the exact graph
+	// material. This envelope is an internal validation carrier, so its
+	// deterministic framing overhead must not consume the caller's raw-source
+	// allowance; depth, graph shape, schema, node, and edge checks still run.
+	decoded, findings := authoring.DecodeEnvelope(encoded, authoring.Limits{MaximumBytes: len(encoded)})
+	if len(findings) != 0 {
+		return nil, diagnosticsError(ErrDefinitionUnresolved, findings)
+	}
+	result := authoring.CompileEnvelope(ctx, decoded, source.SourceFormat, authoring.CompileOptions{
+		Compile:    compile.CompileOptions{NodeExpanders: r.expanders},
+		Dependency: r.dependencies,
+		Validation: compile.ValidationOptions{StepKinds: r.kinds, Verifiers: r.verifiers, MaxCallDepth: r.maxCallDepth},
+		Definition: definition,
+	})
+	if result.Plan == nil || len(result.Diagnostics) != 0 {
+		return nil, diagnosticsError(ErrDefinitionUnresolved, result.Diagnostics)
+	}
+	plan, err := cloneExecutionPlan(result.Plan)
+	if err != nil {
+		return nil, err
+	}
+	plan.Definition.Locator = source.Definition.Locator
+	provenance := plan.Provenance
+	plan.Definition.Provenance = &provenance
 	return plan, nil
 }
 
@@ -784,6 +909,10 @@ func validateRequestedDefinitionReference(input graph.DefinitionRef) error {
 		if input.Locator == "" {
 			return errors.New("package workflow reference requires locator")
 		}
+	case DefinitionKindAuthoring:
+		if input.ID == "" || input.Locator == "" || input.Version == "" || input.Digest == "" {
+			return errors.New("authoring workflow reference requires exact id, locator, version, and digest")
+		}
 	default:
 		return fmt.Errorf("unsupported definition kind %q", input.Kind)
 	}
@@ -862,7 +991,20 @@ func validateResolvedSourceTransport(input ResolvedSource) error {
 	if !utf8.ValidString(input.TrustClass) || containsDefinitionControl(input.TrustClass) {
 		return errors.New("resolved trust class must be valid UTF-8 without control characters")
 	}
+	schemaID, schemaVersion, supported := authoring.SourceSchemaFor(input.SourceFormat)
+	if !supported || input.SourceSchemaID != schemaID || input.SourceSchemaVersion != schemaVersion {
+		return errors.New("resolved source format and schema must be explicitly supported")
+	}
 	return nil
+}
+
+func normalizeResolvedSourceSchema(input ResolvedSource) ResolvedSource {
+	if input.SourceFormat == "" && input.SourceSchemaID == "" && input.SourceSchemaVersion == "" {
+		input.SourceFormat = graph.SourceWorkflow
+		input.SourceSchemaID = authoring.WorkflowSourceSchemaID
+		input.SourceSchemaVersion = authoring.WorkflowSourceSchemaVersion
+	}
+	return input
 }
 
 func containsDefinitionControl(input string) bool {
@@ -912,12 +1054,15 @@ func exactDefinitionReference(input graph.DefinitionRef) bool {
 func equalResolvedSourceIdentity(left, right ResolvedSource) bool {
 	identity := func(input ResolvedSource) any {
 		return struct {
-			Definition graph.DefinitionRef `json:"definition"`
-			Bytes      []byte              `json:"bytes"`
-			Digest     string              `json:"digest"`
-			TrustClass string              `json:"trust_class"`
-			Movable    bool                `json:"movable"`
-		}{input.Definition, input.Bytes, input.Digest, input.TrustClass, input.Movable}
+			Definition          graph.DefinitionRef `json:"definition"`
+			Bytes               []byte              `json:"bytes"`
+			Digest              string              `json:"digest"`
+			TrustClass          string              `json:"trust_class"`
+			Movable             bool                `json:"movable"`
+			SourceFormat        graph.SourceFormat  `json:"source_format"`
+			SourceSchemaID      string              `json:"source_schema_id"`
+			SourceSchemaVersion string              `json:"source_schema_version"`
+		}{input.Definition, input.Bytes, input.Digest, input.TrustClass, input.Movable, input.SourceFormat, input.SourceSchemaID, input.SourceSchemaVersion}
 	}
 	leftJSON, leftErr := json.Marshal(identity(left))
 	rightJSON, rightErr := json.Marshal(identity(right))
@@ -926,10 +1071,13 @@ func equalResolvedSourceIdentity(left, right ResolvedSource) bool {
 
 func resolvedSourceContextKey(input ResolvedSource) (string, error) {
 	encoded, err := json.Marshal(struct {
-		Definition graph.DefinitionRef `json:"definition"`
-		Digest     string              `json:"digest"`
-		Trust      string              `json:"trust"`
-	}{input.Definition, input.Digest, input.TrustClass})
+		Definition          graph.DefinitionRef `json:"definition"`
+		Digest              string              `json:"digest"`
+		Trust               string              `json:"trust"`
+		SourceFormat        graph.SourceFormat  `json:"source_format"`
+		SourceSchemaID      string              `json:"source_schema_id"`
+		SourceSchemaVersion string              `json:"source_schema_version"`
+	}{input.Definition, input.Digest, input.TrustClass, input.SourceFormat, input.SourceSchemaID, input.SourceSchemaVersion})
 	if err != nil {
 		return "", err
 	}

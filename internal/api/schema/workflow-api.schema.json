@@ -1,0 +1,4048 @@
+{
+  "$defs": {
+    "AgentAuthoringRequest": {
+      "$ref": "#/$defs/AppworkflowAgentAuthoringRequest"
+    },
+    "AgentAuthoringResult": {
+      "$ref": "#/$defs/AppworkflowAgentAuthoringResult"
+    },
+    "AppworkflowAgentAuthoringRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "envelope": {
+          "$ref": "#/$defs/AuthoringEnvelope"
+        },
+        "id": {
+          "type": "string"
+        },
+        "make_current": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "suite": {
+          "$ref": "#/$defs/AppworkflowWorkflowContractSuite"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "envelope",
+        "id",
+        "namespace",
+        "version"
+      ],
+      "type": "object"
+    },
+    "AppworkflowAgentAuthoringResult": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/AuthoringCompactDiagnostic"
+          },
+          "type": "array"
+        },
+        "plan": {
+          "$ref": "#/$defs/RuntimePlanRef"
+        },
+        "registration": {
+          "$ref": "#/$defs/AppworkflowAgentRegistration"
+        },
+        "report": {
+          "$ref": "#/$defs/AppworkflowContractTestReport"
+        },
+        "scaffold": {
+          "$ref": "#/$defs/AppworkflowWorkflowContractSuite"
+        },
+        "schema_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "diagnostics",
+        "schema_id",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "AppworkflowAgentRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "plan_digest": {
+          "type": "string"
+        },
+        "schema_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "source_format": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/SourceFormat"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "name",
+        "namespace",
+        "plan_digest",
+        "schema_id",
+        "schema_version",
+        "source_format",
+        "version"
+      ],
+      "type": "object"
+    },
+    "AppworkflowCancelWorkflowRunRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "identity",
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "AppworkflowCancelWorkflowRunResult": {
+      "additionalProperties": false,
+      "properties": {
+        "cancellation": {
+          "$ref": "#/$defs/RuntimeRequestRunCancellationResult"
+        },
+        "failures": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowOperationIssue"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cancellation"
+      ],
+      "type": "object"
+    },
+    "AppworkflowContractCaseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowContractToolCall"
+          },
+          "type": "array"
+        },
+        "effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "failure": {
+          "$ref": "#/$defs/AppworkflowContractExpectedError"
+        },
+        "message": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output_digest": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "effects",
+        "name",
+        "passed"
+      ],
+      "type": "object"
+    },
+    "AppworkflowContractExecutorMock": {
+      "additionalProperties": false,
+      "properties": {
+        "config_schema": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Schema"
+        },
+        "expected_config": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Config"
+        },
+        "expected_inputs": {
+          "$ref": "#/$defs/ValuesValueSet"
+        },
+        "expected_inputs_editable": {
+          "type": "boolean"
+        },
+        "input_schema": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Schema"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "kind_version": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Schema"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowContractMockResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "config_schema",
+        "expected_config",
+        "expected_inputs",
+        "input_schema",
+        "kind",
+        "kind_version",
+        "node_id",
+        "output_schema",
+        "results"
+      ],
+      "type": "object"
+    },
+    "AppworkflowContractExpectedError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "type": "object"
+    },
+    "AppworkflowContractMockResult": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowContractToolCall"
+          },
+          "type": "array"
+        },
+        "expected_inputs": {
+          "$ref": "#/$defs/ValuesValueSet"
+        },
+        "failure": {
+          "$ref": "#/$defs/StepkindExecutionError"
+        },
+        "iteration": {
+          "type": "string"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesValueSet"
+        }
+      },
+      "required": [
+        "outputs"
+      ],
+      "type": "object"
+    },
+    "AppworkflowContractTestReport": {
+      "additionalProperties": false,
+      "properties": {
+        "attestation": {
+          "type": "string"
+        },
+        "cases": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowContractCaseResult"
+          },
+          "type": "array"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "plan_digest": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "suite_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attestation",
+        "cases",
+        "digest",
+        "passed",
+        "plan_digest",
+        "schema_version",
+        "suite_digest"
+      ],
+      "type": "object"
+    },
+    "AppworkflowContractToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "effect": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Effect"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/VerificationActivityOutcome"
+        }
+      },
+      "required": [
+        "arguments",
+        "effect",
+        "kind",
+        "name",
+        "node_id",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "AppworkflowExplainWorkflowRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmed": {
+          "type": "boolean"
+        },
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "inputs": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "definition",
+        "idempotency_key",
+        "identity",
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "AppworkflowIdentityRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "execution_target": {
+          "$ref": "#/$defs/HoststateExecutionTargetSelector"
+        },
+        "principal_hint": {
+          "type": "string"
+        },
+        "run_scope": {
+          "$ref": "#/$defs/HoststateRunScopeSelector"
+        },
+        "source_authority": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_authority"
+      ],
+      "type": "object"
+    },
+    "AppworkflowInspectWorkflowRunRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_limit": {
+          "type": "integer"
+        },
+        "attempt_limit": {
+          "type": "integer"
+        },
+        "display": {
+          "$ref": "#/$defs/ValuesDisplayPolicy"
+        },
+        "event_limit": {
+          "type": "integer"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "node_limit": {
+          "type": "integer"
+        },
+        "resource_limit": {
+          "type": "integer"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "value_limit": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "identity",
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "AppworkflowOperationIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "AppworkflowRerunWorkflowRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "from_node_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "source_run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "from_node_id",
+        "idempotency_key",
+        "identity",
+        "run_id",
+        "source_run_id"
+      ],
+      "type": "object"
+    },
+    "AppworkflowResumeAttemptStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RuntimeAttemptID"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeNodeStatus"
+        }
+      },
+      "required": [
+        "id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "AppworkflowResumeNodeStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeNodeStatus"
+        }
+      },
+      "required": [
+        "id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "AppworkflowResumeWaitStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RuntimeWaitID"
+        },
+        "status": {
+          "$ref": "#/$defs/WaitStatus"
+        }
+      },
+      "required": [
+        "id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "AppworkflowResumeWorkflowRunRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "payload": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "digest": {
+                  "type": "string"
+                },
+                "inline": {},
+                "media_type": {
+                  "type": "string"
+                },
+                "producer": {
+                  "$ref": "#/$defs/ValuesProducer"
+                },
+                "redaction": {
+                  "$ref": "#/$defs/ValuesRedactionClass"
+                },
+                "retention": {
+                  "$ref": "#/$defs/ValuesRetentionClass"
+                },
+                "type": {
+                  "$ref": "#/$defs/ValuesType"
+                }
+              },
+              "required": [
+                "digest",
+                "media_type",
+                "inline",
+                "producer",
+                "redaction",
+                "retention",
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "artifact": {
+                  "$ref": "#/$defs/ValuesArtifactRef"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "media_type": {
+                  "type": "string"
+                },
+                "producer": {
+                  "$ref": "#/$defs/ValuesProducer"
+                },
+                "redaction": {
+                  "$ref": "#/$defs/ValuesRedactionClass"
+                },
+                "retention": {
+                  "$ref": "#/$defs/ValuesRetentionClass"
+                },
+                "type": {
+                  "$ref": "#/$defs/ValuesType"
+                }
+              },
+              "required": [
+                "digest",
+                "media_type",
+                "artifact",
+                "producer",
+                "redaction",
+                "retention",
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "digest": {
+                  "type": "string"
+                },
+                "media_type": {
+                  "type": "string"
+                },
+                "producer": {
+                  "$ref": "#/$defs/ValuesProducer"
+                },
+                "redaction": {
+                  "$ref": "#/$defs/ValuesRedactionClass"
+                },
+                "retention": {
+                  "$ref": "#/$defs/ValuesRetentionClass"
+                },
+                "secret_ref": {
+                  "$ref": "#/$defs/ValuesSecretRef"
+                },
+                "type": {
+                  "$ref": "#/$defs/ValuesType"
+                }
+              },
+              "required": [
+                "digest",
+                "media_type",
+                "secret_ref",
+                "producer",
+                "redaction",
+                "retention",
+                "type"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "token": {
+          "type": "string"
+        },
+        "wait_id": {
+          "$ref": "#/$defs/RuntimeWaitID"
+        },
+        "wake_source": {
+          "$ref": "#/$defs/WaitWakeSource"
+        }
+      },
+      "required": [
+        "correlation",
+        "idempotency_key",
+        "identity",
+        "payload",
+        "run_id",
+        "token",
+        "wait_id",
+        "wake_source"
+      ],
+      "type": "object"
+    },
+    "AppworkflowResumeWorkflowRunResult": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/AppworkflowResumeAttemptStatus"
+        },
+        "node": {
+          "$ref": "#/$defs/AppworkflowResumeNodeStatus"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RuntimeResumeOutcome"
+        },
+        "values": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "wait": {
+          "$ref": "#/$defs/AppworkflowResumeWaitStatus"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "AppworkflowRunWorkflowRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "confirmed": {
+          "type": "boolean"
+        },
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "inputs": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "pins": {
+          "items": {
+            "$ref": "#/$defs/HoststateStartPin"
+          },
+          "type": "array"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "definition",
+        "idempotency_key",
+        "identity",
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "AppworkflowStartRunResult": {
+      "additionalProperties": false,
+      "properties": {
+        "bound": {
+          "$ref": "#/$defs/RuntimeBoundRun"
+        },
+        "decision": {
+          "$ref": "#/$defs/HoststatePolicyDecision"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/DiagnosticDiagnostic"
+          },
+          "type": "array"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "durability": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DurabilityMode"
+        },
+        "facts": {
+          "$ref": "#/$defs/HoststatePolicyFacts"
+        },
+        "inspection_limitations": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RuntimeIdempotencyOutcome"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesRenderedValueSet"
+        },
+        "phase": {
+          "$ref": "#/$defs/HoststateStartPhase"
+        },
+        "run": {
+          "$ref": "#/$defs/RuntimeRunSnapshot"
+        }
+      },
+      "required": [
+        "decision",
+        "dry_run",
+        "facts"
+      ],
+      "type": "object"
+    },
+    "AppworkflowValidateWorkflowRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        }
+      },
+      "required": [
+        "definition",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "AppworkflowValidateWorkflowResult": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/DiagnosticDiagnostic"
+          },
+          "type": "array"
+        },
+        "plan": {
+          "$ref": "#/$defs/RuntimePlanRef"
+        }
+      },
+      "required": [
+        "definition",
+        "diagnostics"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowContractCase": {
+      "additionalProperties": false,
+      "properties": {
+        "editable": {
+          "type": "boolean"
+        },
+        "expected_calls": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowContractToolCall"
+          },
+          "type": "array"
+        },
+        "expected_effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "expected_error": {
+          "$ref": "#/$defs/AppworkflowContractExpectedError"
+        },
+        "expected_outputs": {
+          "$ref": "#/$defs/ValuesValueSet"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ValuesValueSet"
+        },
+        "mocks": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowContractExecutorMock"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_effects",
+        "expected_outputs",
+        "inputs",
+        "mocks",
+        "name"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowContractSuite": {
+      "additionalProperties": false,
+      "properties": {
+        "cases": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowWorkflowContractCase"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cases",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "AuthoringCompactDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "help": {
+          "type": "string"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "severity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "severity"
+      ],
+      "type": "object"
+    },
+    "AuthoringEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": [
+            "graph_ir",
+            "workflow_source"
+          ],
+          "type": "string"
+        },
+        "graph": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Graph"
+        },
+        "material_schema_id": {
+          "type": "string"
+        },
+        "material_schema_version": {
+          "type": "string"
+        },
+        "schema_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "material_schema_id",
+        "material_schema_version",
+        "schema_id",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "CancelWorkflowRunRequest": {
+      "$ref": "#/$defs/AppworkflowCancelWorkflowRunRequest"
+    },
+    "CancelWorkflowRunResult": {
+      "$ref": "#/$defs/AppworkflowCancelWorkflowRunResult"
+    },
+    "DiagnosticCode": {
+      "type": "string"
+    },
+    "DiagnosticDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/DiagnosticCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/DiagnosticRelatedReference"
+          },
+          "type": "array"
+        },
+        "remediation": {
+          "$ref": "#/$defs/DiagnosticRemediation"
+        },
+        "severity": {
+          "$ref": "#/$defs/DiagnosticSeverity"
+        },
+        "source": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "severity"
+      ],
+      "type": "object"
+    },
+    "DiagnosticRelatedReference": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/SourceRef"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "DiagnosticRemediation": {
+      "additionalProperties": false,
+      "properties": {
+        "documentation": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "suggested_syntax": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "DiagnosticSeverity": {
+      "type": "string"
+    },
+    "ExplainWorkflowRequest": {
+      "$ref": "#/$defs/AppworkflowExplainWorkflowRequest"
+    },
+    "HoststateExecutionTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config_refs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/HoststateTargetConfigReference"
+          },
+          "type": "object"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "environment_refs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/HoststateTargetConfigReference"
+          },
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/HoststateExecutionTargetKind"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "lease": {
+          "$ref": "#/$defs/HoststateExecutionTargetLease"
+        },
+        "provenance": {
+          "$ref": "#/$defs/HoststateTargetProvenance"
+        },
+        "readiness": {
+          "$ref": "#/$defs/HoststateTargetReadiness"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/HoststateSandboxPolicy"
+        },
+        "version": {
+          "type": "string"
+        },
+        "workspace_handle": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "provenance",
+        "readiness",
+        "sandbox",
+        "version"
+      ],
+      "type": "object"
+    },
+    "HoststateExecutionTargetKind": {
+      "type": "string"
+    },
+    "HoststateExecutionTargetLease": {
+      "additionalProperties": false,
+      "properties": {
+        "acquired_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "acquired_at",
+        "expires_at",
+        "id"
+      ],
+      "type": "object"
+    },
+    "HoststateExecutionTargetReadiness": {
+      "type": "string"
+    },
+    "HoststateExecutionTargetSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kinds": {
+          "items": {
+            "$ref": "#/$defs/HoststateExecutionTargetKind"
+          },
+          "type": "array"
+        },
+        "required_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "required_labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "sandbox_modes": {
+          "items": {
+            "$ref": "#/$defs/HoststateSandboxMode"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "type": "object"
+    },
+    "HoststateIdentityBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_target": {
+          "$ref": "#/$defs/HoststateExecutionTarget"
+        },
+        "extension": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "grants": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "principal": {
+          "type": "string"
+        },
+        "run_scope": {
+          "$ref": "#/$defs/HoststateRunScope"
+        },
+        "source_authority": {
+          "type": "string"
+        },
+        "trust": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "principal",
+        "run_scope",
+        "source_authority",
+        "trust"
+      ],
+      "type": "object"
+    },
+    "HoststatePolicyDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "decided_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/HoststatePolicyOutcome"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "decided_at",
+        "id",
+        "operation",
+        "outcome",
+        "reason",
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "HoststatePolicyFacts": {
+      "additionalProperties": false,
+      "properties": {
+        "blast_radius": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "confirmation_advised": {
+          "type": "boolean"
+        },
+        "dry_run_available": {
+          "type": "boolean"
+        },
+        "effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "execution_target": {
+          "$ref": "#/$defs/HoststateExecutionTarget"
+        },
+        "identity": {
+          "$ref": "#/$defs/HoststateIdentityBinding"
+        },
+        "node_count": {
+          "type": "integer"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "plan": {
+          "$ref": "#/$defs/RuntimePlanRef"
+        },
+        "required_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "run_scope": {
+          "$ref": "#/$defs/HoststateRunScope"
+        },
+        "target_requirements": {
+          "additionalProperties": {
+            "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/ExecutionTargetRequirements"
+          },
+          "type": "object"
+        },
+        "unresolved_call_nodes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "blast_radius",
+        "confirmation_advised",
+        "dry_run_available",
+        "effects",
+        "identity",
+        "node_count",
+        "operation",
+        "plan",
+        "run_id",
+        "run_scope"
+      ],
+      "type": "object"
+    },
+    "HoststatePolicyOutcome": {
+      "type": "string"
+    },
+    "HoststateRunScope": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/HoststateRunScopeKind"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "version"
+      ],
+      "type": "object"
+    },
+    "HoststateRunScopeKind": {
+      "type": "string"
+    },
+    "HoststateRunScopeSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/HoststateRunScopeKind"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "version"
+      ],
+      "type": "object"
+    },
+    "HoststateSandboxMode": {
+      "type": "string"
+    },
+    "HoststateSandboxPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/HoststateSandboxMode"
+        },
+        "profile": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "HoststateStartPhase": {
+      "type": "string"
+    },
+    "HoststateStartPin": {
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        }
+      },
+      "required": [
+        "node_id",
+        "outputs"
+      ],
+      "type": "object"
+    },
+    "HoststateTargetConfigReference": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authority",
+        "name"
+      ],
+      "type": "object"
+    },
+    "HoststateTargetProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "authority": {
+          "type": "string"
+        },
+        "reference": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authority",
+        "reference"
+      ],
+      "type": "object"
+    },
+    "HoststateTargetReadiness": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/HoststateExecutionTargetReadiness"
+        }
+      },
+      "required": [
+        "checked_at",
+        "state"
+      ],
+      "type": "object"
+    },
+    "InspectWorkflowRunRequest": {
+      "$ref": "#/$defs/AppworkflowInspectWorkflowRunRequest"
+    },
+    "RerunWorkflowRequest": {
+      "$ref": "#/$defs/AppworkflowRerunWorkflowRequest"
+    },
+    "ResumeWorkflowRunRequest": {
+      "$ref": "#/$defs/AppworkflowResumeWorkflowRunRequest"
+    },
+    "RunWorkflowRequest": {
+      "$ref": "#/$defs/AppworkflowRunWorkflowRequest"
+    },
+    "RundiagnosticsActivationFireAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_id": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "failure_code": {
+          "type": "string"
+        },
+        "fire_id": {
+          "type": "string"
+        },
+        "fired_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "scheduled_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "activation_id",
+        "attempt",
+        "fire_id",
+        "run_id",
+        "scheduled_at",
+        "source",
+        "status"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsAttemptDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "executor": {
+          "$ref": "#/$defs/RundiagnosticsExecutorDiagnostic"
+        },
+        "failure": {
+          "$ref": "#/$defs/RundiagnosticsFailureDiagnostic"
+        },
+        "finished_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeNodeStatus"
+        }
+      },
+      "required": [
+        "executor",
+        "generation",
+        "number",
+        "started_at",
+        "status"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_attempts": {
+          "type": "boolean"
+        },
+        "concurrency_state": {
+          "type": "boolean"
+        },
+        "control_decisions": {
+          "type": "boolean"
+        },
+        "pin_bindings": {
+          "type": "boolean"
+        },
+        "replay_provenance": {
+          "type": "boolean"
+        },
+        "start_binding": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "activation_attempts",
+        "concurrency_state",
+        "control_decisions",
+        "pin_bindings",
+        "replay_provenance",
+        "start_binding"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsControlDecisionDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "bind_as": {
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeControlDecisionKind"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RuntimeControlDecisionOutcome"
+        },
+        "rule_index": {
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/RuntimeNodeInvocationID"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "created_at",
+        "generation",
+        "kind",
+        "outcome",
+        "source"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsControlDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsControlDecisionDiagnostic"
+          },
+          "type": "array"
+        },
+        "terminal_intent": {
+          "$ref": "#/$defs/RundiagnosticsTerminalIntentDiagnostic"
+        }
+      },
+      "type": "object"
+    },
+    "RundiagnosticsDefinitionDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RundiagnosticsDependencyDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "invocations": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsDependencyInvocationDiagnostic"
+          },
+          "type": "array"
+        },
+        "node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsDependencyInvocationDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeNodeStatus"
+        }
+      },
+      "required": [
+        "id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsDownstreamDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "declared_effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/RundiagnosticsSourceDiagnostic"
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsEdgeValueFlowDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "source_outputs": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsInvocationValueDiagnostic"
+          },
+          "type": "array"
+        },
+        "target_inputs": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsInvocationValueDiagnostic"
+          },
+          "type": "array"
+        },
+        "values_omitted": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "RundiagnosticsExecutorDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "masked": {
+          "type": "boolean"
+        },
+        "target": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "version"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsFailureDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "masked": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsInvocationValueDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "values": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        }
+      },
+      "required": [
+        "invocation",
+        "values"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsLeaseDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "masked": {
+          "type": "boolean"
+        },
+        "owner": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expires_at",
+        "generation",
+        "owner"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsNodeDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsAttemptDiagnostic"
+          },
+          "type": "array"
+        },
+        "attempts_truncated": {
+          "type": "boolean"
+        },
+        "claim_generation": {
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "definition": {
+          "$ref": "#/$defs/RundiagnosticsPlanNodeDiagnostic"
+        },
+        "downstream": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsDownstreamDiagnostic"
+          },
+          "type": "array"
+        },
+        "explanation": {
+          "$ref": "#/$defs/RundiagnosticsNodeExplanation"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "latest_attempt": {
+          "type": "integer"
+        },
+        "lease": {
+          "$ref": "#/$defs/RundiagnosticsLeaseDiagnostic"
+        },
+        "memo_key_digest": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/RuntimeInvocationOrigin"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "pin": {
+          "$ref": "#/$defs/RundiagnosticsPinDiagnostic"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "resources": {
+          "$ref": "#/$defs/RundiagnosticsNodeResourceDiagnostic"
+        },
+        "source": {
+          "$ref": "#/$defs/RundiagnosticsSourceDiagnostic"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeNodeStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "upstream": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsDependencyDiagnostic"
+          },
+          "type": "array"
+        },
+        "wait": {
+          "$ref": "#/$defs/RundiagnosticsWaitDiagnostic"
+        }
+      },
+      "required": [
+        "claim_generation",
+        "created_at",
+        "definition",
+        "explanation",
+        "generation",
+        "id",
+        "resources",
+        "status",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsNodeExplanation": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/RuntimeNodeInvocationID"
+          },
+          "type": "array"
+        },
+        "details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "failure": {
+          "$ref": "#/$defs/RundiagnosticsFailureDiagnostic"
+        },
+        "masked": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsNodeResourceDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "holders": {
+          "items": {
+            "$ref": "#/$defs/RuntimeSchedulerResourceHolder"
+          },
+          "type": "array"
+        },
+        "waiter": {
+          "$ref": "#/$defs/RuntimeSchedulerResourceWaiter"
+        }
+      },
+      "type": "object"
+    },
+    "RundiagnosticsPinDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "bound_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "output_schema_digest": {
+          "type": "string"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "policy_code": {
+          "type": "string"
+        },
+        "policy_reason": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "source_origin": {
+          "$ref": "#/$defs/RuntimeInvocationOrigin"
+        },
+        "source_plan_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bound_at",
+        "output_schema_digest",
+        "outputs",
+        "policy_code",
+        "policy_reason",
+        "source",
+        "source_origin",
+        "source_plan_digest"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsPlanActivationDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/RundiagnosticsSourceDiagnostic"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsPlanDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "activations": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsPlanActivationDiagnostic"
+          },
+          "type": "array"
+        },
+        "definition": {
+          "$ref": "#/$defs/RundiagnosticsDefinitionDiagnostic"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsPlanEdgeDiagnostic"
+          },
+          "type": "array"
+        },
+        "graph_digest": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsPlanNodeDiagnostic"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/RundiagnosticsProvenanceDiagnostic"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/RundiagnosticsSourceDiagnostic"
+        },
+        "source_digests": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsSourceDigestDiagnostic"
+          },
+          "type": "array"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "definition",
+        "digest",
+        "graph_digest",
+        "id",
+        "nodes",
+        "provenance",
+        "schema_version",
+        "source_digests",
+        "version"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsPlanEdgeDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EdgeKind"
+        },
+        "source": {
+          "$ref": "#/$defs/RundiagnosticsSourceDiagnostic"
+        },
+        "to": {
+          "type": "string"
+        },
+        "value_flow": {
+          "$ref": "#/$defs/RundiagnosticsEdgeValueFlowDiagnostic"
+        }
+      },
+      "required": [
+        "from",
+        "kind",
+        "to"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsPlanNodeDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "catch_targets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "declared_effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "finally": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "kind_version": {
+          "type": "string"
+        },
+        "needs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "position": {
+          "$ref": "#/$defs/RundiagnosticsPositionDiagnostic"
+        },
+        "ready_when": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/ReadyRule"
+        },
+        "retry": {
+          "$ref": "#/$defs/RundiagnosticsRetryDiagnostic"
+        },
+        "source": {
+          "$ref": "#/$defs/RundiagnosticsSourceDiagnostic"
+        },
+        "switch_targets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "ready_when"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsPositionDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsProvenanceDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "parents": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsProvenanceReferenceDiagnostic"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RundiagnosticsProvenanceReferenceDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "locator": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RundiagnosticsReplayDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "from_node_id": {
+          "type": "string"
+        },
+        "plan_digest": {
+          "type": "string"
+        },
+        "policy": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsReplayPolicyDiagnostic"
+          },
+          "type": "array"
+        },
+        "source_run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "created_at",
+        "from_node_id",
+        "plan_digest",
+        "source_run_id"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsReplayPolicyDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "attempt": {
+          "$ref": "#/$defs/RuntimeAttemptID"
+        },
+        "code": {
+          "type": "string"
+        },
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "allow",
+        "code",
+        "invocation",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsResourceDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "holders": {
+          "items": {
+            "$ref": "#/$defs/RuntimeSchedulerResourceHolder"
+          },
+          "type": "array"
+        },
+        "waiters": {
+          "items": {
+            "$ref": "#/$defs/RuntimeSchedulerResourceWaiter"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "holders",
+        "waiters"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_attempts": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsActivationFireAttempt"
+          },
+          "type": "array"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/RundiagnosticsCapabilities"
+        },
+        "control": {
+          "$ref": "#/$defs/RundiagnosticsControlDiagnostic"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/RuntimeRenderedEvent"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsNodeDiagnostic"
+          },
+          "type": "array"
+        },
+        "omissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "plan": {
+          "$ref": "#/$defs/RundiagnosticsPlanDiagnostic"
+        },
+        "replay": {
+          "$ref": "#/$defs/RundiagnosticsReplayDiagnostic"
+        },
+        "resources": {
+          "$ref": "#/$defs/RundiagnosticsResourceDiagnostic"
+        },
+        "run": {
+          "$ref": "#/$defs/RundiagnosticsRunDiagnostic"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "start_activation": {
+          "$ref": "#/$defs/RundiagnosticsStartActivationDiagnostic"
+        },
+        "start_policy": {
+          "$ref": "#/$defs/RundiagnosticsStartPolicyDiagnostic"
+        },
+        "truncated": {
+          "$ref": "#/$defs/RundiagnosticsTruncation"
+        },
+        "values": {
+          "items": {
+            "$ref": "#/$defs/RundiagnosticsValueSetDiagnostic"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "capabilities",
+        "control",
+        "nodes",
+        "plan",
+        "run",
+        "schema_version",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsRetryDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer"
+        },
+        "initial_delay": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Duration"
+        },
+        "max_delay": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Duration"
+        },
+        "strategy": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/BackoffStrategy"
+        }
+      },
+      "required": [
+        "attempts"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsRunDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "plan": {
+          "$ref": "#/$defs/RuntimePlanRef"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeRunStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "generation",
+        "id",
+        "plan",
+        "status",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsSourceDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "end_column": {
+          "type": "integer"
+        },
+        "end_line": {
+          "type": "integer"
+        },
+        "format": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/SourceFormat"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "path": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "section": {
+          "type": "string"
+        },
+        "stage_name": {
+          "type": "string"
+        },
+        "start_column": {
+          "type": "integer"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "step_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "locator"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsSourceDigestDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/SourceFormat"
+        }
+      },
+      "required": [
+        "digest",
+        "format"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsStartActivationDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_id": {
+          "type": "string"
+        },
+        "fire_identity_digest": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "activation_id",
+        "fire_identity_digest",
+        "occurred_at"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsStartPolicyDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "blast_radius": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "confirmation_advised": {
+          "type": "boolean"
+        },
+        "decision": {
+          "$ref": "#/$defs/HoststatePolicyOutcome"
+        },
+        "declared_effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "dry_run_available": {
+          "type": "boolean"
+        },
+        "exposure_masked": {
+          "type": "boolean"
+        },
+        "exposure_ref": {
+          "type": "string"
+        },
+        "node_count": {
+          "type": "integer"
+        },
+        "required_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "blast_radius",
+        "confirmation_advised",
+        "decision",
+        "declared_effects",
+        "dry_run_available",
+        "node_count"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsTerminalIntentDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "finalizers": {
+          "items": {
+            "$ref": "#/$defs/RuntimeFinalizerScope"
+          },
+          "type": "array"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "intended_status": {
+          "$ref": "#/$defs/RuntimeRunStatus"
+        },
+        "reason": {
+          "$ref": "#/$defs/RundiagnosticsFailureDiagnostic"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeTerminalIntentStatus"
+        },
+        "success_outputs_required": {
+          "type": "boolean"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "generation",
+        "intended_status",
+        "status",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsTruncation": {
+      "additionalProperties": false,
+      "properties": {
+        "activations": {
+          "type": "boolean"
+        },
+        "attempts": {
+          "type": "boolean"
+        },
+        "edges": {
+          "type": "boolean"
+        },
+        "events": {
+          "type": "boolean"
+        },
+        "nodes": {
+          "type": "boolean"
+        },
+        "resources": {
+          "type": "boolean"
+        },
+        "values": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "RundiagnosticsValueSetDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "values": {
+          "$ref": "#/$defs/ValuesRenderedValueSet"
+        }
+      },
+      "required": [
+        "ref",
+        "roles",
+        "values"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsWaitDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "deadline": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/RuntimeWaitID"
+        },
+        "kind": {
+          "$ref": "#/$defs/WaitKind"
+        },
+        "payload": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "resolution": {
+          "$ref": "#/$defs/RundiagnosticsWaitResolutionDiagnostic"
+        },
+        "resolved_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resume_values": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "status": {
+          "$ref": "#/$defs/WaitStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/$defs/WaitVisibility"
+        },
+        "wake_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "wake_source": {
+          "$ref": "#/$defs/WaitWakeSource"
+        }
+      },
+      "required": [
+        "created_at",
+        "generation",
+        "id",
+        "kind",
+        "status",
+        "updated_at",
+        "visibility",
+        "wake_source"
+      ],
+      "type": "object"
+    },
+    "RundiagnosticsWaitResolutionDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "payload_digest": {
+          "type": "string"
+        },
+        "resolved_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "responder_kind": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/WaitWakeSource"
+        }
+      },
+      "required": [
+        "resolved_at",
+        "responder_kind",
+        "source"
+      ],
+      "type": "object"
+    },
+    "RuntimeAttemptID": {
+      "additionalProperties": false,
+      "properties": {
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "number": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "invocation",
+        "number"
+      ],
+      "type": "object"
+    },
+    "RuntimeBeginReplayResult": {
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/RuntimeEvent"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/RuntimeNodeInvocationSnapshot"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RuntimeIdempotencyOutcome"
+        },
+        "provenance": {
+          "$ref": "#/$defs/RuntimeReplayProvenance"
+        },
+        "run": {
+          "$ref": "#/$defs/RuntimeRunSnapshot"
+        }
+      },
+      "required": [
+        "event",
+        "nodes",
+        "outcome",
+        "provenance",
+        "run"
+      ],
+      "type": "object"
+    },
+    "RuntimeBlockedReason": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/RuntimeNodeInvocationID"
+          },
+          "type": "array"
+        },
+        "details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RuntimeBoundRun": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "inputs_ref": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "plan": {
+          "$ref": "#/$defs/RuntimePlanRef"
+        },
+        "provenance": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Provenance"
+        }
+      },
+      "required": [
+        "created_at",
+        "id",
+        "inputs_ref",
+        "plan",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "RuntimeCancellationIntentKind": {
+      "type": "string"
+    },
+    "RuntimeCancellationIntentSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/RuntimeAttemptID"
+        },
+        "child_policy": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/ParentClosePolicy"
+        },
+        "child_run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeCancellationIntentKind"
+        },
+        "requested_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resolved_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeCancellationIntentStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "id",
+        "kind",
+        "requested_at",
+        "run_id",
+        "status",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RuntimeCancellationIntentStatus": {
+      "type": "string"
+    },
+    "RuntimeClaimLease": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expires_at",
+        "generation",
+        "owner",
+        "token"
+      ],
+      "type": "object"
+    },
+    "RuntimeControlDecisionKind": {
+      "type": "string"
+    },
+    "RuntimeControlDecisionOutcome": {
+      "type": "string"
+    },
+    "RuntimeEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/RuntimeAttemptID"
+        },
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "redaction": {
+          "$ref": "#/$defs/ValuesRedactionClass"
+        },
+        "retention": {
+          "$ref": "#/$defs/ValuesRetentionClass"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        }
+      },
+      "required": [
+        "occurred_at",
+        "redaction",
+        "retention",
+        "run_id",
+        "sequence",
+        "type"
+      ],
+      "type": "object"
+    },
+    "RuntimeFinalizerScope": {
+      "additionalProperties": false,
+      "properties": {
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "scope": {
+          "items": {
+            "$ref": "#/$defs/RuntimeNodeInvocationID"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "invocation",
+        "order",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "RuntimeIdempotencyOutcome": {
+      "type": "string"
+    },
+    "RuntimeInvocationOrigin": {
+      "type": "string"
+    },
+    "RuntimeNodeInvocationID": {
+      "additionalProperties": false,
+      "properties": {
+        "iteration": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "node_id",
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "RuntimeNodeInvocationSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "blocked": {
+          "$ref": "#/$defs/RuntimeBlockedReason"
+        },
+        "claim_generation": {
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "latest_attempt": {
+          "type": "integer"
+        },
+        "lease": {
+          "$ref": "#/$defs/RuntimeClaimLease"
+        },
+        "memo_key_digest": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/RuntimeInvocationOrigin"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeNodeStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "wait": {
+          "$ref": "#/$defs/RuntimeWaitRef"
+        }
+      },
+      "required": [
+        "claim_generation",
+        "created_at",
+        "generation",
+        "id",
+        "status",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RuntimeNodeStatus": {
+      "type": "string"
+    },
+    "RuntimePlanRef": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "id",
+        "schema_version",
+        "version"
+      ],
+      "type": "object"
+    },
+    "RuntimeRenderedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/RuntimeAttemptID"
+        },
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "masked": {
+          "type": "boolean"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "redaction": {
+          "$ref": "#/$defs/ValuesRedactionClass"
+        },
+        "retention": {
+          "$ref": "#/$defs/ValuesRetentionClass"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        },
+        "values": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        }
+      },
+      "required": [
+        "masked",
+        "occurred_at",
+        "redaction",
+        "retention",
+        "run_id",
+        "sequence",
+        "type"
+      ],
+      "type": "object"
+    },
+    "RuntimeRepeatPolicyDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "code": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "allow",
+        "code",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "RuntimeReplayNodePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/RuntimeAttemptID"
+        },
+        "decision": {
+          "$ref": "#/$defs/RuntimeRepeatPolicyDecision"
+        },
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        }
+      },
+      "required": [
+        "decision",
+        "invocation"
+      ],
+      "type": "object"
+    },
+    "RuntimeReplayProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "from_node_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "plan_digest": {
+          "type": "string"
+        },
+        "policy": {
+          "items": {
+            "$ref": "#/$defs/RuntimeReplayNodePolicy"
+          },
+          "type": "array"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "source_run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "created_at",
+        "from_node_id",
+        "idempotency_key",
+        "plan_digest",
+        "policy",
+        "run_id",
+        "source_run_id"
+      ],
+      "type": "object"
+    },
+    "RuntimeRequestRunCancellationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "Events": {
+          "items": {
+            "$ref": "#/$defs/RuntimeEvent"
+          },
+          "type": "array"
+        },
+        "Intents": {
+          "items": {
+            "$ref": "#/$defs/RuntimeCancellationIntentSnapshot"
+          },
+          "type": "array"
+        },
+        "Nodes": {
+          "items": {
+            "$ref": "#/$defs/RuntimeNodeInvocationSnapshot"
+          },
+          "type": "array"
+        },
+        "Outcome": {
+          "$ref": "#/$defs/RuntimeIdempotencyOutcome"
+        },
+        "Run": {
+          "$ref": "#/$defs/RuntimeRunSnapshot"
+        }
+      },
+      "required": [
+        "Events",
+        "Intents",
+        "Nodes",
+        "Outcome",
+        "Run"
+      ],
+      "type": "object"
+    },
+    "RuntimeResumeOutcome": {
+      "type": "string"
+    },
+    "RuntimeRunID": {
+      "type": "string"
+    },
+    "RuntimeRunSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ValuesValueSetRef"
+        },
+        "plan": {
+          "$ref": "#/$defs/RuntimePlanRef"
+        },
+        "status": {
+          "$ref": "#/$defs/RuntimeRunStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "generation",
+        "id",
+        "plan",
+        "status",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RuntimeRunStatus": {
+      "type": "string"
+    },
+    "RuntimeSchedulerResourceHolder": {
+      "additionalProperties": false,
+      "properties": {
+        "acquired_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "claim_generation": {
+          "type": "integer"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "#/$defs/RuntimeSchedulerResourceID"
+        },
+        "units": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "acquired_at",
+        "claim_generation",
+        "expires_at",
+        "invocation",
+        "owner",
+        "resource",
+        "units"
+      ],
+      "type": "object"
+    },
+    "RuntimeSchedulerResourceID": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RuntimeSchedulerResourceKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RuntimeSchedulerResourceKind": {
+      "type": "string"
+    },
+    "RuntimeSchedulerResourceRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "resource": {
+          "$ref": "#/$defs/RuntimeSchedulerResourceID"
+        },
+        "units": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit",
+        "resource",
+        "units"
+      ],
+      "type": "object"
+    },
+    "RuntimeSchedulerResourceWaiter": {
+      "additionalProperties": false,
+      "properties": {
+        "blocked": {
+          "items": {
+            "$ref": "#/$defs/RuntimeSchedulerResourceID"
+          },
+          "type": "array"
+        },
+        "enqueued_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "invocation": {
+          "$ref": "#/$defs/RuntimeNodeInvocationID"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/RuntimeSchedulerResourceRequirement"
+          },
+          "type": "array"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "blocked",
+        "enqueued_at",
+        "invocation",
+        "requirements",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "RuntimeTerminalIntentStatus": {
+      "type": "string"
+    },
+    "RuntimeWaitID": {
+      "type": "string"
+    },
+    "RuntimeWaitRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RuntimeWaitID"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "StepkindExecutionError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retry_classification": {
+          "$ref": "#/$defs/StepkindRetryClassification"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retry_classification"
+      ],
+      "type": "object"
+    },
+    "StepkindRetryClassification": {
+      "type": "string"
+    },
+    "ValidateWorkflowRequest": {
+      "$ref": "#/$defs/AppworkflowValidateWorkflowRequest"
+    },
+    "ValuesArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "producer": {
+          "$ref": "#/$defs/ValuesProducer"
+        },
+        "redaction": {
+          "$ref": "#/$defs/ValuesRedactionClass"
+        },
+        "retention": {
+          "$ref": "#/$defs/ValuesRetentionClass"
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "store": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "media_type",
+        "producer",
+        "redaction",
+        "retention",
+        "size_bytes",
+        "store",
+        "uri"
+      ],
+      "type": "object"
+    },
+    "ValuesDisplayPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "private": {
+          "$ref": "#/$defs/ValuesPrivateDisplayPolicy"
+        }
+      },
+      "type": "object"
+    },
+    "ValuesPrivateDisplayPolicy": {
+      "type": "string"
+    },
+    "ValuesProducer": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "reference": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "reference"
+      ],
+      "type": "object"
+    },
+    "ValuesRedactionClass": {
+      "type": "string"
+    },
+    "ValuesRenderedValue": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "masked": {
+          "type": "boolean"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "payload": {},
+        "producer": {
+          "$ref": "#/$defs/ValuesProducer"
+        },
+        "redaction": {
+          "$ref": "#/$defs/ValuesRedactionClass"
+        },
+        "retention": {
+          "$ref": "#/$defs/ValuesRetentionClass"
+        },
+        "type": {
+          "$ref": "#/$defs/ValuesType"
+        }
+      },
+      "required": [
+        "digest",
+        "masked",
+        "media_type",
+        "payload",
+        "producer",
+        "redaction",
+        "retention",
+        "type"
+      ],
+      "type": "object"
+    },
+    "ValuesRenderedValueSet": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ValuesRenderedValue"
+      },
+      "type": "object"
+    },
+    "ValuesRetentionClass": {
+      "type": "string"
+    },
+    "ValuesSecretRef": {
+      "type": "string"
+    },
+    "ValuesType": {
+      "type": "string"
+    },
+    "ValuesValueSet": {
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "inline": {},
+              "media_type": {
+                "type": "string"
+              },
+              "producer": {
+                "$ref": "#/$defs/ValuesProducer"
+              },
+              "redaction": {
+                "$ref": "#/$defs/ValuesRedactionClass"
+              },
+              "retention": {
+                "$ref": "#/$defs/ValuesRetentionClass"
+              },
+              "type": {
+                "$ref": "#/$defs/ValuesType"
+              }
+            },
+            "required": [
+              "digest",
+              "media_type",
+              "inline",
+              "producer",
+              "redaction",
+              "retention",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "artifact": {
+                "$ref": "#/$defs/ValuesArtifactRef"
+              },
+              "digest": {
+                "type": "string"
+              },
+              "media_type": {
+                "type": "string"
+              },
+              "producer": {
+                "$ref": "#/$defs/ValuesProducer"
+              },
+              "redaction": {
+                "$ref": "#/$defs/ValuesRedactionClass"
+              },
+              "retention": {
+                "$ref": "#/$defs/ValuesRetentionClass"
+              },
+              "type": {
+                "$ref": "#/$defs/ValuesType"
+              }
+            },
+            "required": [
+              "digest",
+              "media_type",
+              "artifact",
+              "producer",
+              "redaction",
+              "retention",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "media_type": {
+                "type": "string"
+              },
+              "producer": {
+                "$ref": "#/$defs/ValuesProducer"
+              },
+              "redaction": {
+                "$ref": "#/$defs/ValuesRedactionClass"
+              },
+              "retention": {
+                "$ref": "#/$defs/ValuesRetentionClass"
+              },
+              "secret_ref": {
+                "$ref": "#/$defs/ValuesSecretRef"
+              },
+              "type": {
+                "$ref": "#/$defs/ValuesType"
+              }
+            },
+            "required": [
+              "digest",
+              "media_type",
+              "secret_ref",
+              "producer",
+              "redaction",
+              "retention",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "object"
+    },
+    "ValuesValueSetRef": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "id"
+      ],
+      "type": "object"
+    },
+    "VerificationActivityOutcome": {
+      "type": "string"
+    },
+    "WaitKind": {
+      "type": "string"
+    },
+    "WaitStatus": {
+      "type": "string"
+    },
+    "WaitVisibility": {
+      "type": "string"
+    },
+    "WaitWakeSource": {
+      "type": "string"
+    },
+    "WorkflowAttemptDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsAttemptDiagnostic"
+    },
+    "WorkflowAttemptID": {
+      "$ref": "#/$defs/RuntimeAttemptID"
+    },
+    "WorkflowControlDecisionDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsControlDecisionDiagnostic"
+    },
+    "WorkflowDefinitionRef": {
+      "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+    },
+    "WorkflowDiagnosticFinding": {
+      "$ref": "#/$defs/DiagnosticDiagnostic"
+    },
+    "WorkflowEdgeValueFlowDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsEdgeValueFlowDiagnostic"
+    },
+    "WorkflowFailureDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsFailureDiagnostic"
+    },
+    "WorkflowGraph": {
+      "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Graph"
+    },
+    "WorkflowGraphDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsResult"
+    },
+    "WorkflowInvocationValueDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsInvocationValueDiagnostic"
+    },
+    "WorkflowNodeDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsNodeDiagnostic"
+    },
+    "WorkflowNodeInvocationID": {
+      "$ref": "#/$defs/RuntimeNodeInvocationID"
+    },
+    "WorkflowNodeResourceDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsNodeResourceDiagnostic"
+    },
+    "WorkflowPlanDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsPlanDiagnostic"
+    },
+    "WorkflowPlanEdgeDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsPlanEdgeDiagnostic"
+    },
+    "WorkflowPlanNodeDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsPlanNodeDiagnostic"
+    },
+    "WorkflowPlanRef": {
+      "$ref": "#/$defs/RuntimePlanRef"
+    },
+    "WorkflowPositionDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsPositionDiagnostic"
+    },
+    "WorkflowRenderedEvent": {
+      "$ref": "#/$defs/RuntimeRenderedEvent"
+    },
+    "WorkflowRenderedValue": {
+      "$ref": "#/$defs/ValuesRenderedValue"
+    },
+    "WorkflowRerunResult": {
+      "$ref": "#/$defs/RuntimeBeginReplayResult"
+    },
+    "WorkflowResumeRequest": {
+      "$ref": "#/$defs/AppworkflowResumeWorkflowRunRequest"
+    },
+    "WorkflowResumeResult": {
+      "$ref": "#/$defs/AppworkflowResumeWorkflowRunResult"
+    },
+    "WorkflowRetryDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsRetryDiagnostic"
+    },
+    "WorkflowSchedulerResourceHolder": {
+      "$ref": "#/$defs/RuntimeSchedulerResourceHolder"
+    },
+    "WorkflowSchedulerResourceID": {
+      "$ref": "#/$defs/RuntimeSchedulerResourceID"
+    },
+    "WorkflowSchedulerResourceRequirement": {
+      "$ref": "#/$defs/RuntimeSchedulerResourceRequirement"
+    },
+    "WorkflowSchedulerResourceWaiter": {
+      "$ref": "#/$defs/RuntimeSchedulerResourceWaiter"
+    },
+    "WorkflowSourceDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsSourceDiagnostic"
+    },
+    "WorkflowStartPolicyDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsStartPolicyDiagnostic"
+    },
+    "WorkflowStartResult": {
+      "$ref": "#/$defs/AppworkflowStartRunResult"
+    },
+    "WorkflowValidateResult": {
+      "$ref": "#/$defs/AppworkflowValidateWorkflowResult"
+    },
+    "WorkflowValueSetDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsValueSetDiagnostic"
+    },
+    "WorkflowValueSetRef": {
+      "$ref": "#/$defs/ValuesValueSetRef"
+    },
+    "WorkflowWaitDiagnostic": {
+      "$ref": "#/$defs/RundiagnosticsWaitDiagnostic"
+    }
+  },
+  "$id": "https://schemas.hollis-labs.dev/hadron/workflow-api/v1/workflow-api.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Generated from transport-neutral Go workflow contracts.",
+  "title": "Hadron Workflow HTTP API",
+  "type": "object",
+  "x-hadron-agent-result-schema": {
+    "id": "https://schemas.hollis-labs.dev/workflow/authoring/v1/result.schema.json",
+    "version": "1"
+  },
+  "x-hadron-authoring-schema": {
+    "id": "https://schemas.hollis-labs.dev/workflow/authoring/v1/envelope.schema.json",
+    "version": "1"
+  },
+  "x-hadron-graph-schema": {
+    "id": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json",
+    "version": "1"
+  },
+  "x-hadron-operations": [
+    {
+      "name": "validateWorkflow",
+      "method": "POST",
+      "path": "/v1/workflows/validate",
+      "request": "ValidateWorkflowRequest",
+      "response": "WorkflowValidateResult"
+    },
+    {
+      "name": "explainWorkflow",
+      "method": "POST",
+      "path": "/v1/workflows/explain",
+      "request": "ExplainWorkflowRequest",
+      "response": "WorkflowStartResult",
+      "idempotency_key": "idempotency_key"
+    },
+    {
+      "name": "runWorkflow",
+      "method": "POST",
+      "path": "/v1/workflows/runs",
+      "request": "RunWorkflowRequest",
+      "response": "WorkflowStartResult",
+      "idempotency_key": "idempotency_key"
+    },
+    {
+      "name": "inspectWorkflowRun",
+      "method": "POST",
+      "path": "/v1/workflows/runs/{run_id}/inspect",
+      "path_field": "run_id",
+      "request": "InspectWorkflowRunRequest",
+      "response": "WorkflowGraphDiagnostic"
+    },
+    {
+      "name": "cancelWorkflowRun",
+      "method": "POST",
+      "path": "/v1/workflows/runs/{run_id}/cancel",
+      "path_field": "run_id",
+      "request": "CancelWorkflowRunRequest",
+      "response": "CancelWorkflowRunResult",
+      "idempotency_key": "idempotency_key"
+    },
+    {
+      "name": "resumeWorkflowRun",
+      "method": "POST",
+      "path": "/v1/workflows/runs/{run_id}/resume",
+      "path_field": "run_id",
+      "request": "ResumeWorkflowRunRequest",
+      "response": "WorkflowResumeResult",
+      "idempotency_key": "idempotency_key"
+    },
+    {
+      "name": "rerunWorkflow",
+      "method": "POST",
+      "path": "/v1/workflows/runs/{source_run_id}/rerun",
+      "path_field": "source_run_id",
+      "request": "RerunWorkflowRequest",
+      "response": "WorkflowRerunResult",
+      "idempotency_key": "idempotency_key"
+    }
+  ],
+  "x-hadron-schema-version": "1",
+  "x-hadron-workflow-source-schema": {
+    "id": "https://schemas.hollis-labs.dev/workflow/source/v1/workflow-source",
+    "version": "1"
+  }
+}

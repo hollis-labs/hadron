@@ -15,6 +15,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/pack"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
+	"github.com/hollis-labs/hadron/workflow/authoring"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
@@ -26,6 +27,7 @@ type definitionSourceOptions struct {
 	packageAuthority     string
 	packageTrustClass    string
 	registry             hadronregistry.WorkflowResolver
+	authoring            AuthoringSourceResolver
 	maxSourceBytes       int64
 	maxArchiveBytes      int64
 	maxArchiveEntries    int
@@ -44,13 +46,16 @@ func normalizeDefinitionSourceOptions(options DefinitionResolverOptions) (defini
 	if options.Registry != nil && nilInterface(options.Registry) {
 		return definitionSourceOptions{}, invalidDefinitionOptions("workflow registry must not be typed nil")
 	}
+	if options.Authoring != nil && nilInterface(options.Authoring) {
+		return definitionSourceOptions{}, invalidDefinitionOptions("workflow authoring source resolver must not be typed nil")
+	}
 	if options.MaxSourceBytes < 0 || options.MaxArchiveBytes < 0 || options.MaxArchiveEntries < 0 || options.MaxArchiveTotalBytes < 0 {
 		return definitionSourceOptions{}, invalidDefinitionOptions("source and archive bounds must not be negative")
 	}
 	result := definitionSourceOptions{
 		fileAuthority: options.FileAuthority, fileTrustClass: options.FileTrustClass,
 		packageAuthority: options.PackageAuthority, packageTrustClass: options.PackageTrustClass,
-		registry: options.Registry, maxSourceBytes: options.MaxSourceBytes,
+		registry: options.Registry, authoring: options.Authoring, maxSourceBytes: options.MaxSourceBytes,
 		maxArchiveBytes: options.MaxArchiveBytes, maxArchiveEntries: options.MaxArchiveEntries,
 		maxArchiveTotalBytes: options.MaxArchiveTotalBytes,
 	}
@@ -136,9 +141,28 @@ func (r *DefinitionResolver) resolveFreshSource(ctx context.Context, requested g
 		return r.resolveRegistrySource(ctx, requested)
 	case DefinitionKindPackage:
 		return r.resolvePackageSource(ctx, requested)
+	case DefinitionKindAuthoring:
+		return r.resolveAuthoringSource(ctx, requested)
 	default:
 		return ResolvedSource{}, definitionError(CodeDefinitionInvalid, ErrDefinitionUnresolved, requested.Locator, "workflow definition kind is unsupported", "Use file, registry, package, or a workflow locator reference.")
 	}
+}
+
+func (r *DefinitionResolver) resolveAuthoringSource(ctx context.Context, requested graph.DefinitionRef) (ResolvedSource, error) {
+	if r.sources.authoring == nil {
+		return ResolvedSource{}, definitionError(CodeDefinitionUnresolved, ErrDefinitionUnresolved, requested.Locator, "workflow authoring material is unavailable", "Stage exact authoring material before validation.")
+	}
+	resolved, err := r.sources.authoring.ResolveAuthoringSource(ctx, requested)
+	if err != nil {
+		return ResolvedSource{}, definitionError(CodeDefinitionUnresolved, errors.Join(ErrDefinitionUnresolved, err), requested.Locator, "workflow authoring material could not be resolved exactly", "Restage the exact authoring envelope.")
+	}
+	if len(resolved.Bytes) == 0 || int64(len(resolved.Bytes)) > r.sources.maxSourceBytes {
+		return ResolvedSource{}, definitionError(CodeDefinitionUnsafe, ErrUnsafeDefinitionSource, requested.Locator, "workflow authoring material is empty or exceeds the configured source bound", "Submit non-empty authoring material no larger than the host's maximum source bytes.")
+	}
+	if resolved.Requested.Kind == "" {
+		resolved.Requested = requested
+	}
+	return resolved, nil
 }
 
 func (r *DefinitionResolver) resolveFileSource(ctx context.Context, requested graph.DefinitionRef) (ResolvedSource, error) {
@@ -177,7 +201,7 @@ func (r *DefinitionResolver) resolveFileSource(ctx context.Context, requested gr
 		Authority: r.sources.fileAuthority, Kind: "workflow", ID: requested.ID,
 		Locator: selected.locator, Version: requested.Version, Digest: digest, Provenance: &provenance,
 	}
-	return ResolvedSource{Requested: requested, Definition: definition, Bytes: contents, Digest: digest, TrustClass: r.sources.fileTrustClass, Movable: requested.Digest == ""}, nil
+	return ResolvedSource{Requested: requested, Definition: definition, Bytes: contents, Digest: digest, SourceFormat: graph.SourceWorkflow, SourceSchemaID: authoring.WorkflowSourceSchemaID, SourceSchemaVersion: authoring.WorkflowSourceSchemaVersion, TrustClass: r.sources.fileTrustClass, Movable: requested.Digest == ""}, nil
 }
 
 func (r *DefinitionResolver) resolveRegistrySource(ctx context.Context, requested graph.DefinitionRef) (ResolvedSource, error) {
@@ -215,10 +239,10 @@ func (r *DefinitionResolver) resolveRegistrySource(ctx context.Context, requeste
 	}
 	provenance.Metadata["trust_class"] = record.TrustClass
 	definition := graph.DefinitionRef{
-		Authority: record.Authority, Kind: "workflow", ID: record.Name,
+		Authority: record.Authority, Kind: "workflow", ID: record.SourceDefinitionID(),
 		Locator: provenance.Locator, Version: record.Version, Digest: record.Digest, Provenance: &provenance,
 	}
-	return ResolvedSource{Requested: requested, Definition: definition, Bytes: record.Source, Digest: record.Digest, TrustClass: record.TrustClass, Movable: resolution.Movable}, nil
+	return ResolvedSource{Requested: requested, Definition: definition, Bytes: record.Source, Digest: record.Digest, SourceFormat: record.SourceFormat, SourceSchemaID: record.SourceSchemaID, SourceSchemaVersion: record.SourceSchemaVersion, TrustClass: record.TrustClass, Movable: resolution.Movable}, nil
 }
 
 func (r *DefinitionResolver) resolvePackageSource(ctx context.Context, requested graph.DefinitionRef) (ResolvedSource, error) {
@@ -263,7 +287,7 @@ func (r *DefinitionResolver) resolvePackageSource(ctx context.Context, requested
 		Authority: r.sources.packageAuthority, Kind: "workflow", ID: requested.ID,
 		Locator: virtualLocator, Version: requested.Version, Digest: selected.SourceDigest, Provenance: &provenance,
 	}
-	return ResolvedSource{Requested: requested, Definition: definition, Bytes: selected.Source, Digest: selected.SourceDigest, TrustClass: r.sources.packageTrustClass, Movable: requested.Digest == ""}, nil
+	return ResolvedSource{Requested: requested, Definition: definition, Bytes: selected.Source, Digest: selected.SourceDigest, SourceFormat: graph.SourceWorkflow, SourceSchemaID: authoring.WorkflowSourceSchemaID, SourceSchemaVersion: authoring.WorkflowSourceSchemaVersion, TrustClass: r.sources.packageTrustClass, Movable: requested.Digest == ""}, nil
 }
 
 func (r *DefinitionResolver) resolveRootedPath(locator string) (rootedDefinitionPath, error) {

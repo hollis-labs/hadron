@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/hollis-labs/hadron/workflow/authoring"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/values"
 )
@@ -33,6 +34,9 @@ type WorkflowRecord struct {
 	Version             string
 	Digest              string
 	Source              []byte
+	SourceFormat        graph.SourceFormat `json:"source_format,omitempty"`
+	SourceSchemaID      string             `json:"source_schema_id,omitempty"`
+	SourceSchemaVersion string             `json:"source_schema_version,omitempty"`
 	Authority           string
 	TrustClass          string
 	Provenance          graph.Provenance
@@ -43,6 +47,16 @@ type WorkflowRecord struct {
 	PublisherPrincipal  string
 	RegisteredAt        time.Time
 	Published           bool
+}
+
+// SourceDefinitionID returns the source-local graph identity. Canonical
+// records preserve the invariant Name == Namespace + "/" + source ID when a
+// namespace is present, and Name == source ID otherwise.
+func (r WorkflowRecord) SourceDefinitionID() string {
+	if r.Namespace != "" {
+		return strings.TrimPrefix(r.Name, r.Namespace+"/")
+	}
+	return r.Name
 }
 
 // WorkflowQuery selects an exact version/digest or the explicitly designated
@@ -288,6 +302,19 @@ func canonicalWorkflowRecord(input WorkflowRecord) (WorkflowRecord, error) {
 	input.TrustClass = strings.TrimSpace(input.TrustClass)
 	input.Namespace = strings.TrimSpace(input.Namespace)
 	input.PublisherPrincipal = strings.TrimSpace(input.PublisherPrincipal)
+	input.SourceSchemaID = strings.TrimSpace(input.SourceSchemaID)
+	input.SourceSchemaVersion = strings.TrimSpace(input.SourceSchemaVersion)
+	if input.SourceFormat == "" && input.SourceSchemaID == "" && input.SourceSchemaVersion == "" {
+		// Catalogs written before W07-T11 contain only graph-native workflow
+		// source. The default is format migration, never content inference.
+		input.SourceFormat = graph.SourceWorkflow
+		input.SourceSchemaID = authoring.WorkflowSourceSchemaID
+		input.SourceSchemaVersion = authoring.WorkflowSourceSchemaVersion
+	}
+	wantSchemaID, wantSchemaVersion, supported := authoring.SourceSchemaFor(input.SourceFormat)
+	if !supported || input.SourceSchemaID != wantSchemaID || input.SourceSchemaVersion != wantSchemaVersion {
+		return WorkflowRecord{}, fmt.Errorf("%w: workflow source format/schema is unsupported", ErrInvalidWorkflow)
+	}
 	if input.Published {
 		return WorkflowRecord{}, fmt.Errorf("%w: publication is operational catalog state", ErrInvalidWorkflow)
 	}
@@ -312,6 +339,9 @@ func canonicalWorkflowRecord(input WorkflowRecord) (WorkflowRecord, error) {
 		if !strings.HasPrefix(input.Name, input.Namespace+"/") {
 			return WorkflowRecord{}, fmt.Errorf("%w: workflow name is outside its namespace", ErrInvalidWorkflow)
 		}
+	}
+	if err := graph.ValidateID(input.SourceDefinitionID()); err != nil {
+		return WorkflowRecord{}, fmt.Errorf("%w: workflow name must be its namespace plus one source-local graph ID: %w", ErrInvalidWorkflow, err)
 	}
 	if input.PlanDigest != "" {
 		if err := values.ValidateDigest(input.PlanDigest); err != nil {

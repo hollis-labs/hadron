@@ -73,12 +73,12 @@ test('edge truncation remains a transport fact and is not reconstructed in the f
 test('invocation selection prefers an open wait and otherwise the latest highest-priority iteration', () => {
   const result = getDemoWorkflowDiagnostic('run-demo-waiting-r3s4t5u6');
   const base = result.nodes.find(node => node.id.node_id === 'approval')!;
-  const completed = { ...structuredClone(base), id: { ...base.id, iteration: 0 }, status: 'succeeded', wait: undefined, updated_at: '2026-08-24T19:00:00Z' };
-  const open = { ...structuredClone(base), id: { ...base.id, iteration: 1 }, updated_at: '2026-08-24T18:00:00Z' };
-  assert.equal(selectPrimaryInvocation([completed, open])?.id.iteration, 1);
+  const completed = { ...structuredClone(base), id: { ...base.id, iteration: '0' }, status: 'succeeded', wait: undefined, updated_at: '2026-08-24T19:00:00Z' };
+  const open = { ...structuredClone(base), id: { ...base.id, iteration: '1' }, updated_at: '2026-08-24T18:00:00Z' };
+  assert.equal(selectPrimaryInvocation([completed, open])?.id.iteration, '1');
 
-  const failed = { ...completed, id: { ...base.id, iteration: 2 }, status: 'failed', updated_at: '2026-08-24T20:00:00Z' };
-  assert.deepEqual(sortWorkflowInvocations([completed, failed]).map(node => node.id.iteration), [2, 0]);
+  const failed = { ...completed, id: { ...base.id, iteration: '2' }, status: 'failed', updated_at: '2026-08-24T20:00:00Z' };
+  assert.deepEqual(sortWorkflowInvocations([completed, failed]).map(node => node.id.iteration), ['2', '0']);
 });
 
 test('terminal workflow states stop polling for crashes and timeouts as well as ordinary completion', () => {
