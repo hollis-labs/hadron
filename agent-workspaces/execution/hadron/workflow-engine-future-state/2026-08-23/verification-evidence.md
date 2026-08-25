@@ -1379,3 +1379,28 @@ migration 0027.
 | independent source review `bb72580` | resolver/source atomicity, plan/snapshot digest separation, defensive copies, immutable persistence/link integrity, legacy recovery, cleanup retention, inspect/explain redaction, source mutation/deletion/reopen/rerun, and exposure-provenance audit | pass after protocol-relative userinfo redaction was added |
 | integration `f0df790` | `go test -count=1 ./internal/appworkflow/... ./internal/persistence/... ./internal/rundiagnostics/...` | pass |
 | integration `f0df790` | `go test -race ./internal/appworkflow/... ./internal/persistence/... ./internal/rundiagnostics/...`; `go test ./...` | pass |
+
+## W06-T09
+
+Reviewed the graph-native Torque fixture, contract qualification and immutable
+registration, exact exposure schemas and annotations, first-class MCP mounting,
+durable fan-out input binding and concurrency resources, MCP input-only prepare,
+raw executor output validation/verification followed by declared public output
+projection, tolerated terminal item failure, transform aggregation, durable
+retry activation, restart recovery, keyed external deduplication, final typed
+outputs, provenance, and redacted inspection. Source commit `58d52de` was
+integrated as `c2a7dec` while preserving W07-T11's stricter source-local
+registry identity and W05-T05's exact snapshot boundary.
+
+Integration review found that the generic retry gate still allowed an
+effective `none` idempotency mode plus an arbitrary raw key to reach the effect
+authorizer for `RetryRequiresIdempotency`. Commit `7a4895c` now rejects that at
+the idempotency gate, including when an allow-all authorizer and read,
+materialize, or mutate effects are present.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `58d52de` | dedicated Torque E2E at `-count=10`; workflow/appworkflow/MCP suites; focused race; full repository; vet; targeted golangci; snapshot, module, and diff checks | pass; zero task-local issues and stable generated snapshots |
+| independent source review `58d52de` | compiler scope/collision, child input durability, output projection/verification, MCP preparation, retry/effect authority, source identity, exposure contract, fake protocol and concurrency, restart, and redaction audit | pass after removing an unnecessary live-descriptor policy projection and retaining frozen kind contracts |
+| integration `c2a7dec` + `7a4895c` | dedicated E2E at `-count=3`; retry authority cases at `-count=10`; workflow/appworkflow/MCP/offlinebuild/persistence suites | pass |
+| integration `c2a7dec` + `7a4895c` | focused runtime/MCP/transform/appworkflow/persistence race suite; `go test -count=1 ./...` | pass |
