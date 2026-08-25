@@ -44,7 +44,8 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_cache_entries": "table", "workflow_pinned_values": "table",
 		"workflow_external_activations": "table",
 		"workflow_services":             "table",
-		"idx_workflow_runs_recovery":    "index", "idx_workflow_nodes_recovery": "index",
+		"workflow_exposure_profiles":    "table", "workflow_mcp_principals": "table",
+		"idx_workflow_runs_recovery": "index", "idx_workflow_nodes_recovery": "index",
 		"idx_workflow_node_leases_expiry": "index", "idx_workflow_attempts_invocation": "index",
 		"idx_workflow_waits_recovery": "index", "idx_workflow_waits_deadline": "index",
 		"idx_workflow_waits_correlation": "index", "idx_workflow_value_sets_digest": "index",
@@ -55,6 +56,7 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"idx_workflow_events_type": "index", "idx_workflow_cache_expiry": "index",
 		"idx_workflow_pins_expiry": "index", "idx_workflow_activations_run": "index",
 		"idx_workflow_activations_registration": "index",
+		"idx_workflow_mcp_principals_profile":   "index",
 		"idx_workflow_services_recovery":        "index",
 		"idx_workflow_control_decisions_run":    "index", "idx_workflow_terminal_intents_recovery": "index",
 		"idx_workflow_scheduler_holders_capacity": "index", "idx_workflow_scheduler_holders_invocation": "index",
@@ -116,6 +118,12 @@ SELECT name FROM sqlite_master WHERE type = ? AND name = ?`, kind, name).Scan(&f
 	}
 	if migrations != 1 {
 		t.Fatalf("migration 24 count = %d, want 1", migrations)
+	}
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 26`).Scan(&migrations); err != nil {
+		t.Fatalf("read migration version 26: %v", err)
+	}
+	if migrations != 1 {
+		t.Fatalf("migration 26 count = %d, want 1", migrations)
 	}
 	if !hasColumn(t, store, "workflow_fanouts", "fail_fast") {
 		t.Fatal("workflow_fanouts missing fail_fast persistence")

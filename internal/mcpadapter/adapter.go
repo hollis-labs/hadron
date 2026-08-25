@@ -2,12 +2,15 @@ package mcpadapter
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/hollis-labs/go-messaging"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
@@ -149,6 +152,8 @@ type Adapter struct {
 	blueprintDir  string
 	serverVersion string
 	sessionID     string // unique ID for this MCP session, used for trigger ownership
+	workflowNonce string // restart-unique entropy for durable workflow invocation identities
+	workflow      *workflowSurface
 }
 
 func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRunner, token string, scopes []string, opts ...Option) *Adapter {
@@ -165,16 +170,42 @@ func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRu
 		runner:        runner,
 		sched:         sched,
 		pipeline:      pipeline,
-		token:         strings.TrimSpace(token),
+		token:         canonicalWorkflowToken(token),
 		scopes:        scopeSet,
 		blueprintDir:  settings.DefaultBlueprintDir(),
 		serverVersion: "dev",
 		sessionID:     fmt.Sprintf("mcp-%s", time.Now().UTC().Format("20060102-150405")),
+		workflowNonce: newWorkflowInstanceNonce(),
 	}
 	for _, opt := range opts {
 		opt(a)
 	}
 	return a
+}
+
+func canonicalWorkflowToken(token string) string {
+	if err := hoststate.ValidateMCPToken(token); err != nil {
+		return ""
+	}
+	return token
+}
+
+func newWorkflowInstanceNonce() string {
+	buffer := make([]byte, 12)
+	if _, err := rand.Read(buffer); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(buffer)
+}
+
+func withWorkflowInstanceNonceForTest(nonce string) Option {
+	return func(adapter *Adapter) {
+		if safeSessionFragment(nonce) == nonce && len(nonce) <= 64 {
+			adapter.workflowNonce = nonce
+		} else {
+			adapter.workflowNonce = ""
+		}
+	}
 }
 
 // Option configures optional Adapter fields.
@@ -205,6 +236,14 @@ func WithServerVersion(version string) Option {
 	}
 }
 
+// WithWorkflowServices installs the graph-native MCP surface. Each operation
+// continues to route through transport-neutral appworkflow contracts.
+func WithWorkflowServices(exposure WorkflowExposureOperations, operations WorkflowOperations, reads WorkflowReadOperations, signals WorkflowSignalOperations) Option {
+	return func(a *Adapter) {
+		a.workflow = newWorkflowSurface(a, exposure, operations, reads, signals)
+	}
+}
+
 // CallTool invokes a registered tool by name and returns its result.
 // Primarily used in tests.
 func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string]any) *mcp.CallToolResult {
@@ -215,7 +254,30 @@ func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string
 	}
 
 	handlers := a.buildHandlerMap()
+	if a.workflow != nil {
+		for name, handler := range a.workflow.handlerMap() {
+			handlers[name] = handler
+		}
+	}
 	handler, ok := handlers[toolName]
+	if !ok && a.workflow != nil {
+		sessionID := workflowSessionID(ctx, a.sessionID)
+		if _, _, err := a.workflow.current(ctx, sessionID, a.token); err == nil {
+			a.workflow.mu.Lock()
+			mount := a.workflow.sessions[sessionID]
+			descriptor, mounted := mount.direct[toolName]
+			if !mounted {
+				descriptor, mounted = mount.lazy[toolName]
+			}
+			a.workflow.mu.Unlock()
+			if mounted {
+				handler = func(callCtx context.Context, callRequest mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					return a.workflow.handleDirect(callCtx, callRequest, descriptor)
+				}
+				ok = true
+			}
+		}
+	}
 	if !ok {
 		return toolError("not_found", "unknown tool: "+toolName)
 	}

@@ -40,8 +40,25 @@ type WorkflowRunReadOperations interface {
 	FetchWorkflowEvents(context.Context, WorkflowRunReadRequest) (WorkflowEventListResult, error)
 }
 
+// WorkflowSignalOperations is a narrow optional control surface for named,
+// typed W07 signals. It stays separate from the initial W06 operation
+// contract so transports can fail closed when signal composition is absent.
+type WorkflowSignalOperations interface {
+	SignalWorkflowRun(context.Context, SignalWorkflowRunRequest) (ResumeWorkflowRunResult, error)
+}
+
 type RunID = workflowruntime.RunID
 type WaitID = workflowruntime.WaitID
+type WorkflowResumeOutcome = workflowruntime.ResumeOutcome
+type WorkflowWakeSource = workflowwait.WakeSource
+
+const (
+	WorkflowResumeApplied  WorkflowResumeOutcome = workflowruntime.ResumeApplied
+	WorkflowResumeReplayed WorkflowResumeOutcome = workflowruntime.ResumeReplayed
+	WorkflowWakeCallback   WorkflowWakeSource    = workflowwait.WakeCallback
+	WorkflowWakeGate       WorkflowWakeSource    = workflowwait.WakeGate
+	WorkflowWakeMessage    WorkflowWakeSource    = workflowwait.WakeMessage
+)
 
 type WorkflowAccessOperation string
 
@@ -56,6 +73,7 @@ const (
 	WorkflowAccessWaits    WorkflowAccessOperation = "list_waits"
 	WorkflowAccessValues   WorkflowAccessOperation = "fetch_values"
 	WorkflowAccessEvents   WorkflowAccessOperation = "fetch_events"
+	WorkflowAccessSignal   WorkflowAccessOperation = "signal"
 )
 
 // WorkflowAccessIntent is the non-secret operation metadata supplied to a
@@ -217,6 +235,16 @@ type ResumeAttemptStatus struct {
 }
 
 type RerunWorkflowResult = workflowruntime.BeginReplayResult
+
+type SignalWorkflowRunRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Name           string                `json:"name"`
+	Correlation    string                `json:"correlation"`
+	Payload        values.Value          `json:"payload"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Identity       IdentityRequest       `json:"identity"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
 
 type RerunWorkflowRequest struct {
 	SourceRunID    workflowruntime.RunID `json:"source_run_id"`
@@ -452,6 +480,17 @@ func (s *WorkflowOperator) RerunWorkflow(ctx context.Context, request RerunWorkf
 		return workflowruntime.BeginReplayResult{}, err
 	}
 	return s.replay.Rerun(ctx, workflowruntime.ReplayRequest{SourceRunID: request.SourceRunID, RunID: request.RunID, FromNodeID: request.FromNodeID, IdempotencyKey: request.IdempotencyKey, At: s.host.now()})
+}
+
+func (s *WorkflowOperator) SignalWorkflowRun(ctx context.Context, request SignalWorkflowRunRequest) (ResumeWorkflowRunResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return ResumeWorkflowRunResult{}, err
+	}
+	result, err := s.host.SignalRun(ctx, SignalRunRequest{
+		Selector: workflowruntime.SignalSelector{RunID: request.RunID, Name: request.Name, Correlation: request.Correlation},
+		Payload:  request.Payload, IdempotencyKey: request.IdempotencyKey, Identity: request.Identity, Confirmed: request.Confirmed,
+	})
+	return safeResumeWorkflowRunResult(result), err
 }
 
 func (s *WorkflowOperator) ready(ctx context.Context) error {

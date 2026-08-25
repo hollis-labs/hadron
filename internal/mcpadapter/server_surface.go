@@ -10,6 +10,8 @@ import (
 
 const serverInstructions = "Hadron by Hollis Labs is an agent-first blueprint automation runner. Prefer hadron_skills for orientation, hadron_blueprint_broker or hadron_blueprint_discover to choose workflows, hadron_blueprint_schema before hadron_run_enqueue, and hadron_run_operations before scraping raw run events. This server is in active public beta."
 
+const workflowServerInstructions = "Hadron exposes graph-native workflows through profile-authorized meta-tools and session-scoped generated tools. Search with hadron_workflows_search, mount exact schemas with hadron_workflows_load, and inspect runs through the typed workflow tools. Hidden workflows and secret values are never returned."
+
 type toolBehavior struct {
 	readOnly    bool
 	destructive bool
@@ -18,19 +20,41 @@ type toolBehavior struct {
 }
 
 func (a *Adapter) newServer() *server.MCPServer {
-	s := server.NewMCPServer(
-		"Hadron by Hollis Labs",
-		a.serverVersion,
+	instructions := serverInstructions
+	if a.workflow != nil {
+		instructions = workflowServerInstructions
+	}
+	options := []server.ServerOption{
 		server.WithToolCapabilities(true),
 		server.WithPromptCompletionProvider(a),
 		server.WithResourceCompletionProvider(a),
 		server.WithCompletions(),
-		server.WithInstructions(serverInstructions),
+		server.WithInstructions(instructions),
+	}
+	if a.workflow != nil {
+		hooks := &server.Hooks{}
+		hooks.AddOnRegisterSession(a.workflow.onRegisterSession)
+		hooks.AddOnUnregisterSession(a.workflow.onUnregisterSession)
+		options = append(options, server.WithHooks(hooks))
+	}
+	s := server.NewMCPServer(
+		"Hadron by Hollis Labs",
+		a.serverVersion,
+		options...,
 	)
 	a.registerTools(s)
+	if a.workflow != nil {
+		a.workflow.registerTools(s)
+	}
 	a.registerPrompts(s)
 	a.registerResources(s)
+	if a.workflow != nil {
+		a.workflow.registerResources(s)
+	}
 	a.finalizeToolSurface(s)
+	if a.workflow != nil {
+		a.workflow.bindServer(s)
+	}
 	return s
 }
 

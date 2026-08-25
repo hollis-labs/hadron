@@ -20,6 +20,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/agentsubstrate"
 	"github.com/hollis-labs/hadron/internal/api"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/config"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
@@ -312,15 +313,35 @@ func runMCP(args []string) error {
 		}
 	}
 
+	workflowExposure, err := newMCPWorkflowExposure(store)
+	if err != nil {
+		return fmt.Errorf("compose MCP workflow exposure: %w", err)
+	}
 	adapter := mcpadapter.New(store, mgr, sched, pipelineRunner, *tokenFlag, scopes,
 		mcpadapter.WithServerVersion(version),
 		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
-		mcpadapter.WithRegistry(reg))
+		mcpadapter.WithRegistry(reg),
+		mcpadapter.WithWorkflowServices(workflowExposure, nil, nil, nil))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	return adapter.Run(ctx)
+}
+
+func newMCPWorkflowExposure(store *persistence.Store) (*appworkflow.WorkflowExposureService, error) {
+	exposureStore, err := persistence.NewWorkflowExposureStore(store)
+	if err != nil {
+		return nil, err
+	}
+	// W06-T06 supplies the active graph Host, registry index, and operator.
+	// Until then the durable identity/profile boundary is live while every
+	// graph-dependent MCP operation returns a typed unavailable result.
+	exposure, err := appworkflow.NewWorkflowExposureService(appworkflow.WorkflowExposureOptions{Store: exposureStore})
+	if err != nil {
+		return nil, err
+	}
+	return exposure, nil
 }
 
 func hadronEnvironment() string {
