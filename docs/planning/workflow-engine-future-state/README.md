@@ -116,7 +116,7 @@ superseded requirements are not mistaken for omissions.
 | W07-T03 | Reintroduce `agent_launch` as workflow sugar | 07 | W03-T05, W04-T06 | [x] |
 | W07-T04 | Add generated API client step families | 07 | W04-T01, W06-T02 | [x] |
 | W07-T05 | Add compiled/offline workflow build path | 07 | W01-T02, W04-T02, W04-T03, W04-T04, W04-T05, W04-T06, W04-T07 | [x] |
-| W07-T06 | Finalize public engine boundary and downstream adoption kit | 07 | W00-T04, W06-T07 | [ ] |
+| W07-T06 | Finalize public engine boundary and downstream adoption kit | 07 | W00-T04, W06-T07 | [x] |
 | W07-T07 | Add `emit` and `checkpoint` step kinds | 07 | W04-T01, W04-T07, W05-T01 | [x] |
 | W07-T08 | Add reactor, signal, and durability controls | 07 | W00-T07, W03-T06, W04-T07, W05-T04 | [x] |
 | W07-T09 | Add advanced graph authoring and service-node semantics | 07 | W02-T07, W03-T08, W04-T07 | [x] |

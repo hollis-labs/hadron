@@ -79,3 +79,4 @@
 | 75 | W06-T06-H3 | `16c4f43` | `87c0e56` | Hadron | isolated Playwright daemon state per run and aligned browser navigation with the Workflow Registry default |
 | 76 | W06-T07 | `801f3e21` | `7c20913` | Hadron | accepted with graph-native user/developer/safety docs, production-only runnable examples, release E2E, complete lint cleanup, and patched reachable toolchain/dependency vulnerabilities |
 | 77 | W06-T07-H1 | `66522696` | `374ccc1` | Hadron | corrected operational versus lifecycle registry-reference grammar and distinguished source lowering from production value-dependency inference |
+| 78 | W07-T06 | `6eee1fd` | `6dfcf8c` | Hadron | accepted with a complete public API snapshot/import guard, production-named in-memory store, source-compatible test shim, truthful complete conformance entry point, external host example, and downstream adoption/extraction guide |

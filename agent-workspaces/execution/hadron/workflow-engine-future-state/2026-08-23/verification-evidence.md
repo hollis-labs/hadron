@@ -1480,3 +1480,19 @@ fixed dependency versions instead of accepting a security waiver.
 | independent integration `7c20913` + `374ccc1` | `go generate ./workflow/graph`; `go generate ./internal/api`; `go mod tidy`; clean diff check | pass under Go 1.26.6; byte-stable generated and module files |
 | independent integration `7c20913` + `374ccc1` | `go test -count=1 ./...`; `make test-ui`; `make typecheck`; `make lint-ui`; `make frontend-build` | pass; all Go packages and 45 UI tests green |
 | independent integration `7c20913` + `374ccc1` | exact `make lint`; exact `make e2e` | pass; zero lint issues, zero reachable vulnerabilities, both production examples validate/run, and retired CLI roots remain unavailable |
+
+## W07-T06
+
+Reviewed the complete public `workflow/...` contract, host adoption guide,
+external-package execution example, conformance entry points, deterministic API
+snapshot, import guard, and production-named process-lifetime store. Source
+commit `6eee1fd` integrated as `6dfcf8c`. The prior `runtime/runtimetest` path is
+a thin deprecated alias to the same implementation; production offline and
+contract execution import `runtime/inmemory` directly.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `6eee1fd` | focused suites at repeated counts; complete focused race; workflow and full repository suites; exact `make lint`; generation, module, import, API snapshot, and diff checks | pass; zero lint issues, zero reachable vulnerabilities, byte-stable generated/module state, and zero `workflow/...` dependencies on Hadron internals |
+| independent integration `6dfcf8c` | `go test -count=3 ./workflow/runtime/inmemory ./workflow/runtime/runtimetest ./workflow/offline ./workflow/conformance`; API snapshot test; `go list -deps` internal-import assertion; `git diff --check` | pass |
+| independent integration `6dfcf8c` | `go test -race -count=1 ./workflow/runtime/inmemory ./workflow/runtime ./workflow/offline ./workflow/conformance ./internal/appworkflow`; `go test -count=1 ./...` | pass |
+| independent integration `6dfcf8c` | `go generate ./workflow/graph`; `go generate ./internal/api`; `go mod tidy`; generated/module diff and clean-tree checks; exact `make lint` | pass; zero lint issues, zero reachable vulnerabilities, and no generated or module drift |
