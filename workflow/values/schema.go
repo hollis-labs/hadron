@@ -25,6 +25,23 @@ var (
 
 const valueSchemaResource = "urn:hadron:workflow:values:schema"
 
+// ValidateLiteralBindingSchema proves that binding is the exact literal form
+// accepted for an omitted workflow input, constructs its normalized inline
+// value envelope, and validates that value against schema.
+func ValidateLiteralBindingSchema(binding *graph.Binding, schema graph.Schema) error {
+	if binding == nil || binding.Kind != graph.BindingLiteral || binding.Expression != nil || binding.Interpolation != "" {
+		return fmt.Errorf("%w: workflow input default is not an exact literal binding", ErrInvalidValue)
+	}
+	value, err := NewInline(binding.Literal, Metadata{
+		Producer:  Producer{Kind: "workflow_default", Reference: "literal-schema-validation"},
+		MediaType: "application/json", Redaction: RedactionPrivate, Retention: RetentionRun,
+	})
+	if err != nil {
+		return err
+	}
+	return ValidateValueSchema(schema, value)
+}
+
 // ValidateValueSchema validates one typed Value against an inline JSON Schema.
 // Local JSON Pointer and $defs references are supported. Network, file, and
 // other external resource loading is always rejected. The graph-native

@@ -130,6 +130,16 @@ type StartRunResult struct {
 	Outcome     runtime.IdempotencyOutcome `json:"outcome,omitempty"`
 	Phase       hoststate.StartPhase       `json:"phase,omitempty"`
 	DryRun      bool                       `json:"dry_run"`
+	Durability  graph.DurabilityMode       `json:"durability,omitempty"`
+	// Outputs remains the internal typed terminal result for in-process host
+	// composition. It is never serialized because private inline values and
+	// opaque secret/artifact references are not transport-safe by default.
+	Outputs         values.ValueSet         `json:"-"`
+	RenderedOutputs values.RenderedValueSet `json:"outputs,omitempty"`
+	// InspectionLimitations is populated for durability:none because only a
+	// bounded terminal host audit exists; node/attempt/wait/event history does
+	// not survive the embedded execution.
+	InspectionLimitations []string `json:"inspection_limitations,omitempty"`
 }
 
 // RejectedBeforeAdmission reports the durable fail-closed outcome for a
@@ -173,6 +183,11 @@ type HealthStatus struct {
 	IncompleteStarts  int       `json:"incomplete_starts"`
 }
 
+type FailureHandlerConfig struct {
+	Definition   graph.DefinitionRef
+	MaximumDepth int
+}
+
 // Options contains only host boundaries. Concrete transport startup remains
 // outside New, making construction deterministic and testable.
 type Options struct {
@@ -186,12 +201,16 @@ type Options struct {
 	// Verifiers is the exact host verification catalog. Nil adopts a catalog
 	// exposed by Definitions when available, otherwise the deterministic core.
 	// Construction freezes implementations and specs for the Host lifetime.
-	Verifiers     verification.Registry
-	DryRun        DryRunSupport
-	Activations   workflowwait.ActivationScheduler
-	Waits         *runtime.WaitCoordinator
-	Cancellation  *runtime.CancellationCoordinator
-	RecoveryHooks []RecoveryHook
+	Verifiers   verification.Registry
+	DryRun      DryRunSupport
+	Activations workflowwait.ActivationScheduler
+	// ActivationStore enables restart-durable reactor recovery from exact
+	// source-owned message/event registrations.
+	ActivationStore hoststate.ActivationStore
+	OnRunFailed     *FailureHandlerConfig
+	Waits           *runtime.WaitCoordinator
+	Cancellation    *runtime.CancellationCoordinator
+	RecoveryHooks   []RecoveryHook
 	// RecoveryRepeatPolicy authorizes crash/replay repetition after the core
 	// executor effect and idempotency floors have passed. Nil keeps the
 	// extraction-safe low-effect-only default.

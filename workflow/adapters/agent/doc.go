@@ -14,10 +14,10 @@
 // exposes payload/resume/timed_out, where payload is the typed
 // handle/status/result object.
 //
-// The wait contract accepts the canonical child-run terminal envelope, but
-// producing that envelope from child terminal transitions is a Hadron host
-// integration boundary owned by W07-T08. This adapter does not imply that a
-// host lacking that producer completes wait mode automatically.
+// The wait contract accepts the canonical child-run terminal envelope. Hadron
+// hosts produce it from durable child terminal transitions through the common
+// WaitCoordinator resume path; extracted hosts must provide the equivalent
+// producer for wait mode to complete automatically.
 //
 // SessionHost is intentionally stronger than a process-local launcher: exact
 // launch replay and observe/heartbeat/cancel must survive host restart. A host

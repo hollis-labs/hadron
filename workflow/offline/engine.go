@@ -31,6 +31,11 @@ type ExecuteOptions struct {
 	// PollInterval bounds durable external-operation observation cadence.
 	// Zero selects 100ms; tests may inject a shorter positive cadence.
 	PollInterval time.Duration
+	// RunID and IdempotencyKey let an ordinary host use the embedded engine
+	// while preserving its caller-visible identity. Generated/offline callers
+	// may omit both and receive deterministic content-derived defaults.
+	RunID          runtime.RunID
+	IdempotencyKey string
 }
 
 // RuntimeRegistryBinder adapts an exact immutable build registry to an
@@ -146,7 +151,14 @@ func ExecuteWithStore(ctx context.Context, manifest Manifest, options ExecuteOpt
 	if err != nil {
 		return ExecutionResult{}, err
 	}
-	runID := runtime.RunID("offline-" + manifest.BuildDigest[len("sha256:"):len("sha256:")+16] + "-" + inputDigest[len("sha256:"):len("sha256:")+8])
+	runID := options.RunID
+	if runID == "" {
+		runID = runtime.RunID("offline-" + manifest.BuildDigest[len("sha256:"):len("sha256:")+16] + "-" + inputDigest[len("sha256:"):len("sha256:")+8])
+	}
+	startKey := options.IdempotencyKey
+	if startKey == "" {
+		startKey = "offline:start:" + manifest.BuildDigest + ":" + inputDigest
+	}
 	bound, err := runtime.BindRun(ctx, store, runtime.BindRunRequest{ID: runID, Plan: &manifest.Plan, Inputs: options.Inputs, CreatedAt: tick()})
 	if err != nil {
 		return ExecutionResult{}, err
@@ -157,7 +169,7 @@ func ExecuteWithStore(ctx context.Context, manifest Manifest, options ExecuteOpt
 	if bound.Run == nil {
 		return ExecutionResult{}, fmt.Errorf("%w: input binding returned no run", ErrInvalidBuild)
 	}
-	started, _, err := runtime.StartBoundRun(ctx, store, *bound.Run, "offline:start:"+manifest.BuildDigest+":"+inputDigest)
+	started, _, err := runtime.StartBoundRun(ctx, store, *bound.Run, startKey)
 	if err != nil {
 		return ExecutionResult{}, err
 	}

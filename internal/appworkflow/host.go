@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/stepkind"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -35,29 +36,33 @@ func InitialKinds() []KindRef { return sortedKindRefs(initialKindRefs) }
 // boundary. Durable state remains authoritative; in-memory fields contain only
 // health, shutdown, and immutable collaborator references.
 type Host struct {
-	state        runtime.StateStore
-	journal      hoststate.Journal
-	definitions  DefinitionProvider
-	identity     IdentityProvider
-	policy       PolicyEvaluator
-	dryRun       DryRunSupport
-	activations  workflowwait.ActivationScheduler
-	waits        *runtime.WaitCoordinator
-	cancellation *runtime.CancellationCoordinator
-	coreRecovery RecoveryHook
-	hooks        []RecoveryHook
-	childSource  ChildRunRecoverySource
-	childDefs    ChildRunDefinitionSource
-	childRuns    ChildRunMaterializer
-	telemetry    TelemetrySink
-	artifacts    values.ArtifactStore
-	clock        Clock
-	registry     *stepkind.MemoryRegistry
-	verifiers    *verification.MemoryRegistry
-	dispatcher   *runtime.StepDispatcher
-	pins         *runtime.PinCoordinator
-	interval     time.Duration
-	batchLimit   int
+	state              runtime.StateStore
+	journal            hoststate.Journal
+	definitions        DefinitionProvider
+	identity           IdentityProvider
+	policy             PolicyEvaluator
+	dryRun             DryRunSupport
+	activations        workflowwait.ActivationScheduler
+	reactorActivations hoststate.ActivationStore
+	reactors           runtime.ReactorStore
+	failureHooks       hoststate.FailureHookJournal
+	failureHandler     *FailureHandlerConfig
+	waits              *runtime.WaitCoordinator
+	cancellation       *runtime.CancellationCoordinator
+	coreRecovery       RecoveryHook
+	hooks              []RecoveryHook
+	childSource        ChildRunRecoverySource
+	childDefs          ChildRunDefinitionSource
+	childRuns          ChildRunMaterializer
+	telemetry          TelemetrySink
+	artifacts          values.ArtifactStore
+	clock              Clock
+	registry           *stepkind.MemoryRegistry
+	verifiers          *verification.MemoryRegistry
+	dispatcher         *runtime.StepDispatcher
+	pins               *runtime.PinCoordinator
+	interval           time.Duration
+	batchLimit         int
 
 	mu     sync.RWMutex
 	health HealthStatus
@@ -95,6 +100,14 @@ func New(options Options) (*Host, error) {
 	}
 	if options.ReuseAuthorizer != nil && nilInterface(options.ReuseAuthorizer) {
 		return nil, fmt.Errorf("%w: reuse authorizer must not be typed nil", ErrInvalidHost)
+	}
+	if options.ActivationStore != nil && nilInterface(options.ActivationStore) {
+		return nil, fmt.Errorf("%w: activation registration store must not be typed nil", ErrInvalidHost)
+	}
+	if options.OnRunFailed != nil {
+		if err := validateFailureHandlerDefinition(options.OnRunFailed.Definition); err != nil || options.OnRunFailed.MaximumDepth < 1 || options.OnRunFailed.MaximumDepth > 16 {
+			return nil, fmt.Errorf("%w: on_run_failed requires an exact definition and maximum depth between 1 and 16", ErrInvalidHost)
+		}
 	}
 	childSource, hasChildSource := options.Journal.(ChildRunRecoverySource)
 	childDefs, _ := options.Journal.(ChildRunDefinitionSource)
@@ -142,6 +155,7 @@ func New(options Options) (*Host, error) {
 	inputStore, inputOK := options.State.(runtime.NodeInputStore)
 	controlStore, controlOK := options.State.(runtime.ControlFlowStore)
 	policyStore, policyOK := options.State.(runtime.RunPolicyStore)
+	reactorStore, reactorOK := options.State.(runtime.ReactorStore)
 	if !recoveryOK || nilInterface(recoveryStore) || !inputOK || nilInterface(inputStore) ||
 		!controlOK || nilInterface(controlStore) || !policyOK || nilInterface(policyStore) {
 		return nil, fmt.Errorf("%w: state must provide recovery, input-binding, control-flow, and run-policy stores", ErrInvalidHost)
@@ -164,15 +178,47 @@ func New(options Options) (*Host, error) {
 		Registry: registry, Policy: options.RecoveryRepeatPolicy, RetryAuthorizer: options.RecoveryRetryAuthorizer,
 		Policies: policyStore, Waits: waits,
 	}, Limit: options.RecoveryBatchLimit}
-	return &Host{
+	host := &Host{
 		state: options.State, journal: options.Journal, definitions: options.Definitions,
 		identity: options.Identity, policy: options.Policy, dryRun: options.DryRun,
-		activations: options.Activations, waits: waits, cancellation: cancellation, coreRecovery: coreRecovery,
+		activations: options.Activations, reactorActivations: options.ActivationStore, waits: waits, cancellation: cancellation, coreRecovery: coreRecovery,
 		hooks: append([]RecoveryHook(nil), options.RecoveryHooks...), telemetry: options.Telemetry,
 		childSource: childSource, childDefs: childDefs, childRuns: options.ChildRuns,
 		artifacts: options.Artifacts, clock: clock, registry: registry, verifiers: verifiers, dispatcher: dispatcher, pins: pinCoordinator,
 		interval: interval, batchLimit: options.RecoveryBatchLimit,
-	}, nil
+	}
+	if hooks, ok := options.Journal.(hoststate.FailureHookJournal); ok && !nilInterface(hooks) {
+		host.failureHooks = hooks
+	}
+	if options.OnRunFailed != nil {
+		if host.failureHooks == nil {
+			return nil, fmt.Errorf("%w: on_run_failed requires durable failure-hook journal support", ErrInvalidHost)
+		}
+		config := *options.OnRunFailed
+		host.failureHandler = &config
+	}
+	if options.ActivationStore != nil {
+		if !reactorOK || nilInterface(reactorStore) {
+			return nil, fmt.Errorf("%w: activation registration recovery requires reactor state support", ErrInvalidHost)
+		}
+		host.reactors = reactorStore
+	}
+	return host, nil
+}
+
+func validateFailureHandlerDefinition(ref graph.DefinitionRef) error {
+	for _, field := range []string{ref.Authority, ref.Kind, ref.ID, ref.Version} {
+		if hoststate.ValidatePublicText(field, hoststate.MaximumActivationTextBytes, true) != nil {
+			return errors.New("failure handler definition reference is incomplete or unsafe")
+		}
+	}
+	if ref.Locator != "" && hoststate.ValidatePublicText(ref.Locator, hoststate.MaximumActivationTextBytes, false) != nil {
+		return errors.New("failure handler definition locator is unsafe")
+	}
+	if values.ValidateDigest(ref.Digest) != nil {
+		return errors.New("failure handler definition digest is invalid")
+	}
+	return nil
 }
 
 type definitionVerifierCatalog interface {
@@ -461,6 +507,9 @@ func (h *Host) recover(ctx context.Context, startup bool) error {
 			return fmt.Errorf("recover cancellation intents: %w", errors.Join(failures...))
 		}
 	}
+	if err := h.recoverRunUpdates(ctx); err != nil {
+		return fmt.Errorf("recover tracked workflow updates: %w", err)
+	}
 	// Core recovery is installed for every Host and runs after exact child and
 	// cancellation restoration but before extension hooks can observe or admit
 	// ordinary work.
@@ -469,6 +518,18 @@ func (h *Host) recover(ctx context.Context, startup bool) error {
 	}
 	if err := h.coreRecovery.RecoverWorkflow(ctx, runtime.RecoverySnapshot{}, now); err != nil {
 		return fmt.Errorf("recover workflow core: %w", err)
+	}
+	if err := h.recoverChildTerminalWaits(ctx); err != nil {
+		return fmt.Errorf("recover child terminal waits: %w", err)
+	}
+	if h.reactors != nil {
+		service := ReactorService{Host: h, Activations: h.reactorActivations, Store: h.reactors, Clock: h.clock}
+		if err := service.Recover(ctx, h.batchLimit); err != nil {
+			return fmt.Errorf("recover workflow reactors: %w", err)
+		}
+	}
+	if err := h.recoverFailureHooks(ctx); err != nil {
+		return fmt.Errorf("recover workflow failure hooks: %w", err)
 	}
 	snapshot, err := h.state.Recovery(ctx, runtime.RecoveryQuery{Now: now, Limit: h.batchLimit})
 	if err != nil {

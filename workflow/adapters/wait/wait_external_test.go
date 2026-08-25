@@ -94,6 +94,9 @@ func TestWaitForBuildsTypedWakeRecordsWithoutPolling(t *testing.T) {
 				!result.Wait.Record.Deadline.Equal(baseTime.Add(30*time.Minute)) || observed.Source.Kind != test.sourceKind {
 				t.Fatalf("record/request = %#v / %#v", result.Wait.Record, observed)
 			}
+			if test.kind == workflowwait.KindSignal && result.Wait.Record.SignalName != observed.Source.Reference {
+				t.Fatalf("named signal = %q, source reference = %q", result.Wait.Record.SignalName, observed.Source.Reference)
+			}
 			if test.sourceKind == waitadapter.SourceEvent {
 				if result.Wait.Record.Authority.Attributes["wait_source"] != "event" || result.Wait.Record.Authority.Attributes["event_type"] != "deploy.complete" {
 					t.Fatalf("event authority metadata = %#v", result.Wait.Record.Authority.Attributes)

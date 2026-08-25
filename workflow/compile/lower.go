@@ -25,7 +25,7 @@ func CompileWithOptions(source *Source, options CompileOptions) CompileResult {
 	}
 
 	root := source.Document.Content[0]
-	rootFields := l.mapping(root, nil, "workflow", "on", "inputs", "outputs", "steps", "finally", "sequential_groups")
+	rootFields := l.mapping(root, nil, "workflow", "on", "inputs", "outputs", "steps", "finally", "sequential_groups", "durability")
 	headerField, ok := rootFields["workflow"]
 	if !ok {
 		l.invalidShape(root, nil, "required graph-native workflow marker is missing")
@@ -60,6 +60,9 @@ func CompileWithOptions(source *Source, options CompileOptions) CompileResult {
 	}
 	if field, exists := rootFields["on"]; exists {
 		compiledGraph.Activations = l.lowerActivations(field.value, field.path, sourceMap.Activations, header.provenance)
+	}
+	if field, exists := rootFields["durability"]; exists {
+		compiledGraph.Durability = l.lowerDurability(field.value, field.path)
 	}
 	if field, exists := rootFields["steps"]; exists {
 		compiledGraph.Nodes, compiledGraph.Edges = l.lowerNodes(field.value, field.path, &sourceMap, false)

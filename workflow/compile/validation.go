@@ -51,6 +51,9 @@ const (
 	CodeInvalidFinally diagnostic.Code = "HADR-SOURCE-032"
 	// CodeInvalidMemoization identifies effect-unsafe or executor-denied memo policy.
 	CodeInvalidMemoization diagnostic.Code = "HADR-SOURCE-036"
+	// CodeInvalidDurability identifies a durability mode or reactor policy that
+	// cannot be implemented truthfully by the selected graph and executor set.
+	CodeInvalidDurability diagnostic.Code = "HADR-SOURCE-037"
 
 	// CodeUnknownDependency identifies an explicit dependency endpoint absent
 	// from the graph.
@@ -203,6 +206,7 @@ func validate(ctx context.Context, value graph.Graph, root graph.DefinitionRef, 
 	}
 	v.validateStructure()
 	v.validateNodes()
+	v.validateDurability()
 	v.validateCalls()
 	sortDiagnostics(v.diagnostics)
 	return append([]diagnostic.Diagnostic(nil), v.diagnostics...)

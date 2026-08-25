@@ -2,6 +2,8 @@ package appworkflow_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	calladapter "github.com/hollis-labs/hadron/workflow/adapters/call"
 	"github.com/hollis-labs/hadron/workflow/adapters/transform"
+	waitadapter "github.com/hollis-labs/hadron/workflow/adapters/wait"
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	"github.com/hollis-labs/hadron/workflow/graph"
@@ -48,6 +51,15 @@ func TestHostGraphNativeStartInspectExplainReplayAndActivation(t *testing.T) {
 	if err != nil || len(inspected.Nodes) != 1 || inspected.Nodes[0].Status != workflowruntime.NodeReady || len(inspected.Decisions) != 1 {
 		t.Fatalf("InspectRun = %#v, %v", inspected, err)
 	}
+	queried, err := fixture.host.QueryRun(callerContext, appworkflow.QueryRunRequest{Query: workflowruntime.RunStateQuery{RunID: request.RunID, Limit: 10}, Identity: request.Identity})
+	if err != nil || queried.Run.ID != request.RunID || len(queried.Nodes) != 1 {
+		t.Fatalf("QueryRun = %#v, %v", queried, err)
+	}
+	foreignQuery := request.Identity
+	foreignQuery.PrincipalHint = "user:other"
+	if _, queryErr := fixture.host.QueryRun(authenticatedContext(t.Context(), "user:other"), appworkflow.QueryRunRequest{Query: workflowruntime.RunStateQuery{RunID: request.RunID, Limit: 10}, Identity: foreignQuery}); !errors.Is(queryErr, appworkflow.ErrPolicyDenied) {
+		t.Fatalf("foreign QueryRun = %v", queryErr)
+	}
 	explained, err := fixture.host.ExplainRun(t.Context(), request.RunID)
 	if err != nil || explained.Decision.ID == "" || explained.DryRunTruth == "" {
 		t.Fatalf("ExplainRun = %#v, %v", explained, err)
@@ -75,6 +87,665 @@ func TestHostGraphNativeStartInspectExplainReplayAndActivation(t *testing.T) {
 	}
 	if fixture.scheduler.scheduled != 1 || fixture.scheduler.canceled != 1 {
 		t.Fatalf("scheduler calls = %#v", fixture.scheduler)
+	}
+}
+
+func TestHostQueryRunReturnsOnlyTransportSafeProjection(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+	start := fixture.startRequest("safe-query-run", "safe-query-start", "user:safe-query")
+	ctx := authenticatedContext(t.Context(), "user:safe-query")
+	if _, err := fixture.host.StartRun(ctx, start); err != nil {
+		t.Fatal(err)
+	}
+	id := workflowruntime.NodeInvocationID{RunID: start.RunID, NodeID: fixture.plan.Graph.Nodes[0].ID}
+	node, err := fixture.state.LoadNodeInvocation(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := fixture.state.ClaimNode(t.Context(), workflowruntime.ClaimNodeRequest{InvocationID: id, ExpectedClaimGeneration: node.ClaimGeneration,
+		Owner: "private-lease-owner", Token: "private-lease-token", IdempotencyKey: "safe-query-claim", Now: fixture.now, LeaseUntil: fixture.now.Add(time.Hour)})
+	if err != nil || !claimed.Acquired || claimed.Lease == nil {
+		t.Fatalf("ClaimNode = %#v, %v", claimed, err)
+	}
+	if _, appendErr := fixture.state.AppendEvent(t.Context(), workflowruntime.AppendEventRequest{RunID: start.RunID, Invocation: &id,
+		Type: "private.event", OccurredAt: fixture.now, Attributes: map[string]string{"password": "private-event-secret"},
+		Redaction: values.RedactionSecret, Retention: values.RetentionRun}); appendErr != nil {
+		t.Fatal(appendErr)
+	}
+	queried, err := fixture.host.QueryRun(ctx, appworkflow.QueryRunRequest{Query: workflowruntime.RunStateQuery{RunID: start.RunID, Limit: 100}, Identity: start.Identity})
+	if err != nil || len(queried.Nodes) != 1 || len(queried.Events) == 0 {
+		t.Fatalf("QueryRun = %#v, %v", queried, err)
+	}
+	assertSafeQueryJSON(t, queried, "private-lease-owner", "private-lease-token", "private-event-secret", "password")
+
+	proof := workflowruntime.ClaimProof{Owner: claimed.Lease.Owner, Token: claimed.Lease.Token, Generation: claimed.Lease.Generation}
+	claimedNode, err := fixture.state.LoadNodeInvocation(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: id,
+		ExpectedNodeGeneration: claimedNode.Generation, Claim: proof, Executor: workflowruntime.ExecutorMetadata{Kind: "transform", Version: "v1",
+			Target: "private-target", Attributes: map[string]string{"credential": "private-executor-secret"}}, At: fixture.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := workflowwait.NewSchemaRef(graph.Schema{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumeTokenDigest, err := workflowwait.DigestToken("private-resume-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := workflowwait.Record{Kind: workflowwait.KindSignal, SignalName: "safe.signal", Correlation: "private-correlation",
+		ResumeSchema: schema, ResumeTokenDigest: resumeTokenDigest, ResumeURL: "https://example.test/resume/safe",
+		Visibility: workflowwait.VisibilitySecret, Authority: workflowwait.ResponderAuthority{Kind: "private-authority", Reference: "private-authority-reference",
+			Attributes: map[string]string{"credential": "private-authority-secret"}}, WakeSource: workflowwait.WakeSignal, Status: workflowwait.StatusOpen}
+	if _, suspendErr := (workflowruntime.WaitCoordinator{Store: fixture.state}).Suspend(t.Context(), workflowruntime.SuspendCommand{Request: workflowruntime.SuspendNodeWaitRequest{
+		Wait:                   workflowruntime.WaitSnapshot{Ref: workflowruntime.WaitRef{ID: "safe-query-wait"}, Invocation: id, Record: wait},
+		ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, At: fixture.now}, ResumeToken: "private-resume-token"}); suspendErr != nil {
+		t.Fatal(suspendErr)
+	}
+	queried, err = fixture.host.QueryRun(ctx, appworkflow.QueryRunRequest{Query: workflowruntime.RunStateQuery{RunID: start.RunID, Limit: 100}, Identity: start.Identity})
+	if err != nil || len(queried.Waits) != 1 || len(queried.Attempts) != 1 {
+		t.Fatalf("QueryRun with wait = %#v, %v", queried, err)
+	}
+	assertSafeQueryJSON(t, queried, "private-correlation", "private-resume-token", resumeTokenDigest, "private-authority", "private-authority-reference",
+		"private-authority-secret", "private-target", "private-executor-secret", "private-event-secret", "password")
+}
+
+func assertSafeQueryJSON(t *testing.T, view appworkflow.RunQueryView, forbidden ...string) {
+	t.Helper()
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range forbidden {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("transport-safe query JSON exposed %q: %s", secret, encoded)
+		}
+	}
+}
+
+func TestHostRecoversChildTerminalThroughCanonicalWaitResume(t *testing.T) {
+	t.Run("inline output and restart replay", func(t *testing.T) {
+		fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+		wait, child := seedHostTerminalChildWait(t, fixture, "inline", values.ValueSet{"result": mustInline(t, "done")})
+		if err := fixture.host.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		assertChildTerminalWait(t, fixture, wait.Ref.ID, "succeeded", "done")
+		if err := fixture.host.Shutdown(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		restarted := hostWithFixedIdentity(t, fixture, testIdentityBinding("seed", "test"))
+		if err := restarted.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := restarted.Shutdown(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		assertSingleChildResume(t, fixture, wait.Ref.ID, child.ID)
+	})
+
+	t.Run("secret output converges to safe failure", func(t *testing.T) {
+		fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+		ref, err := values.ParseSecretRef("secret://project/child-output")
+		if err != nil {
+			t.Fatal(err)
+		}
+		secret, err := values.NewSecretRef(ref, values.Metadata{Producer: values.Producer{Kind: "child", Reference: "secret"},
+			MediaType: "text/plain", Redaction: values.RedactionSecret, Retention: values.RetentionRun})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wait, child := seedHostTerminalChildWait(t, fixture, "secret", values.ValueSet{"result": secret})
+		if err := fixture.host.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		assertChildTerminalWait(t, fixture, wait.Ref.ID, "child_output_not_inline", "")
+		if err := fixture.host.Shutdown(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		restarted := hostWithFixedIdentity(t, fixture, testIdentityBinding("seed", "test"))
+		if err := restarted.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := restarted.Shutdown(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		assertSingleChildResume(t, fixture, wait.Ref.ID, child.ID)
+	})
+
+	t.Run("already resumed candidate is not duplicated", func(t *testing.T) {
+		fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+		wait, child := seedHostTerminalChildWait(t, fixture, "already", values.ValueSet{"result": mustInline(t, "done")})
+		payload := mustInline(t, map[string]any{"status": string(waitadapter.ChildRunSucceeded), "outputs": map[string]any{"result": "done"}})
+		resumed, err := (workflowruntime.WaitCoordinator{Store: fixture.state}).Resume(t.Context(), workflowruntime.ResumeCommand{
+			WaitID: wait.Ref.ID, Correlation: string(child.ID), WakeSource: workflowwait.WakeChildRun,
+			Responder: workflowwait.Responder{Kind: "child_run", Reference: string(child.ID)}, Payload: payload,
+			IdempotencyKey: "child-terminal:" + string(child.ID), ReceivedAt: fixture.now,
+		})
+		if err != nil || resumed.Outcome != workflowruntime.ResumeApplied {
+			t.Fatalf("pre-recovery Resume = %#v, %v", resumed, err)
+		}
+		if err := fixture.host.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := fixture.host.Shutdown(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		assertSingleChildResume(t, fixture, wait.Ref.ID, child.ID)
+	})
+
+	t.Run("ambiguous open waits fail before limit one resumes either", func(t *testing.T) {
+		fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+		wait, _ := seedHostTerminalChildWait(t, fixture, "ambiguous", values.ValueSet{"result": mustInline(t, "done")})
+		duplicateID := workflowruntime.WaitID("child-wait-ambiguous-duplicate")
+		if _, err := fixture.store.DB().Exec(`INSERT INTO workflow_waits(
+wait_id,run_id,node_id,iteration,status,resume_values_ref_json,generation,created_at,updated_at,resolved_at,record_json,deadline)
+SELECT ?,run_id,node_id,iteration,status,resume_values_ref_json,generation,created_at,updated_at,resolved_at,record_json,deadline
+FROM workflow_waits WHERE wait_id=?`, duplicateID, wait.Ref.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := fixture.host.Start(t.Context()); err == nil || !strings.Contains(err.Error(), "ambiguous open waits") {
+			t.Fatalf("ambiguous child recovery = %v", err)
+		}
+		for _, waitID := range []workflowruntime.WaitID{wait.Ref.ID, duplicateID} {
+			loaded, err := fixture.state.LoadWait(t.Context(), waitID)
+			if err != nil || loaded.Status != workflowruntime.WaitOpen || loaded.Generation != 1 || loaded.ResumeValues != nil {
+				t.Fatalf("ambiguous wait %s changed = %#v, %v", waitID, loaded, err)
+			}
+			var resumeRows int
+			if err := fixture.store.DB().QueryRow(`SELECT COUNT(1) FROM workflow_wait_resume_results WHERE wait_id=?`, waitID).Scan(&resumeRows); err != nil {
+				t.Fatal(err)
+			}
+			if resumeRows != 0 {
+				t.Fatalf("ambiguous wait %s recorded %d resume rows", waitID, resumeRows)
+			}
+		}
+	})
+}
+
+func seedHostTerminalChildWait(t *testing.T, fixture *hostFixture, suffix string, outputs values.ValueSet) (workflowruntime.WaitSnapshot, workflowruntime.RunSnapshot) {
+	t.Helper()
+	parent := seedRunningCallParent(t, fixture)
+	parentRun, err := fixture.state.LoadRun(t.Context(), parent.Node.ID.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childID := workflowruntime.RunID("terminal-child-" + suffix)
+	child, _, err := fixture.state.CreateRun(t.Context(), workflowruntime.CreateRunRequest{ID: childID, Plan: parentRun.Plan,
+		Status: workflowruntime.RunPending, StartIdempotencyKey: "terminal-child-start-" + suffix, CreatedAt: fixture.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: child.ID,
+		ExpectedGeneration: child.Generation, To: workflowruntime.RunRunning, At: fixture.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputRef, err := fixture.state.SaveValues(t.Context(), workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "run_outputs", RunID: child.ID}, Values: outputs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: child.ID,
+		ExpectedGeneration: running.Snapshot.Generation, To: workflowruntime.RunSucceeded, Outputs: &outputRef, At: fixture.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recordErr := fixture.state.RecordChildRun(t.Context(), workflowruntime.ChildRunLink{ParentRunID: parent.Node.ID.RunID, Invocation: parent.Node.ID,
+		ChildRunID: child.ID, Policy: graph.ParentCloseCancel, CreatedAt: fixture.now}); recordErr != nil {
+		t.Fatal(recordErr)
+	}
+	if parent.Node.Lease == nil {
+		t.Fatal("running parent lost its claim before suspension")
+	}
+	schema, err := workflowwait.NewSchemaRef(graph.Schema{"type": "object"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := workflowwait.Record{Kind: workflowwait.KindChildRun, Correlation: string(child.ID), ResumeSchema: schema,
+		Visibility: workflowwait.VisibilityPrivate, Authority: workflowwait.ResponderAuthority{Kind: "child_run", Reference: string(child.ID)},
+		WakeSource: workflowwait.WakeChildRun, Status: workflowwait.StatusOpen}
+	suspended, err := (workflowruntime.WaitCoordinator{Store: fixture.state}).Suspend(t.Context(), workflowruntime.SuspendCommand{Request: workflowruntime.SuspendNodeWaitRequest{
+		Wait:                   workflowruntime.WaitSnapshot{Ref: workflowruntime.WaitRef{ID: workflowruntime.WaitID("child-wait-" + suffix)}, Invocation: parent.Node.ID, Record: record},
+		ExpectedNodeGeneration: parent.Node.Generation, ExpectedAttemptGeneration: parent.Attempt.Generation,
+		Claim: workflowruntime.ClaimProof{Owner: parent.Node.Lease.Owner, Token: parent.Node.Lease.Token, Generation: parent.Node.Lease.Generation}, At: fixture.now}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return suspended.Wait, completed.Snapshot
+}
+
+func assertChildTerminalWait(t *testing.T, fixture *hostFixture, waitID workflowruntime.WaitID, contains, output string) {
+	t.Helper()
+	wait, err := fixture.state.LoadWait(t.Context(), waitID)
+	if err != nil || wait.Status != workflowruntime.WaitResumed || wait.Resolution == nil || wait.Resolution.Source != workflowwait.WakeChildRun || wait.ResumeValues == nil {
+		t.Fatalf("child terminal wait = %#v, %v", wait, err)
+	}
+	set, err := fixture.state.LoadValues(t.Context(), *wait.ResumeValues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(set[workflowruntime.ResumeValueName].Inline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), contains) || output != "" && !strings.Contains(string(encoded), output) || strings.Contains(string(encoded), "secret://") {
+		t.Fatalf("child terminal payload = %s", encoded)
+	}
+}
+
+func assertSingleChildResume(t *testing.T, fixture *hostFixture, waitID workflowruntime.WaitID, childID workflowruntime.RunID) {
+	t.Helper()
+	var resultCount, idempotencyCount int
+	if err := fixture.store.DB().QueryRow(`SELECT COUNT(1) FROM workflow_wait_resume_results WHERE wait_id=?`, waitID).Scan(&resultCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.DB().QueryRow(`SELECT COUNT(1) FROM workflow_wait_resume_idempotency WHERE idempotency_key=?`, "child-terminal:"+string(childID)).Scan(&idempotencyCount); err != nil {
+		t.Fatal(err)
+	}
+	if resultCount != 1 || idempotencyCount != 1 {
+		t.Fatalf("child resume counts result=%d idempotency=%d", resultCount, idempotencyCount)
+	}
+}
+
+func TestHostNamedSignalAndTrackedUpdateAuthorizeReplayAndConflict(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+
+	start := fixture.startRequest("signal-run", "signal-start", "user:signal")
+	owner := authenticatedContext(t.Context(), "user:signal")
+	if _, err := fixture.host.StartRun(owner, start); err != nil {
+		t.Fatal(err)
+	}
+	suspendHostNamedSignal(t, fixture, start.RunID, "signal-wait", "project.changed", "project-1")
+	payload := mustInline(t, map[string]any{"sequence": 1})
+	signal := appworkflow.SignalRunRequest{Selector: workflowruntime.SignalSelector{RunID: start.RunID, Name: "project.changed", Correlation: "project-1"}, Payload: payload,
+		IdempotencyKey: "signal-delivery", Identity: start.Identity}
+	foreign := signal
+	foreign.Identity.PrincipalHint = "user:other"
+	if _, err := fixture.host.SignalRun(authenticatedContext(t.Context(), "user:other"), foreign); !errors.Is(err, appworkflow.ErrPolicyDenied) {
+		t.Fatalf("foreign SignalRun = %v", err)
+	}
+	applied, err := fixture.host.SignalRun(owner, signal)
+	if err != nil || applied.Outcome != workflowruntime.ResumeApplied || applied.Wait.Status != workflowruntime.WaitResumed {
+		t.Fatalf("SignalRun = %#v, %v", applied, err)
+	}
+	replayed, err := fixture.host.SignalRun(owner, signal)
+	if err != nil || replayed.Outcome != workflowruntime.ResumeReplayed || replayed.Wait.Ref.ID != applied.Wait.Ref.ID {
+		t.Fatalf("SignalRun replay = %#v, %v", replayed, err)
+	}
+	conflict := signal
+	conflict.Payload = mustInline(t, map[string]any{"sequence": 2})
+	if _, conflictErr := fixture.host.SignalRun(owner, conflict); !errors.Is(conflictErr, workflowruntime.ErrIdempotencyConflict) {
+		t.Fatalf("SignalRun conflict = %v", conflictErr)
+	}
+
+	updateStart := fixture.startRequest("update-run", "update-start", "user:update")
+	updateOwner := authenticatedContext(t.Context(), "user:update")
+	if _, startErr := fixture.host.StartRun(updateOwner, updateStart); startErr != nil {
+		t.Fatal(startErr)
+	}
+	suspendHostNamedSignal(t, fixture, updateStart.RunID, "update-wait", "review.completed", "review-1")
+	update := appworkflow.UpdateRunRequest{Selector: workflowruntime.SignalSelector{RunID: updateStart.RunID, Name: "review.completed", Correlation: "review-1"}, Payload: mustInline(t, "accepted"),
+		IdempotencyKey: "tracked-update", Identity: updateStart.Identity}
+	foreignUpdate := update
+	foreignUpdate.Identity.PrincipalHint = "user:other"
+	if _, foreignErr := fixture.host.UpdateRun(authenticatedContext(t.Context(), "user:other"), foreignUpdate); !errors.Is(foreignErr, appworkflow.ErrPolicyDenied) {
+		t.Fatalf("foreign UpdateRun = %v", foreignErr)
+	}
+	updated, err := fixture.host.UpdateRun(updateOwner, update)
+	if err != nil || updated.Status != workflowruntime.RunUpdateApplied || updated.Receipt == nil || updated.Receipt.Outcome != workflowruntime.ResumeApplied {
+		t.Fatalf("UpdateRun = %#v, %v", updated, err)
+	}
+	updateReplay, err := fixture.host.UpdateRun(updateOwner, update)
+	if err != nil || updateReplay.Status != workflowruntime.RunUpdateApplied || updateReplay.Generation != updated.Generation {
+		t.Fatalf("UpdateRun replay = %#v, %v", updateReplay, err)
+	}
+	updateConflict := update
+	updateConflict.Payload = mustInline(t, "changed")
+	if _, err := fixture.host.UpdateRun(updateOwner, updateConflict); !errors.Is(err, workflowruntime.ErrIdempotencyConflict) {
+		t.Fatalf("UpdateRun conflict = %v", err)
+	}
+}
+
+func TestHostTrackedUpdateClampsRegressedClockToSelectedWait(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	request := fixture.startRequest("update-clock-run", "update-clock-start", "user:update-clock")
+	ctx := authenticatedContext(t.Context(), "user:update-clock")
+	if _, err := fixture.host.StartRun(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	wait := suspendHostNamedSignal(t, fixture, request.RunID, "update-clock-wait", "clock.updated", "clock-1")
+	if shutdownErr := fixture.host.Shutdown(t.Context()); shutdownErr != nil {
+		t.Fatal(shutdownErr)
+	}
+	regressed := hostWithFixedIdentityClock(t, fixture, testIdentityBinding("user:update-clock", request.Identity.SourceAuthority),
+		appworkflow.ClockFunc(func() time.Time { return wait.UpdatedAt.Add(-time.Minute) }))
+	if err := regressed.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = regressed.Shutdown(context.Background()) })
+	updated, err := regressed.UpdateRun(ctx, appworkflow.UpdateRunRequest{Selector: workflowruntime.SignalSelector{RunID: request.RunID,
+		Name: "clock.updated", Correlation: "clock-1"}, Payload: mustInline(t, "accepted"), IdempotencyKey: "update-clock-key", Identity: request.Identity})
+	if err != nil || updated.Status != workflowruntime.RunUpdateApplied || !updated.Request.ReceivedAt.Equal(wait.UpdatedAt) {
+		t.Fatalf("regressed-clock UpdateRun = %#v, %v", updated, err)
+	}
+	pending, err := fixture.state.RecoverRunUpdates(t.Context(), 10)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("regressed clock left unrecoverable update intents = %#v, %v", pending, err)
+	}
+}
+
+func TestHostSignalRunClampsRegressedClockToSelectedWait(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if startErr := fixture.host.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
+	}
+	request := fixture.startRequest("signal-clock-run", "signal-clock-start", "user:signal-clock")
+	ctx := authenticatedContext(t.Context(), "user:signal-clock")
+	if _, startErr := fixture.host.StartRun(ctx, request); startErr != nil {
+		t.Fatal(startErr)
+	}
+	wait := suspendHostNamedSignal(t, fixture, request.RunID, "signal-clock-wait", "clock.signaled", "clock-signal-1")
+	if shutdownErr := fixture.host.Shutdown(t.Context()); shutdownErr != nil {
+		t.Fatal(shutdownErr)
+	}
+	regressed := hostWithFixedIdentityClock(t, fixture, testIdentityBinding("user:signal-clock", request.Identity.SourceAuthority),
+		appworkflow.ClockFunc(func() time.Time { return wait.UpdatedAt.Add(-time.Minute) }))
+	if startErr := regressed.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
+	}
+	t.Cleanup(func() { _ = regressed.Shutdown(context.Background()) })
+	resumed, signalErr := regressed.SignalRun(ctx, appworkflow.SignalRunRequest{Selector: workflowruntime.SignalSelector{RunID: request.RunID,
+		Name: "clock.signaled", Correlation: "clock-signal-1"}, Payload: mustInline(t, "accepted"), IdempotencyKey: "signal-clock-key", Identity: request.Identity})
+	if signalErr != nil || resumed.Outcome != workflowruntime.ResumeApplied || !resumed.Wait.ResolvedAt.Equal(wait.UpdatedAt) {
+		t.Fatalf("regressed-clock SignalRun = %#v, %v", resumed, signalErr)
+	}
+}
+
+func TestHostRecoveryIgnoresWaitObserverFailureAfterTrackedUpdateSeals(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	request := fixture.startRequest("update-post-commit-run", "update-post-commit-start", "user:update-post-commit")
+	ctx := authenticatedContext(t.Context(), "user:update-post-commit")
+	if _, err := fixture.host.StartRun(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	wait := suspendHostNamedSignal(t, fixture, request.RunID, "update-post-commit-wait", "observer.updated", "observer-1")
+	payload := mustInline(t, "accepted")
+	identity := testIdentityBinding("user:update-post-commit", request.Identity.SourceAuthority)
+	responder := workflowwait.Responder{Kind: "hadron_identity", Reference: identity.Principal,
+		Attributes: map[string]string{"source_authority": identity.SourceAuthority, "trust": identity.Trust}}
+	pending, _, err := fixture.state.BeginRunUpdate(t.Context(), workflowruntime.BeginRunUpdateRequest{IdempotencyKey: "update-post-commit-key",
+		Selector: workflowruntime.SignalSelector{RunID: request.RunID, Name: "observer.updated", Correlation: "observer-1"},
+		WaitID:   wait.Ref.ID, Responder: responder, Payload: payload, ReceivedAt: wait.UpdatedAt})
+	if err != nil || pending.Status != workflowruntime.RunUpdatePending {
+		t.Fatalf("seed pending tracked update = %#v, %v", pending, err)
+	}
+	if shutdownErr := fixture.host.Shutdown(t.Context()); shutdownErr != nil {
+		t.Fatal(shutdownErr)
+	}
+	restarted := hostWithFixedIdentityClock(t, fixture, identity, appworkflow.ClockFunc(func() time.Time { return fixture.now.Add(time.Minute) }),
+		failingWaitMaterializer{err: errors.New("observer unavailable")})
+	if startErr := restarted.Start(t.Context()); startErr != nil {
+		t.Fatalf("recover post-commit tracked update = %v", startErr)
+	}
+	if shutdownErr := restarted.Shutdown(t.Context()); shutdownErr != nil {
+		t.Fatal(shutdownErr)
+	}
+	sealed, err := fixture.state.LoadRunUpdate(t.Context(), pending.Request.IdempotencyKey)
+	resumed, waitErr := fixture.state.LoadWait(t.Context(), wait.Ref.ID)
+	if err != nil || waitErr != nil || sealed.Status != workflowruntime.RunUpdateApplied || sealed.Receipt == nil ||
+		resumed.Status != workflowruntime.WaitResumed || resumed.Resolution == nil || resumed.Resolution.IdempotencyKey != pending.Request.IdempotencyKey {
+		t.Fatalf("post-commit tracked update convergence sealed=%#v wait=%#v errors=%v/%v", sealed, resumed, err, waitErr)
+	}
+}
+
+func suspendHostNamedSignal(t *testing.T, fixture *hostFixture, runID workflowruntime.RunID, waitID workflowruntime.WaitID, name, correlation string) workflowruntime.WaitSnapshot {
+	t.Helper()
+	nodeID := workflowruntime.NodeInvocationID{RunID: runID, NodeID: fixture.plan.Graph.Nodes[0].ID}
+	node, err := fixture.state.LoadNodeInvocation(t.Context(), nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := fixture.state.ClaimNode(t.Context(), workflowruntime.ClaimNodeRequest{InvocationID: nodeID, ExpectedClaimGeneration: node.ClaimGeneration,
+		Owner: "signal-worker", Token: "claim-" + string(waitID), IdempotencyKey: "claim-" + string(waitID), Now: fixture.now, LeaseUntil: fixture.now.Add(time.Hour)})
+	if err != nil || !claimed.Acquired || claimed.Lease == nil {
+		t.Fatalf("ClaimNode = %#v, %v", claimed, err)
+	}
+	proof := workflowruntime.ClaimProof{Owner: claimed.Lease.Owner, Token: claimed.Lease.Token, Generation: claimed.Lease.Generation}
+	claimedNode, err := fixture.state.LoadNodeInvocation(t.Context(), nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := fixture.state.StartNodeAttempt(t.Context(), workflowruntime.StartNodeAttemptRequest{InvocationID: nodeID, ExpectedNodeGeneration: claimedNode.Generation,
+		Claim: proof, Executor: workflowruntime.ExecutorMetadata{Kind: "transform", Version: "v1"}, At: fixture.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := workflowwait.NewSchemaRef(graph.Schema{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := workflowwait.Record{Kind: workflowwait.KindSignal, SignalName: name, Correlation: correlation, ResumeSchema: schema,
+		Visibility: workflowwait.VisibilityPrivate, Authority: workflowwait.ResponderAuthority{Kind: "policy", Reference: "run-owner"}, WakeSource: workflowwait.WakeSignal, Status: workflowwait.StatusOpen}
+	suspended, err := (workflowruntime.WaitCoordinator{Store: fixture.state}).Suspend(t.Context(), workflowruntime.SuspendCommand{Request: workflowruntime.SuspendNodeWaitRequest{
+		Wait: workflowruntime.WaitSnapshot{Ref: workflowruntime.WaitRef{ID: waitID}, Invocation: nodeID, Record: wait}, ExpectedNodeGeneration: started.Node.Generation,
+		ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, At: fixture.now}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return suspended.Wait
+}
+
+func TestHostDurabilityNoneUsesOrdinaryStartWithTypedOutputParityAndBoundedAudit(t *testing.T) {
+	fixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, compileNonDurableHostPlan(t))
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
+	request := fixture.startRequest("non-durable-run", "non-durable-key", "user:none")
+	ctx := authenticatedContext(t.Context(), "user:none")
+	started, err := fixture.host.StartRun(ctx, request)
+	if err != nil || started.Run == nil || started.Run.Status != workflowruntime.RunSucceeded || started.Durability != graph.DurabilityNone || started.Outputs["echo"].Inline != "hello" || len(started.InspectionLimitations) == 0 {
+		t.Fatalf("StartRun durability none = %#v, %v", started, err)
+	}
+	secretRef, err := values.ParseSecretRef("secret://project/non-durable#token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := values.NewSecretRef(secretRef, values.Metadata{Producer: values.Producer{Kind: "test", Reference: "non-durable-secret"},
+		MediaType: "text/plain", Redaction: values.RedactionSecret, Retention: values.RetentionProject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := values.NewArtifact(values.ArtifactRef{Store: "external", URI: "artifact://private/non-durable-output",
+		Digest: values.SHA256Digest([]byte("artifact payload")), MediaType: "application/octet-stream", SizeBytes: 16,
+		Producer: values.Producer{Kind: "test", Reference: "non-durable-artifact"}, Redaction: values.RedactionPrivate, Retention: values.RetentionExternal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transportValues := values.ValueSet{"echo": started.Outputs["echo"], "secret": secret, "artifact": artifact}
+	started.Outputs = transportValues
+	started.RenderedOutputs, err = values.RenderValueSet(transportValues, values.DisplayPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedStart, err := json.Marshal(started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"hello", "secret://project/non-durable", "artifact://private/non-durable-output"} {
+		if strings.Contains(string(encodedStart), forbidden) {
+			t.Fatalf("non-durable start JSON exposed %q: %s", forbidden, encodedStart)
+		}
+	}
+	if !strings.Contains(string(encodedStart), values.RedactedMarker) || !strings.Contains(string(encodedStart), `"outputs"`) {
+		t.Fatalf("non-durable start JSON omitted masked output projection: %s", encodedStart)
+	}
+	if _, loadErr := fixture.state.LoadRun(t.Context(), request.RunID); !errors.Is(loadErr, workflowruntime.ErrNotFound) {
+		t.Fatalf("durability none wrote durable runtime run: %v", loadErr)
+	}
+	audit, err := fixture.journal.LoadNonDurableStart(t.Context(), request.RunID)
+	if err != nil || audit.Outputs["echo"].Inline != started.Outputs["echo"].Inline {
+		t.Fatalf("non-durable audit = %#v, %v", audit, err)
+	}
+	replayed, err := fixture.host.StartRun(ctx, request)
+	if err != nil || replayed.Outcome != workflowruntime.IdempotencyReplayed || replayed.Outputs["echo"].Inline != "hello" {
+		t.Fatalf("non-durable replay = %#v, %v", replayed, err)
+	}
+	queried, err := fixture.host.QueryRun(ctx, appworkflow.QueryRunRequest{Query: workflowruntime.RunStateQuery{RunID: request.RunID, Limit: 10}, Identity: request.Identity})
+	if err != nil || queried.Run.ID != request.RunID || !queried.Run.HasOutputs || len(queried.Nodes) != 0 || len(queried.Events) != 0 {
+		t.Fatalf("non-durable query = %#v, %v", queried, err)
+	}
+	assertSafeQueryJSON(t, queried, "hello", "secret://", "artifact://")
+}
+
+func TestHostAutomaticallyStartsExactFailureHandlerAndDurablyFencesRecursion(t *testing.T) {
+	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+	if err := fixture.host.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	request := fixture.startRequest("failure-source", "failure-source-key", "user:failure")
+	if _, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:failure"), request); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := fixture.state.LoadRun(t.Context(), request.RunID)
+	failed, err := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunFailed, At: fixture.now.Add(time.Second)})
+	if err != nil || failed.Snapshot.Status != workflowruntime.RunFailed {
+		t.Fatalf("fail source run = %#v, %v", failed, err)
+	}
+	if shutdownErr := fixture.host.Shutdown(t.Context()); shutdownErr != nil {
+		t.Fatal(shutdownErr)
+	}
+
+	handlerPlan := compileFailureHandlerPlan(t)
+	provider := mapDefinitionProvider{plans: map[string]*workflowcompile.ExecutionPlan{fixture.plan.Digest: fixture.plan, fixture.plan.Definition.Digest: fixture.plan, handlerPlan.Digest: handlerPlan, handlerPlan.Definition.Digest: handlerPlan}}
+	newHost := func() *appworkflow.Host {
+		host, hostErr := appworkflow.New(appworkflow.Options{State: fixture.state, Journal: fixture.journal, Definitions: provider,
+			Identity: identityProviderFunc(func(_ context.Context, identity appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+				return testIdentityBinding(identity.PrincipalHint, identity.SourceAuthority), nil
+			}),
+			Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+				return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "allow failure handler"}, nil
+			}),
+			Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: fixture.scheduler,
+			Artifacts: fixture.artifacts, Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now.Add(2 * time.Second) }), RecoveryInterval: time.Hour, RecoveryBatchLimit: 10,
+			ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }), OnRunFailed: &appworkflow.FailureHandlerConfig{Definition: handlerPlan.Definition, MaximumDepth: 1}})
+		if hostErr != nil {
+			t.Fatal(hostErr)
+		}
+		return host
+	}
+	restarted := newHost()
+	if startErr := restarted.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
+	}
+	handlerRunID := testFailureHandlerRunID(request.RunID, handlerPlan.Definition.Digest)
+	handlerStart, err := fixture.journal.LoadStart(t.Context(), handlerRunID)
+	if err != nil || handlerStart.Record.Requested.Digest != handlerPlan.Definition.Digest || handlerStart.Record.Facts.Plan.Digest != handlerPlan.Digest {
+		t.Fatalf("failure handler start = %#v, %v", handlerStart, err)
+	}
+	handlerRun, _ := fixture.state.LoadRun(t.Context(), handlerRunID)
+	if _, err := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: handlerRun.ID, ExpectedGeneration: handlerRun.Generation, To: workflowruntime.RunFailed, At: fixture.now.Add(3 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	third := newHost()
+	if err := third.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = third.Shutdown(context.Background()) })
+	recursiveRunID := testFailureHandlerRunID(handlerRunID, handlerPlan.Definition.Digest)
+	if _, err := fixture.journal.LoadStart(t.Context(), recursiveRunID); !errors.Is(err, workflowruntime.ErrNotFound) {
+		t.Fatalf("recursive handler was not suppressed: %v", err)
+	}
+}
+
+func TestHostFailureHandlerUsesNormalDenyAndConfirmationPolicy(t *testing.T) {
+	for _, outcome := range []hoststate.PolicyOutcome{hoststate.PolicyDeny, hoststate.PolicyConfirm} {
+		t.Run(string(outcome), func(t *testing.T) {
+			fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
+			if err := fixture.host.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			request := fixture.startRequest("failure-policy-"+string(outcome), "failure-policy-key-"+string(outcome), "user:failure-policy")
+			if _, err := fixture.host.StartRun(authenticatedContext(t.Context(), "user:failure-policy"), request); err != nil {
+				t.Fatal(err)
+			}
+			run, err := fixture.state.LoadRun(t.Context(), request.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fixture.state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunFailed, At: fixture.now.Add(time.Second)}); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.host.Shutdown(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+
+			handlerPlan := compileFailureHandlerPlan(t)
+			provider := mapDefinitionProvider{plans: map[string]*workflowcompile.ExecutionPlan{fixture.plan.Digest: fixture.plan, fixture.plan.Definition.Digest: fixture.plan, handlerPlan.Digest: handlerPlan, handlerPlan.Definition.Digest: handlerPlan}}
+			newHost := func(policyOutcome hoststate.PolicyOutcome) *appworkflow.Host {
+				host, hostErr := appworkflow.New(appworkflow.Options{State: fixture.state, Journal: fixture.journal, Definitions: provider,
+					Identity: identityProviderFunc(func(_ context.Context, identity appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
+						return testIdentityBinding(identity.PrincipalHint, identity.SourceAuthority), nil
+					}),
+					Policy: appworkflow.PolicyEvaluatorFunc(func(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+						return hoststate.PolicyDecision{Outcome: policyOutcome, Reason: "failure policy fixture"}, nil
+					}),
+					Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: fixture.scheduler,
+					Artifacts: fixture.artifacts, Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now.Add(2 * time.Second) }), RecoveryInterval: time.Hour, RecoveryBatchLimit: 10,
+					ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }), OnRunFailed: &appworkflow.FailureHandlerConfig{Definition: handlerPlan.Definition, MaximumDepth: 2}})
+				if hostErr != nil {
+					t.Fatal(hostErr)
+				}
+				return host
+			}
+			denied := newHost(outcome)
+			if err := denied.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := denied.Shutdown(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			handlerRunID := testFailureHandlerRunID(request.RunID, handlerPlan.Definition.Digest)
+			if _, err := fixture.journal.LoadStart(t.Context(), handlerRunID); !errors.Is(err, workflowruntime.ErrNotFound) {
+				t.Fatalf("denied handler bypassed policy: %v", err)
+			}
+			var status, resultJSON string
+			if err := fixture.store.DB().QueryRow(`SELECT status,result_json FROM workflow_failure_hooks WHERE source_run_id=?`, request.RunID).Scan(&status, &resultJSON); err != nil || status != string(hoststate.FailureHookFailed) || len(resultJSON) == 0 || len(resultJSON) > 4096 {
+				t.Fatalf("terminal failure hook status=%q result=%q err=%v", status, resultJSON, err)
+			}
+
+			// A later permissive restart must retain the terminal deny/confirm
+			// result rather than silently bypassing it.
+			permissive := newHost(hoststate.PolicyAllow)
+			if err := permissive.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = permissive.Shutdown(context.Background()) })
+			if _, err := fixture.journal.LoadStart(t.Context(), handlerRunID); !errors.Is(err, workflowruntime.ErrNotFound) {
+				t.Fatalf("terminal policy result was bypassed after restart: %v", err)
+			}
+		})
 	}
 }
 
@@ -1399,6 +2070,7 @@ func TestHostDoesNotReadyCatchSwitchOrFinallyTargetsAsRoots(t *testing.T) {
 
 type hostFixture struct {
 	host              *appworkflow.Host
+	dbPath            string
 	store             *persistence.Store
 	state             *persistence.WorkflowStateStore
 	journal           *persistence.WorkflowHostStore
@@ -1422,7 +2094,8 @@ func newHostFixture(t *testing.T, outcome hoststate.PolicyOutcome, interval time
 func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, interval time.Duration, hook appworkflow.RecoveryHook, plan *workflowcompile.ExecutionPlan) *hostFixture {
 	t.Helper()
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-	store, openErr := persistence.Open(filepath.Join(t.TempDir(), "host.db"))
+	dbPath := filepath.Join(t.TempDir(), "host.db")
+	store, openErr := persistence.Open(dbPath)
 	if openErr != nil {
 		t.Fatal(openErr)
 	}
@@ -1438,7 +2111,7 @@ func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, inter
 	if artifactErr != nil {
 		t.Fatal(artifactErr)
 	}
-	fixture := &hostFixture{store: store, state: state, journal: journal, plan: plan, now: now, scheduler: scheduler, artifacts: artifactStore}
+	fixture := &hostFixture{dbPath: dbPath, store: store, state: state, journal: journal, plan: plan, now: now, scheduler: scheduler, artifacts: artifactStore}
 	identity := identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
 		fixture.identityCalls.Add(1)
 		principal, ok := ctx.Value(authenticatedPrincipalKey{}).(string)
@@ -1485,6 +2158,12 @@ func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, inter
 }
 
 func hostWithFixedIdentity(t *testing.T, fixture *hostFixture, binding hoststate.IdentityBinding) *appworkflow.Host {
+	return hostWithFixedIdentityClock(t, fixture, binding, appworkflow.ClockFunc(func() time.Time { return fixture.now }))
+}
+
+func hostWithFixedIdentityClock(t *testing.T, fixture *hostFixture, binding hoststate.IdentityBinding, clock appworkflow.Clock,
+	materializers ...workflowwait.Materializer,
+) *appworkflow.Host {
 	t.Helper()
 	identity := identityProviderFunc(func(ctx context.Context, request appworkflow.IdentityRequest) (hoststate.IdentityBinding, error) {
 		fixture.identityCalls.Add(1)
@@ -1504,11 +2183,18 @@ func hostWithFixedIdentity(t *testing.T, fixture *hostFixture, binding hoststate
 		fixture.policyMu.Unlock()
 		return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "fixture policy"}, nil
 	})
+	var waits *workflowruntime.WaitCoordinator
+	if len(materializers) > 1 {
+		t.Fatal("at most one wait materializer is supported")
+	}
+	if len(materializers) == 1 {
+		waits = &workflowruntime.WaitCoordinator{Store: fixture.state, Scheduler: fixture.scheduler, Materializer: materializers[0]}
+	}
 	host, err := appworkflow.New(appworkflow.Options{
 		State: fixture.state, Journal: fixture.journal,
 		Definitions: definitionProvider{plan: fixture.plan, calls: &fixture.definitionCalls}, Identity: identity, Policy: policy,
 		Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}},
-		Activations: fixture.scheduler, Artifacts: fixture.artifacts, Clock: appworkflow.ClockFunc(func() time.Time { return fixture.now }),
+		Activations: fixture.scheduler, Waits: waits, Artifacts: fixture.artifacts, Clock: clock,
 		RecoveryInterval: time.Hour, RecoveryBatchLimit: 1,
 		ChildRuns: childMaterializerFunc(func(context.Context, calladapter.ChildRunRequest) error { return nil }),
 	})
@@ -1647,6 +2333,68 @@ steps:
 		t.Fatalf("Compile = %#v", result)
 	}
 	return inferHostPlan(t, result.Plan)
+}
+
+func compileNonDurableHostPlan(t *testing.T) *workflowcompile.ExecutionPlan {
+	t.Helper()
+	source := workflowcompile.LoadBytes("host-non-durable.workflow.yaml", []byte(`workflow:
+  name: Host Non Durable Fixture
+  version: v1
+durability: none
+inputs:
+  - name: message
+    type: string
+    required: true
+outputs:
+  echo:
+    type: string
+    value: steps.echo.outputs.result
+steps:
+  - name: Echo
+    kind_version: v1
+    transform:
+      result: inputs.message
+    with:
+      message: inputs.message
+    effects: [compute]
+`))
+	if source.Source == nil || len(source.Diagnostics) != 0 {
+		t.Fatalf("LoadBytes non-durable = %#v", source)
+	}
+	result := workflowcompile.Compile(source.Source)
+	if result.Plan == nil || len(result.Diagnostics) != 0 {
+		t.Fatalf("Compile non-durable = %#v", result)
+	}
+	return inferHostPlan(t, result.Plan)
+}
+
+func compileFailureHandlerPlan(t *testing.T) *workflowcompile.ExecutionPlan {
+	t.Helper()
+	source := workflowcompile.LoadBytes("failure-handler.workflow.yaml", []byte(`workflow:
+  name: Failure Handler
+  version: v1
+steps:
+  - name: Record
+    transform:
+      result: handled
+    effects: [compute]
+`))
+	if source.Source == nil || len(source.Diagnostics) != 0 {
+		t.Fatalf("LoadBytes failure handler = %#v", source)
+	}
+	result := workflowcompile.Compile(source.Source)
+	if result.Plan == nil || len(result.Diagnostics) != 0 {
+		t.Fatalf("Compile failure handler = %#v", result)
+	}
+	plan := inferHostPlan(t, result.Plan)
+	plan.Definition.Authority = "project"
+	plan.Definition.Kind = "workflow"
+	return plan
+}
+
+func testFailureHandlerRunID(source workflowruntime.RunID, digest string) workflowruntime.RunID {
+	sum := sha256.Sum256([]byte(string(source) + "\x00" + digest))
+	return workflowruntime.RunID("failure-handler-" + hex.EncodeToString(sum[:]))
 }
 
 func compilePinnedReplayHostPlan(t *testing.T) *workflowcompile.ExecutionPlan {
@@ -1798,6 +2546,28 @@ func mustInline(t *testing.T, input any) values.Value {
 type definitionProvider struct {
 	plan  *workflowcompile.ExecutionPlan
 	calls *atomic.Int32
+}
+
+type mapDefinitionProvider struct {
+	plans map[string]*workflowcompile.ExecutionPlan
+}
+
+func (p mapDefinitionProvider) ResolvePlan(_ context.Context, ref graph.DefinitionRef) (*workflowcompile.ExecutionPlan, error) {
+	plan, ok := p.plans[ref.Digest]
+	if !ok {
+		return nil, workflowruntime.ErrNotFound
+	}
+	copyPlan := *plan
+	return &copyPlan, nil
+}
+
+func (p mapDefinitionProvider) LoadPlan(_ context.Context, digest string) (*workflowcompile.ExecutionPlan, error) {
+	plan, ok := p.plans[digest]
+	if !ok {
+		return nil, workflowruntime.ErrNotFound
+	}
+	copyPlan := *plan
+	return &copyPlan, nil
 }
 
 type hostTestVerifier struct {

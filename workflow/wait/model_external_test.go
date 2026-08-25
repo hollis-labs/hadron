@@ -51,6 +51,20 @@ func TestRecordRejectsTokenBearingURLAndIncompatibleTerminals(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := workflowwait.Record{Kind: workflowwait.KindSignal, Correlation: "signal-1", ResumeSchema: schema, Visibility: workflowwait.VisibilityPrivate, Authority: workflowwait.ResponderAuthority{Kind: "test"}, WakeSource: workflowwait.WakeSignal, Status: workflowwait.StatusOpen}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("preexisting unnamed signal record = %v", err)
+	}
+	named := base
+	named.SignalName = "review.completed"
+	if err := named.Validate(); err != nil {
+		t.Fatalf("named signal record = %v", err)
+	}
+	wrongKind := named
+	wrongKind.Kind = workflowwait.KindCallback
+	wrongKind.WakeSource = workflowwait.WakeCallback
+	if err := wrongKind.Validate(); err == nil {
+		t.Fatal("non-signal record accepted signal_name")
+	}
 	for _, raw := range []string{"https://secret@example.test/wait", "https://example.test/wait?token=secret", "https://example.test/wait#secret"} {
 		candidate := base
 		candidate.ResumeURL = raw

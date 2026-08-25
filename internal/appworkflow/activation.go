@@ -90,6 +90,7 @@ type ActivationStartRequest struct {
 type ActivationStartResult struct {
 	Dispatch hoststate.ActivationDispatch
 	Start    StartRunResult
+	Reactor  *ReactorDeliveryResult
 	Outcome  runtime.IdempotencyOutcome
 }
 
@@ -206,6 +207,29 @@ func (s ActivationService) ActivateExternal(ctx context.Context, request Externa
 	for name, value := range payload {
 		canonicalPayload[name] = value.Inline
 	}
+	var reactorService ReactorService
+	var reactorCorrelation string
+	reactorService = ReactorService{Host: s.Host, Activations: s.Store, Store: s.Host.reactors, Clock: s.Clock}
+	reactorDelivery, err := reactorService.handlesSourceRegistration(ctx, request.RegistrationID)
+	if err != nil {
+		return ActivationStartResult{}, err
+	}
+	if reactorDelivery {
+		if s.Host.reactors == nil {
+			return ActivationStartResult{}, fmt.Errorf("%w: source reactor persistence is unavailable", ErrInvalidHost)
+		}
+		if request.LogicalRunID != "" {
+			return ActivationStartResult{}, fmt.Errorf("%w: reactor logical identity is derived by the host", ErrInvalidActivation)
+		}
+		registration, loadErr := s.Store.LoadActivation(ctx, request.RegistrationID)
+		if loadErr != nil {
+			return ActivationStartResult{}, loadErr
+		}
+		reactorCorrelation, err = deriveReactorCorrelation(registration, canonicalPayload, request.IdempotencyKey, request.OccurredAt)
+		if err != nil {
+			return ActivationStartResult{}, err
+		}
+	}
 	fire, _, err := s.Store.RecordActivationEvent(context.WithoutCancel(ctx), hoststate.ActivationEvent{
 		RegistrationID: request.RegistrationID, IdempotencyKey: request.IdempotencyKey,
 		OccurredAt: request.OccurredAt.UTC(), Payload: payload, LogicalRunID: request.LogicalRunID, SourceRef: request.SourceRef,
@@ -226,15 +250,28 @@ func (s ActivationService) ActivateExternal(ctx context.Context, request Externa
 		fire = claimed
 	}
 	if fire.Status == gosched.FireSucceeded || fire.Status == gosched.FireSkipped || fire.Status == gosched.FireExhausted {
+		if reactorDelivery && fire.Status == gosched.FireSucceeded {
+			reactor, deliveryErr := reactorService.Deliver(ctx, ReactorDeliveryRequest{RegistrationID: request.RegistrationID, IdempotencyKey: request.IdempotencyKey,
+				Correlation: reactorCorrelation, Payload: canonicalPayload, OccurredAt: request.OccurredAt.UTC(), ReceivedAt: request.ReceivedAt.UTC()})
+			return ActivationStartResult{Reactor: &reactor, Outcome: reactor.Outcome}, deliveryErr
+		}
 		return s.replayTerminalActivation(ctx, fire)
 	}
 	if fire.Status != gosched.FireClaimed {
 		return ActivationStartResult{}, ErrActivationSkipped
 	}
-	result, startErr := s.Start(ctx, ActivationStartRequest{
-		RegistrationID: request.RegistrationID, FireID: fire.ID, Attempt: fire.Attempt,
-		ScheduledAt: fire.ScheduledAt, ObservedAt: request.ReceivedAt.UTC(), Payload: canonicalPayload, LogicalRunID: request.LogicalRunID,
-	})
+	var result ActivationStartResult
+	var startErr error
+	if reactorDelivery {
+		reactor, deliveryErr := reactorService.Deliver(ctx, ReactorDeliveryRequest{RegistrationID: request.RegistrationID, IdempotencyKey: request.IdempotencyKey,
+			Correlation: reactorCorrelation, Payload: canonicalPayload, OccurredAt: request.OccurredAt.UTC(), ReceivedAt: request.ReceivedAt.UTC()})
+		result, startErr = ActivationStartResult{Reactor: &reactor, Outcome: reactor.Outcome}, deliveryErr
+	} else {
+		result, startErr = s.Start(ctx, ActivationStartRequest{
+			RegistrationID: request.RegistrationID, FireID: fire.ID, Attempt: fire.Attempt,
+			ScheduledAt: fire.ScheduledAt, ObservedAt: request.ReceivedAt.UTC(), Payload: canonicalPayload, LogicalRunID: request.LogicalRunID,
+		})
+	}
 	completedAt := s.now()
 	if completedAt.Before(request.ReceivedAt) {
 		completedAt = request.ReceivedAt.UTC()
@@ -255,6 +292,25 @@ func (s ActivationService) ActivateExternal(ctx context.Context, request Externa
 		transitionErr = gosched.ErrTransitionConflict
 	}
 	return result, errors.Join(startErr, transitionErr)
+}
+
+func deriveReactorCorrelation(registration hoststate.ActivationRegistration, payload map[string]any, deliveryKey string, occurredAt time.Time) (string, error) {
+	if registration.Policy.DeduplicationKey == nil {
+		return "", fmt.Errorf("%w: source reactor requires a compiler-owned deduplication key for correlation", ErrInvalidActivation)
+	}
+	contextValues, err := privateActivationContext(registration, payload, deliveryKey, occurredAt.UTC())
+	if err != nil {
+		return "", err
+	}
+	key, err := values.NewExpressionEngine().EvaluateRaw(*registration.Policy.DeduplicationKey, activationExpressionContext(contextValues), values.ExpressionOptions{})
+	if err != nil {
+		return "", fmt.Errorf("evaluate reactor correlation key: %w", err)
+	}
+	digest, err := values.DigestInline(key)
+	if err != nil {
+		return "", fmt.Errorf("digest reactor correlation key: %w", err)
+	}
+	return "reactor-correlation-" + strings.TrimPrefix(digest, "sha256:"), nil
 }
 
 func (s ActivationService) replayTerminalActivation(ctx context.Context, fire gosched.Fire) (ActivationStartResult, error) {

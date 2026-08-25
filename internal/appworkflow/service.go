@@ -22,11 +22,15 @@ import (
 const cancellationCASLimit = 8
 
 func (h *Host) StartRun(ctx context.Context, request StartRunRequest) (StartRunResult, error) {
-	return h.startRun(ctx, request, nil)
+	return h.startRunInternal(ctx, request, nil, false)
 }
 
 func (h *Host) startRun(ctx context.Context, request StartRunRequest, expectedIdentity *hoststate.IdentityBinding) (StartRunResult, error) {
-	if err := h.requireReady(); err != nil {
+	return h.startRunInternal(ctx, request, expectedIdentity, false)
+}
+
+func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, expectedIdentity *hoststate.IdentityBinding, allowRecovery bool) (StartRunResult, error) {
+	if err := h.requireStartReady(allowRecovery); err != nil {
 		return StartRunResult{}, err
 	}
 	if ctx == nil {
@@ -55,6 +59,22 @@ func (h *Host) startRun(ctx context.Context, request StartRunRequest, expectedId
 		return StartRunResult{}, err
 	}
 	decisionID := policyDecisionID(request.IdempotencyKey)
+	if audit, ok := h.journal.(hoststate.NonDurableJournal); ok && !nilInterface(audit) {
+		if prior, loadErr := audit.LoadNonDurableStartByKey(ctx, request.IdempotencyKey); loadErr == nil {
+			if authErr := h.authorizeNonDurableReplay(ctx, request.Identity, prior); authErr != nil {
+				return StartRunResult{}, authErr
+			}
+			if expectedIdentity != nil && !sameIdentity(prior.Identity, expectedIdentity.Clone()) {
+				return StartRunResult{}, fmt.Errorf("%w: replayed internal identity differs from its immutable source binding", ErrPolicyDenied)
+			}
+			if prior.RequestDigest != requestDigest {
+				return StartRunResult{}, &runtime.IdempotencyConflictError{Operation: "start non-durable graph workflow", Key: request.IdempotencyKey}
+			}
+			return nonDurableStartResult(prior, runtime.IdempotencyReplayed)
+		} else if !errors.Is(loadErr, runtime.ErrNotFound) {
+			return StartRunResult{}, fmt.Errorf("load non-durable workflow replay: %w", loadErr)
+		}
+	}
 	if prior, loadErr := h.journal.LoadStartByKey(ctx, request.IdempotencyKey); loadErr == nil {
 		if authErr := h.authorizeStartReplay(ctx, request.Identity, prior.Record.Identity); authErr != nil {
 			return StartRunResult{}, authErr
@@ -152,6 +172,9 @@ func (h *Host) startRun(ctx context.Context, request StartRunRequest, expectedId
 	if request.DryRun && !facts.DryRunAvailable {
 		return StartRunResult{Decision: decision, Facts: facts}, ErrDryRunUnsupported
 	}
+	if runtime.EffectiveDurability(plan.Graph) == graph.DurabilityNone && !request.DryRun {
+		return h.executeNonDurable(ctx, request, requestDigest, plan, facts, decision)
+	}
 
 	boundResult, err := runtime.BindRun(ctx, h.state, runtime.BindRunRequest{ID: request.RunID, Plan: plan, Inputs: request.Inputs, CreatedAt: h.now()})
 	if err != nil {
@@ -186,6 +209,22 @@ func (h *Host) startRun(ctx context.Context, request StartRunRequest, expectedId
 	}
 	h.observe(request.RunID, "workflow.started", map[string]string{"phase": string(finished.Phase), "outcome": string(outcome)})
 	return h.startResult(ctx, finished, outcome, nil)
+}
+
+func (h *Host) requireStartReady(allowRecovery bool) error {
+	if !allowRecovery {
+		return h.requireReady()
+	}
+	if h == nil {
+		return ErrInvalidHost
+	}
+	h.mu.RLock()
+	started := h.health.Started
+	h.mu.RUnlock()
+	if !started {
+		return ErrHostNotReady
+	}
+	return nil
 }
 
 func cloneExecutionPlan(input *compile.ExecutionPlan) (*compile.ExecutionPlan, error) {
@@ -257,7 +296,7 @@ func (h *Host) bindIdentity(ctx context.Context, request IdentityRequest) (hosts
 
 func (h *Host) startResult(ctx context.Context, snapshot hoststate.StartSnapshot, outcome runtime.IdempotencyOutcome, resultErr error) (StartRunResult, error) {
 	bound := snapshot.Record.Run
-	result := StartRunResult{Bound: &bound, Decision: snapshot.Record.Decision, Facts: snapshot.Record.Facts, Outcome: outcome, Phase: snapshot.Phase, DryRun: snapshot.Record.DryRun}
+	result := StartRunResult{Bound: &bound, Decision: snapshot.Record.Decision, Facts: snapshot.Record.Facts, Outcome: outcome, Phase: snapshot.Phase, DryRun: snapshot.Record.DryRun, Durability: graph.DurabilitySteps}
 	if !snapshot.Record.DryRun && phaseHasRun(snapshot.Phase) {
 		run, err := h.state.LoadRun(context.WithoutCancel(ctx), snapshot.Record.Run.ID)
 		if err == nil {

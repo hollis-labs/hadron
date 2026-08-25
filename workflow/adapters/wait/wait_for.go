@@ -127,6 +127,12 @@ func (e *WaitFor) Execute(ctx context.Context, prepared stepkind.PreparedInvocat
 	if err != nil {
 		return stepkind.StepResult{}, invalidInvocation(err)
 	}
+	if kind == workflowwait.KindSignal {
+		record.SignalName = config.source.Reference
+		if err := record.Validate(); err != nil {
+			return stepkind.StepResult{}, invalidInvocation(err)
+		}
+	}
 	resumeToken := ""
 	if config.source.Kind == SourceCallback {
 		if nilInterface(e.base.callbacks) {

@@ -163,6 +163,10 @@ func (r Resolution) Validate() error {
 type Record struct {
 	Kind        Kind   `json:"kind"`
 	Correlation string `json:"correlation"`
+	// SignalName is the stable, typed signal or event name used by named host
+	// signal/update lookup. It is optional for backwards compatibility with
+	// durable signal rows created before named signals were introduced.
+	SignalName string `json:"signal_name,omitempty"`
 	// WakeAt is the immutable successful timer firing time. It is distinct
 	// from Deadline, which always means timeout-at. Legacy timer records without
 	// WakeAt remain timeout-only.
@@ -187,6 +191,12 @@ func (r Record) Validate() error {
 	}
 	if err := requiredText("wait correlation", r.Correlation); err != nil {
 		return err
+	}
+	if err := optionalText("wait signal name", r.SignalName); err != nil {
+		return err
+	}
+	if r.SignalName != "" && r.Kind != KindSignal {
+		return fmt.Errorf("wait signal name is supported only by signal waits")
 	}
 	if r.Payload != nil {
 		if err := r.Payload.Validate(); err != nil {
