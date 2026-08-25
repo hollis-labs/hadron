@@ -7,14 +7,14 @@ require (
 	github.com/dop251/goja v0.0.0-20260822123354-58e940e0d230
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/hollis-labs/agentkit v0.3.0
+	github.com/hollis-labs/agentkit v0.5.0
 	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
 	github.com/hollis-labs/go-mcp v0.1.0
 	github.com/hollis-labs/go-messaging v0.3.0
 	github.com/hollis-labs/go-otel v0.1.0
 	github.com/hollis-labs/go-providers v0.23.0
-	github.com/hollis-labs/go-scheduler v0.1.0
+	github.com/hollis-labs/go-scheduler v0.1.1
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
@@ -22,12 +22,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
-
-replace github.com/hollis-labs/agentkit => ../../libs/agentkit
-
-// W05-T04 consumes the pinned durable fire/attempt contract from the sibling
-// go-scheduler worktree (commit 51ebe8a); Hadron does not modify that module.
-replace github.com/hollis-labs/go-scheduler => ../../libs/go-scheduler
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
