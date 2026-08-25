@@ -1404,3 +1404,32 @@ materialize, or mutate effects are present.
 | independent source review `58d52de` | compiler scope/collision, child input durability, output projection/verification, MCP preparation, retry/effect authority, source identity, exposure contract, fake protocol and concurrency, restart, and redaction audit | pass after removing an unnecessary live-descriptor policy projection and retaining frozen kind contracts |
 | integration `c2a7dec` + `7a4895c` | dedicated E2E at `-count=3`; retry authority cases at `-count=10`; workflow/appworkflow/MCP/offlinebuild/persistence suites | pass |
 | integration `c2a7dec` + `7a4895c` | focused runtime/MCP/transform/appworkflow/persistence race suite; `go test -count=1 ./...` | pass |
+
+## W06-T08
+
+Reviewed the shared authenticated workflow lifecycle facade, ranked catalog
+search and explicit next steps, graph-native draft validation/scaffolding and
+deterministic contract testing, immutable registration, package metadata,
+exact registry qualification/publish/current mutations, profile-generation CAS,
+MCP lifecycle and generated-tool schemas, published A2A evidence, generated
+HTTP/TypeScript contracts, and the Workflow Registry UI. Source commit
+`5093f7b` was integrated as `c9274ca` after review added exact registry-unpin
+race protection, pre-execution package authorization, strict CLI exact-ref and
+required authoring identity syntax, compact nested MCP schemas, safe lifecycle
+error mapping, explicit search submission, and typed redacted run-output E2E
+inspection.
+
+The acceptance fixture proves missing-fit search through validate, scaffold,
+test, register, package, exact qualification pin, publish, exposure CAS pin,
+profile-filtered MCP discovery, lazy load, generated invocation, durable run
+inspection, CLI/HTTP/A2A/UI evidence parity, and exposure unpin/tool removal.
+Current alias, registry qualification pin, publication, and profile pin remain
+independent states. The in-app visual browser was unavailable because no
+browser was attached; repository Playwright Chromium passed 3/3.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `5093f7b` | focused suites at count 1 and 10; relevant package suite; focused race; full repository; vet; targeted staticcheck/golangci; generator, tidy, diff, and commit-hook checks | pass; zero targeted lint issues and byte-stable generation |
+| source worktree `5093f7b` | frontend generated freshness, 45 unit tests, typecheck, Biome, ESLint, build; Playwright Chromium | pass; 3/3 browser scenarios |
+| independent integration review `c9274ca` | lifecycle flywheel at `-count=3`; focused appworkflow/API/MCP/agentcard/CLI; API generation byte check; frontend generated freshness, 45 tests, typecheck, ESLint, and build | pass |
+| integration `c9274ca` | `go test -count=1 ./...`; committed status and diff checks | pass |

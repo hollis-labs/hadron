@@ -529,3 +529,21 @@
   executable semantics.
 
   Vanta revision for both W07-T11 decisions: `01M0VCQMBBXG15HS02WZYTRAXE`.
+
+- W06-T08 projects catalog discovery, draft validation/scaffolding/testing,
+  registration, packaging, exact registry mutation, publication, and exposure
+  management through one authenticated `WorkflowLifecycleOperations` facade.
+  CLI, HTTP, MCP, A2A, registry inspection, and UI consume the canonical
+  authoring, registration, exposure, and runtime contracts rather than owning
+  transport-local compilers, registries, or execution paths.
+
+- The mutable catalog `current` alias, exact registry qualification pin,
+  publication state, and exact exposure-profile pin are independent
+  authorities and are reported separately. Publication requires the exact
+  registry pin; direct generated-tool visibility requires a separately
+  published exact profile pin changed by generation CAS after source/plan,
+  effect/ACL, collision, and direct-tool-budget preflight. Collapsing these
+  states into one flag or mutation, allowing A2A management mutations, and
+  returning package bytes or private qualification material were rejected.
+
+  Vanta revision: `01M0VKXTYT0PV25VXE75FTGS59`.
