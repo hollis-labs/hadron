@@ -11,6 +11,7 @@ async function openKnownRun(page: Page, runID: string) {
 
 test('edits the xyflow draft and keeps registry, exposure, and persistence gaps explicit', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Workflow Graph' }).click();
   await expect(page.getByRole('heading', { name: 'Resolve, validate, and run through hadrond' })).toBeVisible();
   await expect(page.locator('.workflow-author-node')).toHaveCount(2);
   await page.getByRole('button', { name: 'Add layout note' }).click();
