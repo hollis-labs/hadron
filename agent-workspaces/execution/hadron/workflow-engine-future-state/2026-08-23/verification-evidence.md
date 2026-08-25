@@ -1361,3 +1361,21 @@ without exposing legacy blueprint execution as target semantics.
 | independent source review `e423176` | identity/provenance, authorization, idempotency, state-transition, migration, registry projection, and fail-closed route audit | pass after required hardening |
 | integration `05a97b5` | focused five-package suite; `go vet ./...`; committed diff/status checks | pass |
 | integration `05a97b5` | `go test -count=1 ./...` | all packages passed except one known `internal/agentsubstrate` explicit-reply timing flake; the isolated failing test passed immediately on rerun |
+
+## W05-T05
+
+Reviewed exact plan/source/compiler capture, relocation-stable plan identity,
+locator-sensitive snapshot identity, per-run immutable persistence, legacy and
+generic-provider unavailable fallbacks, private source retention, bounded
+cleanup, restart-safe inspection and rerun, and the safe metadata projection.
+Source commit `bb72580` was integrated as `f0df790` after the shared locator
+sanitizer was hardened for malformed, opaque, credential-bearing, secret, and
+protocol-relative references. Migration 0028 follows the integrated A2A
+migration 0027.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `bb72580` | focused appworkflow/persistence/diagnostics suites; repeated exact-snapshot and locator cases; focused race; full repository; vet; targeted golangci/staticcheck; tidy and diff checks | pass; zero task-local issues and no dependency/generated-artifact changes |
+| independent source review `bb72580` | resolver/source atomicity, plan/snapshot digest separation, defensive copies, immutable persistence/link integrity, legacy recovery, cleanup retention, inspect/explain redaction, source mutation/deletion/reopen/rerun, and exposure-provenance audit | pass after protocol-relative userinfo redaction was added |
+| integration `f0df790` | `go test -count=1 ./internal/appworkflow/... ./internal/persistence/... ./internal/rundiagnostics/...` | pass |
+| integration `f0df790` | `go test -race ./internal/appworkflow/... ./internal/persistence/... ./internal/rundiagnostics/...`; `go test ./...` | pass |
