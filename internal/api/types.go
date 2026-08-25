@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/hadron/internal/a2a"
+	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
@@ -101,6 +102,17 @@ func (f WorkflowRequestAuthenticatorFunc) AuthenticateWorkflowRequest(request *h
 	return f(request, intent)
 }
 
+type A2ATaskService interface {
+	SubmitTask(context.Context, a2a.TaskRequest) (*a2a.TaskResponse, error)
+	GetTask(context.Context, string) (*a2a.TaskResponse, error)
+	CancelTask(context.Context, string, a2a.CancelTaskRequest) (*a2a.TaskResponse, error)
+	ResumeTask(context.Context, string, a2a.ResumeTaskRequest) (*a2a.ResumeTaskResponse, error)
+}
+
+type AgentCardProvider interface {
+	Card(context.Context, string) (*agentcard.AgentCard, error)
+}
+
 // Dependencies groups daemon services used by the API handlers.
 type Dependencies struct {
 	Runs          RunStore
@@ -116,6 +128,8 @@ type Dependencies struct {
 	Workflows     appworkflow.WorkflowOperations
 	WorkflowReads appworkflow.WorkflowRunReadOperations
 	WorkflowAuth  WorkflowRequestAuthenticator
+	A2ATasks      A2ATaskService
+	AgentCard     AgentCardProvider
 	BlueprintDir  string
 	// WebUI is the optional transport-neutral operator SPA. The daemon owns
 	// delivery; the handler owns only static browser assets and never workflow
@@ -132,5 +146,4 @@ type Server struct {
 	pipelineSeq    atomic.Uint64
 	triggerSeq     atomic.Uint64
 	triggerManager *trigger.Manager
-	a2aHandler     *a2a.Handler
 }

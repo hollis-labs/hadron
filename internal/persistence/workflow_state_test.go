@@ -45,6 +45,7 @@ func TestWorkflowStateMigrationTablesAndIndexes(t *testing.T) {
 		"workflow_external_activations": "table",
 		"workflow_services":             "table",
 		"workflow_exposure_profiles":    "table", "workflow_mcp_principals": "table",
+		"workflow_a2a_tasks":         "table",
 		"idx_workflow_runs_recovery": "index", "idx_workflow_nodes_recovery": "index",
 		"idx_workflow_node_leases_expiry": "index", "idx_workflow_attempts_invocation": "index",
 		"idx_workflow_waits_recovery": "index", "idx_workflow_waits_deadline": "index",
@@ -124,6 +125,12 @@ SELECT name FROM sqlite_master WHERE type = ? AND name = ?`, kind, name).Scan(&f
 	}
 	if migrations != 1 {
 		t.Fatalf("migration 26 count = %d, want 1", migrations)
+	}
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 27`).Scan(&migrations); err != nil {
+		t.Fatalf("read migration version 27: %v", err)
+	}
+	if migrations != 1 {
+		t.Fatalf("migration 27 count = %d, want 1", migrations)
 	}
 	if !hasColumn(t, store, "workflow_fanouts", "fail_fast") {
 		t.Fatal("workflow_fanouts missing fail_fast persistence")

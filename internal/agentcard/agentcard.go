@@ -1,18 +1,21 @@
 package agentcard
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+	"io"
+	"reflect"
 
-	"github.com/hollis-labs/hadron/internal/blueprint"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/workflow/graph"
 )
 
-// ── A2A Agent Card Types ──────────────────────────────────────────────────────
+const MaximumAgentCardBytes = 1 << 20
 
-// AgentCard represents an A2A-compatible agent card served at /.well-known/agent.json.
+// AgentCard represents Hadron's bounded A2A discovery document.
 type AgentCard struct {
 	Name               string       `json:"name"`
 	Description        string       `json:"description"`
@@ -25,211 +28,131 @@ type AgentCard struct {
 	Skills             []Skill      `json:"skills"`
 }
 
-// Provider identifies the organization providing the agent.
 type Provider struct {
 	Organization string `json:"organization"`
 }
 
-// Capabilities describes what the agent supports.
 type Capabilities struct {
 	Streaming         bool `json:"streaming"`
 	PushNotifications bool `json:"pushNotifications"`
 }
 
-// Skill represents a single capability derived from a blueprint.
+// Skill carries the exact published registry identity and canonical workflow
+// contract. Raw source locators and arbitrary provenance metadata are omitted.
 type Skill struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	Tags        []string    `json:"tags"`
-	InputSchema InputSchema `json:"inputSchema"`
+	ID           string                                 `json:"id"`
+	Name         string                                 `json:"name"`
+	Description  string                                 `json:"description"`
+	Tags         []string                               `json:"tags"`
+	Definition   graph.DefinitionRef                    `json:"definition"`
+	Provenance   appworkflow.WorkflowExposureProvenance `json:"provenance"`
+	Effects      graph.EffectSet                        `json:"effects"`
+	InputSchema  graph.Schema                           `json:"inputSchema"`
+	OutputSchema graph.Schema                           `json:"outputSchema"`
 }
 
-// InputSchema is a JSON Schema object describing inputs.
-type InputSchema struct {
-	Type       string                    `json:"type"`
-	Properties map[string]SchemaProperty `json:"properties"`
-	Required   []string                  `json:"required,omitempty"`
+type PublishedWorkflowSource interface {
+	PublishedWorkflows(context.Context) ([]appworkflow.WorkflowExposureDescriptor, error)
 }
 
-// SchemaProperty describes one JSON Schema property.
-type SchemaProperty struct {
-	Type        string       `json:"type"`
-	Description string       `json:"description,omitempty"`
-	Pattern     string       `json:"pattern,omitempty"`
-	MinLength   *int         `json:"minLength,omitempty"`
-	MaxLength   *int         `json:"maxLength,omitempty"`
-	Minimum     *float64     `json:"minimum,omitempty"`
-	Maximum     *float64     `json:"maximum,omitempty"`
-	Enum        []any        `json:"enum,omitempty"`
-	Items       *SchemaItems `json:"items,omitempty"`
+type Builder struct {
+	source PublishedWorkflowSource
 }
 
-// SchemaItems describes the items constraint for array types.
-type SchemaItems struct {
-	Type string `json:"type"`
+func NewBuilder(source PublishedWorkflowSource) (*Builder, error) {
+	if nilInterface(source) {
+		return nil, errors.New("published workflow source is required")
+	}
+	return &Builder{source: source}, nil
 }
 
-// ── Construction ──────────────────────────────────────────────────────────────
-
-// SkillFromBlueprint generates a Skill from a single parsed blueprint.
-// The path argument is used only for fallback ID generation when the blueprint
-// has no slug or name.
-func SkillFromBlueprint(bp *blueprint.Blueprint, path string) Skill {
-	id := bp.Spec.Slug
-	if id == "" {
-		id = bp.Spec.Name
+// Card derives one immutable snapshot from published graph registry records.
+func (b *Builder) Card(ctx context.Context, baseURL string) (*AgentCard, error) {
+	if ctx == nil || b == nil || nilInterface(b.source) {
+		return nil, errors.New("agent-card builder is not initialized")
 	}
-	if id == "" {
-		id = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
-	name := bp.Spec.Title
-	if name == "" {
-		name = bp.Spec.Name
-	}
-	if name == "" {
-		name = id
-	}
-
-	desc := bp.Spec.Description
-
-	tags := bp.Spec.Tags
-	if tags == nil {
-		tags = []string{}
-	}
-
-	props := make(map[string]SchemaProperty, len(bp.Inputs))
-	var required []string
-
-	for _, inp := range bp.Inputs {
-		prop := inputToSchemaProperty(inp)
-		props[inp.Name] = prop
-		if inp.Required {
-			required = append(required, inp.Name)
-		}
-	}
-
-	return Skill{
-		ID:          id,
-		Name:        name,
-		Description: desc,
-		Tags:        tags,
-		InputSchema: InputSchema{
-			Type:       "object",
-			Properties: props,
-			Required:   required,
-		},
-	}
-}
-
-// FromDirectory scans a directory for blueprint YAML files and builds a
-// composite AgentCard with all discovered blueprints as skills.
-func FromDirectory(dir string, baseURL string) (*AgentCard, error) {
 	if baseURL == "" {
 		baseURL = "http://localhost:8095"
 	}
-
-	var skills []Skill
-
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			// Card generation is best-effort: a single inaccessible entry
-			// must not prevent serving a card for valid peers. Only an error
-			// on the root directory itself is fatal.
-			if path == dir {
-				return err
-			}
-			return nil //nolint:nilerr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		ext := filepath.Ext(d.Name())
-		if ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-		bp, parseErr := blueprint.ParseFile(path)
-		if parseErr != nil {
-			// Invalid blueprints should not prevent serving a card for valid peers.
-			return nil //nolint:nilerr
-		}
-		skills = append(skills, SkillFromBlueprint(bp, path))
-		return nil
-	})
+	descriptors, err := b.source.PublishedWorkflows(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("walk blueprint directory: %w", err)
+		return nil, err
 	}
-
-	if skills == nil {
-		skills = []Skill{}
+	skills := make([]Skill, len(descriptors))
+	for index, descriptor := range descriptors {
+		input, cloneErr := cloneSchema(descriptor.InputSchema)
+		if cloneErr != nil {
+			return nil, fmt.Errorf("clone workflow input schema: %w", cloneErr)
+		}
+		output, cloneErr := cloneSchema(descriptor.OutputSchema)
+		if cloneErr != nil {
+			return nil, fmt.Errorf("clone workflow output schema: %w", cloneErr)
+		}
+		description := descriptor.Description
+		if description == "" {
+			description = "Start the published durable workflow " + descriptor.Name + "."
+		}
+		skills[index] = Skill{
+			ID:   descriptor.Name + "@" + descriptor.Version + "@" + descriptor.Digest,
+			Name: descriptor.Name, Description: description,
+			Tags: append([]string(nil), descriptor.Tags...), Definition: descriptor.Definition,
+			Provenance: descriptor.Provenance, Effects: append(graph.EffectSet(nil), descriptor.Effects...),
+			InputSchema: input, OutputSchema: output,
+		}
 	}
-
-	return &AgentCard{
-		Name:        "Hadron Automation",
-		Description: "Local-first blueprint automation runner",
-		URL:         baseURL,
-		Provider:    Provider{Organization: "Hadron"},
-		Version:     "0.4.0",
-		Capabilities: Capabilities{
-			Streaming:         false,
-			PushNotifications: false,
-		},
-		DefaultInputModes:  []string{"application/json"},
-		DefaultOutputModes: []string{"application/json"},
-		Skills:             skills,
-	}, nil
+	card := &AgentCard{
+		Name: "Hadron Workflows", Description: "Published graph-native durable workflows", URL: baseURL,
+		Provider: Provider{Organization: "Hadron"}, Version: "1.0.0",
+		Capabilities:      Capabilities{Streaming: false, PushNotifications: false},
+		DefaultInputModes: []string{"application/json"}, DefaultOutputModes: []string{"application/json"},
+		Skills: skills,
+	}
+	if encoded, marshalErr := json.Marshal(card); marshalErr != nil || len(encoded) > MaximumAgentCardBytes {
+		return nil, errors.New("agent card exceeds the supported response bound")
+	}
+	return card, nil
 }
 
-// JSON returns the agent card as pretty-printed JSON bytes.
 func (c *AgentCard) JSON() ([]byte, error) {
-	return json.MarshalIndent(c, "", "  ")
+	encoded, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > MaximumAgentCardBytes {
+		return nil, errors.New("agent card exceeds the supported response bound")
+	}
+	return encoded, nil
 }
 
-// ── Input → JSON Schema mapping ───────────────────────────────────────────────
-
-func inputToSchemaProperty(inp blueprint.Input) SchemaProperty {
-	prop := SchemaProperty{
-		Type:        mapInputType(inp.Type),
-		Description: inp.Description,
+func cloneSchema(input graph.Schema) (graph.Schema, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
 	}
-
-	if inp.Pattern != "" {
-		prop.Pattern = inp.Pattern
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var result graph.Schema
+	if err := decoder.Decode(&result); err != nil {
+		return nil, err
 	}
-	if inp.MinLength != nil {
-		prop.MinLength = inp.MinLength
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, errors.New("workflow schema has trailing data")
 	}
-	if inp.MaxLength != nil {
-		prop.MaxLength = inp.MaxLength
-	}
-	if inp.Min != nil {
-		prop.Minimum = inp.Min
-	}
-	if inp.Max != nil {
-		prop.Maximum = inp.Max
-	}
-	if len(inp.Enum) > 0 {
-		prop.Enum = inp.Enum
-	}
-	if inp.Type == "array" && inp.ItemsType != "" {
-		prop.Items = &SchemaItems{Type: mapInputType(inp.ItemsType)}
-	}
-
-	return prop
+	return result, nil
 }
 
-func mapInputType(t string) string {
-	switch t {
-	case "string":
-		return "string"
-	case "number":
-		return "number"
-	case "boolean":
-		return "boolean"
-	case "array":
-		return "array"
+func nilInterface(input any) bool {
+	if input == nil {
+		return true
+	}
+	value := reflect.ValueOf(input)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
 	default:
-		return "string"
+		return false
 	}
 }

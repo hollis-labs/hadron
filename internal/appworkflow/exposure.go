@@ -21,9 +21,13 @@ import (
 )
 
 const (
-	MaximumExposureSearchResults = 100
-	MaximumExposureQueryBytes    = 1024
-	MaximumWorkflowToolNameBytes = 128
+	MaximumExposureSearchResults    = 100
+	MaximumExposureQueryBytes       = 1024
+	MaximumWorkflowToolNameBytes    = 128
+	MaximumWorkflowDescriptionBytes = 2048
+	MaximumWorkflowTags             = 32
+	MaximumWorkflowTagBytes         = 128
+	MaximumPublishedWorkflows       = 256
 )
 
 // WorkflowExposureStore is consumed by the application service. Its concrete
@@ -334,15 +338,29 @@ func (MCPIdentityProvider) BindIdentity(ctx context.Context, request IdentityReq
 }
 
 type WorkflowExposureDescriptor struct {
-	ToolName     string              `json:"tool_name"`
-	Name         string              `json:"name"`
-	Namespace    string              `json:"namespace,omitempty"`
-	Version      string              `json:"version"`
-	Digest       string              `json:"digest"`
-	Definition   graph.DefinitionRef `json:"definition"`
-	InputSchema  graph.Schema        `json:"input_schema"`
-	OutputSchema graph.Schema        `json:"output_schema"`
-	Effects      graph.EffectSet     `json:"effects"`
+	ToolName     string                     `json:"tool_name"`
+	Name         string                     `json:"name"`
+	Namespace    string                     `json:"namespace,omitempty"`
+	Version      string                     `json:"version"`
+	Digest       string                     `json:"digest"`
+	Description  string                     `json:"description,omitempty"`
+	Tags         []string                   `json:"tags"`
+	Definition   graph.DefinitionRef        `json:"definition"`
+	Provenance   WorkflowExposureProvenance `json:"provenance"`
+	InputSchema  graph.Schema               `json:"input_schema"`
+	OutputSchema graph.Schema               `json:"output_schema"`
+	Effects      graph.EffectSet            `json:"effects"`
+}
+
+// WorkflowExposureProvenance is the intentionally small, non-secret subset of
+// registry provenance safe for discovery transports. Source locators, parent
+// chains, and arbitrary metadata never cross this boundary.
+type WorkflowExposureProvenance struct {
+	Authority  string `json:"authority"`
+	Origin     string `json:"origin"`
+	Revision   string `json:"revision"`
+	Digest     string `json:"digest"`
+	TrustClass string `json:"trust_class,omitempty"`
 }
 
 type WorkflowExposureSummary struct {
@@ -545,6 +563,67 @@ func (s *WorkflowExposureService) NamespaceCatalog(ctx context.Context, session 
 	return catalog, nil
 }
 
+// PublishedWorkflows returns transport-neutral, exact descriptors for public
+// agent discovery. Publication is necessary but not sufficient: configured
+// definition authorization may still hide a record.
+func (s *WorkflowExposureService) PublishedWorkflows(ctx context.Context) ([]WorkflowExposureDescriptor, error) {
+	if ctx == nil {
+		return nil, errors.New("workflow exposure context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.requireGraphDependencies(); err != nil {
+		return nil, err
+	}
+	records, err := s.catalog.SearchWorkflows(ctx, "", "")
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].Name != records[j].Name {
+			return records[i].Name < records[j].Name
+		}
+		if records[i].Version != records[j].Version {
+			return records[i].Version < records[j].Version
+		}
+		return records[i].Digest < records[j].Digest
+	})
+	published := 0
+	for _, record := range records {
+		if record.Published {
+			published++
+		}
+	}
+	if published > MaximumPublishedWorkflows {
+		return nil, fmt.Errorf("%w: published workflow catalog exceeds %d descriptors", ErrHostNotReady, MaximumPublishedWorkflows)
+	}
+	result := make([]WorkflowExposureDescriptor, 0, len(records))
+	for _, record := range records {
+		if !record.Published {
+			continue
+		}
+		descriptor, describeErr := s.describeRecord(ctx, WorkflowExposureSession{}, record, "agent_card")
+		if errors.Is(describeErr, ErrWorkflowHidden) {
+			continue
+		}
+		if describeErr != nil {
+			return nil, describeErr
+		}
+		result = append(result, descriptor)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Name != result[j].Name {
+			return result[i].Name < result[j].Name
+		}
+		if result[i].Version != result[j].Version {
+			return result[i].Version < result[j].Version
+		}
+		return result[i].Digest < result[j].Digest
+	})
+	return cloneExposureDescriptors(result)
+}
+
 func (s *WorkflowExposureService) DisplayPolicy(ctx context.Context, session WorkflowExposureSession, requested values.DisplayPolicy) (values.DisplayPolicy, error) {
 	if err := s.reauthorize(ctx, session); err != nil {
 		return values.DisplayPolicy{}, err
@@ -596,7 +675,73 @@ func (s *WorkflowExposureService) describeRecord(ctx context.Context, session Wo
 	if err != nil {
 		return WorkflowExposureDescriptor{}, err
 	}
-	return WorkflowExposureDescriptor{ToolName: workflowToolName(record.Name), Name: record.Name, Namespace: record.Namespace, Version: record.Version, Digest: record.Digest, Definition: ref, InputSchema: input, OutputSchema: output, Effects: effects}, nil
+	description, tags, err := workflowDiscoveryMetadata(plan.Graph.Metadata)
+	if err != nil {
+		return WorkflowExposureDescriptor{}, err
+	}
+	provenance := WorkflowExposureProvenance{Authority: record.Authority, Origin: record.Provenance.Origin, Revision: record.Version, Digest: record.Digest, TrustClass: record.TrustClass}
+	if err := provenance.Validate(); err != nil {
+		return WorkflowExposureDescriptor{}, err
+	}
+	return WorkflowExposureDescriptor{ToolName: workflowToolName(record.Name), Name: record.Name, Namespace: record.Namespace, Version: record.Version, Digest: record.Digest, Description: description, Tags: tags, Definition: ref, Provenance: provenance, InputSchema: input, OutputSchema: output, Effects: effects}, nil
+}
+
+func (p WorkflowExposureProvenance) Validate() error {
+	for _, field := range []struct {
+		value    string
+		required bool
+	}{
+		{p.Authority, true}, {p.Origin, true}, {p.Revision, true}, {p.TrustClass, false},
+	} {
+		if err := hoststate.ValidatePublicText(field.value, 512, field.required); err != nil {
+			return errors.New("workflow discovery provenance is invalid")
+		}
+	}
+	if err := values.ValidateDigest(p.Digest); err != nil {
+		return fmt.Errorf("workflow discovery provenance digest: %w", err)
+	}
+	return nil
+}
+
+func workflowDiscoveryMetadata(metadata graph.Metadata) (string, []string, error) {
+	var description string
+	if raw, exists := metadata["description"]; exists {
+		var ok bool
+		description, ok = raw.(string)
+		if !ok || hoststate.ValidatePublicText(description, MaximumWorkflowDescriptionBytes, false) != nil {
+			return "", nil, errors.New("workflow discovery description is invalid")
+		}
+	}
+	var tags []string
+	if raw, exists := metadata["tags"]; exists {
+		switch typed := raw.(type) {
+		case []string:
+			tags = append(tags, typed...)
+		case []any:
+			for _, item := range typed {
+				value, ok := item.(string)
+				if !ok {
+					return "", nil, errors.New("workflow discovery tags are invalid")
+				}
+				tags = append(tags, value)
+			}
+		default:
+			return "", nil, errors.New("workflow discovery tags are invalid")
+		}
+	}
+	if len(tags) > MaximumWorkflowTags {
+		return "", nil, errors.New("workflow discovery tags exceed the supported bound")
+	}
+	sort.Strings(tags)
+	for index, tag := range tags {
+		if hoststate.ValidatePublicText(tag, MaximumWorkflowTagBytes, true) != nil || index > 0 && tag == tags[index-1] {
+			return "", nil, errors.New("workflow discovery tags are invalid")
+		}
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	return description, tags, nil
 }
 
 func (s *WorkflowExposureService) reauthorize(ctx context.Context, session WorkflowExposureSession) error {
@@ -877,6 +1022,7 @@ func cloneExposureDescriptors(input []WorkflowExposureDescriptor) ([]WorkflowExp
 		}
 		descriptor.InputSchema, descriptor.OutputSchema = inputSchema, outputSchema
 		descriptor.Effects = append(graph.EffectSet(nil), descriptor.Effects...)
+		descriptor.Tags = append([]string(nil), descriptor.Tags...)
 		result[index] = descriptor
 	}
 	return result, nil

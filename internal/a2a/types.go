@@ -1,28 +1,73 @@
 package a2a
 
-// TaskRequest is the inbound payload for POST /a2a/tasks.
+import (
+	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/rundiagnostics"
+	"github.com/hollis-labs/hadron/workflow/graph"
+	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	"github.com/hollis-labs/hadron/workflow/values"
+)
+
+// TaskRequest carries execution intent only. Authenticated principal facts are
+// bound from the request context at the appworkflow boundary.
 type TaskRequest struct {
-	ID       string         `json:"id"`                 // client-provided or auto-generated
-	Skill    string         `json:"skill"`              // maps to blueprint name/slug
-	Input    map[string]any `json:"input"`              // maps to blueprint inputs
-	Metadata map[string]any `json:"metadata,omitempty"` // opaque caller metadata
+	ID              string                             `json:"id,omitempty"`
+	Skill           graph.DefinitionRef                `json:"skill"`
+	Input           map[string]any                     `json:"input,omitempty"`
+	IdempotencyKey  string                             `json:"idempotency_key"`
+	RunScope        *hoststate.RunScopeSelector        `json:"run_scope,omitempty"`
+	ExecutionTarget *hoststate.ExecutionTargetSelector `json:"execution_target,omitempty"`
+	Confirmed       bool                               `json:"confirmed,omitempty"`
 }
 
-// TaskResponse is returned from both submit and get endpoints.
+type CancelTaskRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	Reason         string `json:"reason,omitempty"`
+}
+
+type ResumeTaskRequest struct {
+	WaitID         appworkflow.WaitID             `json:"wait_id"`
+	Correlation    string                         `json:"correlation"`
+	Token          string                         `json:"token,omitempty"`
+	WakeSource     appworkflow.WorkflowWakeSource `json:"wake_source"`
+	Payload        values.Value                   `json:"payload"`
+	IdempotencyKey string                         `json:"idempotency_key"`
+}
+
+// TaskResponse is a transport-safe projection assembled exclusively from
+// authorized appworkflow operations.
 type TaskResponse struct {
-	ID     string      `json:"id"`
-	Status TaskStatus  `json:"status"`
-	Result *TaskResult `json:"result,omitempty"`
+	ID         string                              `json:"id"`
+	RunID      appworkflow.RunID                   `json:"run_id"`
+	Definition graph.DefinitionRef                 `json:"definition"`
+	Outcome    workflowruntime.IdempotencyOutcome  `json:"outcome,omitempty"`
+	Available  bool                                `json:"available"`
+	Status     TaskStatus                          `json:"status"`
+	Waits      []appworkflow.WorkflowWaitListItem  `json:"waits,omitempty"`
+	Values     []rundiagnostics.ValueSetDiagnostic `json:"values,omitempty"`
+	Events     []workflowruntime.RenderedEvent     `json:"events,omitempty"`
+	Result     *TaskResult                         `json:"result,omitempty"`
+	Omissions  []string                            `json:"omissions,omitempty"`
+	Truncated  TaskTruncation                      `json:"truncated"`
 }
 
-// TaskStatus describes the current state of an A2A task.
 type TaskStatus struct {
-	State   string `json:"state"`             // "submitted", "working", "completed", "failed", "canceled"
-	Message string `json:"message,omitempty"` // human-readable detail
+	State   string `json:"state"`
+	Message string `json:"message,omitempty"`
 }
 
-// TaskResult carries the output of a completed task.
 type TaskResult struct {
-	OutputType string `json:"outputType"` // e.g. "application/json"
-	Output     any    `json:"output"`     // captured outputs from the run
+	OutputType string                  `json:"outputType"`
+	Output     values.RenderedValueSet `json:"output"`
+}
+
+type TaskTruncation struct {
+	Waits  bool `json:"waits,omitempty"`
+	Values bool `json:"values,omitempty"`
+	Events bool `json:"events,omitempty"`
+}
+
+type ResumeTaskResponse struct {
+	Resume appworkflow.ResumeWorkflowRunResult `json:"resume"`
 }

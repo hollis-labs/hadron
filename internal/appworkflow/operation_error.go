@@ -12,6 +12,7 @@ var (
 	// classifications. Authenticators keep credential details private.
 	ErrWorkflowUnauthenticated = errors.New("workflow caller is unauthenticated")
 	ErrWorkflowHidden          = errors.New("workflow is unavailable to this caller")
+	ErrWorkflowInvalidRequest  = errors.New("workflow request is invalid")
 )
 
 // SafeWorkflowOperationError projects an application error without carrying
@@ -25,6 +26,9 @@ func SafeWorkflowOperationError(err error, result *StartRunResult) WorkflowOpera
 	}
 	if errors.Is(err, ErrWorkflowUnauthenticated) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeUnauthenticated}
+	}
+	if errors.Is(err, ErrWorkflowInvalidRequest) {
+		return WorkflowOperationError{Code: WorkflowErrorCodeInvalidRequest}
 	}
 	if errors.Is(err, ErrWorkflowHidden) || errors.Is(err, ErrDefinitionUnauthorized) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeNotFound}

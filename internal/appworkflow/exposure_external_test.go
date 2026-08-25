@@ -3,7 +3,9 @@ package appworkflow_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -141,6 +143,48 @@ func TestWorkflowExposureSessionIdentitySchemasEffectsAndGeneration(t *testing.T
 	}
 	if _, err := fixture.service.DirectWorkflows(ctx, session); !errors.Is(err, appworkflow.ErrPolicyDenied) {
 		t.Fatalf("stale profile generation = %v", err)
+	}
+}
+
+func TestWorkflowExposurePublishedWorkflowsAreExactBoundedAndPublic(t *testing.T) {
+	fixture := newExposureFixture(t)
+	fixture.catalog.records[1].Published = false
+	fixture.definitions.plans[fixture.catalog.records[0].Name].Graph.Metadata = graph.Metadata{
+		"description": "Summarize a review.", "tags": []any{"review", "summary"},
+	}
+	descriptors, err := fixture.service.PublishedWorkflows(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(descriptors) != 2 || descriptors[0].Name != "team/review/discover" || descriptors[1].Name != "team/review/summarize" {
+		t.Fatalf("published descriptors = %#v", descriptors)
+	}
+	var summarize appworkflow.WorkflowExposureDescriptor
+	for _, descriptor := range descriptors {
+		if descriptor.Name == fixture.catalog.records[0].Name {
+			summarize = descriptor
+		}
+	}
+	if summarize.Description != "Summarize a review." || !reflect.DeepEqual(summarize.Tags, []string{"review", "summary"}) || summarize.Definition != exposureDefinitionRef(fixture.catalog.records[0]) || summarize.Provenance.Authority != fixture.catalog.records[0].Authority || summarize.Provenance.Digest != fixture.catalog.records[0].Digest || summarize.InputSchema["required"] == nil || summarize.OutputSchema["required"] == nil {
+		t.Fatalf("published exact descriptor = %#v", summarize)
+	}
+	summarize.Tags[0] = "mutated"
+	again, err := fixture.service.PublishedWorkflows(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, descriptor := range again {
+		if descriptor.Name == summarize.Name && descriptor.Tags[0] == "mutated" {
+			t.Fatal("published descriptor mutation escaped")
+		}
+	}
+
+	for len(fixture.catalog.records) <= appworkflow.MaximumPublishedWorkflows+1 {
+		record := exposureRecord(fmt.Sprintf("team/review/bounded-%03d", len(fixture.catalog.records)), "team/review", true)
+		fixture.catalog.records = append(fixture.catalog.records, record)
+	}
+	if _, err := fixture.service.PublishedWorkflows(t.Context()); !errors.Is(err, appworkflow.ErrHostNotReady) {
+		t.Fatalf("oversized published catalog error = %v", err)
 	}
 }
 

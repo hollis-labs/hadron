@@ -8,15 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hollis-labs/go-otel/propagation"
 	"github.com/hollis-labs/hadron/internal/a2a"
-	"github.com/hollis-labs/hadron/internal/agentcard"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
@@ -24,6 +24,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/trigger"
+	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 )
 
 // Handler returns the underlying HTTP handler (useful for testing with httptest).
@@ -85,11 +86,8 @@ func NewServer(addr string, deps Dependencies) *Server {
 	mux.HandleFunc("/.well-known/agent.json", s.handleAgentCard)
 
 	// A2A Task endpoints
-	if deps.Runner != nil && deps.Runs != nil {
-		s.a2aHandler = a2a.NewHandler(deps.Runs, deps.Runner, &serverBlueprintResolver{s: s})
-		mux.HandleFunc("/a2a/tasks", s.handleA2ATasks)
-		mux.HandleFunc("/a2a/tasks/", s.handleA2ATaskByID)
-	}
+	mux.HandleFunc("/a2a/tasks", s.handleA2ATasks)
+	mux.HandleFunc("/a2a/tasks/", s.handleA2ATaskByID)
 
 	// Blueprints
 	mux.HandleFunc("/v1/blueprints/validate", s.handleBlueprintValidate)
@@ -276,28 +274,20 @@ func humanGateDecisionAllowed(optionsJSON, decision string) bool {
 
 func (s *Server) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		writeWorkflowOperationError(w, http.StatusMethodNotAllowed, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInvalidRequest})
 		return
 	}
-	dir := s.deps.BlueprintDir
-	if dir == "" {
-		writeError(w, http.StatusServiceUnavailable, "blueprint directory not configured")
+	if s.deps.AgentCard == nil {
+		writeWorkflowOperationError(w, http.StatusServiceUnavailable, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable})
 		return
 	}
 	baseURL := "http://" + s.httpServer.Addr
-	card, err := agentcard.FromDirectory(dir, baseURL)
+	card, err := s.deps.AgentCard.Card(r.Context(), baseURL)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to build agent card: "+err.Error())
+		s.writeWorkflowFailure(w, err, nil, false)
 		return
 	}
-	data, err := card.JSON()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to marshal agent card: "+err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	writeWorkflowJSON(w, http.StatusOK, card)
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
@@ -1331,124 +1321,131 @@ func (s *Server) nextTriggerID() string {
 	return fmt.Sprintf("trig-%s-%04d", time.Now().UTC().Format("20060102-150405"), n)
 }
 
-// resolveBlueprintPath resolves a blueprint name to a file path within BlueprintDir.
-// It searches for: name.yaml, name.yml, name/name.yaml, name/name.yml, and
-// walks subdirectories matching by slug, spec name, or filename.
-func (s *Server) resolveBlueprintPath(name string) (string, error) {
-	dir := s.deps.BlueprintDir
-	if dir == "" {
-		return "", fmt.Errorf("blueprint directory not configured")
-	}
-
-	// Direct file match
-	for _, ext := range []string{".yaml", ".yml"} {
-		candidate := filepath.Join(dir, name+ext)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	// Subdirectory match: name/name.yaml
-	for _, ext := range []string{".yaml", ".yml"} {
-		candidate := filepath.Join(dir, name, name+ext)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	// Walk subdirectories looking for matching slug or spec name
-	var found string
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || found != "" {
-			return err
-		}
-		ext := filepath.Ext(path)
-		if ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-		base := strings.TrimSuffix(filepath.Base(path), ext)
-		if base == name {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if found != "" {
-		return found, nil
-	}
-
-	return "", fmt.Errorf("not found")
-}
-
 // ── A2A Tasks ─────────────────────────────────────────────────────────────────
-
-// serverBlueprintResolver adapts Server.resolveBlueprintPath to the a2a.BlueprintResolver interface.
-type serverBlueprintResolver struct {
-	s *Server
-}
-
-func (r *serverBlueprintResolver) Resolve(name string) (string, error) {
-	return r.s.resolveBlueprintPath(name)
-}
 
 func (s *Server) handleA2ATasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		writeWorkflowOperationError(w, http.StatusMethodNotAllowed, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInvalidRequest})
 		return
 	}
-	if s.a2aHandler == nil {
-		writeError(w, http.StatusServiceUnavailable, "a2a tasks unavailable")
+	if s.deps.A2ATasks == nil || s.deps.WorkflowAuth == nil {
+		writeWorkflowOperationError(w, http.StatusServiceUnavailable, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable})
 		return
 	}
 
 	var req a2a.TaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeWorkflowRequest(w, r, &req) || !workflowIdempotencyKey(w, r, &req.IdempotencyKey) {
 		return
 	}
-	if req.Skill == "" {
-		writeError(w, http.StatusBadRequest, "skill is required")
+	definition := req.Skill
+	ctx, ok := s.authenticateA2A(w, r, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessRun, Definition: &definition}, true)
+	if !ok {
 		return
 	}
 
-	resp, err := s.a2aHandler.SubmitTask(r.Context(), req)
+	resp, err := s.deps.A2ATasks.SubmitTask(ctx, req)
 	if err != nil {
-		// Distinguish "unknown skill" from internal errors.
-		if strings.Contains(err.Error(), "unknown skill") || strings.Contains(err.Error(), "not found") {
-			writeError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeA2AFailure(w, err, true)
 		return
 	}
-
-	writeJSON(w, http.StatusCreated, resp)
+	status := http.StatusOK
+	if resp.Outcome == workflowruntime.IdempotencyApplied || resp.Outcome == "" {
+		status = http.StatusCreated
+	}
+	writeWorkflowJSON(w, status, resp)
 }
 
 func (s *Server) handleA2ATaskByID(w http.ResponseWriter, r *http.Request) {
-	taskID := strings.TrimPrefix(r.URL.Path, "/a2a/tasks/")
-	if taskID == "" {
-		writeError(w, http.StatusNotFound, "not found")
+	taskID, action, ok := a2aTaskPath(r)
+	if !ok {
+		writeWorkflowOperationError(w, http.StatusNotFound, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeNotFound})
 		return
 	}
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if s.deps.A2ATasks == nil || s.deps.WorkflowAuth == nil {
+		writeWorkflowOperationError(w, http.StatusServiceUnavailable, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable})
 		return
 	}
-	if s.a2aHandler == nil {
-		writeError(w, http.StatusServiceUnavailable, "a2a tasks unavailable")
+	operation := appworkflow.WorkflowAccessInspect
+	switch action {
+	case "cancel":
+		operation = appworkflow.WorkflowAccessCancel
+	case "resume":
+		operation = appworkflow.WorkflowAccessResume
+	}
+	ctx, authenticated := s.authenticateA2A(w, r, appworkflow.WorkflowAccessIntent{Operation: operation}, false)
+	if !authenticated {
 		return
 	}
-
-	resp, err := s.a2aHandler.GetTask(r.Context(), taskID)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			writeError(w, http.StatusNotFound, err.Error())
+	switch {
+	case r.Method == http.MethodGet && action == "":
+		response, err := s.deps.A2ATasks.GetTask(ctx, taskID)
+		if err != nil {
+			s.writeA2AFailure(w, err, false)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		writeWorkflowJSON(w, http.StatusOK, response)
+	case r.Method == http.MethodPost && action == "cancel":
+		var request a2a.CancelTaskRequest
+		if !decodeWorkflowRequest(w, r, &request) || !workflowIdempotencyKey(w, r, &request.IdempotencyKey) {
+			return
+		}
+		response, err := s.deps.A2ATasks.CancelTask(ctx, taskID, request)
+		if err != nil {
+			s.writeA2AFailure(w, err, false)
+			return
+		}
+		writeWorkflowJSON(w, http.StatusOK, response)
+	case r.Method == http.MethodPost && action == "resume":
+		var request a2a.ResumeTaskRequest
+		if !decodeWorkflowRequest(w, r, &request) || !workflowIdempotencyKey(w, r, &request.IdempotencyKey) {
+			return
+		}
+		response, err := s.deps.A2ATasks.ResumeTask(ctx, taskID, request)
+		if err != nil {
+			s.writeA2AFailure(w, err, false)
+			return
+		}
+		writeWorkflowJSON(w, http.StatusOK, response)
+	default:
+		writeWorkflowOperationError(w, http.StatusMethodNotAllowed, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInvalidRequest})
 	}
+}
 
-	writeJSON(w, http.StatusOK, resp)
+func (s *Server) authenticateA2A(w http.ResponseWriter, r *http.Request, intent appworkflow.WorkflowAccessIntent, hideDenied bool) (context.Context, bool) {
+	ctx, err := s.deps.WorkflowAuth.AuthenticateWorkflowRequest(r, intent)
+	if err != nil || ctx == nil {
+		operationError := appworkflow.SafeWorkflowOperationError(err, nil)
+		if ctx == nil && err == nil {
+			operationError.Code = appworkflow.WorkflowErrorCodeUnauthenticated
+		}
+		operationError = hideWorkflowDefinitionDenial(operationError, hideDenied)
+		writeWorkflowOperationError(w, workflowHTTPStatus(operationError.Code), operationError)
+		return nil, false
+	}
+	return ctx, true
+}
+
+func (s *Server) writeA2AFailure(w http.ResponseWriter, err error, hideDenied bool) {
+	operationError := hideWorkflowDefinitionDenial(appworkflow.SafeWorkflowOperationError(err, nil), hideDenied)
+	writeWorkflowOperationError(w, workflowHTTPStatus(operationError.Code), operationError)
+}
+
+func a2aTaskPath(request *http.Request) (string, string, bool) {
+	path := strings.TrimPrefix(request.URL.EscapedPath(), "/a2a/tasks/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 1 || len(parts) > 2 || parts[0] == "" {
+		return "", "", false
+	}
+	taskID, err := url.PathUnescape(parts[0])
+	if err != nil || hoststate.ValidateA2ATaskID(taskID) != nil {
+		return "", "", false
+	}
+	action := ""
+	if len(parts) == 2 {
+		action = parts[1]
+		if action != "cancel" && action != "resume" {
+			return "", "", false
+		}
+	}
+	return taskID, action, true
 }
