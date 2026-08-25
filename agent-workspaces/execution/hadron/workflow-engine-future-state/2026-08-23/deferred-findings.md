@@ -270,6 +270,17 @@ No execution findings have been deferred.
 
   Vanta revision: `01M0TWKQKMGV9JJZ6P6C7CFEG8`.
 
+- The production `hadrond` host intentionally freezes its executable kind
+  boundary to `transform@v1`, `script@v1`, `sleep@v1`, `wait_for@v1`,
+  `message_wait@v1`, and `human_gate@v1`. Other public adapters remain
+  available to embedded hosts but are not advertised or accepted by the
+  production daemon until their complete policy, capability, credential,
+  recovery, and transport composition is explicitly reviewed. W06-T07 must
+  document this host capability boundary rather than implying every engine
+  adapter is production-enabled.
+
+  Vanta revision: `01M0VYPGPKKN2KBQXMDY0FH3Z6`.
+
 ## Follow-up candidates
 
 - W07-T09 intentionally leaves concrete Hadron service providers and the

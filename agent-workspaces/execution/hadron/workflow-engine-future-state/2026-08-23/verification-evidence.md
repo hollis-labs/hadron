@@ -1433,3 +1433,30 @@ browser was attached; repository Playwright Chromium passed 3/3.
 | source worktree `5093f7b` | frontend generated freshness, 45 unit tests, typecheck, Biome, ESLint, build; Playwright Chromium | pass; 3/3 browser scenarios |
 | independent integration review `c9274ca` | lifecycle flywheel at `-count=3`; focused appworkflow/API/MCP/agentcard/CLI; API generation byte check; frontend generated freshness, 45 tests, typecheck, ESLint, and build | pass |
 | integration `c9274ca` | `go test -count=1 ./...`; committed status and diff checks | pass |
+
+## W06-T06
+
+Reviewed the production daemon composition, graph-only public CLI and UI,
+same-origin and loopback/bearer HTTP authentication, workflow-only MCP and A2A
+routing, source scheduling and external activation ingress, process-safe
+catalog and attestor storage, durable resource-aware workers, lifecycle-driven
+activation discovery, generated HTTP/TypeScript contracts, and legacy runtime
+quarantine. Source commit `765cc7f` integrated as `c714e0b`; independent review
+hardening integrated as `3e694a3`, `5124860`, and `87c0e56`.
+
+The tagged binary E2E audit exposed that ordinary unpinned file paths validated
+but could not start because the exact source snapshot lacked the authored
+ID/version present in the compiled plan. The fix fills only those absent
+semantic fields after exact compilation and leaves authority, locator, source
+digest, provenance, and all caller pins unchanged. The rewritten E2E now
+executes a typed transform workflow to durable success and exact output
+storage, exercises idempotent replay, returns structured invalid-graph
+diagnostics, and proves retired legacy roots are unavailable.
+
+| Revision | Command | Result |
+| --- | --- | --- |
+| source worktree `765cc7f` | focused suites at `-count=3`; generator byte stability; full `go test -count=1 ./...`; vet; exact golangci and targeted staticcheck; relevant race suites; frontend freshness, 45 tests, typecheck, Biome, ESLint, and build; tidy and diff checks | pass; zero repository-lint issues and clean generated/module state |
+| independent review through `05597f9` | active daemon/API/appworkflow/MCP/persistence/runtime race suite; Linux `CGO_ENABLED=0` cross-build; CLI help and legacy-boundary scan; full repository and vet | pass; initial full run under three simultaneous heavy suites hit the known agentsubstrate outbox timing fixture, which passed 20/20 isolated and in the immediate uncontented full rerun |
+| independent hardening `0cfdd9b` | resolver and daemon suites at `-count=3`; focused race; direct staticcheck and exact golangci; `go test -count=1 ./...`; `go vet ./...`; `go test -tags e2e -count=3 ./test/e2e/...`; exact `make e2e` | pass; file-path workflow validates, starts, executes, persists outputs, and replays through freshly built production binaries |
+| browser hardening `16c4f43` | frontend freshness and 45 unit tests; typecheck; Biome; ESLint; Vite build; isolated `CI=1 npm run test:e2e` | pass; 3/3 Chromium scenarios against a fresh canonical daemon runtime directory |
+| integration `c714e0b` through `87c0e56` | cherry-pick, committed diff check, and clean-tree check | pass |

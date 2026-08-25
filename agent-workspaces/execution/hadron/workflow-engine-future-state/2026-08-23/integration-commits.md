@@ -73,3 +73,7 @@
 | 69 | W06-T09 | `58d52de` | `c2a7dec` | Hadron | accepted with pinned first-class Torque MCP invocation, durable bounded fan-out, per-child bound inputs, raw-output projection, tolerated failure data, restart-stable keyed retry, exact schemas/provenance, and redacted inspection |
 | 70 | W06-T09-H1 | root integration review | `7a4895c` | Hadron | required `RetryRequiresIdempotency` to use the effective trusted mode so raw keys and host effect grants cannot upgrade `none` |
 | 71 | W06-T08 | `5093f7b` | `c9274ca` | Hadron | accepted with one authenticated lifecycle facade, independent exact alias/qualification/publication/exposure state, bounded agent authoring schemas, cross-surface evidence parity, CAS-safe mutations, and generated-tool flywheel coverage |
+| 72 | W06-T06 | `765cc7f` | `c714e0b` | Hadron | accepted with one production graph-native host shared by CLI, HTTP, MCP, A2A, source activations, workers, and UI; legacy semantic roots are removed or fail-closed |
+| 73 | W06-T06-H1 | `05597f9` | `3e694a3` | Hadron | documented the intentional exported-boundary nil-context regression for both static-analysis front ends without weakening the fail-closed production guard |
+| 74 | W06-T06-H2 | `0cfdd9b` | `5124860` | Hadron | replaced legacy tagged E2E with production graph validate/run/inspect/output/replay coverage and fixed unpinned file/package snapshot ID/version binding |
+| 75 | W06-T06-H3 | `16c4f43` | `87c0e56` | Hadron | isolated Playwright daemon state per run and aligned browser navigation with the Workflow Registry default |

@@ -547,3 +547,48 @@
   returning package bytes or private qualification material were rejected.
 
   Vanta revision: `01M0VKXTYT0PV25VXE75FTGS59`.
+
+- W06-T06 makes the graph-native `appworkflow.Host` composition the only
+  production semantic runtime. CLI, HTTP, MCP, A2A, schedule/trigger ingress,
+  resource-aware workers, lifecycle services, and the embedded UI share that
+  composition and its durable stores. Legacy blueprint/pipeline routes are
+  absent by default and require an explicit internal compatibility flag;
+  retired CLI roots and active UI navigation were removed. `::set-output`
+  parsing remains only in the explicit graph command-adapter compatibility
+  collector; archived execution/pipeline code, tests, and migration diagnostics
+  cannot define a new public contract.
+
+  Vanta revision: `01M0VYP6ERYHQ4ANDYW1JEAT8C`.
+
+- Production source activations bind an immutable exact registry definition,
+  stable source owner, authenticated principal/exposure reference, and plan
+  digest. Public lifecycle inspection returns only bounded safe activation
+  handles. External admission validates the current alias under a shared
+  process-safe catalog fence that remains held through direct start or durable
+  reactor delivery, so an alias move linearizes wholly before or after a fire.
+  Future timestamps, non-external source kinds, stale aliases, ambiguous public
+  result branches, and mismatched exposure identities fail before durable fire
+  state is written.
+
+  Vanta revision: `01M0VYP6FCGXHWCH5MKJ31E556` (supersedes
+  `01M0TZ5G7Z8AR6K71XA8FRQAVZ`).
+
+- Production worker lease renewal extends only lease and scheduler-holder
+  expiry; it does not advance the node's semantic generation or update time.
+  Completion therefore retains its pre-execution CAS authority across long
+  calls. Catalog mutation and contract-attestor key publication use private,
+  non-symlink sidecar locks plus durable parent-directory synchronization so
+  concurrent daemon/MCP processes cannot lose catalog writes or adopt a
+  partially published attestation key.
+
+  Vanta revision: `01M0VYP6XD2P06DBHQCK7BQJH0`.
+
+- Durable snapshots of file and package locators may fill only a missing
+  authored workflow ID/version from the already validated exact compiled plan.
+  Host-resolved authority, locator, source digest, and provenance remain
+  unchanged and must compare exactly. This permits the normal CLI file-path
+  form to execute while retaining locator-sensitive snapshot identity and all
+  caller-supplied pin checks.
+
+  Vanta revision: `01M0VYP6XTF1H51BQJ8656NPDT` (supersedes
+  `01M0VFYAWFJ2VSTGR22YPA2HHJ`).
