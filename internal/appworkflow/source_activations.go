@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -20,19 +21,28 @@ import (
 // exact Hadron identity and exposure facts selected at registration time.
 // ExposureRefs is keyed by graph activation declaration ID.
 type SourceActivationRequest struct {
-	Plan                      *workflowcompile.ExecutionPlan `json:"plan"`
-	Identity                  hoststate.IdentityBinding      `json:"identity"`
-	ExposureRefs              map[string]string              `json:"exposure_refs"`
-	ExpectedCurrentPlanDigest string                         `json:"expected_current_plan_digest,omitempty"`
-	Enabled                   bool                           `json:"enabled"`
-	ExpiresAt                 time.Time                      `json:"expires_at,omitempty"`
-	At                        time.Time                      `json:"at"`
+	Plan *workflowcompile.ExecutionPlan `json:"plan"`
+	// SourceOwner identifies the stable logical source whose successive exact
+	// plans replace one another. Empty defaults to Plan.Definition for existing
+	// file/package callers. Registry lifecycle callers use authority+registry
+	// name without version, digest, or ephemeral authoring locator.
+	SourceOwner graph.DefinitionRef `json:"source_owner,omitempty"`
+	// ExecutionDefinition is the exact immutable definition persisted on each
+	// registration and resolved when it fires. Empty defaults to Plan.Definition.
+	ExecutionDefinition       graph.DefinitionRef       `json:"execution_definition,omitempty"`
+	Identity                  hoststate.IdentityBinding `json:"identity"`
+	ExposureRefs              map[string]string         `json:"exposure_refs"`
+	ExpectedCurrentPlanDigest string                    `json:"expected_current_plan_digest,omitempty"`
+	Enabled                   bool                      `json:"enabled"`
+	ExpiresAt                 time.Time                 `json:"expires_at,omitempty"`
+	At                        time.Time                 `json:"at"`
 }
 
 // SourceActivationRetireRequest removes the current operational projection
 // for one source identity while retaining every historical registration.
 type SourceActivationRetireRequest struct {
 	Definition                graph.DefinitionRef `json:"definition"`
+	SourceOwner               graph.DefinitionRef `json:"source_owner,omitempty"`
 	ExpectedCurrentPlanDigest string              `json:"expected_current_plan_digest"`
 	At                        time.Time           `json:"at"`
 }
@@ -71,7 +81,15 @@ func prepareSourceActivationReconcile(request SourceActivationRequest) (hoststat
 	if !request.ExpiresAt.IsZero() && !request.ExpiresAt.After(request.At) {
 		return hoststate.ActivationReconcileRequest{}, fmt.Errorf("%w: source activation expiry must follow materialization", ErrInvalidActivation)
 	}
-	sourceOwnerKey, err := sourceActivationIdentityDigest(plan.Definition)
+	sourceOwner, err := validatedSourceActivationOwner(request.SourceOwner, plan.Definition)
+	if err != nil {
+		return hoststate.ActivationReconcileRequest{}, err
+	}
+	executionDefinition, err := validatedSourceActivationExecutionDefinition(request.ExecutionDefinition, plan.Definition)
+	if err != nil {
+		return hoststate.ActivationReconcileRequest{}, err
+	}
+	sourceOwnerKey, err := sourceActivationIdentityDigest(sourceOwner)
 	if err != nil {
 		return hoststate.ActivationReconcileRequest{}, err
 	}
@@ -95,7 +113,7 @@ func prepareSourceActivationReconcile(request SourceActivationRequest) (hoststat
 			return hoststate.ActivationReconcileRequest{}, fmt.Errorf("%w: activation template cannot be digested", ErrInvalidActivation)
 		}
 		registration, materializeErr := MaterializeActivationRegistration(ActivationMaterializationRequest{
-			Declaration: declaration, Definition: plan.Definition, Identity: identity, ExposureRef: exposure,
+			Declaration: declaration, Definition: executionDefinition, Identity: identity, ExposureRef: exposure,
 			Enabled: request.Enabled, ExpiresAt: request.ExpiresAt, CreatedAt: request.At,
 		})
 		if materializeErr != nil {
@@ -141,7 +159,11 @@ func (s ActivationService) RetireSourceActivations(ctx context.Context, request 
 	if request.At.IsZero() || request.At.Location() != time.UTC || values.ValidateDigest(request.ExpectedCurrentPlanDigest) != nil {
 		return hoststate.ActivationReconcileResult{}, fmt.Errorf("%w: source activation retirement is invalid", ErrInvalidActivation)
 	}
-	sourceOwnerKey, err := sourceActivationIdentityDigest(request.Definition)
+	sourceOwner, err := validatedSourceActivationOwner(request.SourceOwner, request.Definition)
+	if err != nil {
+		return hoststate.ActivationReconcileResult{}, err
+	}
+	sourceOwnerKey, err := sourceActivationIdentityDigest(sourceOwner)
 	if err != nil {
 		return hoststate.ActivationReconcileResult{}, err
 	}
@@ -167,11 +189,40 @@ func validateSourceActivationPlan(input *workflowcompile.ExecutionPlan) (*workfl
 	if err != nil || graphErr != nil || digest != plan.Digest || graphDigest != plan.Graph.Digest ||
 		values.ValidateDigest(plan.Digest) != nil || plan.Definition.Digest == "" ||
 		plan.Definition.ID != plan.Graph.ID || plan.Definition.Version != plan.Graph.Version ||
-		len(plan.SourceDigests) != 1 || plan.SourceDigests[0].Format != graph.SourceWorkflow ||
+		len(plan.SourceDigests) != 1 || !graphNativeActivationSourceFormat(plan.SourceDigests[0].Format) ||
 		plan.SourceDigests[0].Digest != plan.Definition.Digest || plan.Provenance.Digest != plan.Definition.Digest {
 		return nil, fmt.Errorf("%w: compiled activation plan identity is invalid", ErrInvalidActivation)
 	}
 	return &plan, nil
+}
+
+func graphNativeActivationSourceFormat(format graph.SourceFormat) bool {
+	return format == graph.SourceWorkflow || format == graph.SourceAgent || format == graph.SourceSDK || format == graph.SourceUI
+}
+
+func validatedSourceActivationOwner(requested, fallback graph.DefinitionRef) (graph.DefinitionRef, error) {
+	if requested == (graph.DefinitionRef{}) {
+		return fallback, nil
+	}
+	if requested.Authority == "" || requested.Kind != DefinitionKindRegistry || requested.ID == "" ||
+		requested.Locator != "" || requested.Version != "" || requested.Digest != "" || requested.Provenance != nil ||
+		hadronregistry.ValidateWorkflowName(requested.ID) != nil || requested.Authority != fallback.Authority {
+		return graph.DefinitionRef{}, fmt.Errorf("%w: source activation owner is invalid", ErrInvalidActivation)
+	}
+	return requested, nil
+}
+
+func validatedSourceActivationExecutionDefinition(requested, fallback graph.DefinitionRef) (graph.DefinitionRef, error) {
+	if requested == (graph.DefinitionRef{}) {
+		return fallback, nil
+	}
+	if requested.Authority == "" || requested.Kind != DefinitionKindRegistry || requested.ID == "" ||
+		requested.Locator != "" || requested.Provenance != nil || hadronregistry.ValidateWorkflowName(requested.ID) != nil ||
+		requested.Authority != fallback.Authority || requested.Version != fallback.Version || requested.Digest != fallback.Digest ||
+		values.ValidateDigest(requested.Digest) != nil {
+		return graph.DefinitionRef{}, fmt.Errorf("%w: source activation execution definition is invalid", ErrInvalidActivation)
+	}
+	return requested, nil
 }
 
 func validateSourceActivationTarget(plan *workflowcompile.ExecutionPlan, target *hoststate.ExecutionTarget) error {

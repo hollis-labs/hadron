@@ -10,6 +10,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
+	appworkflowhoststate "github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
@@ -113,25 +114,46 @@ type AgentCardProvider interface {
 	Card(context.Context, string) (*agentcard.AgentCard, error)
 }
 
+// WorkflowHealthProvider reports the readiness of the single graph-native
+// semantic runtime. HTTP health must never claim success independently of it.
+type WorkflowHealthProvider interface {
+	Health() appworkflow.HealthStatus
+}
+
+// WorkflowActivationService is the existing graph-native trigger adapter. The
+// API loads the registration to authorize its exact workflow before delivering
+// the credential-free event; registration IDs are not capabilities.
+type WorkflowActivationService interface {
+	LoadRegistration(context.Context, string) (appworkflowhoststate.ActivationRegistration, error)
+	Fire(context.Context, trigger.ActivationEvent) (appworkflow.ActivationStartResult, error)
+}
+
 // Dependencies groups daemon services used by the API handlers.
 type Dependencies struct {
-	Runs              RunStore
-	Schedules         ScheduleStore
-	Pipelines         PipelineStore
-	Workspaces        WorkspaceStore
-	Triggers          TriggerStore
-	HumanGates        HumanGateStore
-	Messages          MessageStore
-	Runner            Runner
-	Scheduler         Scheduler
-	Pipeline          PipelineRunner
-	Workflows         appworkflow.WorkflowOperations
-	WorkflowReads     appworkflow.WorkflowRunReadOperations
-	WorkflowLifecycle appworkflow.WorkflowLifecycleOperations
-	WorkflowAuth      WorkflowRequestAuthenticator
-	A2ATasks          A2ATaskService
-	AgentCard         AgentCardProvider
-	BlueprintDir      string
+	// EnableLegacyRuntime mounts the archived blueprint/pipeline REST surface.
+	// Production composition must leave this false; it exists only while the
+	// rewrite/archive helpers and their reference tests remain in the tree.
+	EnableLegacyRuntime bool
+	Runs                RunStore
+	Schedules           ScheduleStore
+	Pipelines           PipelineStore
+	Workspaces          WorkspaceStore
+	Triggers            TriggerStore
+	HumanGates          HumanGateStore
+	Messages            MessageStore
+	Runner              Runner
+	Scheduler           Scheduler
+	Pipeline            PipelineRunner
+	Workflows           appworkflow.WorkflowOperations
+	WorkflowReads       appworkflow.WorkflowRunReadOperations
+	WorkflowLifecycle   appworkflow.WorkflowLifecycleOperations
+	WorkflowAuth        WorkflowRequestAuthenticator
+	A2ATasks            A2ATaskService
+	AgentCard           AgentCardProvider
+	WorkflowHealth      WorkflowHealthProvider
+	WorkflowActivations WorkflowActivationService
+	BuildVersion        string
+	BlueprintDir        string
 	// WebUI is the optional transport-neutral operator SPA. The daemon owns
 	// delivery; the handler owns only static browser assets and never workflow
 	// semantics.

@@ -8,36 +8,16 @@ import { AppFooter } from './components/layout/AppFooter';
 import { Spinner } from './components/ui/Spinner';
 
 const PAGE_TITLES: Record<NavPage, string> = {
-  dashboard: 'Operations',
   workflowCatalog: 'Workflow Registry',
-  blueprints: 'Blueprint Browser',
-  blueprintDetail: 'Blueprint Detail',
-  blueprintWizard: 'Blueprint Wizard',
-  pipelines: 'Pipelines',
-  pipelineDetail: 'Pipeline Detail',
   flowBuilder: 'Workflow Graph',
   runs: 'Run Log',
   runDetail: 'Run Detail',
-  schedules: 'Schedules',
-  telemetry: 'Telemetry',
-  settings: 'Settings',
-  help: 'Help',
 };
 
-const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
 const WorkflowCatalogPage = lazy(() => import('./pages/WorkflowCatalogPage').then(m => ({ default: m.WorkflowCatalogPage })));
-const BlueprintsPage = lazy(() => import('./pages/BlueprintsPage').then(m => ({ default: m.BlueprintsPage })));
-const BlueprintDetailPage = lazy(() => import('./pages/BlueprintDetailPage').then(m => ({ default: m.BlueprintDetailPage })));
-const BlueprintWizardPage = lazy(() => import('./pages/BlueprintWizardPage').then(m => ({ default: m.BlueprintWizardPage })));
-const PipelinesPage = lazy(() => import('./pages/PipelinesPage').then(m => ({ default: m.PipelinesPage })));
-const PipelineDetailPage = lazy(() => import('./pages/PipelineDetailPage').then(m => ({ default: m.PipelineDetailPage })));
 const FlowBuilderPage = lazy(() => import('./pages/FlowBuilderPage').then(m => ({ default: m.FlowBuilderPage })));
 const RunsPage = lazy(() => import('./pages/RunsPage').then(m => ({ default: m.RunsPage })));
 const RunDetailPage = lazy(() => import('./pages/RunDetailPage').then(m => ({ default: m.RunDetailPage })));
-const SchedulerPage = lazy(() => import('./pages/SchedulerPage').then(m => ({ default: m.SchedulerPage })));
-const TelemetryPage = lazy(() => import('./pages/TelemetryPage').then(m => ({ default: m.TelemetryPage })));
-const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const HelpPage = lazy(() => import('./pages/HelpPage').then(m => ({ default: m.HelpPage })));
 
 function PageFallback() {
   return (
@@ -65,15 +45,6 @@ function AppShell() {
       nav.refresh();
     }
 
-    if (e.key === 'n' && !e.metaKey && !e.ctrlKey && nav.page === 'blueprints') {
-      nav.openWizard();
-      e.preventDefault();
-    }
-
-    if (e.key === '?' && !e.metaKey && !e.ctrlKey) {
-      nav.navigate('help');
-      e.preventDefault();
-    }
   }, [nav]);
 
   useEffect(() => {
@@ -90,19 +61,9 @@ function AppShell() {
 
         <main className="content">
           <Suspense fallback={<PageFallback />}>
-            {nav.page === 'dashboard' && <DashboardPage />}
             {nav.page === 'workflowCatalog' && <WorkflowCatalogPage />}
-            {nav.page === 'blueprints' && <BlueprintsPage />}
-            {nav.page === 'blueprintDetail' && nav.selectedBlueprintPath && <BlueprintDetailPage />}
-            {nav.page === 'blueprintWizard' && <BlueprintWizardPage />}
-            {nav.page === 'pipelines' && <PipelinesPage />}
-            {nav.page === 'pipelineDetail' && nav.selectedPipelinePath && <PipelineDetailPage />}
             {nav.page === 'flowBuilder' && <FlowBuilderPage />}
             {nav.page === 'runs' && <RunsPage />}
-            {nav.page === 'schedules' && <SchedulerPage />}
-            {nav.page === 'telemetry' && <TelemetryPage />}
-            {nav.page === 'settings' && <SettingsPage />}
-            {nav.page === 'help' && <HelpPage />}
             {nav.page === 'runDetail' && nav.selectedRunId && <RunDetailPage />}
           </Suspense>
         </main>

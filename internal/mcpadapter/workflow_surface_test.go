@@ -151,6 +151,120 @@ func TestWorkflowSurfacePinnedSchemasSessionIsolationAndProfileRemoval(t *testin
 	}
 }
 
+func TestWorkflowOnlySurfaceContainsNoLegacyToolsHealthSkillsPromptsOrResources(t *testing.T) {
+	exposure := newFakeWorkflowExposure()
+	operations := &fakeWorkflowOperations{}
+	adapter := New(nil, nil, nil, nil, "token-a", nil,
+		WithWorkflowOnly(),
+		WithWorkflowServices(exposure, operations, operations, operations),
+		WithWorkflowLifecycle(&fakeWorkflowLifecycle{}),
+	)
+	mcpServer := adapter.newServer()
+	for name := range mcpServer.ListTools() {
+		if name == "hadron_skills" || strings.HasPrefix(name, "hadron_workflow_") || strings.HasPrefix(name, "hadron_workflows_") {
+			continue
+		}
+		t.Fatalf("workflow-only tool %q is outside the graph-native surface", name)
+	}
+	if _, exists := mcpServer.ListTools()["hadron_health"]; exists {
+		t.Fatal("workflow-only MCP retained independent hard-coded health")
+	}
+	assertNoLegacyWorkflowSurfaceText(t, "server instructions", workflowServerInstructions)
+
+	for _, method := range []string{"prompts/list", "resources/list"} {
+		response := mcpServer.HandleMessage(t.Context(), json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`))
+		if rpcError, unsupported := response.(mcp.JSONRPCError); unsupported {
+			assertNoLegacyWorkflowSurfaceText(t, method, rpcError.Error.Message)
+			continue
+		}
+		rpc, ok := response.(mcp.JSONRPCResponse)
+		if !ok {
+			t.Fatalf("%s response = %#v", method, response)
+		}
+		encoded, err := json.Marshal(rpc.Result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNoLegacyWorkflowSurfaceText(t, method, string(encoded))
+		switch result := rpc.Result.(type) {
+		case mcp.ListPromptsResult:
+			if len(result.Prompts) != 0 {
+				t.Fatalf("workflow-only prompts = %#v", result.Prompts)
+			}
+		case mcp.ListResourcesResult:
+			for _, resource := range result.Resources {
+				if !strings.HasPrefix(resource.URI, "workflow://") && !strings.HasPrefix(resource.URI, "hadron://workflows/") {
+					t.Fatalf("workflow-only resource = %#v", resource)
+				}
+			}
+		default:
+			t.Fatalf("%s result type = %T", method, rpc.Result)
+		}
+	}
+
+	index := adapter.CallTool(t.Context(), "hadron_skills", nil)
+	if index == nil || len(index.Content) != 1 {
+		t.Fatalf("workflow skill index = %#v", index)
+	}
+	indexText := index.Content[0].(mcp.TextContent).Text
+	assertNoLegacyWorkflowSurfaceText(t, "skill index", indexText)
+	var catalog struct {
+		Items []hadronSkillDoc `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(indexText), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	wantSkills := []string{"start-here", "workflow-lifecycle", "run-inspection"}
+	gotSkills := make([]string, len(catalog.Items))
+	for index := range catalog.Items {
+		gotSkills[index] = catalog.Items[index].Name
+	}
+	if !reflect.DeepEqual(gotSkills, wantSkills) {
+		t.Fatalf("workflow skill names = %#v, want %#v", gotSkills, wantSkills)
+	}
+	advertised := make(map[string]struct{}, len(mcpServer.ListTools()))
+	for name := range mcpServer.ListTools() {
+		advertised[name] = struct{}{}
+	}
+	for _, skill := range wantSkills {
+		result := adapter.CallTool(t.Context(), "hadron_skills", map[string]any{"name": skill})
+		if result == nil || len(result.Content) != 1 {
+			t.Fatalf("workflow skill %q = %#v", skill, result)
+		}
+		body := result.Content[0].(mcp.TextContent).Text
+		assertNoLegacyWorkflowSurfaceText(t, skill, body)
+		for _, name := range workflowSkillToolNames(body) {
+			if _, exists := advertised[name]; !exists {
+				t.Fatalf("workflow skill %q advertises unregistered tool %q", skill, name)
+			}
+		}
+	}
+	if hidden := adapter.CallTool(t.Context(), "hadron_skills", map[string]any{"name": "blueprint-discovery"}); hidden == nil || len(hidden.Content) != 1 || !strings.Contains(hidden.Content[0].(mcp.TextContent).Text, "skill_not_found") {
+		t.Fatalf("legacy skill remained readable = %#v", hidden)
+	}
+}
+
+func assertNoLegacyWorkflowSurfaceText(t *testing.T, surface, value string) {
+	t.Helper()
+	lower := strings.ToLower(value)
+	for _, forbidden := range []string{"blueprint", "hadron_run_", "hadron_message_", "hadron_pipeline_", "hadron_schedule_", "hadron_trigger_", "hadron_workflow_run_values", "hadron_workflow_run_waits"} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("%s contains legacy or nonexistent surface %q: %s", surface, forbidden, value)
+		}
+	}
+}
+
+func workflowSkillToolNames(body string) []string {
+	var result []string
+	for _, field := range strings.Fields(body) {
+		name := strings.Trim(field, "`.,:;()[]")
+		if strings.HasPrefix(name, "hadron_") {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
 func TestWorkflowSurfaceFailClosedErrorAndMetaCatalog(t *testing.T) {
 	exposure := newFakeWorkflowExposure()
 	adapter := New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, nil, nil, nil))

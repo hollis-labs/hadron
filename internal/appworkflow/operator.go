@@ -74,6 +74,7 @@ const (
 	WorkflowAccessValues               WorkflowAccessOperation = "fetch_values"
 	WorkflowAccessEvents               WorkflowAccessOperation = "fetch_events"
 	WorkflowAccessSignal               WorkflowAccessOperation = "signal"
+	WorkflowAccessActivationFire       WorkflowAccessOperation = "activation_fire"
 	WorkflowAccessCatalogSearch        WorkflowAccessOperation = "catalog_search"
 	WorkflowAccessCatalogInspect       WorkflowAccessOperation = "catalog_inspect"
 	WorkflowAccessAuthorValidate       WorkflowAccessOperation = "author_validate"
@@ -205,6 +206,7 @@ const (
 	WorkflowErrorCodeUnauthenticated      = "unauthenticated"
 	WorkflowErrorCodeNotFound             = "not_found"
 	WorkflowErrorCodeIdempotencyConflict  = "idempotency_conflict"
+	WorkflowErrorCodeActivationConflict   = "activation_conflict"
 	WorkflowErrorCodeUnavailable          = "unavailable"
 	WorkflowErrorCodeInternal             = "internal_error"
 )

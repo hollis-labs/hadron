@@ -32,6 +32,9 @@ var messageSeq uint64
 
 func (a *Adapter) registerTools(s *server.MCPServer) {
 	a.registerSkillsTool(s)
+	if a.workflowOnly {
+		return
+	}
 
 	s.AddTool(mcp.NewTool("hadron_health",
 		mcp.WithDescription("Read Hadron MCP adapter health/status."),

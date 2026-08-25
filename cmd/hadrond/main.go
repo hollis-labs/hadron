@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -18,20 +19,11 @@ import (
 
 	feotel "github.com/hollis-labs/go-otel"
 
-	"github.com/hollis-labs/hadron/internal/agentsubstrate"
 	"github.com/hollis-labs/hadron/internal/api"
-	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/config"
-	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
-	"github.com/hollis-labs/hadron/internal/messagesubstrate"
 	"github.com/hollis-labs/hadron/internal/persistence"
-	"github.com/hollis-labs/hadron/internal/pipeline"
-	"github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
-	"github.com/hollis-labs/hadron/internal/telemetry"
-	"github.com/hollis-labs/hadron/internal/trigger"
 	"github.com/hollis-labs/hadron/internal/webui"
 )
 
@@ -152,53 +144,28 @@ func runServe(args []string) error {
 		workers = 3
 	}
 
-	tel := telemetry.New(cfg.LogsDir, sett.Telemetry.Enabled)
-
-	mgr := execution.NewManager(store, sett, workers, cfg.LogsDir, tel)
-	defer mgr.Close()
-
-	sched := scheduler.New(store, mgr)
-	sched.Start()
-	defer sched.Stop()
-
-	pipelineRunner := pipeline.NewRunner(store, mgr)
-	serveReg := registry.New(store)
-	pipelineRunner.SetBlueprintResolver(serveReg.Resolve)
-	internalMCP := mcpadapter.New(store, mgr, sched, pipelineRunner, "internal", mcpadapter.AllScopes(),
-		mcpadapter.WithServerVersion(version),
-		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
-		mcpadapter.WithRegistry(serveReg))
-	internalCaller := mcpadapter.NewInternalCaller(internalMCP, mcpadapter.WithExternalServers(externalMCPServers(sett)))
-	defer func() { _ = internalCaller.Close() }()
-	mgr.SetMCPCaller(internalCaller)
-	agentLauncher := agentsubstrate.NewLauncher(cfg.DataDir, sett.AgentSubstrates)
-	defer func() { _ = agentLauncher.Close() }()
-	messageService := messagesubstrate.New(store, sett.MessageSubstrates)
-	agentLauncher.SetReplyMessenger(messageService)
-	mgr.SetAgentLauncher(agentLauncher)
-	mgr.SetMessageSource(messageService)
+	workflowRuntime, err := newProductionWorkflowRuntime(store, cfg, workers)
+	if err != nil {
+		return fmt.Errorf("compose graph workflow runtime: %w", err)
+	}
+	if err := workflowRuntime.Start(context.Background()); err != nil {
+		return fmt.Errorf("start graph workflow runtime: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if shutdownErr := workflowRuntime.Shutdown(shutdownCtx); shutdownErr != nil {
+			log.Printf("workflow runtime shutdown error: %v", shutdownErr)
+		}
+	}()
 
 	srv := api.NewServer(cfg.Addr, api.Dependencies{
-		Runs:         store,
-		Schedules:    store,
-		Pipelines:    store,
-		Workspaces:   store,
-		Triggers:     store,
-		HumanGates:   store,
-		Messages:     messageService,
-		Runner:       mgr,
-		Scheduler:    sched,
-		Pipeline:     pipelineRunner,
-		BlueprintDir: sett.BlueprintDir,
-		WebUI:        webui.Handler(),
+		Workspaces: store, Workflows: workflowRuntime.operations, WorkflowReads: workflowRuntime.operations,
+		WorkflowLifecycle: workflowRuntime.lifecycle, WorkflowAuth: workflowRuntime.auth,
+		WorkflowActivations: workflowRuntime.externalActivations,
+		A2ATasks:            workflowRuntime.a2a, AgentCard: workflowRuntime.card,
+		WorkflowHealth: workflowRuntime.host, BuildVersion: version, WebUI: webui.Handler(),
 	})
-
-	// Start trigger file watchers and TTL cleanup.
-	trigMgr := trigger.New(store, mgr)
-	trigMgr.StartFileWatchers()
-	trigMgr.StartTTLCleanup(60 * time.Second)
-	defer trigMgr.StopFileWatchers()
-	defer trigMgr.StopTTLCleanup()
 
 	startMsg, _ := json.Marshal(map[string]string{
 		"level":   "info",
@@ -239,11 +206,13 @@ func runMCP(args []string) error {
 	dbFlag := fs.String("db", "", "SQLite database path")
 	logsFlag := fs.String("logs", "", "run logs directory")
 	dataFlag := fs.String("data", "", "data directory")
-	tokenFlag := fs.String("token", "", "bearer token for mutating tools")
-	scopesFlag := fs.String("token-scopes", "", "comma-separated scopes (e.g. run.write,pipeline.write)")
+	tokenFlag := fs.String("token", "", "durable workflow principal bearer token")
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *tokenFlag == "" {
+		return errors.New("mcp requires --token for a durable workflow principal")
 	}
 
 	cfg := config.Default()
@@ -277,51 +246,28 @@ func runMCP(args []string) error {
 		workers = 3
 	}
 
-	tel := telemetry.New(cfg.LogsDir, sett.Telemetry.Enabled)
-
-	mgr := execution.NewManager(store, sett, workers, cfg.LogsDir, tel)
-	defer mgr.Close()
-
-	sched := scheduler.New(store, mgr)
-	sched.Start()
-	defer sched.Stop()
-
-	pipelineRunner := pipeline.NewRunner(store, mgr)
-	reg := registry.New(store)
-	pipelineRunner.SetBlueprintResolver(reg.Resolve)
-	internalMCP := mcpadapter.New(store, mgr, sched, pipelineRunner, "internal", mcpadapter.AllScopes(),
-		mcpadapter.WithServerVersion(version),
-		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
-		mcpadapter.WithRegistry(reg))
-	internalCaller := mcpadapter.NewInternalCaller(internalMCP, mcpadapter.WithExternalServers(externalMCPServers(sett)))
-	defer func() { _ = internalCaller.Close() }()
-	mgr.SetMCPCaller(internalCaller)
-	agentLauncher := agentsubstrate.NewLauncher(cfg.DataDir, sett.AgentSubstrates)
-	defer func() { _ = agentLauncher.Close() }()
-	messageService := messagesubstrate.New(store, sett.MessageSubstrates)
-	agentLauncher.SetReplyMessenger(messageService)
-	mgr.SetAgentLauncher(agentLauncher)
-	mgr.SetMessageSource(messageService)
-
-	var scopes []string
-	if *scopesFlag != "" {
-		for _, s := range strings.Split(*scopesFlag, ",") {
-			s = strings.TrimSpace(s)
-			if s != "" {
-				scopes = append(scopes, s)
-			}
-		}
-	}
-
-	workflowExposure, err := newMCPWorkflowExposure(store)
+	workflowRuntime, err := newProductionWorkflowRuntime(store, cfg, workers)
 	if err != nil {
-		return fmt.Errorf("compose MCP workflow exposure: %w", err)
+		return fmt.Errorf("compose graph workflow runtime: %w", err)
 	}
-	adapter := mcpadapter.New(store, mgr, sched, pipelineRunner, *tokenFlag, scopes,
+	if err := workflowRuntime.Start(context.Background()); err != nil {
+		return fmt.Errorf("start graph workflow runtime: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if shutdownErr := workflowRuntime.Shutdown(shutdownCtx); shutdownErr != nil {
+			log.Printf("workflow runtime shutdown error: %v", shutdownErr)
+		}
+	}()
+	if err := workflowRuntime.BootstrapMCP(context.Background(), *tokenFlag); err != nil {
+		return fmt.Errorf("bootstrap MCP workflow principal: %w", err)
+	}
+	adapter := mcpadapter.New(nil, nil, nil, nil, *tokenFlag, nil,
 		mcpadapter.WithServerVersion(version),
-		mcpadapter.WithBlueprintDir(sett.BlueprintDir),
-		mcpadapter.WithRegistry(reg),
-		mcpadapter.WithWorkflowServices(workflowExposure, nil, nil, nil))
+		mcpadapter.WithWorkflowOnly(),
+		mcpadapter.WithWorkflowServices(workflowRuntime.exposure, workflowRuntime.operations, workflowRuntime.operations, workflowRuntime.operations),
+		mcpadapter.WithWorkflowLifecycle(workflowRuntime.lifecycle))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -329,19 +275,8 @@ func runMCP(args []string) error {
 	return adapter.Run(ctx)
 }
 
-func newMCPWorkflowExposure(store *persistence.Store) (*appworkflow.WorkflowExposureService, error) {
-	exposureStore, err := persistence.NewWorkflowExposureStore(store)
-	if err != nil {
-		return nil, err
-	}
-	// W06-T06 supplies the active graph Host, registry index, and operator.
-	// Until then the durable identity/profile boundary is live while every
-	// graph-dependent MCP operation returns a typed unavailable result.
-	exposure, err := appworkflow.NewWorkflowExposureService(appworkflow.WorkflowExposureOptions{Store: exposureStore})
-	if err != nil {
-		return nil, err
-	}
-	return exposure, nil
+func workflowSourceRoot(cfg *config.Config) string {
+	return filepath.Join(cfg.DataDir, "workflows")
 }
 
 func hadronEnvironment() string {
@@ -351,34 +286,4 @@ func hadronEnvironment() string {
 		}
 	}
 	return "development"
-}
-
-func externalMCPServers(sett *settings.Settings) map[string]mcpadapter.ExternalServerConfig {
-	if sett == nil || len(sett.MCPServers) == 0 {
-		return nil
-	}
-	out := make(map[string]mcpadapter.ExternalServerConfig, len(sett.MCPServers))
-	for name, server := range sett.MCPServers {
-		out[name] = mcpadapter.ExternalServerConfig{
-			Transport:      server.Transport,
-			Command:        server.Command,
-			Args:           append([]string(nil), server.Args...),
-			Env:            cloneStringMap(server.Env),
-			URL:            server.URL,
-			Headers:        cloneStringMap(server.Headers),
-			TimeoutSeconds: server.TimeoutSeconds,
-		}
-	}
-	return out
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }

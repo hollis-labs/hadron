@@ -273,6 +273,21 @@ func (s WorkflowExposureSession) Clone() WorkflowExposureSession {
 
 type workflowExposureIdentityKey struct{}
 
+// WithAuthenticatedIdentity binds one already-authenticated, validated caller
+// to a context consumed by ContextIdentityProvider. Transport adapters must
+// authenticate the caller before using this function; request DTO identity
+// fields are never authority.
+func WithAuthenticatedIdentity(ctx context.Context, binding hoststate.IdentityBinding) (context.Context, error) {
+	if ctx == nil {
+		return nil, ErrWorkflowUnauthenticated
+	}
+	binding = normalizeIdentity(binding)
+	if err := binding.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: authenticated workflow identity is invalid", ErrWorkflowUnauthenticated)
+	}
+	return context.WithValue(ctx, workflowExposureIdentityKey{}, binding.Clone()), nil
+}
+
 // ResolveSession maps the transient token through the local durable identity
 // record. Empty and unknown credentials intentionally receive the same safe
 // meta-only session.
@@ -306,12 +321,41 @@ func (s *WorkflowExposureService) ResolveSession(ctx context.Context, sessionID,
 	}
 	resolved := WorkflowExposureSession{SessionID: sessionID, Authenticated: true, Principal: principal.Public(), Profile: profile, ProfileGeneration: profileGeneration, AgentNamespace: principal.Record.AgentNamespace}
 	if s.sessions != nil {
-		if err := s.sessions.AuthorizeExposureSession(ctx, resolved.Clone()); err != nil {
+		if authorizationErr := s.sessions.AuthorizeExposureSession(ctx, resolved.Clone()); authorizationErr != nil {
 			return ctx, base, nil //nolint:nilerr // Session denial intentionally does not disclose a durable principal or profile.
 		}
 	}
 	binding := principal.Record.Identity.Clone()
-	return context.WithValue(ctx, workflowExposureIdentityKey{}, binding), resolved.Clone(), nil
+	bound, err := WithAuthenticatedIdentity(ctx, binding)
+	if err != nil {
+		return ctx, WorkflowExposureSession{}, err
+	}
+	return bound, resolved.Clone(), nil
+}
+
+// ContextIdentityProvider binds only identity facts placed in the context by
+// a trusted transport authenticator. Selectors may narrow those facts but
+// transported principals, attributes, or authorities can never replace them.
+type ContextIdentityProvider struct{}
+
+func (ContextIdentityProvider) BindIdentity(ctx context.Context, request IdentityRequest) (hoststate.IdentityBinding, error) {
+	binding, ok := ctx.Value(workflowExposureIdentityKey{}).(hoststate.IdentityBinding)
+	if !ok {
+		return hoststate.IdentityBinding{}, ErrWorkflowUnauthenticated
+	}
+	if request.SourceAuthority != "" && request.SourceAuthority != binding.SourceAuthority ||
+		request.PrincipalHint != "" && request.PrincipalHint != binding.Principal || len(request.Attributes) != 0 {
+		return hoststate.IdentityBinding{}, fmt.Errorf("%w: authenticated workflow identity cannot be overridden", ErrPolicyDenied)
+	}
+	if request.RunScope != nil && !request.RunScope.Matches(binding.RunScope) {
+		return hoststate.IdentityBinding{}, fmt.Errorf("%w: authenticated workflow scope cannot be widened", ErrPolicyDenied)
+	}
+	if request.ExecutionTarget != nil {
+		if binding.ExecutionTarget == nil || !request.ExecutionTarget.Matches(*binding.ExecutionTarget) {
+			return hoststate.IdentityBinding{}, fmt.Errorf("%w: authenticated workflow target cannot be widened", ErrPolicyDenied)
+		}
+	}
+	return binding.Clone(), nil
 }
 
 // MCPIdentityProvider binds only the identity previously authenticated by
@@ -319,22 +363,11 @@ func (s *WorkflowExposureService) ResolveSession(ctx context.Context, sessionID,
 type MCPIdentityProvider struct{}
 
 func (MCPIdentityProvider) BindIdentity(ctx context.Context, request IdentityRequest) (hoststate.IdentityBinding, error) {
-	binding, ok := ctx.Value(workflowExposureIdentityKey{}).(hoststate.IdentityBinding)
-	if !ok {
-		return hoststate.IdentityBinding{}, ErrWorkflowUnauthenticated
-	}
-	if request.SourceAuthority != "" && request.SourceAuthority != "mcp" || request.PrincipalHint != "" && request.PrincipalHint != binding.Principal || len(request.Attributes) != 0 {
+	if request.SourceAuthority != "" && request.SourceAuthority != "mcp" {
 		return hoststate.IdentityBinding{}, fmt.Errorf("%w: MCP caller identity cannot be overridden", ErrPolicyDenied)
 	}
-	if request.RunScope != nil && !request.RunScope.Matches(binding.RunScope) {
-		return hoststate.IdentityBinding{}, fmt.Errorf("%w: MCP caller scope cannot be widened", ErrPolicyDenied)
-	}
-	if request.ExecutionTarget != nil {
-		if binding.ExecutionTarget == nil || !request.ExecutionTarget.Matches(*binding.ExecutionTarget) {
-			return hoststate.IdentityBinding{}, fmt.Errorf("%w: MCP caller target cannot be widened", ErrPolicyDenied)
-		}
-	}
-	return binding.Clone(), nil
+	request.SourceAuthority = "mcp"
+	return (ContextIdentityProvider{}).BindIdentity(ctx, request)
 }
 
 type WorkflowExposureDescriptor struct {

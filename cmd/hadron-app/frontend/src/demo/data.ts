@@ -496,6 +496,7 @@ export const DEMO_HEALTH: Health = {
   status: 'ok',
   version: '0.4.0-demo',
   service: 'hadrond',
+  workflow: { started: true, ready: true, recovering: false, recovery_failed: false, incomplete_starts: 0 },
 };
 
 // ── Workspaces ──

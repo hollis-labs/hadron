@@ -688,8 +688,6 @@ func (s *Store) RenewNodeLease(ctx context.Context, request workflowruntime.Rene
 	}
 	current = cloneNode(current)
 	current.Lease.ExpiresAt = request.LeaseUntil
-	current.Generation++
-	current.UpdatedAt = request.Now
 	if err := current.Validate(); err != nil {
 		return workflowruntime.ClaimLease{}, invalid(err)
 	}

@@ -28,6 +28,16 @@ type ActivationEvent struct {
 
 type ActivationManager struct{ Service appworkflow.ActivationService }
 
+// LoadRegistration exposes the exact graph-native activation definition to an
+// authenticated transport before it accepts a credential-free event. An
+// opaque registration ID is never treated as authority.
+func (m ActivationManager) LoadRegistration(ctx context.Context, id string) (hoststate.ActivationRegistration, error) {
+	if ctx == nil || m.Service.Store == nil {
+		return hoststate.ActivationRegistration{}, appworkflow.ErrHostNotReady
+	}
+	return m.Service.Store.LoadActivation(ctx, id)
+}
+
 func (m ActivationManager) Fire(ctx context.Context, event ActivationEvent) (appworkflow.ActivationStartResult, error) {
 	if ctx == nil {
 		return appworkflow.ActivationStartResult{}, errors.New("trigger activation requires context")

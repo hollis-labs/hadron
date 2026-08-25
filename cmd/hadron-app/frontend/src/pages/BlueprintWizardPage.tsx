@@ -1,7 +1,8 @@
+// Archive/rewrite-only legacy blueprint UI; unreachable from active navigation.
 import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { useNavigation } from '@/contexts/NavigationContext';
+import { useArchivedNavigation as useNavigation } from '@/contexts/NavigationContext';
 import { useWizardState } from '@/hooks/useWizardState';
 import {
   WizardMetadataStep,

@@ -44,11 +44,10 @@ Use ` + "`hadron_blueprint_schema`" + ` after choosing a blueprint so you can co
 Avoid relying on registry-only tools for first-pass agent discovery. Those are still useful operationally, but the blueprint discovery tools work directly from the configured blueprint directory.`,
 	"run-inspection": `# Run Inspection
 
-Use ` + "`hadron_run_get`" + ` for the current run summary.
-Use ` + "`hadron_run_operations`" + ` for structured diagnostics across MCP, HTTP, message waits, and agent launches.
-Use ` + "`hadron_run_events`" + ` when you need the append-only raw event history.
+Use ` + "`hadron_workflow_run_inspect`" + ` for the redacted durable run projection.
+Use ` + "`hadron_workflow_run_events`" + ` for bounded rendered events and ` + "`hadron_workflow_run_subscribe`" + ` for bounded progress polling. Typed waits and values are projected by inspect; resume through ` + "`hadron_workflow_run_resume`" + ` when the wait contract permits it.
 
-Prefer ` + "`hadron_run_operations`" + ` before scraping event text when you need to understand a failed step.`,
+Never infer private values from raw errors or scrape legacy run-event text.`,
 	"message-workflows": `# Message Workflows
 
 For local agent-to-agent workflows:
@@ -71,6 +70,14 @@ func hadronSkillIndex() []hadronSkillDoc {
 	}
 }
 
+func workflowSkillIndex() []hadronSkillDoc {
+	return []hadronSkillDoc{
+		{Name: "start-here", Description: "Orientation for the graph-native Hadron MCP surface."},
+		{Name: "workflow-lifecycle", Description: "Discover, author, qualify, publish, and expose graph-native workflows."},
+		{Name: "run-inspection", Description: "Inspect typed, bounded, redacted graph-native run diagnostics."},
+	}
+}
+
 func (a *Adapter) registerSkillsTool(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("hadron_skills",
 		mcp.WithDescription("Hadron MCP orientation and skill index. Call with no args for the catalog; call with `name` to read one skill in full."),
@@ -86,6 +93,9 @@ func (a *Adapter) handleHadronSkills(_ context.Context, req mcp.CallToolRequest)
 	name := req.GetString("name", "")
 	if name == "" {
 		items := hadronSkillIndex()
+		if a.workflowOnly {
+			items = workflowSkillIndex()
+		}
 		return toolJSON(map[string]any{
 			"items": items,
 			"meta": map[string]any{
@@ -94,6 +104,9 @@ func (a *Adapter) handleHadronSkills(_ context.Context, req mcp.CallToolRequest)
 				"next":                  "hadron_skills",
 			},
 		}), nil
+	}
+	if a.workflowOnly && name != "start-here" && name != "workflow-lifecycle" && name != "run-inspection" {
+		return toolError("skill_not_found", errHadronSkillNotFound.Error()), nil
 	}
 	body, err := getHadronSkill(name)
 	if err != nil {

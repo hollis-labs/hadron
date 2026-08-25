@@ -166,6 +166,41 @@ func TestWorkflowLifecycleFlywheelReportsIndependentStateAndTrustedIdentity(t *t
 	}
 }
 
+func TestWorkflowLifecycleCatalogSearchDoesNotEnumerateActivationProjections(t *testing.T) {
+	fixture := newLifecycleFixture(t, nil)
+	identity := IdentityRequest{SourceAuthority: "test"}
+	ref := registerLifecycleWorkflow(t, fixture, workflowLifecycleDraft(t, "search-without-activations", "team"), identity, false)
+	store := &countingLifecycleActivationStore{}
+	fixture.service.sourceActivations = &SourceActivationLifecycle{Activations: ActivationService{Store: store}}
+
+	search, err := fixture.service.SearchWorkflowCatalog(t.Context(), SearchWorkflowCatalogRequest{
+		Namespace: "team", Query: "search without activations", Identity: identity,
+	})
+	if err != nil || len(search.Matches) != 1 {
+		t.Fatalf("SearchWorkflowCatalog = %#v, %v", search, err)
+	}
+	if calls := store.listCalls; calls != 0 {
+		t.Fatalf("catalog search enumerated activation projections %d times", calls)
+	}
+
+	if _, err := fixture.service.InspectWorkflowVersion(t.Context(), InspectWorkflowVersionRequest{Definition: ref, Identity: identity}); err != nil {
+		t.Fatal(err)
+	}
+	if calls := store.listCalls; calls != 1 {
+		t.Fatalf("exact inspection activation projection calls = %d, want 1", calls)
+	}
+}
+
+type countingLifecycleActivationStore struct {
+	hoststate.ActivationStore
+	listCalls int
+}
+
+func (s *countingLifecycleActivationStore) ListDerivedActivations(context.Context, string) ([]hoststate.ActivationRegistration, error) {
+	s.listCalls++
+	return []hoststate.ActivationRegistration{}, nil
+}
+
 func TestWorkflowExposurePinPreflightFailuresDoNotMutateProfile(t *testing.T) {
 	fixture := newLifecycleFixture(t, nil)
 	identity := IdentityRequest{SourceAuthority: "test"}

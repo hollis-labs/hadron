@@ -93,10 +93,16 @@ test('generated client uses escaped opaque IDs and mutation idempotency headers'
     identity: { source_authority: 'http' },
     idempotency_key: 'rerun-key',
   });
+  await client.fireWorkflowActivation({
+    registration_id: 'activation/id',
+    idempotency_key: 'fire-key',
+    occurred_at: '2026-08-24T12:00:00Z',
+  });
 
   assert.deepEqual(calls.map(call => call.path), [
     '/v1/workflows/runs/source%2Fid/cancel',
     '/v1/workflows/runs/source%2Fid/rerun',
+    '/v1/workflows/activations/activation%2Fid/fire',
   ]);
-  assert.deepEqual(calls.map(call => new Headers(call.init.headers).get('Idempotency-Key')), ['cancel-key', 'rerun-key']);
+  assert.deepEqual(calls.map(call => new Headers(call.init.headers).get('Idempotency-Key')), ['cancel-key', 'rerun-key', 'fire-key']);
 });

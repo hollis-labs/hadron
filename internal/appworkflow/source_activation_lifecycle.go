@@ -2,6 +2,7 @@ package appworkflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -89,9 +90,8 @@ func (c SourceActivationRegistrationCoordinator) RegisterCurrent(ctx context.Con
 	}
 	materialization := request.Materialization
 	materialization.Plan = plan
-	prepared, err := prepareSourceActivationReconcile(materialization)
-	if err != nil {
-		return SourceActivationRegistrationResult{}, err
+	if _, preparationErr := prepareSourceActivationReconcile(materialization); preparationErr != nil {
+		return SourceActivationRegistrationResult{}, preparationErr
 	}
 	if !request.Registration.MakeCurrent || !registrationRequestMatchesSourcePlan(request.Registration.Definition, plan.Definition) {
 		return SourceActivationRegistrationResult{}, fmt.Errorf("%w: registration request does not select the exact activation plan as current", ErrInvalidActivation)
@@ -104,7 +104,9 @@ func (c SourceActivationRegistrationCoordinator) RegisterCurrent(ctx context.Con
 		return SourceActivationRegistrationResult{Record: record}, validationErr
 	}
 	lifecycle := SourceActivationLifecycle{Registry: c.Catalog, Activations: c.Activations}
-	activations, err := lifecycle.applyRegistered(context.WithoutCancel(ctx), record.Name, plan, prepared)
+	activations, err := lifecycle.OnRegistered(context.WithoutCancel(ctx), RegisteredSourceActivationRequest{
+		RegistryName: record.Name, Materialization: materialization,
+	})
 	if err != nil {
 		return SourceActivationRegistrationResult{Record: record}, err
 	}
@@ -141,11 +143,25 @@ func (l SourceActivationLifecycle) OnRegistered(ctx context.Context, request Reg
 	if err := l.validateRegisteredPlan(ctx, request.RegistryName, request.Materialization.Plan); err != nil {
 		return hoststate.ActivationReconcileResult{}, err
 	}
+	if err := l.validateCurrentPlan(ctx, request.RegistryName, request.Materialization.Plan); err != nil {
+		return hoststate.ActivationReconcileResult{}, err
+	}
 	prepared, err := prepareSourceActivationReconcile(request.Materialization)
 	if err != nil {
 		return hoststate.ActivationReconcileResult{}, err
 	}
-	return l.Activations.Store.ReconcileDerivedActivations(context.WithoutCancel(ctx), prepared)
+	result, err := l.Activations.Store.ReconcileDerivedActivations(context.WithoutCancel(ctx), prepared)
+	if err != nil {
+		return result, err
+	}
+	if currentErr := l.validateCurrentPlan(ctx, request.RegistryName, request.Materialization.Plan); currentErr != nil {
+		_, retireErr := l.Activations.RetireSourceActivations(context.WithoutCancel(ctx), SourceActivationRetireRequest{
+			Definition: request.Materialization.Plan.Definition, SourceOwner: request.Materialization.SourceOwner,
+			ExpectedCurrentPlanDigest: request.Materialization.Plan.Digest, At: request.Materialization.At,
+		})
+		return result, errors.Join(ErrActivationConflict, currentErr, retireErr)
+	}
+	return result, nil
 }
 
 func (l SourceActivationLifecycle) OnDisabled(ctx context.Context, request RegisteredSourceActivationRequest) (hoststate.ActivationReconcileResult, error) {
@@ -161,13 +177,6 @@ func (l SourceActivationLifecycle) retireRegistered(ctx context.Context, registr
 		return hoststate.ActivationReconcileResult{}, fmt.Errorf("%w: removal definition differs from the exact registered plan", ErrInvalidActivation)
 	}
 	return l.Activations.RetireSourceActivations(ctx, request)
-}
-
-func (l SourceActivationLifecycle) applyRegistered(ctx context.Context, registryName string, plan *workflowcompile.ExecutionPlan, prepared hoststate.ActivationReconcileRequest) (hoststate.ActivationReconcileResult, error) {
-	if err := l.validateRegisteredPlan(ctx, registryName, plan); err != nil {
-		return hoststate.ActivationReconcileResult{}, err
-	}
-	return l.Activations.Store.ReconcileDerivedActivations(context.WithoutCancel(ctx), prepared)
 }
 
 func sameSourceActivationDefinition(left, right graph.DefinitionRef) bool {
@@ -197,6 +206,23 @@ func (l SourceActivationLifecycle) validateRegisteredPlan(ctx context.Context, r
 	if resolution.Movable || record.Name != registryName || record.Version != plan.Definition.Version ||
 		record.Digest != plan.Definition.Digest || record.PlanDigest != plan.Digest || record.Authority != plan.Definition.Authority {
 		return fmt.Errorf("%w: registered workflow does not match the exact compiled activation plan", ErrInvalidActivation)
+	}
+	return nil
+}
+
+func (l SourceActivationLifecycle) validateCurrentPlan(ctx context.Context, registryName string, input *workflowcompile.ExecutionPlan) error {
+	plan, err := validateSourceActivationPlan(input)
+	if err != nil {
+		return err
+	}
+	resolution, err := l.Registry.ResolveWorkflow(ctx, hadronregistry.WorkflowQuery{Name: registryName})
+	if err != nil {
+		return fmt.Errorf("%w: source workflow current alias is unavailable", ErrActivationConflict)
+	}
+	record := resolution.Record
+	if !resolution.Movable || record.Name != registryName || record.Version != plan.Definition.Version ||
+		record.Digest != plan.Definition.Digest || record.PlanDigest != plan.Digest || record.Authority != plan.Definition.Authority {
+		return fmt.Errorf("%w: source workflow is no longer the exact current version", ErrActivationConflict)
 	}
 	return nil
 }

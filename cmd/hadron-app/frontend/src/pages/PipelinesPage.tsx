@@ -1,3 +1,4 @@
+// Archive/rewrite-only legacy pipeline UI; unreachable from active navigation.
 import { useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -17,7 +18,7 @@ import { EMPTY_FORM, EMPTY_STAGE, parsePipelineToForm } from '@/utils/pipelineYa
 import type { PipelineForm } from '@/utils/pipelineYaml';
 
 import { useDaemon } from '../contexts/DaemonContext';
-import { useNavigation } from '../contexts/NavigationContext';
+import { useArchivedNavigation as useNavigation } from '../contexts/NavigationContext';
 
 export function PipelinesPage() {
   const daemon = useDaemon();

@@ -9,8 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/trigger"
+	"github.com/hollis-labs/hadron/workflow/graph"
 )
 
 const (
@@ -84,6 +88,93 @@ func (s *Server) handleWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeWorkflowJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleWorkflowActivationFire(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeWorkflowOperationError(w, http.StatusMethodNotAllowed, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInvalidRequest})
+		return
+	}
+	if s.deps.Workflows == nil || s.deps.WorkflowAuth == nil || s.deps.WorkflowActivations == nil {
+		writeWorkflowOperationError(w, http.StatusServiceUnavailable, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable})
+		return
+	}
+	escaped := strings.TrimPrefix(r.URL.EscapedPath(), "/v1/workflows/activations/")
+	parts := strings.Split(escaped, "/")
+	if len(parts) != 2 || parts[1] != "fire" {
+		writeWorkflowOperationError(w, http.StatusNotFound, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeNotFound})
+		return
+	}
+	registrationID, err := url.PathUnescape(parts[0])
+	if err != nil || graph.ValidateID(registrationID) != nil {
+		writeWorkflowOperationError(w, http.StatusNotFound, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeNotFound})
+		return
+	}
+	var request appworkflow.FireWorkflowActivationRequest
+	if !decodeWorkflowRequest(w, r, &request) {
+		return
+	}
+	receivedAt := time.Now().UTC()
+	if request.RegistrationID != registrationID || request.OccurredAt.IsZero() || request.OccurredAt.UTC().After(receivedAt) {
+		writeWorkflowOperationError(w, http.StatusBadRequest, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInvalidRequest})
+		return
+	}
+	if !workflowIdempotencyKey(w, r, &request.IdempotencyKey) {
+		return
+	}
+	ctx, ok := s.authenticateWorkflow(w, r, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessActivationFire}, false)
+	if !ok {
+		return
+	}
+	registration, err := s.deps.WorkflowActivations.LoadRegistration(ctx, registrationID)
+	if err != nil {
+		operationError := appworkflow.SafeWorkflowOperationError(err, nil)
+		if operationError.Code != appworkflow.WorkflowErrorCodeNotFound {
+			operationError = appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable}
+		}
+		writeWorkflowOperationError(w, workflowHTTPStatus(operationError.Code), operationError)
+		return
+	}
+	definition, err := workflowActivationExposureDefinition(registration)
+	if err != nil {
+		writeWorkflowOperationError(w, http.StatusServiceUnavailable, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable})
+		return
+	}
+	ctx, ok = s.authenticateWorkflow(w, r, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessActivationFire, Definition: &definition}, true)
+	if !ok {
+		return
+	}
+	result, err := s.deps.WorkflowActivations.Fire(ctx, trigger.ActivationEvent{
+		RegistrationID: registrationID, IdempotencyKey: request.IdempotencyKey,
+		OccurredAt: request.OccurredAt.UTC(), ReceivedAt: receivedAt, Payload: request.Payload,
+		LogicalRunID: request.LogicalRunID, SourceRef: "http",
+	})
+	if err != nil {
+		s.writeWorkflowFailure(w, err, &result.Start, true)
+		return
+	}
+	projected, err := appworkflow.SafeFireWorkflowActivationResult(result)
+	if err != nil {
+		writeWorkflowOperationError(w, http.StatusInternalServerError, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInternal})
+		return
+	}
+	writeWorkflowJSON(w, http.StatusOK, projected)
+}
+
+func workflowActivationExposureDefinition(registration hoststate.ActivationRegistration) (graph.DefinitionRef, error) {
+	if registration.Derivation == nil {
+		return graph.DefinitionRef{}, errors.New("activation exposure reference is unavailable")
+	}
+	exposure, err := appworkflow.DecodeWorkflowActivationExposureRef(registration.Principal.ExposureRef)
+	if err != nil || exposure.ActivationID != registration.Derivation.TemplateID {
+		return graph.DefinitionRef{}, errors.New("activation exposure reference is invalid")
+	}
+	ref := exposure.Definition
+	if registration.Definition.Kind != appworkflow.DefinitionKindRegistry || ref.ID != registration.Definition.ID ||
+		ref.Version != registration.Definition.Version || ref.Digest != registration.Definition.Digest {
+		return graph.DefinitionRef{}, errors.New("activation exposure reference differs from its stored workflow")
+	}
+	return ref, nil
 }
 
 func (s *Server) handleWorkflowRunAction(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +409,7 @@ func workflowHTTPStatus(code string) int {
 		return http.StatusNotFound
 	case appworkflow.WorkflowErrorCodeInvalidRequest:
 		return http.StatusBadRequest
-	case appworkflow.WorkflowErrorCodeConfirmationRequired, appworkflow.WorkflowErrorCodePinRejected, appworkflow.WorkflowErrorCodeIdempotencyConflict:
+	case appworkflow.WorkflowErrorCodeConfirmationRequired, appworkflow.WorkflowErrorCodePinRejected, appworkflow.WorkflowErrorCodeIdempotencyConflict, appworkflow.WorkflowErrorCodeActivationConflict:
 		return http.StatusConflict
 	case appworkflow.WorkflowErrorCodeDryRunUnsupported:
 		return http.StatusUnprocessableEntity

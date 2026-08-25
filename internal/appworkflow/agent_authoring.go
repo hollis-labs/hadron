@@ -11,6 +11,7 @@ import (
 
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/workflow/authoring"
+	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	graphschema "github.com/hollis-labs/hadron/workflow/graph/schema"
 	"github.com/hollis-labs/hadron/workflow/runtime"
@@ -105,6 +106,16 @@ func (s *AgentAuthoringService) Author(ctx context.Context, request AgentAuthori
 // already-bound caller principal may replace the configured service principal.
 // register=false executes contract tests without mutating the catalog.
 func (s *AgentAuthoringService) author(ctx context.Context, request AgentAuthoringRequest, principal string, register bool) (AgentAuthoringResult, error) {
+	return s.authorWithRegistration(ctx, request, principal, register, nil)
+}
+
+type agentRegistrationFunc func(context.Context, RegisterWorkflowRequest, *workflowcompile.ExecutionPlan) (hadronregistry.WorkflowRecord, error)
+
+// authorWithRegistration keeps validation/qualification single-sourced while
+// allowing the lifecycle facade to attach Hadron-owned source-activation
+// reconciliation to the exact current-version registration. The callback is
+// internal authority and never comes from a transport request.
+func (s *AgentAuthoringService) authorWithRegistration(ctx context.Context, request AgentAuthoringRequest, principal string, register bool, registerCurrent agentRegistrationFunc) (AgentAuthoringResult, error) {
 	result := AgentAuthoringResult{SchemaID: AgentAuthoringResultSchemaID, SchemaVersion: AgentAuthoringResultSchemaVersion, Diagnostics: []authoring.CompactDiagnostic{}}
 	if ctx == nil || s == nil || s.stager == nil || s.contracts == nil {
 		return result, fmt.Errorf("%w: service is unavailable", ErrInvalidAgentAuthoring)
@@ -172,10 +183,17 @@ func (s *AgentAuthoringService) author(ctx context.Context, request AgentAuthori
 	if !register {
 		return result, nil
 	}
-	record, registerErr := s.contracts.Register(context.WithoutCancel(ctx), RegisterWorkflowRequest{
+	registrationRequest := RegisterWorkflowRequest{
 		Definition: ref, Namespace: request.Namespace, Principal: identity.Principal,
 		Report: report, MakeCurrent: request.MakeCurrent,
-	})
+	}
+	var record hadronregistry.WorkflowRecord
+	var registerErr error
+	if registerCurrent == nil {
+		record, registerErr = s.contracts.Register(context.WithoutCancel(ctx), registrationRequest)
+	} else {
+		record, registerErr = registerCurrent(context.WithoutCancel(ctx), registrationRequest, validation.Plan)
+	}
 	if registerErr != nil {
 		return result, registerErr
 	}

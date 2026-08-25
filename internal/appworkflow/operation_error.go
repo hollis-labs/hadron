@@ -32,7 +32,7 @@ func SafeWorkflowOperationError(err error, result *StartRunResult) WorkflowOpera
 	if errors.Is(err, ErrWorkflowInvalidRequest) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeInvalidRequest}
 	}
-	if errors.Is(err, ErrInvalidAgentAuthoring) || errors.Is(err, ErrInvalidContractService) || errors.Is(err, ErrContractTestFailed) || errors.Is(err, hadronregistry.ErrInvalidWorkflow) || errors.Is(err, hoststate.ErrInvalidRecord) {
+	if errors.Is(err, ErrInvalidActivation) || errors.Is(err, ErrInvalidAgentAuthoring) || errors.Is(err, ErrInvalidContractService) || errors.Is(err, ErrContractTestFailed) || errors.Is(err, hadronregistry.ErrInvalidWorkflow) || errors.Is(err, hoststate.ErrInvalidRecord) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeInvalidRequest}
 	}
 	if errors.Is(err, ErrHostNotReady) || errors.Is(err, ErrInvalidHost) {
@@ -55,6 +55,9 @@ func SafeWorkflowOperationError(err error, result *StartRunResult) WorkflowOpera
 	}
 	if errors.Is(err, workflowruntime.ErrIdempotencyConflict) || errors.Is(err, hadronregistry.ErrWorkflowConflict) || errors.Is(err, hoststate.ErrConflict) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeIdempotencyConflict}
+	}
+	if errors.Is(err, ErrActivationConflict) || errors.Is(err, ErrActivationSkipped) {
+		return WorkflowOperationError{Code: WorkflowErrorCodeActivationConflict, Diagnostics: resultDiagnostics(result), Result: result}
 	}
 	return WorkflowOperationError{Code: WorkflowErrorCodeInternal}
 }

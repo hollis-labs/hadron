@@ -36,8 +36,9 @@ func NewServer(addr string, deps Dependencies) *Server {
 	s := &Server{deps: deps}
 	mux := http.NewServeMux()
 
-	// Create trigger manager if trigger store is available
-	if deps.Triggers != nil && deps.Runner != nil {
+	// The old trigger manager dispatches execution.Request and is mounted only
+	// by explicit archive/reference composition.
+	if deps.EnableLegacyRuntime && deps.Triggers != nil && deps.Runner != nil {
 		s.triggerManager = trigger.New(deps.Triggers, deps.Runner)
 	}
 
@@ -46,41 +47,33 @@ func NewServer(addr string, deps Dependencies) *Server {
 	mux.HandleFunc("/v1/workflows/explain", s.handleWorkflowExplain)
 	mux.HandleFunc("/v1/workflows/runs", s.handleWorkflowRuns)
 	mux.HandleFunc("/v1/workflows/runs/", s.handleWorkflowRunAction)
+	mux.HandleFunc("/v1/workflows/activations/", s.handleWorkflowActivationFire)
 	mux.HandleFunc("/v1/workflows/lifecycle/", s.handleWorkflowLifecycle)
 
 	// Workspaces
 	mux.HandleFunc("/v1/workspaces", s.handleWorkspaces)
 	mux.HandleFunc("/v1/workspaces/", s.handleWorkspaceByID)
 
-	// Runs
-	mux.HandleFunc("/v1/runs", s.handleRuns)
-	mux.HandleFunc("/v1/runs/", s.handleRunByID)
-
-	// Schedules
-	mux.HandleFunc("/v1/schedules", s.handleSchedules)
-	mux.HandleFunc("/v1/schedules/", s.handleScheduleByID)
-
-	// Pipelines
-	mux.HandleFunc("/v1/pipelines", s.handlePipelines)
-	mux.HandleFunc("/v1/pipelines/", s.handlePipelineByID)
-
-	// Triggers — CRUD for webhook trigger definitions
-	mux.HandleFunc("/v1/triggers", s.handleWebhookTriggers)
-	mux.HandleFunc("/v1/triggers/", s.handleWebhookTriggerByID)
-
-	// Human gates
-	mux.HandleFunc("/v1/human-gates/", s.handleHumanGateByID)
-
-	// Messages
-	mux.HandleFunc("/v1/messages", s.handleMessagesCollection)
-	mux.HandleFunc("/v1/messages/inbox", s.handleMessagesInbox)
-	mux.HandleFunc("/v1/messages/list", s.handleMessagesList)
-	mux.HandleFunc("/v1/messages/thread/", s.handleMessagesThread)
-	mux.HandleFunc("/v1/messages/", s.handleMessageByID)
-
-	// Webhook catch-all — incoming webhook requests
-	if s.triggerManager != nil {
-		s.triggerManager.RegisterWebhookRoutes(mux)
+	if deps.EnableLegacyRuntime {
+		// Archived blueprint/pipeline routes. These are deliberately absent from
+		// production and carry no forward compatibility promise.
+		mux.HandleFunc("/v1/runs", s.handleRuns)
+		mux.HandleFunc("/v1/runs/", s.handleRunByID)
+		mux.HandleFunc("/v1/schedules", s.handleSchedules)
+		mux.HandleFunc("/v1/schedules/", s.handleScheduleByID)
+		mux.HandleFunc("/v1/pipelines", s.handlePipelines)
+		mux.HandleFunc("/v1/pipelines/", s.handlePipelineByID)
+		mux.HandleFunc("/v1/triggers", s.handleWebhookTriggers)
+		mux.HandleFunc("/v1/triggers/", s.handleWebhookTriggerByID)
+		mux.HandleFunc("/v1/human-gates/", s.handleHumanGateByID)
+		mux.HandleFunc("/v1/messages", s.handleMessagesCollection)
+		mux.HandleFunc("/v1/messages/inbox", s.handleMessagesInbox)
+		mux.HandleFunc("/v1/messages/list", s.handleMessagesList)
+		mux.HandleFunc("/v1/messages/thread/", s.handleMessagesThread)
+		mux.HandleFunc("/v1/messages/", s.handleMessageByID)
+		if s.triggerManager != nil {
+			s.triggerManager.RegisterWebhookRoutes(mux)
+		}
 	}
 
 	// A2A Agent Card
@@ -90,8 +83,9 @@ func NewServer(addr string, deps Dependencies) *Server {
 	mux.HandleFunc("/a2a/tasks", s.handleA2ATasks)
 	mux.HandleFunc("/a2a/tasks/", s.handleA2ATaskByID)
 
-	// Blueprints
-	mux.HandleFunc("/v1/blueprints/validate", s.handleBlueprintValidate)
+	if deps.EnableLegacyRuntime {
+		mux.HandleFunc("/v1/blueprints/validate", s.handleBlueprintValidate)
+	}
 
 	// Browser operator UI. API-looking paths remain structured API 404s so a
 	// mistyped workflow route can never be hidden by the SPA fallback.
@@ -141,15 +135,33 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }
 
-// corsMiddleware handles CORS preflight requests for local development and
-// separately hosted browser clients. The production operator UI is same-origin.
+// corsMiddleware permits only same-origin browser requests. The production UI
+// is served by this daemon; wildcard CORS would turn loopback operator identity
+// into a cross-site request capability.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			parsed, err := url.Parse(origin)
+			expectedScheme := "http"
+			if r.TLS != nil {
+				expectedScheme = "https"
+			}
+			if err != nil || parsed.Scheme != expectedScheme || !strings.EqualFold(parsed.Host, r.Host) || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+				writeJSON(w, http.StatusForbidden, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodePolicyDenied})
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
+		}
 
 		if r.Method == http.MethodOptions {
+			if origin == "" {
+				writeJSON(w, http.StatusForbidden, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodePolicyDenied})
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -165,10 +177,40 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "ok",
-		"version": "0.4.0",
-		"service": "hadrond",
+	version := strings.TrimSpace(s.deps.BuildVersion)
+	if version == "" {
+		version = "dev"
+	}
+	health := appworkflow.HealthStatus{}
+	if s.deps.WorkflowHealth != nil {
+		health = s.deps.WorkflowHealth.Health()
+	}
+	status, code := "not_ready", http.StatusServiceUnavailable
+	if health.Started && health.Ready && !health.Recovering {
+		status, code = "ready", http.StatusOK
+	}
+	writeJSON(w, code, struct {
+		Status   string `json:"status"`
+		Version  string `json:"version"`
+		Service  string `json:"service"`
+		Workflow struct {
+			Started          bool      `json:"started"`
+			Ready            bool      `json:"ready"`
+			Recovering       bool      `json:"recovering"`
+			LastRecoveryAt   time.Time `json:"last_recovery_at,omitempty"`
+			RecoveryFailed   bool      `json:"recovery_failed"`
+			IncompleteStarts int       `json:"incomplete_starts"`
+		} `json:"workflow"`
+	}{
+		Status: status, Version: version, Service: "hadrond",
+		Workflow: struct {
+			Started          bool      `json:"started"`
+			Ready            bool      `json:"ready"`
+			Recovering       bool      `json:"recovering"`
+			LastRecoveryAt   time.Time `json:"last_recovery_at,omitempty"`
+			RecoveryFailed   bool      `json:"recovery_failed"`
+			IncompleteStarts int       `json:"incomplete_starts"`
+		}{health.Started, health.Ready, health.Recovering, health.LastRecoveryAt, health.LastRecoveryError != "", health.IncompleteStarts},
 	})
 }
 
@@ -1421,6 +1463,17 @@ func (s *Server) authenticateA2A(w http.ResponseWriter, r *http.Request, intent 
 		}
 		operationError = hideWorkflowDefinitionDenial(operationError, hideDenied)
 		writeWorkflowOperationError(w, workflowHTTPStatus(operationError.Code), operationError)
+		return nil, false
+	}
+	binding, err := (appworkflow.ContextIdentityProvider{}).BindIdentity(ctx, appworkflow.IdentityRequest{})
+	if err != nil {
+		writeWorkflowOperationError(w, http.StatusUnauthorized, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnauthenticated})
+		return nil, false
+	}
+	binding.SourceAuthority = "a2a"
+	ctx, err = appworkflow.WithAuthenticatedIdentity(ctx, binding)
+	if err != nil {
+		writeWorkflowOperationError(w, http.StatusUnauthorized, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnauthenticated})
 		return nil, false
 	}
 	return ctx, true

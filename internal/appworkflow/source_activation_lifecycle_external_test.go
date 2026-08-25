@@ -164,7 +164,7 @@ steps:
 	firstRequest.Materialization.ExpectedCurrentPlanDigest = firstPlan.Digest
 	firstRequest.Materialization.At = fixture.now.Add(6 * time.Second)
 	lifecycle := appworkflow.SourceActivationLifecycle{Registry: catalog, Activations: appworkflow.ActivationService{Store: store}}
-	if _, staleErr := lifecycle.OnRegistered(t.Context(), firstRequest); !errors.Is(staleErr, runtime.ErrIdempotencyConflict) {
+	if _, staleErr := lifecycle.OnRegistered(t.Context(), firstRequest); !errors.Is(staleErr, appworkflow.ErrActivationConflict) {
 		t.Fatalf("stale source resurrection = %v", staleErr)
 	}
 

@@ -39,6 +39,30 @@ func TestActivationExternalUsesHostStartPathAndReplaysStableFire(t *testing.T) {
 	if _, outcome, err := service.Register(t.Context(), registration); err != nil || outcome != workflowruntime.IdempotencyApplied {
 		t.Fatalf("Register = %q, %v", outcome, err)
 	}
+	for _, kind := range []hoststate.ActivationSourceKind{hoststate.ActivationSourceSchedule, hoststate.ActivationSourceTimer, hoststate.ActivationSourceCallback} {
+		unsupported := activationHostRegistration(t, fixture, identity, "not-external-"+string(kind))
+		switch kind {
+		case hoststate.ActivationSourceSchedule:
+			unsupported.Source = hoststate.ActivationSource{Kind: kind, Reference: "schedule-source", Config: graph.Config{"cron": "* * * * *"}}
+		case hoststate.ActivationSourceTimer:
+			unsupported.Source = hoststate.ActivationSource{Kind: kind, Reference: "timer-source", Config: graph.Config{"fire_at": now.Add(time.Hour).Format(time.RFC3339Nano)}, OneShot: true}
+		case hoststate.ActivationSourceCallback:
+			unsupported.Source = hoststate.ActivationSource{Kind: kind, Reference: "callback-source", Config: graph.Config{"path": "/callback"}, OneShot: true}
+		default:
+			t.Fatalf("unexpected non-payload activation kind %q", kind)
+		}
+		if _, _, err := service.Register(t.Context(), unsupported); err != nil {
+			t.Fatalf("register %s activation: %v", kind, err)
+		}
+		if _, err := service.ActivateExternal(authenticatedContext(t.Context(), "service:activation"), appworkflow.ExternalActivationRequest{
+			RegistrationID: unsupported.ID, IdempotencyKey: "manual-" + string(kind), OccurredAt: now, ReceivedAt: now,
+		}); !errors.Is(err, appworkflow.ErrInvalidActivation) {
+			t.Fatalf("manual %s activation = %v", kind, err)
+		}
+	}
+	if due, err := store.ListDueFires(t.Context(), now.Add(2*time.Hour), 10); err != nil || len(due) != 0 {
+		t.Fatalf("non-payload activation ingress persisted fires = %#v, %v", due, err)
+	}
 	if err := service.Enqueue(t.Context(), gosched.Job{ScheduleID: registration.ID, FireID: "malformed-fire", Attempt: 1,
 		ScheduledAt: now, FiredAt: now, Payload: []byte(`{"payload":{} trailing`)}); !errors.Is(err, appworkflow.ErrInvalidActivation) {
 		t.Fatalf("malformed scheduler payload = %v", err)
@@ -47,6 +71,18 @@ func TestActivationExternalUsesHostStartPathAndReplaysStableFire(t *testing.T) {
 	request := appworkflow.ExternalActivationRequest{
 		RegistrationID: registration.ID, IdempotencyKey: "delivery-one", OccurredAt: now, ReceivedAt: now,
 		Payload: map[string]any{"message": "from webhook"}, SourceRef: "delivery-source",
+	}
+	if _, err := service.ActivateExternal(nil, request); !errors.Is(err, appworkflow.ErrInvalidActivation) { //nolint:staticcheck // Explicit exported-boundary nil-context regression.
+		t.Fatalf("nil-context external activation = %v", err)
+	}
+	future := request
+	future.IdempotencyKey = "delivery-future"
+	future.OccurredAt = now.Add(time.Minute)
+	if _, err := service.ActivateExternal(authenticatedContext(t.Context(), "service:activation"), future); !errors.Is(err, appworkflow.ErrInvalidActivation) {
+		t.Fatalf("future external activation = %v", err)
+	}
+	if due, err := store.ListDueFires(t.Context(), now.Add(2*time.Minute), 10); err != nil || len(due) != 0 {
+		t.Fatalf("future external activation persisted delayed fire = %#v, %v", due, err)
 	}
 	started, activationErr := service.ActivateExternal(authenticatedContext(t.Context(), "service:activation"), request)
 	if activationErr != nil || started.Start.Run == nil || started.Dispatch.Status != hoststate.ActivationDispatchStarted ||

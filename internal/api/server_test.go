@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/api"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/messagesubstrate"
 	"github.com/hollis-labs/hadron/internal/persistence"
@@ -46,18 +47,26 @@ func newTestServer(t *testing.T) *httptest.Server {
 	})
 
 	srv := api.NewServer("", api.Dependencies{
-		Runs:       store,
-		Schedules:  store,
-		Pipelines:  store,
-		Workspaces: store,
-		HumanGates: store,
-		Messages:   messageService,
-		Runner:     mgr,
-		Scheduler:  sched,
-		Pipeline:   pipelineRunner,
+		EnableLegacyRuntime: true,
+		Runs:                store,
+		Schedules:           store,
+		Pipelines:           store,
+		Workspaces:          store,
+		HumanGates:          store,
+		Messages:            messageService,
+		Runner:              mgr,
+		Scheduler:           sched,
+		Pipeline:            pipelineRunner,
+		WorkflowHealth:      readyWorkflowHealth{},
 	})
 
 	return httptest.NewServer(srv.Handler())
+}
+
+type readyWorkflowHealth struct{}
+
+func (readyWorkflowHealth) Health() appworkflow.HealthStatus {
+	return appworkflow.HealthStatus{Started: true, Ready: true}
 }
 
 func doRequest(t *testing.T, ts *httptest.Server, method, path string, body any) *http.Response {
@@ -106,8 +115,82 @@ func TestHealth(t *testing.T) {
 	}
 	var result map[string]any
 	decodeJSON(t, resp, &result)
-	if result["status"] != "ok" {
-		t.Fatalf("expected status=ok, got %v", result["status"])
+	if result["status"] != "ready" {
+		t.Fatalf("expected status=ready, got %v", result["status"])
+	}
+}
+
+type fixedWorkflowHealth struct{ status appworkflow.HealthStatus }
+
+func (h fixedWorkflowHealth) Health() appworkflow.HealthStatus { return h.status }
+
+func TestWorkflowHealthReflectsReadinessAndInjectedVersionWithoutRawRecoveryError(t *testing.T) {
+	notReady := api.NewServer("", api.Dependencies{BuildVersion: "cutover-test"})
+	request := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	recorder := httptest.NewRecorder()
+	notReady.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("not-ready health status = %d", recorder.Code)
+	}
+	var unavailable map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &unavailable); err != nil || unavailable["status"] != "not_ready" || unavailable["version"] != "cutover-test" {
+		t.Fatalf("not-ready health = %#v, %v", unavailable, err)
+	}
+
+	ready := api.NewServer("", api.Dependencies{BuildVersion: "cutover-test", WorkflowHealth: fixedWorkflowHealth{status: appworkflow.HealthStatus{
+		Started: true, Ready: true, LastRecoveryError: "database password=must-not-leak", IncompleteStarts: 2,
+	}}})
+	recorder = httptest.NewRecorder()
+	ready.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+	if recorder.Code != http.StatusOK || bytes.Contains(recorder.Body.Bytes(), []byte("must-not-leak")) {
+		t.Fatalf("ready health status/body = %d %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || response["status"] != "ready" || response["version"] != "cutover-test" {
+		t.Fatalf("ready health = %#v, %v", response, err)
+	}
+}
+
+func TestProductionDefaultDoesNotMountLegacyRuntimeRoutes(t *testing.T) {
+	server := api.NewServer("", api.Dependencies{WorkflowHealth: readyWorkflowHealth{}})
+	for _, path := range []string{
+		"/v1/runs", "/v1/schedules", "/v1/pipelines", "/v1/triggers", "/v1/blueprints/validate",
+		"/v1/human-gates/gate", "/v1/messages", "/webhooks/legacy",
+	} {
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("production-default %s status = %d", path, recorder.Code)
+		}
+	}
+}
+
+func TestWorkflowCORSAllowsSameOriginAndRejectsCrossOriginAndOriginlessPreflight(t *testing.T) {
+	server := api.NewServer("", api.Dependencies{WorkflowHealth: readyWorkflowHealth{}})
+	tests := []struct {
+		name, origin string
+		want         int
+	}{
+		{name: "same_origin", origin: "http://localhost:8095", want: http.StatusNoContent},
+		{name: "cross_origin", origin: "https://evil.example", want: http.StatusForbidden},
+		{name: "originless", want: http.StatusForbidden},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodOptions, "http://localhost:8095/v1/workflows/runs", nil)
+			request.Host = "localhost:8095"
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			if recorder.Code != test.want {
+				t.Fatalf("preflight status = %d, want %d", recorder.Code, test.want)
+			}
+			if test.want == http.StatusNoContent && recorder.Header().Get("Access-Control-Allow-Origin") != test.origin {
+				t.Fatalf("same-origin CORS headers = %#v", recorder.Header())
+			}
+		})
 	}
 }
 
@@ -198,14 +281,15 @@ func TestRunMCPCallsEndpoint(t *testing.T) {
 	sched := scheduler.New(store, mgr)
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 	ts := httptest.NewServer(api.NewServer("", api.Dependencies{
-		Runs:       store,
-		Schedules:  store,
-		Pipelines:  store,
-		Workspaces: store,
-		HumanGates: store,
-		Runner:     mgr,
-		Scheduler:  sched,
-		Pipeline:   pipelineRunner,
+		EnableLegacyRuntime: true,
+		Runs:                store,
+		Schedules:           store,
+		Pipelines:           store,
+		Workspaces:          store,
+		HumanGates:          store,
+		Runner:              mgr,
+		Scheduler:           sched,
+		Pipeline:            pipelineRunner,
 	}).Handler())
 	defer ts.Close()
 
@@ -262,14 +346,15 @@ func TestRunOperationsEndpoint(t *testing.T) {
 	sched := scheduler.New(store, mgr)
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 	ts := httptest.NewServer(api.NewServer("", api.Dependencies{
-		Runs:       store,
-		Schedules:  store,
-		Pipelines:  store,
-		Workspaces: store,
-		HumanGates: store,
-		Runner:     mgr,
-		Scheduler:  sched,
-		Pipeline:   pipelineRunner,
+		EnableLegacyRuntime: true,
+		Runs:                store,
+		Schedules:           store,
+		Pipelines:           store,
+		Workspaces:          store,
+		HumanGates:          store,
+		Runner:              mgr,
+		Scheduler:           sched,
+		Pipeline:            pipelineRunner,
 	}).Handler())
 	defer ts.Close()
 
@@ -334,14 +419,15 @@ func TestRunOperationsEndpointPagination(t *testing.T) {
 	sched := scheduler.New(store, mgr)
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 	ts := httptest.NewServer(api.NewServer("", api.Dependencies{
-		Runs:       store,
-		Schedules:  store,
-		Pipelines:  store,
-		Workspaces: store,
-		HumanGates: store,
-		Runner:     mgr,
-		Scheduler:  sched,
-		Pipeline:   pipelineRunner,
+		EnableLegacyRuntime: true,
+		Runs:                store,
+		Schedules:           store,
+		Pipelines:           store,
+		Workspaces:          store,
+		HumanGates:          store,
+		Runner:              mgr,
+		Scheduler:           sched,
+		Pipeline:            pipelineRunner,
 	}).Handler())
 	defer ts.Close()
 
@@ -413,14 +499,15 @@ func TestRunOperationsEndpointRejectsInvalidCursor(t *testing.T) {
 	sched := scheduler.New(store, mgr)
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 	ts := httptest.NewServer(api.NewServer("", api.Dependencies{
-		Runs:       store,
-		Schedules:  store,
-		Pipelines:  store,
-		Workspaces: store,
-		HumanGates: store,
-		Runner:     mgr,
-		Scheduler:  sched,
-		Pipeline:   pipelineRunner,
+		EnableLegacyRuntime: true,
+		Runs:                store,
+		Schedules:           store,
+		Pipelines:           store,
+		Workspaces:          store,
+		HumanGates:          store,
+		Runner:              mgr,
+		Scheduler:           sched,
+		Pipeline:            pipelineRunner,
 	}).Handler())
 	defer ts.Close()
 	now := time.Now().UTC()
@@ -570,16 +657,17 @@ func newTestServerWithTriggers(t *testing.T, bpDir string) *httptest.Server {
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 
 	srv := api.NewServer("", api.Dependencies{
-		Runs:         store,
-		Schedules:    store,
-		Pipelines:    store,
-		Workspaces:   store,
-		Triggers:     store,
-		HumanGates:   store,
-		Runner:       mgr,
-		Scheduler:    sched,
-		Pipeline:     pipelineRunner,
-		BlueprintDir: bpDir,
+		EnableLegacyRuntime: true,
+		Runs:                store,
+		Schedules:           store,
+		Pipelines:           store,
+		Workspaces:          store,
+		Triggers:            store,
+		HumanGates:          store,
+		Runner:              mgr,
+		Scheduler:           sched,
+		Pipeline:            pipelineRunner,
+		BlueprintDir:        bpDir,
 	})
 
 	return httptest.NewServer(srv.Handler())
@@ -708,14 +796,15 @@ func TestHumanGateDecisionEndpoint(t *testing.T) {
 	sched := scheduler.New(store, mgr)
 	pipelineRunner := pipeline.NewRunner(store, mgr)
 	srv := api.NewServer("", api.Dependencies{
-		Runs:       store,
-		Schedules:  store,
-		Pipelines:  store,
-		Workspaces: store,
-		HumanGates: store,
-		Runner:     mgr,
-		Scheduler:  sched,
-		Pipeline:   pipelineRunner,
+		EnableLegacyRuntime: true,
+		Runs:                store,
+		Schedules:           store,
+		Pipelines:           store,
+		Workspaces:          store,
+		HumanGates:          store,
+		Runner:              mgr,
+		Scheduler:           sched,
+		Pipeline:            pipelineRunner,
 	})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

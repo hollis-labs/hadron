@@ -7,6 +7,7 @@ import type { Workspace } from '../api/types';
 interface DaemonContextValue {
   status: string;
   address: string;
+  version: string;
   workspaceId: string;
   workspaces: Workspace[];
   selectWorkspace: (id: string) => void;
@@ -27,6 +28,7 @@ export function useDaemon() {
 export function DaemonProvider({ children }: { children: ReactNode }) {
   const [address] = useState(() => globalThis.location?.host || 'same-origin');
   const [status, setStatus] = useState('connecting');
+  const [version, setVersion] = useState('dev');
   const [workspaceId, setWorkspaceId] = useState('default');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeRunStartedAt, setActiveRunStartedAt] = useState<string | null>(null);
@@ -44,7 +46,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const poll = () => getHealth()
-      .then(() => { if (!cancelled) setStatus('running'); })
+      .then(health => { if (!cancelled) { setStatus('running'); setVersion(health.version); } })
       .catch(() => { if (!cancelled) setStatus('unavailable'); });
     poll();
     const timer = setInterval(poll, 3_000);
@@ -79,6 +81,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     <DaemonContext.Provider value={{
       status,
       address,
+      version,
       workspaceId,
       workspaces,
       selectWorkspace,

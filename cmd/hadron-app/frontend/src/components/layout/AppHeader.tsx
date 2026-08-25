@@ -19,10 +19,7 @@ interface Breadcrumb { label: string; page?: NavPage; }
 
 function getBreadcrumbs(phase: NavPage): Breadcrumb[] {
   switch (phase) {
-    case 'blueprintDetail': return [{ label: 'Blueprints', page: 'blueprints' }, { label: 'Detail' }];
-    case 'blueprintWizard': return [{ label: 'Blueprints', page: 'blueprints' }, { label: 'Wizard' }];
     case 'runDetail': return [{ label: 'Runs', page: 'runs' }, { label: 'Detail' }];
-    case 'pipelineDetail': return [{ label: 'Pipelines', page: 'pipelines' }, { label: 'Detail' }];
     default: return [];
   }
 }
@@ -176,7 +173,7 @@ export function AppHeader({ page, phase }: AppHeaderProps) {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <div className="px-3 py-1.5 text-xs text-muted-foreground leading-snug">
-                <div className="text-primary font-semibold mb-0.5">hadron v0.4.0</div>
+                <div className="text-primary font-semibold mb-0.5">hadron {daemon.version}</div>
                 <div>Hollis Labs</div>
               </div>
             </DropdownMenuContent>

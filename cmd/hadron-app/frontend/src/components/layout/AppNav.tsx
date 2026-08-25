@@ -1,6 +1,6 @@
-import { LayoutDashboard, FileText, GitBranch, Workflow, Activity as ActivityIcon, Clock, BarChart3, Settings, HelpCircle, BookOpenCheck } from 'lucide-react';
+import { Activity as ActivityIcon, Workflow, BookOpenCheck } from 'lucide-react';
 
-export type NavPage = 'dashboard' | 'workflowCatalog' | 'blueprints' | 'blueprintDetail' | 'blueprintWizard' | 'runs' | 'runDetail' | 'schedules' | 'pipelines' | 'pipelineDetail' | 'flowBuilder' | 'telemetry' | 'settings' | 'help';
+export type NavPage = 'workflowCatalog' | 'flowBuilder' | 'runs' | 'runDetail';
 
 interface AppNavProps {
   current: NavPage;
@@ -8,19 +8,9 @@ interface AppNavProps {
 }
 
 const MAIN_NAV: { page: NavPage; label: string; icon: React.ReactNode; parents?: NavPage[] }[] = [
-  { page: 'dashboard', label: 'Operations', icon: <LayoutDashboard size={18} /> },
   { page: 'workflowCatalog', label: 'Workflow Registry', icon: <BookOpenCheck size={18} /> },
-  { page: 'blueprints', label: 'Blueprints', icon: <FileText size={18} />, parents: ['blueprintDetail', 'blueprintWizard'] },
-  { page: 'pipelines', label: 'Pipelines', icon: <GitBranch size={18} />, parents: ['pipelineDetail'] },
   { page: 'flowBuilder', label: 'Workflow Graph', icon: <Workflow size={18} /> },
   { page: 'runs', label: 'Runs', icon: <ActivityIcon size={18} />, parents: ['runDetail'] },
-  { page: 'schedules', label: 'Schedules', icon: <Clock size={18} /> },
-  { page: 'telemetry', label: 'Telemetry', icon: <BarChart3 size={18} /> },
-];
-
-const FOOTER_NAV: { page: NavPage; label: string; icon: React.ReactNode }[] = [
-  { page: 'settings', label: 'Settings', icon: <Settings size={18} /> },
-  { page: 'help', label: 'Help', icon: <HelpCircle size={18} /> },
 ];
 
 function isActive(current: NavPage, item: { page: NavPage; parents?: NavPage[] }): boolean {
@@ -54,21 +44,6 @@ export function AppNav({ current, onNavigate }: AppNavProps) {
           </button>
         ))}
       </nav>
-      <div className="sidebar-footer">
-        {FOOTER_NAV.map(item => (
-          <button
-            key={item.page}
-            type="button"
-            aria-label={item.label}
-            aria-current={isActive(current, item) ? 'page' : undefined}
-            className={`nav-item${isActive(current, item) ? ' active' : ''}`}
-            onClick={() => onNavigate(item.page)}
-          >
-            {item.icon}
-            <span className="tooltip">{item.label}</span>
-          </button>
-        ))}
-      </div>
     </aside>
   );
 }

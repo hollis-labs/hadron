@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	"github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -30,14 +32,29 @@ var (
 )
 
 type ActivationService struct {
-	Host  *Host
-	Store hoststate.ActivationStore
-	Clock Clock
+	Host                *Host
+	Store               hoststate.ActivationStore
+	Clock               Clock
+	CurrentRegistry     SourceActivationRegistry
+	RequireCurrentFence bool
+}
+
+// SourceActivationCurrentFence serializes one derived activation admission
+// with mutations of the registry's movable current alias. The supplied view
+// must observe the same catalog state protected by the fence.
+type SourceActivationCurrentFence interface {
+	WithSourceActivationCurrent(context.Context, func(SourceActivationRegistry) error) error
 }
 
 func (s ActivationService) validate() error {
 	if s.Host == nil || s.Store == nil || nilInterface(s.Store) {
 		return fmt.Errorf("%w: activation service requires host and store", ErrInvalidActivation)
+	}
+	if s.RequireCurrentFence {
+		fence, ok := s.CurrentRegistry.(SourceActivationCurrentFence)
+		if s.CurrentRegistry == nil || nilInterface(s.CurrentRegistry) || !ok || nilInterface(fence) {
+			return fmt.Errorf("%w: activation service requires a current-registry admission fence", ErrInvalidActivation)
+		}
 	}
 	return nil
 }
@@ -92,6 +109,68 @@ type ActivationStartResult struct {
 	Start    StartRunResult
 	Reactor  *ReactorDeliveryResult
 	Outcome  runtime.IdempotencyOutcome
+}
+
+const (
+	WorkflowActivationFireDirect  = "direct"
+	WorkflowActivationFireReactor = "reactor"
+)
+
+// FireWorkflowActivationResult is the bounded public projection of either a
+// direct durable run admission or a reactor delivery. Reactor request payload,
+// responder authority, correlation, receipts, and internal dispatch state are
+// deliberately excluded.
+type FireWorkflowActivationResult struct {
+	Kind    string                             `json:"kind"`
+	Outcome runtime.IdempotencyOutcome         `json:"outcome"`
+	Start   *StartRunResult                    `json:"start,omitempty"`
+	Reactor *WorkflowReactorActivationDelivery `json:"reactor,omitempty"`
+}
+
+type WorkflowReactorActivationDelivery struct {
+	ReactorID         string                        `json:"reactor_id"`
+	CurrentGeneration uint64                        `json:"current_generation"`
+	RunID             runtime.RunID                 `json:"run_id"`
+	ReactorStatus     runtime.ReactorStatus         `json:"reactor_status"`
+	DeliveryStatus    runtime.ReactorDeliveryStatus `json:"delivery_status"`
+}
+
+func SafeFireWorkflowActivationResult(result ActivationStartResult) (FireWorkflowActivationResult, error) {
+	if !validActivationIdempotencyOutcome(result.Outcome) {
+		return FireWorkflowActivationResult{}, fmt.Errorf("%w: activation result outcome is invalid", ErrInvalidActivation)
+	}
+	if result.Reactor != nil {
+		if !reflect.DeepEqual(result.Start, StartRunResult{}) {
+			return FireWorkflowActivationResult{}, fmt.Errorf("%w: activation result contains both direct and reactor branches", ErrInvalidActivation)
+		}
+		reactor := result.Reactor
+		if !validActivationIdempotencyOutcome(reactor.Outcome) || reactor.Outcome != result.Outcome {
+			return FireWorkflowActivationResult{}, fmt.Errorf("%w: reactor activation outcome is inconsistent", ErrInvalidActivation)
+		}
+		if reactor.Reactor.Identity.ID == "" || reactor.Reactor.CurrentGeneration == 0 || reactor.Delivery.RunID == "" ||
+			!reactor.Reactor.Status.Valid() || !reactor.Delivery.Status.Valid() {
+			return FireWorkflowActivationResult{}, fmt.Errorf("%w: reactor activation result is malformed", ErrInvalidActivation)
+		}
+		return FireWorkflowActivationResult{
+			Kind: WorkflowActivationFireReactor, Outcome: reactor.Outcome,
+			Reactor: &WorkflowReactorActivationDelivery{
+				ReactorID: reactor.Reactor.Identity.ID, CurrentGeneration: reactor.Reactor.CurrentGeneration,
+				RunID: reactor.Delivery.RunID, ReactorStatus: reactor.Reactor.Status, DeliveryStatus: reactor.Delivery.Status,
+			},
+		}, nil
+	}
+	if result.Start.Run == nil {
+		return FireWorkflowActivationResult{}, fmt.Errorf("%w: direct activation result has no durable run", ErrInvalidActivation)
+	}
+	if !validActivationIdempotencyOutcome(result.Start.Outcome) || result.Start.Outcome != result.Outcome {
+		return FireWorkflowActivationResult{}, fmt.Errorf("%w: direct activation outcome is inconsistent", ErrInvalidActivation)
+	}
+	start := result.Start
+	return FireWorkflowActivationResult{Kind: WorkflowActivationFireDirect, Outcome: result.Outcome, Start: &start}, nil
+}
+
+func validActivationIdempotencyOutcome(outcome runtime.IdempotencyOutcome) bool {
+	return outcome == runtime.IdempotencyApplied || outcome == runtime.IdempotencyReplayed
 }
 
 type ActivationMaterializationRequest struct {
@@ -191,7 +270,66 @@ type ExternalActivationRequest struct {
 	SourceRef      string
 }
 
+// FireWorkflowActivationRequest is the bounded transport-neutral event intent.
+// ReceivedAt and SourceRef remain host facts and therefore are not caller
+// fields. RegistrationID must agree with the transport path.
+type FireWorkflowActivationRequest struct {
+	RegistrationID string         `json:"registration_id"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	OccurredAt     time.Time      `json:"occurred_at"`
+	Payload        map[string]any `json:"payload,omitempty"`
+	LogicalRunID   string         `json:"logical_run_id,omitempty"`
+}
+
 func (s ActivationService) ActivateExternal(ctx context.Context, request ExternalActivationRequest) (ActivationStartResult, error) {
+	if err := s.validate(); err != nil {
+		return ActivationStartResult{}, err
+	}
+	if ctx == nil {
+		return ActivationStartResult{}, fmt.Errorf("%w: external activation context is required", ErrInvalidActivation)
+	}
+	request.OccurredAt = request.OccurredAt.UTC()
+	request.ReceivedAt = request.ReceivedAt.UTC()
+	if request.OccurredAt.IsZero() || request.ReceivedAt.IsZero() || request.OccurredAt.After(request.ReceivedAt) {
+		return ActivationStartResult{}, fmt.Errorf("%w: external activation timestamps are invalid", ErrInvalidActivation)
+	}
+	registration, err := s.Store.LoadActivation(ctx, request.RegistrationID)
+	if err != nil {
+		return ActivationStartResult{}, err
+	}
+	if !externalActivationSourceKind(registration.Source.Kind) {
+		return ActivationStartResult{}, fmt.Errorf("%w: registration does not accept external activation events", ErrInvalidActivation)
+	}
+	if registration.Derivation == nil || s.CurrentRegistry == nil || nilInterface(s.CurrentRegistry) {
+		return s.activateExternal(ctx, request)
+	}
+	if fence, ok := s.CurrentRegistry.(SourceActivationCurrentFence); ok && !nilInterface(fence) {
+		var result ActivationStartResult
+		err := fence.WithSourceActivationCurrent(ctx, func(registry SourceActivationRegistry) error {
+			if validationErr := validateCurrentDerivedActivation(ctx, registry, registration); validationErr != nil {
+				return validationErr
+			}
+			fencedCtx := context.WithValue(ctx, sourceActivationFenceContextKey{}, sourceActivationFenceContext{registry: registry})
+			var activationErr error
+			result, activationErr = s.activateExternal(fencedCtx, request)
+			return activationErr
+		})
+		return result, err
+	}
+	if s.RequireCurrentFence {
+		return ActivationStartResult{}, fmt.Errorf("%w: derived activation current-alias fence is unavailable", ErrActivationSkipped)
+	}
+	if err := validateCurrentDerivedActivation(ctx, s.CurrentRegistry, registration); err != nil {
+		return ActivationStartResult{}, err
+	}
+	return s.activateExternal(ctx, request)
+}
+
+func externalActivationSourceKind(kind hoststate.ActivationSourceKind) bool {
+	return kind == hoststate.ActivationSourceWebhook || kind == hoststate.ActivationSourceFile || kind == hoststate.ActivationSourceExternal
+}
+
+func (s ActivationService) activateExternal(ctx context.Context, request ExternalActivationRequest) (ActivationStartResult, error) {
 	if err := s.validate(); err != nil {
 		return ActivationStartResult{}, err
 	}
@@ -352,6 +490,36 @@ func (s ActivationService) Start(ctx context.Context, request ActivationStartReq
 	if err != nil {
 		return ActivationStartResult{}, err
 	}
+	if fenced, ok := ctx.Value(sourceActivationFenceContextKey{}).(sourceActivationFenceContext); ok && fenced.registry != nil && !nilInterface(fenced.registry) {
+		return s.startLoadedActivation(ctx, request, registration, fenced.registry)
+	}
+	if registration.Derivation != nil && s.CurrentRegistry != nil && !nilInterface(s.CurrentRegistry) {
+		if fence, ok := s.CurrentRegistry.(SourceActivationCurrentFence); ok && !nilInterface(fence) {
+			var result ActivationStartResult
+			err := fence.WithSourceActivationCurrent(ctx, func(registry SourceActivationRegistry) error {
+				var startErr error
+				result, startErr = s.startLoadedActivation(ctx, request, registration, registry)
+				return startErr
+			})
+			return result, err
+		}
+		if s.RequireCurrentFence {
+			return ActivationStartResult{}, fmt.Errorf("%w: derived activation current-alias fence is unavailable", ErrActivationSkipped)
+		}
+	}
+	return s.startLoadedActivation(ctx, request, registration, s.CurrentRegistry)
+}
+
+type sourceActivationFenceContextKey struct{}
+
+type sourceActivationFenceContext struct {
+	registry SourceActivationRegistry
+}
+
+func (s ActivationService) startLoadedActivation(ctx context.Context, request ActivationStartRequest, registration hoststate.ActivationRegistration, registry SourceActivationRegistry) (ActivationStartResult, error) {
+	if err := validateCurrentDerivedActivation(ctx, registry, registration); err != nil {
+		return ActivationStartResult{}, err
+	}
 	logical := registration.Policy.DefaultLogicalRunID
 	if request.LogicalRunID != "" {
 		logical = request.LogicalRunID
@@ -387,15 +555,20 @@ func (s ActivationService) Start(ctx context.Context, request ActivationStartReq
 	if prepared.Dispatch.Status == hoststate.ActivationDispatchSkipped || prepared.Dispatch.Status == hoststate.ActivationDispatchExhausted {
 		return ActivationStartResult{Dispatch: prepared.Dispatch, Outcome: prepared.Outcome}, ErrActivationSkipped
 	}
+	expectedIdentity := activationIdentity(prepared.Registration)
+	executionCtx, err := WithAuthenticatedIdentity(ctx, expectedIdentity)
+	if err != nil {
+		return ActivationStartResult{Dispatch: prepared.Dispatch, Outcome: prepared.Outcome}, fmt.Errorf("%w: durable activation identity is invalid", ErrInvalidActivation)
+	}
 	for _, priorRun := range prepared.ReplaceRuns {
-		_, _, cancelErr := s.Host.CancelRun(ctx, CancelRunRequest{
+		_, _, cancelErr := s.Host.CancelRun(executionCtx, CancelRunRequest{
 			RunID: priorRun, IdempotencyKey: activationCancelKey(request.FireID, priorRun),
 			Reason: "replaced by workflow activation", At: request.ObservedAt.UTC(),
 		})
 		if cancelErr != nil {
 			return ActivationStartResult{Dispatch: prepared.Dispatch, Outcome: prepared.Outcome}, cancelErr
 		}
-		if fencedErr := s.requireRunFenced(ctx, priorRun); fencedErr != nil {
+		if fencedErr := s.requireRunFenced(executionCtx, priorRun); fencedErr != nil {
 			return ActivationStartResult{Dispatch: prepared.Dispatch, Outcome: prepared.Outcome}, fencedErr
 		}
 	}
@@ -403,11 +576,9 @@ func (s ActivationService) Start(ctx context.Context, request ActivationStartReq
 	if err != nil {
 		return ActivationStartResult{Dispatch: prepared.Dispatch, Outcome: prepared.Outcome}, err
 	}
-	expectedIdentity := activationIdentity(prepared.Registration)
-	identityRequest := activationIdentityRequest(prepared.Registration)
-	start, err := s.Host.startRun(ctx, StartRunRequest{
+	start, err := s.Host.startRun(executionCtx, StartRunRequest{
 		RunID: prepared.Dispatch.PhysicalRunID, Definition: prepared.Registration.Definition,
-		Inputs: inputs, IdempotencyKey: prepared.Dispatch.HostStartKey, Identity: identityRequest,
+		Inputs: inputs, IdempotencyKey: prepared.Dispatch.HostStartKey, Identity: durableActivationIdentityRequest(prepared.Registration),
 		Activation: &hoststate.ActivationBinding{ActivationID: prepared.Registration.ID, IdempotencyKey: prepared.Dispatch.HostStartKey, OccurredAt: request.ScheduledAt.UTC()},
 	}, &expectedIdentity)
 	if err != nil {
@@ -418,6 +589,26 @@ func (s ActivationService) Start(ctx context.Context, request ActivationStartReq
 		Status: hoststate.ActivationDispatchStarted, At: request.ObservedAt.UTC(),
 	})
 	return ActivationStartResult{Dispatch: completed, Start: start, Outcome: prepared.Outcome}, err
+}
+
+func validateCurrentDerivedActivation(ctx context.Context, registry SourceActivationRegistry, registration hoststate.ActivationRegistration) error {
+	if registration.Derivation == nil || registry == nil || nilInterface(registry) {
+		return nil
+	}
+	definition := registration.Definition
+	if definition.Kind != DefinitionKindRegistry || definition.ID == "" || definition.Version == "" || definition.Digest == "" {
+		return fmt.Errorf("%w: derived activation has no exact registry execution identity", ErrActivationSkipped)
+	}
+	resolution, err := registry.ResolveWorkflow(ctx, hadronregistry.WorkflowQuery{Name: definition.ID})
+	if err != nil {
+		return fmt.Errorf("%w: derived activation workflow is no longer current", ErrActivationSkipped)
+	}
+	record := resolution.Record
+	if !resolution.Movable || record.Name != definition.ID || record.Version != definition.Version || record.Digest != definition.Digest ||
+		record.Authority != definition.Authority || record.PlanDigest != registration.Derivation.PlanDigest {
+		return fmt.Errorf("%w: derived activation workflow is no longer current", ErrActivationSkipped)
+	}
+	return nil
 }
 
 func (s ActivationService) requireRunFenced(ctx context.Context, runID runtime.RunID) error {
@@ -570,24 +761,8 @@ func activationIdentity(registration hoststate.ActivationRegistration) hoststate
 	return identity
 }
 
-func activationIdentityRequest(registration hoststate.ActivationRegistration) IdentityRequest {
-	request := IdentityRequest{
-		PrincipalHint: registration.Principal.Principal, SourceAuthority: registration.Principal.SourceAuthority,
-		RunScope:   &hoststate.RunScopeSelector{Version: registration.RunScope.Version, Kind: registration.RunScope.Kind, ID: registration.RunScope.ID},
-		Attributes: map[string]string{"exposure_ref": registration.Principal.ExposureRef},
-	}
-	for key, value := range registration.Principal.Attributes {
-		request.Attributes[key] = value
-	}
-	if registration.ExecutionTarget != nil {
-		target := registration.ExecutionTarget
-		request.ExecutionTarget = &hoststate.ExecutionTargetSelector{
-			Version: target.Version, ID: target.ID, Kinds: []hoststate.ExecutionTargetKind{target.Kind},
-			RequiredCapabilities: append([]string(nil), target.Capabilities...), RequiredLabels: cloneStringMap(target.Labels),
-			SandboxModes: []hoststate.SandboxMode{target.Sandbox.Mode},
-		}
-	}
-	return request
+func durableActivationIdentityRequest(registration hoststate.ActivationRegistration) IdentityRequest {
+	return IdentityRequest{SourceAuthority: registration.Principal.SourceAuthority}
 }
 
 func evaluateActivationInputs(registration hoststate.ActivationRegistration, contextValues values.ValueSet, fireID string) (map[string]any, error) {

@@ -388,6 +388,56 @@
       ],
       "type": "object"
     },
+    "AppworkflowFireWorkflowActivationRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotency_key": {
+          "type": "string"
+        },
+        "logical_run_id": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "registration_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "occurred_at",
+        "registration_id"
+      ],
+      "type": "object"
+    },
+    "AppworkflowFireWorkflowActivationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RuntimeIdempotencyOutcome"
+        },
+        "reactor": {
+          "$ref": "#/$defs/AppworkflowWorkflowReactorActivationDelivery"
+        },
+        "start": {
+          "$ref": "#/$defs/AppworkflowStartRunResult"
+        }
+      },
+      "required": [
+        "kind",
+        "outcome"
+      ],
+      "type": "object"
+    },
     "AppworkflowIdentityRequest": {
       "additionalProperties": false,
       "properties": {
@@ -1015,6 +1065,38 @@
       ],
       "type": "object"
     },
+    "AppworkflowWorkflowActivationDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "registration_id": {
+          "type": "string"
+        },
+        "retired": {
+          "type": "boolean"
+        },
+        "template_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "definition",
+        "enabled",
+        "kind",
+        "registration_id",
+        "retired",
+        "template_id"
+      ],
+      "type": "object"
+    },
     "AppworkflowWorkflowCatalogMatch": {
       "additionalProperties": false,
       "properties": {
@@ -1421,6 +1503,34 @@
       ],
       "type": "object"
     },
+    "AppworkflowWorkflowReactorActivationDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "current_generation": {
+          "type": "integer"
+        },
+        "delivery_status": {
+          "$ref": "#/$defs/RuntimeReactorDeliveryStatus"
+        },
+        "reactor_id": {
+          "type": "string"
+        },
+        "reactor_status": {
+          "$ref": "#/$defs/RuntimeReactorStatus"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RuntimeRunID"
+        }
+      },
+      "required": [
+        "current_generation",
+        "delivery_status",
+        "reactor_id",
+        "reactor_status",
+        "run_id"
+      ],
+      "type": "object"
+    },
     "AppworkflowWorkflowRegistrationResult": {
       "additionalProperties": false,
       "properties": {
@@ -1465,6 +1575,12 @@
     "AppworkflowWorkflowVersionDetail": {
       "additionalProperties": false,
       "properties": {
+        "activations": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowWorkflowActivationDescriptor"
+          },
+          "type": "array"
+        },
         "descriptor": {
           "$ref": "#/$defs/AppworkflowWorkflowExposureDescriptor"
         },
@@ -1477,6 +1593,7 @@
         }
       },
       "required": [
+        "activations",
         "descriptor",
         "registered_at",
         "registry"
@@ -1632,6 +1749,12 @@
     },
     "ExplainWorkflowRequest": {
       "$ref": "#/$defs/AppworkflowExplainWorkflowRequest"
+    },
+    "FireWorkflowActivationRequest": {
+      "$ref": "#/$defs/AppworkflowFireWorkflowActivationRequest"
+    },
+    "FireWorkflowActivationResult": {
+      "$ref": "#/$defs/AppworkflowFireWorkflowActivationResult"
     },
     "GenerateWorkflowContractRequest": {
       "$ref": "#/$defs/AppworkflowValidateWorkflowDraftRequest"
@@ -3861,6 +3984,12 @@
       ],
       "type": "object"
     },
+    "RuntimeReactorDeliveryStatus": {
+      "type": "string"
+    },
+    "RuntimeReactorStatus": {
+      "type": "string"
+    },
     "RuntimeRenderedEvent": {
       "additionalProperties": false,
       "properties": {
@@ -4705,6 +4834,15 @@
       "path": "/v1/workflows/runs",
       "request": "RunWorkflowRequest",
       "response": "WorkflowStartResult",
+      "idempotency_key": "idempotency_key"
+    },
+    {
+      "name": "fireWorkflowActivation",
+      "method": "POST",
+      "path": "/v1/workflows/activations/{registration_id}/fire",
+      "path_field": "registration_id",
+      "request": "FireWorkflowActivationRequest",
+      "response": "FireWorkflowActivationResult",
       "idempotency_key": "idempotency_key"
     },
     {

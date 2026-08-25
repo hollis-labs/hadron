@@ -134,7 +134,7 @@ type ClaimResult struct {
 }
 
 // RenewLeaseRequest extends the matching, unexpired lease without changing its
-// claim generation.
+// claim generation or the invocation's semantic generation/timestamp.
 type RenewLeaseRequest struct {
 	InvocationID NodeInvocationID
 	Owner        string

@@ -1608,7 +1608,8 @@ func (s *ContractRegistrationService) authorize(ctx context.Context, request Nam
 func (o NamespaceOperation) valid() bool {
 	switch o {
 	case NamespaceRegister, NamespacePin, NamespaceUnpin, NamespacePublish,
-		NamespaceInspect, NamespaceSearch, NamespaceResolve, NamespacePackage:
+		NamespaceInspect, NamespaceSearch, NamespaceResolve, NamespacePackage,
+		NamespaceClearCurrent:
 		return true
 	default:
 		return false

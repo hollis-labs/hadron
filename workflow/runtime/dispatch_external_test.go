@@ -78,6 +78,61 @@ func TestStepDispatcherExecutesRegisteredSnapshotAndPersistsTypedOutputs(t *test
 	}
 }
 
+func TestStepDispatcherFinishesAfterLeaseOnlyRenewalDuringExecution(t *testing.T) {
+	store, claim, node, now := dispatchFixture(t, "dispatch-renewed-lease")
+	registry := stepkind.NewRegistry()
+	kind := stepkindtest.NewNoopKind("fixture", "v1")
+	kind.SpecValue.OutputSchema = objectSchema("result", "string")
+	executing := make(chan struct{})
+	resume := make(chan struct{})
+	kind.ExecuteFunc = func(context.Context, stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+		close(executing)
+		<-resume
+		return stepkind.StepResult{Outcome: stepkind.StepCompleted, Outputs: values.ValueSet{"result": dispatchValue(t, "result", "renewed")}}, nil
+	}
+	if err := registry.Register(kind); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := workflowruntime.NewStepDispatcher(workflowruntime.DispatcherOptions{
+		Store: store, Registry: registry, Now: func() time.Time { return now.Add(3 * time.Second) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type dispatchOutcome struct {
+		result workflowruntime.DispatchResult
+		err    error
+	}
+	done := make(chan dispatchOutcome, 1)
+	go func() {
+		result, dispatchErr := dispatcher.Dispatch(context.Background(), workflowruntime.DispatchRequest{
+			Claim: claim, Node: graph.Node{ID: node.ID.NodeID, Kind: "fixture", KindVersion: "v1", Config: graph.Config{}},
+		})
+		done <- dispatchOutcome{result: result, err: dispatchErr}
+	}()
+	<-executing
+	running, err := store.LoadNodeInvocation(context.Background(), node.ID)
+	if err != nil || running.Status != workflowruntime.NodeRunning || running.Lease == nil {
+		t.Fatalf("running node = %#v, %v", running, err)
+	}
+	renewed, err := store.RenewNodeLease(context.Background(), workflowruntime.RenewLeaseRequest{
+		InvocationID: node.ID, Owner: claim.Lease.Owner, Token: claim.Lease.Token, Generation: claim.Lease.Generation,
+		Now: now.Add(30 * time.Minute), LeaseUntil: now.Add(2 * time.Hour),
+	})
+	if err != nil || !renewed.ExpiresAt.Equal(now.Add(2*time.Hour)) {
+		t.Fatalf("RenewNodeLease = %#v, %v", renewed, err)
+	}
+	afterRenew, err := store.LoadNodeInvocation(context.Background(), node.ID)
+	if err != nil || afterRenew.Generation != running.Generation || !afterRenew.UpdatedAt.Equal(running.UpdatedAt) {
+		t.Fatalf("renewal changed semantic node revision: before=%#v after=%#v err=%v", running, afterRenew, err)
+	}
+	close(resume)
+	outcome := <-done
+	if outcome.err != nil || outcome.result.Node.Status != workflowruntime.NodeSucceeded || outcome.result.Attempt.Status != workflowruntime.NodeSucceeded {
+		t.Fatalf("Dispatch after renewal = %#v, %v", outcome.result, outcome.err)
+	}
+}
+
 func TestStepDispatcherValidatesConfigAndInputsBeforeStartingAttempt(t *testing.T) {
 	store, claim, node, now := dispatchFixture(t, "dispatch-validation")
 	registry := stepkind.NewRegistry()

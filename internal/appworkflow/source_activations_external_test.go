@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	gosched "github.com/hollis-labs/go-scheduler"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	calladapter "github.com/hollis-labs/hadron/workflow/adapters/call"
 	waitadapter "github.com/hollis-labs/hadron/workflow/adapters/wait"
 	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
@@ -124,8 +126,8 @@ steps:
 	identity := testIdentityBinding("service:activation", "activation")
 	identity.Extension = map[string]string{"exposure_ref": "source-start-route"}
 	host := hostWithFixedIdentity(t, fixture, identity)
-	if err := host.Start(t.Context()); err != nil {
-		t.Fatal(err)
+	if startErr := host.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
 	}
 	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
 	store, err := persistence.NewWorkflowActivationStore(fixture.store)
@@ -158,6 +160,169 @@ steps:
 	if _, err := service.ActivateExternal(authenticatedContext(t.Context(), "service:activation"), changed); !errors.Is(err, runtime.ErrIdempotencyConflict) {
 		t.Fatalf("ActivateExternal(source conflict) = %v", err)
 	}
+}
+
+func TestDerivedSourceReactorAdmissionHoldsCurrentAliasFenceThroughDelivery(t *testing.T) {
+	correlationDigest, err := values.DigestInline("project-fenced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	correlation := "reactor-correlation-" + correlationDigest[len("sha256:"):]
+	plan := compileSourceActivationPlan(t, "source-reactor-current-fence.workflow.yaml", []byte(fmt.Sprintf(`workflow:
+  name: Source Reactor Current Fence
+  version: 1.0.0
+  provenance:
+    authority: project
+on:
+  event:
+    name: Project Event
+    type: project.changed
+    source: project://fixture
+    deduplication_key: event.project_id
+    extract:
+      cursor: event.cursor
+inputs:
+  - name: cursor
+    type: string
+outputs:
+  cursor:
+    type: string
+    value: steps.await.outputs.payload.event.cursor
+durability:
+  mode: steps
+  continue_as_new:
+    max_events: 2
+    carry: [cursor]
+steps:
+  - name: await
+    kind_version: v1
+    wait_for:
+      event:
+        type: project.changed
+        source: project://fixture
+      correlation: %s
+      timeout: 24h
+      payload_schema:
+        type: object
+`, correlation)))
+	plan = inferHostPlan(t, plan)
+	plan.Definition = graph.DefinitionRef{
+		Kind: appworkflow.DefinitionKindRegistry, ID: plan.Graph.ID, Version: plan.Graph.Version,
+		Digest: plan.Definition.Digest, Authority: plan.Definition.Authority,
+	}
+	plan.Digest, err = workflowcompile.PlanDigest(*plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, plan)
+	activationStore, err := persistence.NewWorkflowActivationStore(fixture.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := testIdentityBinding("service:reactor-fence", "activation")
+	identity.ExecutionTarget.Capabilities = append(identity.ExecutionTarget.Capabilities, waitadapter.CapabilityWait)
+	identity.Extension = map[string]string{"exposure_ref": "source-reactor-fence-route"}
+	clock := &reactorTestClock{at: fixture.now}
+	host := newAuthoredReactorHost(t, fixture, fixture.state, fixture.journal, activationStore, identity, clock, hoststate.PolicyAllow)
+	if startErr := host.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
+	}
+	t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
+
+	materializer := appworkflow.ActivationService{Host: host, Store: activationStore, Clock: clock}
+	materialized, err := materializer.ReconcileSourcePlan(t.Context(), appworkflow.SourceActivationRequest{
+		Plan: plan, Identity: identity, ExposureRefs: map[string]string{"project-event": identity.Extension["exposure_ref"]},
+		Enabled: true, At: clock.Now(),
+	})
+	if err != nil || len(materialized.Registrations) != 1 {
+		t.Fatalf("ReconcileSourcePlan = %#v, %v", materialized, err)
+	}
+	registration := materialized.Registrations[0]
+	fence := &lockingSourceActivationRegistry{resolution: hadronregistry.WorkflowResolution{
+		Movable: true,
+		Record: hadronregistry.WorkflowRecord{
+			Name: registration.Definition.ID, Version: registration.Definition.Version, Digest: registration.Definition.Digest,
+			Authority: registration.Definition.Authority, PlanDigest: registration.Derivation.PlanDigest,
+		},
+	}}
+	recordReached, releaseRecord := make(chan struct{}), make(chan struct{})
+	store := &blockingActivationEventStore{ActivationStore: activationStore, reached: recordReached, release: releaseRecord}
+	service := appworkflow.ActivationService{Host: host, Store: store, Clock: clock, CurrentRegistry: fence, RequireCurrentFence: true}
+	clock.Set(fixture.now.Add(time.Minute))
+	request := appworkflow.ExternalActivationRequest{
+		RegistrationID: registration.ID, IdempotencyKey: "reactor-current-fence", OccurredAt: clock.Now(), ReceivedAt: clock.Now(),
+		SourceRef: "project-event-source", Payload: map[string]any{"event": map[string]any{"project_id": "project-fenced", "cursor": "cursor-0"}},
+	}
+	type activationOutcome struct {
+		result appworkflow.ActivationStartResult
+		err    error
+	}
+	activated := make(chan activationOutcome, 1)
+	go func() {
+		result, activateErr := service.ActivateExternal(authenticatedContext(context.Background(), identity.Principal), request)
+		activated <- activationOutcome{result: result, err: activateErr}
+	}()
+	<-recordReached
+
+	mutationStarted, mutationAcquired := make(chan struct{}), make(chan struct{})
+	go func() {
+		close(mutationStarted)
+		fence.mutate(func() { close(mutationAcquired) })
+	}()
+	<-mutationStarted
+	select {
+	case <-mutationAcquired:
+		t.Fatal("current mutation escaped the source-reactor admission fence")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseRecord)
+	outcome := <-activated
+	if outcome.err != nil || outcome.result.Reactor == nil || outcome.result.Reactor.Delivery.Status != runtime.ReactorDeliveryApplied {
+		t.Fatalf("fenced source-reactor activation = %#v, %v", outcome.result, outcome.err)
+	}
+	select {
+	case <-mutationAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("current mutation did not proceed after reactor delivery released the fence")
+	}
+}
+
+type lockingSourceActivationRegistry struct {
+	gate       sync.RWMutex
+	resolution hadronregistry.WorkflowResolution
+}
+
+func (r *lockingSourceActivationRegistry) WithSourceActivationCurrent(ctx context.Context, operation func(appworkflow.SourceActivationRegistry) error) error {
+	r.gate.RLock()
+	defer r.gate.RUnlock()
+	return operation(r)
+}
+
+func (r *lockingSourceActivationRegistry) ResolveWorkflow(_ context.Context, query hadronregistry.WorkflowQuery) (hadronregistry.WorkflowResolution, error) {
+	if query != (hadronregistry.WorkflowQuery{Name: r.resolution.Record.Name}) {
+		return hadronregistry.WorkflowResolution{}, runtime.ErrNotFound
+	}
+	return r.resolution, nil
+}
+
+func (r *lockingSourceActivationRegistry) mutate(operation func()) {
+	r.gate.Lock()
+	defer r.gate.Unlock()
+	operation()
+}
+
+type blockingActivationEventStore struct {
+	hoststate.ActivationStore
+	reached chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingActivationEventStore) RecordActivationEvent(ctx context.Context, event hoststate.ActivationEvent) (gosched.Fire, runtime.IdempotencyOutcome, error) {
+	s.once.Do(func() { close(s.reached) })
+	<-s.release
+	return s.ActivationStore.RecordActivationEvent(ctx, event)
 }
 
 func TestSourceEventActivationDrivesAuthoredWaitsExactlyOnceAcrossGenerations(t *testing.T) {
@@ -1044,7 +1209,9 @@ func TestSourceActivationMaterializationValidatesBeforeWriting(t *testing.T) {
 		"multiple": func(plan *workflowcompile.ExecutionPlan) {
 			plan.SourceDigests = append(plan.SourceDigests, plan.SourceDigests[0])
 		},
-		"wrong-format": func(plan *workflowcompile.ExecutionPlan) { plan.SourceDigests[0].Format = graph.SourceSDK },
+		"wrong-format": func(plan *workflowcompile.ExecutionPlan) {
+			plan.SourceDigests[0].Format = graph.SourceArchivedBlueprint
+		},
 		"wrong-digest": func(plan *workflowcompile.ExecutionPlan) { plan.SourceDigests[0].Digest = plan.Graph.Digest },
 	} {
 		t.Run("source-digest-"+name, func(t *testing.T) {

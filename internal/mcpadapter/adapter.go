@@ -155,6 +155,7 @@ type Adapter struct {
 	workflowNonce     string // restart-unique entropy for durable workflow invocation identities
 	workflow          *workflowSurface
 	workflowLifecycle WorkflowLifecycleOperations
+	workflowOnly      bool
 }
 
 func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRunner, token string, scopes []string, opts ...Option) *Adapter {
@@ -257,6 +258,13 @@ func WithWorkflowLifecycle(lifecycle WorkflowLifecycleOperations) Option {
 	}
 }
 
+// WithWorkflowOnly quarantines the legacy blueprint/pipeline MCP catalog.
+// Production graph-native composition uses this option; retained legacy tool
+// implementations remain available only to explicit archive/reference tests.
+func WithWorkflowOnly() Option {
+	return func(a *Adapter) { a.workflowOnly = true }
+}
+
 // CallTool invokes a registered tool by name and returns its result.
 // Primarily used in tests.
 func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string]any) *mcp.CallToolResult {
@@ -303,9 +311,14 @@ func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string
 
 // buildHandlerMap returns a map of tool name → handler function for direct invocation.
 func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){
-		"hadron_skills":             a.handleHadronSkills,
-		"hadron_health":             a.handleHealth,
+	handlers := map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){
+		"hadron_skills": a.handleHadronSkills,
+	}
+	if a.workflowOnly {
+		return handlers
+	}
+	handlers["hadron_health"] = a.handleHealth
+	for name, handler := range map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){
 		"hadron_workspaces_list":    a.handleWorkspacesList,
 		"hadron_workspace_get":      a.handleWorkspaceGet,
 		"hadron_workspace_create":   a.handleWorkspaceCreate,
@@ -343,7 +356,10 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 		"hadron_messages_inbox":     a.handleMessagesInbox,
 		"hadron_message_get":        a.handleMessageGet,
 		"hadron_message_consume":    a.handleMessageConsume,
+	} {
+		handlers[name] = handler
 	}
+	return handlers
 }
 
 func (a *Adapter) Run(ctx context.Context) error {

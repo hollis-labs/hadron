@@ -1,3 +1,4 @@
+// Archive/rewrite-only legacy blueprint UI; unreachable from active navigation.
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { EmptyState } from '../components/ui/EmptyState';
 import { RunInputsModal } from '../components/ui/RunInputsModal';
 import { useDaemon } from '../contexts/DaemonContext';
-import { useNavigation } from '../contexts/NavigationContext';
+import { useArchivedNavigation as useNavigation } from '../contexts/NavigationContext';
 import { cn } from '@/lib/utils';
 
 export function BlueprintsPage() {

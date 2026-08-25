@@ -127,8 +127,10 @@ VALUES (?, ?, ?)`, key, requestJSON, resultJSON); err != nil {
 	return nil
 }
 
-// RenewNodeLease implements runtime.StateStore with lease fencing, monotonic
-// timestamps, extension-only expiry, and node record CAS in one transaction.
+// RenewNodeLease implements runtime.StateStore with lease fencing and an
+// extension-only expiry update in one transaction. Renewal is deliberately a
+// lease-only mutation: it must not advance the semantic node generation or
+// updated_at and invalidate a dispatcher's in-flight lifecycle CAS.
 func (s *WorkflowStateStore) RenewNodeLease(ctx context.Context, request workflowruntime.RenewLeaseRequest) (workflowruntime.ClaimLease, error) {
 	if err := validateWorkflowRenew(request); err != nil {
 		return workflowruntime.ClaimLease{}, workflowInvalid(err)
@@ -162,12 +164,10 @@ func (s *WorkflowStateStore) RenewNodeLease(ctx context.Context, request workflo
 		}
 		next := cloneWorkflowNode(current)
 		next.Lease.ExpiresAt = leaseUntil
-		next.Generation++
-		next.UpdatedAt = now
 		if err := next.Validate(); err != nil {
 			return workflowInvalid(err)
 		}
-		if err := updateWorkflowNodeCAS(ctx, query, next, current.Generation); err != nil {
+		if err := replaceWorkflowLease(ctx, query, next.ID, next.Lease); err != nil {
 			return err
 		}
 		result = *cloneWorkflowLease(next.Lease)

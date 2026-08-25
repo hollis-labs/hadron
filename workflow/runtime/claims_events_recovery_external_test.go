@@ -61,6 +61,10 @@ func TestClaimLeaseCASFencingAndExpiry(t *testing.T) {
 	if err != nil || contendedReplay.Acquired || !contendedReplay.Replayed || contendedReplay.Lease != nil {
 		t.Fatalf("contended replay changed outcome: %#v, %v", contendedReplay, err)
 	}
+	beforeRenew, err := store.LoadNodeInvocation(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	renewed, err := store.RenewNodeLease(ctx, workflowruntime.RenewLeaseRequest{
 		InvocationID: id, Owner: "worker-a", Token: "token-a", Generation: 1,
@@ -72,6 +76,9 @@ func TestClaimLeaseCASFencingAndExpiry(t *testing.T) {
 	withEquivalentLease, err := store.LoadNodeInvocation(ctx, id)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if withEquivalentLease.Generation != beforeRenew.Generation || !withEquivalentLease.UpdatedAt.Equal(beforeRenew.UpdatedAt) {
+		t.Fatalf("renewal changed semantic node revision: %#v", withEquivalentLease)
 	}
 	withEquivalentLease.Lease.ExpiresAt = equivalentInstant(withEquivalentLease.Lease.ExpiresAt)
 	withEquivalentLease.UpdatedAt = equivalentInstant(withEquivalentLease.UpdatedAt)
@@ -95,9 +102,9 @@ func TestClaimLeaseCASFencingAndExpiry(t *testing.T) {
 	}
 	if _, regressionErr := store.RenewNodeLease(ctx, workflowruntime.RenewLeaseRequest{
 		InvocationID: id, Owner: "worker-a", Token: "token-a", Generation: 1,
-		Now: now.Add(15 * time.Second), LeaseUntil: now.Add(3 * time.Minute),
+		Now: now.Add(-time.Second), LeaseUntil: now.Add(3 * time.Minute),
 	}); !errors.Is(regressionErr, workflowruntime.ErrInvalidRecord) {
-		t.Fatalf("expected renewal time regression rejection, got %v", regressionErr)
+		t.Fatalf("expected renewal before semantic node time rejection, got %v", regressionErr)
 	}
 	if _, expiryErr := store.RenewNodeLease(ctx, workflowruntime.RenewLeaseRequest{
 		InvocationID: id, Owner: "worker-a", Token: "token-a", Generation: 1,

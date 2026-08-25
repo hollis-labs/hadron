@@ -21,7 +21,7 @@ type toolBehavior struct {
 
 func (a *Adapter) newServer() *server.MCPServer {
 	instructions := serverInstructions
-	if a.workflow != nil {
+	if a.workflow != nil || a.workflowOnly {
 		instructions = workflowServerInstructions
 	}
 	options := []server.ServerOption{
@@ -46,8 +46,10 @@ func (a *Adapter) newServer() *server.MCPServer {
 	if a.workflow != nil {
 		a.workflow.registerTools(s)
 	}
-	a.registerPrompts(s)
-	a.registerResources(s)
+	if !a.workflowOnly {
+		a.registerPrompts(s)
+		a.registerResources(s)
+	}
 	if a.workflow != nil {
 		a.workflow.registerResources(s)
 	}

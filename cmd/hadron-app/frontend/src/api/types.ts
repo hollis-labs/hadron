@@ -99,6 +99,14 @@ export interface Health {
   status: string;
   version: string;
   service: string;
+  workflow: {
+    started: boolean;
+    ready: boolean;
+    recovering: boolean;
+    last_recovery_at?: string;
+    recovery_failed: boolean;
+    incomplete_starts: number;
+  };
 }
 
 export interface ListResponse<T> {

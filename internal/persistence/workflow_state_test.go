@@ -615,6 +615,10 @@ func TestWorkflowStateClaimsContentionExpiryAndNonReady(t *testing.T) {
 	if err != nil || !reclaimed.Acquired || reclaimed.Lease.Generation != claimed.ClaimGeneration+1 {
 		t.Fatalf("expired lease reclaim = (%+v, %v); ready=%+v", reclaimed, err, ready)
 	}
+	reclaimedNode, err := first.LoadNodeInvocation(ctx, node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	renewed, err := first.RenewNodeLease(ctx, workflowruntime.RenewLeaseRequest{
 		InvocationID: node.ID, Owner: reclaimed.Lease.Owner, Token: reclaimed.Lease.Token,
 		Generation: reclaimed.Lease.Generation, Now: base.Add(12 * time.Second),
@@ -622,6 +626,10 @@ func TestWorkflowStateClaimsContentionExpiryAndNonReady(t *testing.T) {
 	})
 	if err != nil || !renewed.ExpiresAt.Equal(base.Add(40*time.Second)) {
 		t.Fatalf("RenewNodeLease = (%+v, %v)", renewed, err)
+	}
+	afterRenew, err := first.LoadNodeInvocation(ctx, node.ID)
+	if err != nil || afterRenew.Generation != reclaimedNode.Generation || !afterRenew.UpdatedAt.Equal(reclaimedNode.UpdatedAt) {
+		t.Fatalf("lease renewal changed semantic node revision = (%+v, %v)", afterRenew, err)
 	}
 	if releaseErr := first.ReleaseNodeClaim(ctx, workflowruntime.ReleaseClaimRequest{
 		InvocationID: node.ID, Owner: renewed.Owner, Token: renewed.Token,

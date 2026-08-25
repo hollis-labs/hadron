@@ -1,26 +1,11 @@
 import type { NavPage } from './AppNav';
+import { useDaemon } from '../../contexts/DaemonContext';
 
 interface AppFooterProps {
   phase?: NavPage;
 }
 
 const HINTS: Partial<Record<NavPage, { key: string; desc: string }[]>> = {
-  dashboard: [
-    { key: 'R', desc: 'Refresh' },
-  ],
-  blueprints: [
-    { key: 'R', desc: 'Refresh' },
-    { key: 'N', desc: 'New blueprint' },
-    { key: '↑↓', desc: 'Navigate' },
-    { key: 'Space', desc: 'Select' },
-    { key: 'Enter', desc: 'Open' },
-  ],
-  blueprintDetail: [
-    { key: 'Esc', desc: 'Back' },
-  ],
-  blueprintWizard: [
-    { key: 'Esc', desc: 'Back' },
-  ],
   runs: [
     { key: 'R', desc: 'Refresh' },
     { key: '↑↓', desc: 'Navigate' },
@@ -30,19 +15,10 @@ const HINTS: Partial<Record<NavPage, { key: string; desc: string }[]>> = {
     { key: 'Esc', desc: 'Back' },
     { key: 'R', desc: 'Refresh' },
   ],
-  schedules: [
-    { key: 'R', desc: 'Refresh' },
-  ],
-  pipelines: [
-    { key: 'R', desc: 'Refresh' },
-  ],
-  telemetry: [
-    { key: 'R', desc: 'Refresh' },
-    { key: 'Esc', desc: 'Back' },
-  ],
 };
 
 export function AppFooter({ phase }: AppFooterProps) {
+  const daemon = useDaemon();
   const hints = phase ? HINTS[phase] ?? [] : [];
   return (
     <footer className="h-[30px] flex items-center px-6 border-t border-border bg-card gap-4 shrink-0">
@@ -52,7 +28,7 @@ export function AppFooter({ phase }: AppFooterProps) {
         </span>
       ))}
       <div className="flex-1" />
-      <span className="text-xs font-mono text-muted-foreground">hadron v0.4.0</span>
+      <span className="text-xs font-mono text-muted-foreground">hadron {daemon.version}</span>
     </footer>
   );
 }

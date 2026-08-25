@@ -303,8 +303,12 @@ func (s ReactorService) startInitial(ctx context.Context, registration hoststate
 		return err
 	}
 	expectedIdentity := activationIdentity(registration)
-	result, err := s.Host.startRunInternal(ctx, StartRunRequest{RunID: reactor.CurrentRunID, Definition: registration.Definition, Inputs: inputs,
-		IdempotencyKey: reactorStartKey(reactor.Identity.ID, reactor.CurrentGeneration), Identity: activationIdentityRequest(registration),
+	executionCtx, err := WithAuthenticatedIdentity(ctx, expectedIdentity)
+	if err != nil {
+		return err
+	}
+	result, err := s.Host.startRunInternal(executionCtx, StartRunRequest{RunID: reactor.CurrentRunID, Definition: registration.Definition, Inputs: inputs,
+		IdempotencyKey: reactorStartKey(reactor.Identity.ID, reactor.CurrentGeneration), Identity: durableActivationIdentityRequest(registration),
 		Activation: &hoststate.ActivationBinding{ActivationID: registration.ID, IdempotencyKey: request.IdempotencyKey, OccurredAt: request.OccurredAt.UTC()}}, &expectedIdentity, allowRecovery)
 	if err != nil {
 		return err
@@ -316,6 +320,11 @@ func (s ReactorService) startInitial(ctx context.Context, registration hoststate
 }
 
 func (s ReactorService) applyDelivery(ctx context.Context, registration hoststate.ActivationRegistration, reactor runtime.ReactorSnapshot, delivery runtime.ReactorDeliverySnapshot, allowRecovery bool) (runtime.ReactorDeliverySnapshot, error) {
+	executionCtx, err := WithAuthenticatedIdentity(ctx, activationIdentity(registration))
+	if err != nil {
+		return delivery, err
+	}
+	ctx = executionCtx
 	if delivery.Status == runtime.ReactorDeliveryApplied || delivery.Status == runtime.ReactorDeliveryClosed {
 		return delivery, nil
 	}
@@ -326,16 +335,16 @@ func (s ReactorService) applyDelivery(ctx context.Context, registration hoststat
 			if !ok {
 				return delivery, errors.New("reactor host lacks named signal controls")
 			}
-			wait, err := controls.FindOpenSignalWait(ctx, runtime.SignalSelector{RunID: delivery.RunID, Name: delivery.Request.SignalName, Correlation: reactor.Identity.Correlation})
-			if err != nil {
-				return delivery, err
+			wait, waitErr := controls.FindOpenSignalWait(ctx, runtime.SignalSelector{RunID: delivery.RunID, Name: delivery.Request.SignalName, Correlation: reactor.Identity.Correlation})
+			if waitErr != nil {
+				return delivery, waitErr
 			}
 			waitID = wait.Ref.ID
 		}
-		claimed, err := s.Store.ClaimReactorDelivery(context.WithoutCancel(ctx), runtime.ClaimReactorDeliveryRequest{ReactorID: reactor.Identity.ID,
+		claimed, claimErr := s.Store.ClaimReactorDelivery(context.WithoutCancel(ctx), runtime.ClaimReactorDeliveryRequest{ReactorID: reactor.Identity.ID,
 			IdempotencyKey: delivery.Request.IdempotencyKey, ExpectedGeneration: delivery.Generation, WaitID: waitID, At: maxTime(s.now(), delivery.UpdatedAt)})
-		if err != nil {
-			return delivery, err
+		if claimErr != nil {
+			return delivery, claimErr
 		}
 		delivery = claimed
 	}
@@ -369,7 +378,7 @@ func (s ReactorService) applyDelivery(ctx context.Context, registration hoststat
 			maxTime(delivery.Request.ReceivedAt, wait.UpdatedAt))
 	} else {
 		update, updateErr = s.Host.updateRunAtWaitInternal(ctx, UpdateRunRequest{Selector: selector, Payload: delivery.Request.Payload,
-			IdempotencyKey: updateKey, Identity: activationIdentityRequest(registration)}, wait, false)
+			IdempotencyKey: updateKey, Identity: durableActivationIdentityRequest(registration)}, wait, false)
 	}
 	if updateErr != nil && update.Status == "" {
 		currentWait, loadErr := s.Host.state.LoadWait(ctx, delivery.ClaimedWaitID)
@@ -473,8 +482,12 @@ func (s ReactorService) resumeContinuationWith(ctx context.Context, registration
 		inputs[name] = value.Inline
 	}
 	expectedIdentity := activationIdentity(registration)
-	started, err := s.Host.startRunInternal(ctx, StartRunRequest{RunID: continuation.Request.ToRunID, Definition: registration.Definition, Inputs: inputs,
-		IdempotencyKey: continuation.Request.IdempotencyKey, Identity: activationIdentityRequest(registration),
+	executionCtx, err := WithAuthenticatedIdentity(ctx, expectedIdentity)
+	if err != nil {
+		return err
+	}
+	started, err := s.Host.startRunInternal(executionCtx, StartRunRequest{RunID: continuation.Request.ToRunID, Definition: registration.Definition, Inputs: inputs,
+		IdempotencyKey: continuation.Request.IdempotencyKey, Identity: durableActivationIdentityRequest(registration),
 		Activation: &hoststate.ActivationBinding{ActivationID: registration.ID, IdempotencyKey: continuation.Request.IdempotencyKey, OccurredAt: continuation.Request.At}}, &expectedIdentity, true)
 	if err != nil {
 		return err

@@ -5,14 +5,7 @@ interface NavigationContextValue {
   page: NavPage;
   navigate: (page: NavPage) => void;
   selectedRunId: string | null;
-  selectedBlueprintPath: string | null;
-  selectedPipelinePath: string | null;
-  wizardEditPath: string | null;
   openRun: (runId: string) => void;
-  openBlueprint: (path: string) => Promise<void>;
-  openPipeline: (path: string) => void;
-  openFlowBuilder: (path: string) => void;
-  openWizard: (editPath?: string | null) => void;
   goBack: () => void;
   refresh: () => void;
 }
@@ -28,18 +21,11 @@ export function useNavigation() {
 // Map detail pages to their parent pages for back navigation
 const PARENT_PAGE: Partial<Record<NavPage, NavPage>> = {
   runDetail: 'runs',
-  blueprintDetail: 'blueprints',
-  blueprintWizard: 'blueprints',
-  pipelineDetail: 'pipelines',
-  flowBuilder: 'dashboard',
 };
 
 export function NavigationProvider({ children }: { children: ReactNode }) {
-  const [page, setPage] = useState<NavPage>('flowBuilder');
+  const [page, setPage] = useState<NavPage>('workflowCatalog');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selectedBlueprintPath, setSelectedBlueprintPath] = useState<string | null>(null);
-  const [selectedPipelinePath, setSelectedPipelinePath] = useState<string | null>(null);
-  const [wizardEditPath, setWizardEditPath] = useState<string | null>(null);
   const navigate = useCallback((target: NavPage) => {
     if (target !== 'runDetail') setPage(target);
   }, []);
@@ -47,26 +33,6 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
   const openRun = useCallback((runId: string) => {
     setSelectedRunId(runId);
     setPage('runDetail');
-  }, []);
-
-  const openBlueprint = useCallback(async (path: string) => {
-    setSelectedBlueprintPath(path);
-    setPage('blueprintDetail');
-  }, []);
-
-  const openPipeline = useCallback((path: string) => {
-    setSelectedPipelinePath(path);
-    setPage('pipelineDetail');
-  }, []);
-
-  const openFlowBuilder = useCallback((path: string) => {
-    setSelectedPipelinePath(path);
-    setPage('flowBuilder');
-  }, []);
-
-  const openWizard = useCallback((editPath: string | null = null) => {
-    setWizardEditPath(editPath);
-    setPage('blueprintWizard');
   }, []);
 
   const goBack = useCallback(() => {
@@ -86,18 +52,38 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
       page,
       navigate,
       selectedRunId,
-      selectedBlueprintPath,
-      selectedPipelinePath,
-      wizardEditPath,
       openRun,
-      openBlueprint,
-      openPipeline,
-      openFlowBuilder,
-      openWizard,
       goBack,
       refresh,
     }}>
       {children}
     </NavigationContext.Provider>
   );
+}
+
+type ArchivedNavPage = NavPage | 'blueprints' | 'blueprintDetail' | 'blueprintWizard' | 'pipelines' | 'pipelineDetail';
+
+// useArchivedNavigation keeps dormant legacy page modules type-checkable while
+// making their routes and actions unreachable from the active application
+// contract. W06-T07 may delete these archive-only modules outright.
+export function useArchivedNavigation() {
+  const active = useNavigation();
+  const unavailable = () => { throw new Error('legacy navigation is unavailable'); };
+  return {
+    ...active,
+    navigate: (page: ArchivedNavPage) => {
+      if (page === 'workflowCatalog' || page === 'flowBuilder' || page === 'runs' || page === 'runDetail') {
+        active.navigate(page);
+        return;
+      }
+      unavailable();
+    },
+    selectedBlueprintPath: null as string | null,
+    selectedPipelinePath: null as string | null,
+    wizardEditPath: null as string | null,
+    openBlueprint: async (_path: string) => unavailable(),
+    openPipeline: (_path: string) => unavailable(),
+    openFlowBuilder: (_path: string) => unavailable(),
+    openWizard: (_editPath?: string | null) => unavailable(),
+  };
 }

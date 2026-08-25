@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/workflow/graph"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 	"github.com/hollis-labs/hadron/workflow/values"
@@ -34,8 +35,20 @@ func (f *fakeA2AHTTPService) SubmitTask(ctx context.Context, request a2a.TaskReq
 	if ctx.Value(a2aHTTPContextKey{}) != "authenticated" {
 		return nil, errors.New("missing authenticated context")
 	}
+	identity, err := (appworkflow.ContextIdentityProvider{}).BindIdentity(ctx, appworkflow.IdentityRequest{SourceAuthority: "a2a"})
+	if err != nil || identity.Principal != "principal:http" || identity.SourceAuthority != "a2a" {
+		return nil, errors.New("missing A2A-bound durable identity")
+	}
 	f.submits = append(f.submits, request)
 	return &a2a.TaskResponse{ID: request.ID, RunID: "run-one", Definition: request.Skill, Outcome: workflowruntime.IdempotencyApplied, Available: true, Status: a2a.TaskStatus{State: "working"}}, nil
+}
+
+func authenticatedA2AHTTPContext(request *http.Request) (context.Context, error) {
+	base := context.WithValue(request.Context(), a2aHTTPContextKey{}, "authenticated")
+	return appworkflow.WithAuthenticatedIdentity(base, hoststate.IdentityBinding{
+		Principal: "principal:http", SourceAuthority: "http", Trust: "local",
+		RunScope: hoststate.RunScope{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeUser, ID: "api-user"},
+	})
 }
 
 func (f *fakeA2AHTTPService) GetTask(ctx context.Context, taskID string) (*a2a.TaskResponse, error) {
@@ -88,7 +101,7 @@ func TestA2AHTTPAuthenticatesExactStartAndRejectsTransportedIdentity(t *testing.
 	var intents []appworkflow.WorkflowAccessIntent
 	auth := api.WorkflowRequestAuthenticatorFunc(func(request *http.Request, intent appworkflow.WorkflowAccessIntent) (context.Context, error) {
 		intents = append(intents, intent)
-		return context.WithValue(request.Context(), a2aHTTPContextKey{}, "authenticated"), nil
+		return authenticatedA2AHTTPContext(request)
 	})
 	server := httptest.NewServer(api.NewServer("", api.Dependencies{A2ATasks: service, WorkflowAuth: auth, AgentCard: fakeAgentCardProvider{}}).Handler())
 	t.Cleanup(server.Close)
@@ -120,7 +133,7 @@ func TestA2AHTTPHidesDefinitionDenialAndBindsMutationKeys(t *testing.T) {
 		if deny {
 			return nil, appworkflow.ErrPolicyDenied
 		}
-		return context.WithValue(request.Context(), a2aHTTPContextKey{}, "authenticated"), nil
+		return authenticatedA2AHTTPContext(request)
 	})
 	server := httptest.NewServer(api.NewServer("", api.Dependencies{A2ATasks: service, WorkflowAuth: auth}).Handler())
 	t.Cleanup(server.Close)
