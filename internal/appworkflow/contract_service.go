@@ -256,14 +256,15 @@ type contractDefinitionResolver interface {
 type NamespaceOperation string
 
 const (
-	NamespaceRegister NamespaceOperation = "register"
-	NamespacePin      NamespaceOperation = "pin"
-	NamespaceUnpin    NamespaceOperation = "unpin"
-	NamespacePublish  NamespaceOperation = "publish"
-	NamespaceInspect  NamespaceOperation = "inspect"
-	NamespaceSearch   NamespaceOperation = "search"
-	NamespaceResolve  NamespaceOperation = "resolve"
-	NamespacePackage  NamespaceOperation = "package"
+	NamespaceRegister     NamespaceOperation = "register"
+	NamespacePin          NamespaceOperation = "pin"
+	NamespaceUnpin        NamespaceOperation = "unpin"
+	NamespacePublish      NamespaceOperation = "publish"
+	NamespaceInspect      NamespaceOperation = "inspect"
+	NamespaceSearch       NamespaceOperation = "search"
+	NamespaceResolve      NamespaceOperation = "resolve"
+	NamespacePackage      NamespaceOperation = "package"
+	NamespaceClearCurrent NamespaceOperation = "clear_current"
 )
 
 // NamespaceAuthorizationStage distinguishes fail-closed authorization of the
@@ -577,10 +578,35 @@ func (s *ContractRegistrationService) Unpin(ctx context.Context, name, principal
 	if err != nil {
 		return err
 	}
-	if authorizationErr := s.authorizeRecord(ctx, NamespaceUnpin, namespace, name, record.Record, principal); authorizationErr != nil {
+	return s.UnpinExact(ctx, hadronregistry.WorkflowQuery{Name: name, Version: record.Record.Version, Digest: record.Record.Digest}, principal)
+}
+
+// UnpinExact preserves one caller-supplied immutable selection through
+// requested/resolved authorization and the catalog CAS mutation. A moved pin
+// conflicts rather than removing another version.
+func (s *ContractRegistrationService) UnpinExact(ctx context.Context, query hadronregistry.WorkflowQuery, principal string) error {
+	if err := s.ready(ctx); err != nil {
+		return err
+	}
+	if query.Version == "" || query.Digest == "" {
+		return fmt.Errorf("%w: exact registry unpin requires version and digest", ErrInvalidContractService)
+	}
+	namespace, name, principal, err := canonicalRequestedIdentity("", query.Name, principal)
+	if err != nil {
+		return err
+	}
+	query.Name = name
+	if authorizationErr := s.authorizeRequested(ctx, NamespaceUnpin, namespace, name, principal); authorizationErr != nil {
 		return authorizationErr
 	}
-	return s.catalog.UnpinWorkflowExact(ctx, hadronregistry.WorkflowQuery{Name: name, Version: record.Record.Version, Digest: record.Record.Digest})
+	record, err := s.catalog.InspectWorkflow(ctx, query)
+	if err != nil {
+		return err
+	}
+	if authorizationErr := s.authorizeRecord(ctx, NamespaceUnpin, namespace, name, record, principal); authorizationErr != nil {
+		return authorizationErr
+	}
+	return s.catalog.UnpinWorkflowExact(ctx, query)
 }
 
 func (s *ContractRegistrationService) Publish(ctx context.Context, query hadronregistry.WorkflowQuery, principal string) (hadronregistry.WorkflowRecord, error) {
@@ -674,26 +700,12 @@ func (s *ContractRegistrationService) Resolve(ctx context.Context, query hadronr
 }
 
 func (s *ContractRegistrationService) Package(ctx context.Context, query hadronregistry.WorkflowQuery, suite WorkflowContractSuite, report ContractTestReport, principal string) (pack.WorkflowPackage, error) {
-	if err := s.ready(ctx); err != nil {
-		return pack.WorkflowPackage{}, err
-	}
-	namespace, name, principal, err := canonicalRequestedIdentity("", query.Name, principal)
-	if err != nil {
-		return pack.WorkflowPackage{}, err
-	}
-	query.Name = name
-	if authorizationErr := s.authorizeRequested(ctx, NamespacePackage, namespace, name, principal); authorizationErr != nil {
-		return pack.WorkflowPackage{}, authorizationErr
-	}
 	if admissionErr := validateContractReportAdmission(report); admissionErr != nil {
 		return pack.WorkflowPackage{}, admissionErr
 	}
-	record, err := s.catalog.InspectWorkflow(ctx, query)
+	record, err := s.authorizePackage(ctx, query, principal)
 	if err != nil {
 		return pack.WorkflowPackage{}, err
-	}
-	if authorizationErr := s.authorizeRecord(ctx, NamespacePackage, namespace, name, record, principal); authorizationErr != nil {
-		return pack.WorkflowPackage{}, authorizationErr
 	}
 	_, suiteJSON, err := canonicalContractSuite(suite)
 	if err != nil {
@@ -719,6 +731,30 @@ func (s *ContractRegistrationService) Package(ctx context.Context, query hadronr
 			RegisteredAt: record.RegisteredAt, Provenance: record.Provenance,
 		},
 	})
+}
+
+// authorizePackage proves the exact requested version is visible to the bound
+// principal before contract execution or package construction consumes work.
+func (s *ContractRegistrationService) authorizePackage(ctx context.Context, query hadronregistry.WorkflowQuery, principal string) (hadronregistry.WorkflowRecord, error) {
+	if err := s.ready(ctx); err != nil {
+		return hadronregistry.WorkflowRecord{}, err
+	}
+	namespace, name, principal, err := canonicalRequestedIdentity("", query.Name, principal)
+	if err != nil {
+		return hadronregistry.WorkflowRecord{}, err
+	}
+	query.Name = name
+	if authorizationErr := s.authorizeRequested(ctx, NamespacePackage, namespace, name, principal); authorizationErr != nil {
+		return hadronregistry.WorkflowRecord{}, authorizationErr
+	}
+	record, err := s.catalog.InspectWorkflow(ctx, query)
+	if err != nil {
+		return hadronregistry.WorkflowRecord{}, err
+	}
+	if authorizationErr := s.authorizeRecord(ctx, NamespacePackage, namespace, name, record, principal); authorizationErr != nil {
+		return hadronregistry.WorkflowRecord{}, authorizationErr
+	}
+	return record, nil
 }
 
 func canonicalContractSuite(input WorkflowContractSuite) (WorkflowContractSuite, []byte, error) {

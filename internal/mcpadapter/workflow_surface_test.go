@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -264,7 +265,7 @@ func TestWorkflowMetaReplaySafeAnnotations(t *testing.T) {
 }
 
 func TestWorkflowMetaLimitsRequireExactIntegers(t *testing.T) {
-	for _, name := range []string{"hadron_workflows_search", "hadron_workflow_run_events", "hadron_workflow_run_subscribe"} {
+	for _, name := range []string{"hadron_workflows_search", "hadron_workflow_catalog_search", "hadron_workflow_run_events", "hadron_workflow_run_subscribe"} {
 		property, ok := workflowMetaTool(name).InputSchema.Properties["limit"].(map[string]any)
 		if !ok || property["type"] != "integer" {
 			t.Fatalf("%s limit schema = %#v", name, property)
@@ -308,6 +309,106 @@ func TestWorkflowMetaLimitsRequireExactIntegers(t *testing.T) {
 	fractional.Params.Arguments = map[string]any{"run_id": "run-one", "limit": 1.9}
 	if result, callErr := adapter.workflow.handleEvents(t.Context(), fractional); callErr != nil || !result.IsError {
 		t.Fatalf("fractional event limit = %#v, %v", result, callErr)
+	}
+}
+
+func TestWorkflowLifecycleMetaSchemasAndExactGeneration(t *testing.T) {
+	testSchema := workflowMetaTool("hadron_workflow_author_test").InputSchema.Properties
+	registerSchema := workflowMetaTool("hadron_workflow_author_register").InputSchema.Properties
+	if _, advertised := testSchema["make_current"]; advertised {
+		t.Fatalf("author test advertised register-only make_current: %#v", testSchema)
+	}
+	if _, advertised := registerSchema["make_current"]; !advertised {
+		t.Fatalf("author register omitted make_current: %#v", registerSchema)
+	}
+	draft, ok := testSchema["draft"].(map[string]any)
+	if !ok || draft["description"] == "" {
+		t.Fatal("authoring tools must describe the bounded draft contract")
+	}
+	draftProperties, ok := draft["properties"].(map[string]any)
+	if !ok || draftProperties["envelope"] == nil || draftProperties["id"] == nil || draftProperties["version"] == nil || draftProperties["namespace"] == nil {
+		t.Fatalf("draft schema is not agent-usable: %#v", draft)
+	}
+	if required, present := draft["required"].([]any); !present || !reflect.DeepEqual(required, []any{"envelope", "id", "version", "namespace"}) {
+		t.Fatalf("draft nested required fields = %#v", draft["required"])
+	}
+	suite, ok := testSchema["suite"].(map[string]any)
+	if !ok || suite["description"] == "" {
+		t.Fatal("contract tools must describe the deterministic suite contract")
+	}
+	suiteProperties, ok := suite["properties"].(map[string]any)
+	if !ok || suiteProperties["schema_version"] == nil || suiteProperties["cases"] == nil {
+		t.Fatalf("suite schema is not agent-usable: %#v", suite)
+	}
+	if required, present := suite["required"].([]any); !present || !reflect.DeepEqual(required, []any{"schema_version", "cases"}) {
+		t.Fatalf("suite nested required fields = %#v", suite["required"])
+	}
+	generationSchema, ok := workflowMetaTool("hadron_workflow_exposure_pin_definition").InputSchema.Properties["expected_generation"].(map[string]any)
+	if !ok || generationSchema["type"] != "integer" || generationSchema["minimum"] != 1 {
+		t.Fatalf("expected_generation schema = %#v", generationSchema)
+	}
+
+	exposure := newFakeWorkflowExposure()
+	lifecycle := &fakeWorkflowLifecycle{}
+	operations := &fakeWorkflowOperations{}
+	adapter := New(nil, nil, nil, nil, "token-a", nil,
+		WithWorkflowServices(exposure, operations, operations, operations),
+		WithWorkflowLifecycle(lifecycle),
+	)
+	request := mcp.CallToolRequest{Header: http.Header{"Authorization": []string{"Bearer token-a"}}}
+	request.Params.Arguments = map[string]any{
+		"profile_id": "profile:token-a", "name": exposure.alpha.Name,
+		"version": exposure.alpha.Version, "digest": exposure.alpha.Digest,
+		"expected_generation": 1.9,
+	}
+	result, err := adapter.workflow.handleLifecycleExposurePin(t.Context(), request)
+	if err != nil || !result.IsError || lifecycle.pinCalls != 0 {
+		t.Fatalf("fractional generation = %#v, %v calls=%d", result, err, lifecycle.pinCalls)
+	}
+	request.Params.Arguments.(map[string]any)["expected_generation"] = float64(1 << 53)
+	result, err = adapter.workflow.handleLifecycleExposurePin(t.Context(), request)
+	if err != nil || !result.IsError || lifecycle.pinCalls != 0 {
+		t.Fatalf("unsafe generation = %#v, %v calls=%d", result, err, lifecycle.pinCalls)
+	}
+	if parsed, parseErr := parseWorkflowUint64(json.Number("18446744073709551615")); parseErr != nil || parsed != ^uint64(0) {
+		t.Fatalf("maximum uint64 = %d, %v", parsed, parseErr)
+	}
+}
+
+func TestWorkflowLifecycleCatalogSearchIsDistinctAndProfileFiltered(t *testing.T) {
+	exposure := newFakeWorkflowExposure()
+	lifecycle := &fakeWorkflowLifecycle{search: func(_ context.Context, request appworkflow.SearchWorkflowCatalogRequest) (appworkflow.WorkflowCatalogSearchResult, error) {
+		if request.Namespace != "team" || request.Query != "lazy" || request.Identity.SourceAuthority != "mcp" {
+			t.Fatalf("catalog search request = %#v", request)
+		}
+		return appworkflow.WorkflowCatalogSearchResult{Matches: []appworkflow.WorkflowCatalogMatch{{
+			Definition: exposure.lazy.Definition, Name: exposure.lazy.Name, Namespace: exposure.lazy.Namespace,
+			Score: 90, RecommendedNext: "inspect_exact",
+		}, {
+			Definition: exposure.alpha.Definition, Name: exposure.alpha.Name, Namespace: exposure.alpha.Namespace,
+			Score: 80, RecommendedNext: "inspect_exact",
+		}}, NextStep: "inspect_exact"}, nil
+	}}
+	operations := &fakeWorkflowOperations{}
+	adapter := New(nil, nil, nil, nil, "token-a", nil,
+		WithWorkflowLifecycle(lifecycle),
+		WithWorkflowServices(exposure, operations, operations, operations),
+	)
+	request := mcp.CallToolRequest{Header: http.Header{"Authorization": []string{"Bearer token-a"}}}
+	request.Params.Arguments = map[string]any{"namespace": "team", "query": "lazy", "limit": 10}
+	result, err := adapter.workflow.handleLifecycleCatalogSearch(t.Context(), request)
+	if err != nil || result.IsError {
+		t.Fatalf("catalog search = %#v, %v", result, err)
+	}
+	search, ok := result.StructuredContent.(appworkflow.WorkflowCatalogSearchResult)
+	if !ok || len(search.Matches) != 1 || search.Matches[0].Definition != exposure.lazy.Definition || search.NextStep != "inspect_exact" {
+		t.Fatalf("profile-filtered catalog result = %#v", result.StructuredContent)
+	}
+	if lifecycle.searchCalls != 1 {
+		t.Fatalf("catalog search calls=%d", lifecycle.searchCalls)
+	}
+	if workflowMetaTool("hadron_workflows_search").Description == workflowMetaTool("hadron_workflow_catalog_search").Description {
+		t.Fatal("session discovery and ranked lifecycle catalog search were conflated")
 	}
 }
 
@@ -562,6 +663,26 @@ type fakeWorkflowOperations struct {
 	runs    []appworkflow.RunWorkflowRequest
 	resumes []appworkflow.ResumeWorkflowRunRequest
 	signals []appworkflow.SignalWorkflowRunRequest
+}
+
+type fakeWorkflowLifecycle struct {
+	appworkflow.WorkflowLifecycleOperations
+	search      func(context.Context, appworkflow.SearchWorkflowCatalogRequest) (appworkflow.WorkflowCatalogSearchResult, error)
+	searchCalls int
+	pinCalls    int
+}
+
+func (f *fakeWorkflowLifecycle) SearchWorkflowCatalog(ctx context.Context, request appworkflow.SearchWorkflowCatalogRequest) (appworkflow.WorkflowCatalogSearchResult, error) {
+	f.searchCalls++
+	if f.search == nil {
+		return appworkflow.WorkflowCatalogSearchResult{}, nil
+	}
+	return f.search(ctx, request)
+}
+
+func (f *fakeWorkflowLifecycle) PinWorkflowExposure(_ context.Context, request appworkflow.MutateWorkflowExposureRequest) (hoststate.ExposureProfileSnapshot, error) {
+	f.pinCalls++
+	return hoststate.ExposureProfileSnapshot{Record: hoststate.ExposureProfileRecord{ID: request.ProfileID, MaxDirectTools: 4, SearchScope: hoststate.ExposureSearchAll}, Generation: request.ExpectedGeneration + 1}, nil
 }
 
 func (*fakeWorkflowOperations) ValidateWorkflow(context.Context, appworkflow.ValidateWorkflowRequest) (appworkflow.ValidateWorkflowResult, error) {

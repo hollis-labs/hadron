@@ -1,6 +1,6 @@
-import { LayoutDashboard, FileText, GitBranch, Workflow, Activity as ActivityIcon, Clock, BarChart3, Settings, HelpCircle } from 'lucide-react';
+import { LayoutDashboard, FileText, GitBranch, Workflow, Activity as ActivityIcon, Clock, BarChart3, Settings, HelpCircle, BookOpenCheck } from 'lucide-react';
 
-export type NavPage = 'dashboard' | 'blueprints' | 'blueprintDetail' | 'blueprintWizard' | 'runs' | 'runDetail' | 'schedules' | 'pipelines' | 'pipelineDetail' | 'flowBuilder' | 'telemetry' | 'settings' | 'help';
+export type NavPage = 'dashboard' | 'workflowCatalog' | 'blueprints' | 'blueprintDetail' | 'blueprintWizard' | 'runs' | 'runDetail' | 'schedules' | 'pipelines' | 'pipelineDetail' | 'flowBuilder' | 'telemetry' | 'settings' | 'help';
 
 interface AppNavProps {
   current: NavPage;
@@ -9,6 +9,7 @@ interface AppNavProps {
 
 const MAIN_NAV: { page: NavPage; label: string; icon: React.ReactNode; parents?: NavPage[] }[] = [
   { page: 'dashboard', label: 'Operations', icon: <LayoutDashboard size={18} /> },
+  { page: 'workflowCatalog', label: 'Workflow Registry', icon: <BookOpenCheck size={18} /> },
   { page: 'blueprints', label: 'Blueprints', icon: <FileText size={18} />, parents: ['blueprintDetail', 'blueprintWizard'] },
   { page: 'pipelines', label: 'Pipelines', icon: <GitBranch size={18} />, parents: ['pipelineDetail'] },
   { page: 'flowBuilder', label: 'Workflow Graph', icon: <Workflow size={18} /> },

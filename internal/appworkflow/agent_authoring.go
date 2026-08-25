@@ -97,6 +97,14 @@ func NewAgentAuthoringService(options AgentAuthoringOptions) (*AgentAuthoringSer
 // definition through ContractRegistrationService. A nil suite returns the
 // exact generated scaffold and performs no catalog mutation.
 func (s *AgentAuthoringService) Author(ctx context.Context, request AgentAuthoringRequest) (AgentAuthoringResult, error) {
+	return s.author(ctx, request, s.identity.Principal, true)
+}
+
+// author is the shared authoring path used by the authenticated lifecycle
+// facade. Authority and trust remain frozen host configuration; only the
+// already-bound caller principal may replace the configured service principal.
+// register=false executes contract tests without mutating the catalog.
+func (s *AgentAuthoringService) author(ctx context.Context, request AgentAuthoringRequest, principal string, register bool) (AgentAuthoringResult, error) {
 	result := AgentAuthoringResult{SchemaID: AgentAuthoringResultSchemaID, SchemaVersion: AgentAuthoringResultSchemaVersion, Diagnostics: []authoring.CompactDiagnostic{}}
 	if ctx == nil || s == nil || s.stager == nil || s.contracts == nil {
 		return result, fmt.Errorf("%w: service is unavailable", ErrInvalidAgentAuthoring)
@@ -107,7 +115,12 @@ func (s *AgentAuthoringService) Author(ctx context.Context, request AgentAuthori
 	if err := validateAgentAuthoringRequest(request); err != nil {
 		return result, err
 	}
-	if err := s.contracts.authorizeRequested(ctx, NamespaceRegister, request.Namespace, request.Namespace+"/"+request.ID, s.identity.Principal); err != nil {
+	identity := s.identity
+	identity.Principal = strings.TrimSpace(principal)
+	if err := validateAgentAuthoringHostIdentity(identity); err != nil {
+		return result, err
+	}
+	if err := s.contracts.authorizeRequested(ctx, NamespaceRegister, request.Namespace, request.Namespace+"/"+request.ID, identity.Principal); err != nil {
 		return result, err
 	}
 	envelope, findings := authoring.DecodeEnvelope(request.Envelope, s.limits)
@@ -116,7 +129,7 @@ func (s *AgentAuthoringService) Author(ctx context.Context, request AgentAuthori
 		return result, nil
 	}
 
-	source, ref, sourceErr := stagedAgentSource(envelope, request, s.identity)
+	source, ref, sourceErr := stagedAgentSource(envelope, request, identity)
 	if sourceErr != nil {
 		return result, sourceErr
 	}
@@ -138,6 +151,9 @@ func (s *AgentAuthoringService) Author(ctx context.Context, request AgentAuthori
 		result.Diagnostics = authoring.CompactDiagnostics(findings)
 		return result, nil
 	}
+	if validation.Plan.Graph.Namespace != request.Namespace {
+		return result, fmt.Errorf("%w: compiled graph namespace differs from the authorized registry namespace", ErrInvalidAgentAuthoring)
+	}
 	planRef := runtime.PlanRef{ID: validation.Plan.ID, Version: validation.Plan.Graph.Version, Digest: validation.Plan.Digest, SchemaVersion: validation.Plan.SchemaVersion}
 	result.Plan = &planRef
 	if request.Suite == nil {
@@ -153,8 +169,11 @@ func (s *AgentAuthoringService) Author(ctx context.Context, request AgentAuthori
 		return result, reportErr
 	}
 	result.Report = &report
+	if !register {
+		return result, nil
+	}
 	record, registerErr := s.contracts.Register(context.WithoutCancel(ctx), RegisterWorkflowRequest{
-		Definition: ref, Namespace: request.Namespace, Principal: s.identity.Principal,
+		Definition: ref, Namespace: request.Namespace, Principal: identity.Principal,
 		Report: report, MakeCurrent: request.MakeCurrent,
 	})
 	if registerErr != nil {
@@ -182,6 +201,10 @@ func stagedAgentSource(envelope authoring.Envelope, request AgentAuthoringReques
 			return ResolvedSource{}, graph.DefinitionRef{}, fmt.Errorf("%w: graph identity differs from the request", ErrInvalidAgentAuthoring)
 		}
 		value := *envelope.Graph
+		// Namespace is the authorized registry placement selected alongside the
+		// source-local graph identity. Bind it before qualification so the
+		// immutable source, plan, registry record, and later exposure all agree.
+		value.Namespace = request.Namespace
 		rebindAgentGraph(&value, locator, &hostProvenance)
 		var err error
 		sourceBytes, err = json.Marshal(value)

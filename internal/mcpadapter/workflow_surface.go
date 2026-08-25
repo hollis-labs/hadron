@@ -47,12 +47,17 @@ type WorkflowSignalOperations interface {
 	appworkflow.WorkflowSignalOperations
 }
 
+type WorkflowLifecycleOperations interface {
+	appworkflow.WorkflowLifecycleOperations
+}
+
 type workflowSurface struct {
 	adapter    *Adapter
 	exposure   WorkflowExposureOperations
 	operations WorkflowOperations
 	reads      WorkflowReadOperations
 	signals    WorkflowSignalOperations
+	lifecycle  WorkflowLifecycleOperations
 	sequence   atomic.Uint64
 
 	mu       sync.Mutex
@@ -67,8 +72,8 @@ type workflowMount struct {
 	lazy    map[string]appworkflow.WorkflowExposureDescriptor
 }
 
-func newWorkflowSurface(adapter *Adapter, exposure WorkflowExposureOperations, operations WorkflowOperations, reads WorkflowReadOperations, signals WorkflowSignalOperations) *workflowSurface {
-	return &workflowSurface{adapter: adapter, exposure: exposure, operations: operations, reads: reads, signals: signals, sessions: make(map[string]workflowMount)}
+func newWorkflowSurface(adapter *Adapter, exposure WorkflowExposureOperations, operations WorkflowOperations, reads WorkflowReadOperations, signals WorkflowSignalOperations, lifecycle WorkflowLifecycleOperations) *workflowSurface {
+	return &workflowSurface{adapter: adapter, exposure: exposure, operations: operations, reads: reads, signals: signals, lifecycle: lifecycle, sessions: make(map[string]workflowMount)}
 }
 
 func (w *workflowSurface) bindServer(s *server.MCPServer) {
@@ -119,6 +124,8 @@ func workflowMetaTool(name string) mcp.Tool {
 	switch name {
 	case "hadron_workflows_search":
 		tool = mcp.NewTool(name, mcp.WithDescription("Search workflows visible to this MCP principal."), mcp.WithString("query"), mcp.WithNumber("limit"))
+	case "hadron_workflow_catalog_search":
+		tool = mcp.NewTool(name, mcp.WithDescription("Return bounded ranked workflow recommendations and the next authoring step."), mcp.WithString("query"), mcp.WithString("namespace"), mcp.WithNumber("limit"))
 	case "hadron_workflows_load":
 		tool = mcp.NewTool(name, mcp.WithDescription("Mount exact discoverable workflow schemas for this MCP session."), mcp.WithArray("definitions", mcp.WithStringItems()))
 	case "hadron_workflow_describe", "hadron_workflow_validate":
@@ -135,22 +142,41 @@ func workflowMetaTool(name string) mcp.Tool {
 		tool = mcp.NewTool(name, mcp.WithString("run_id", mcp.Required()), mcp.WithString("wait_id", mcp.Required()), mcp.WithString("correlation", mcp.Required()), mcp.WithString("token"), mcp.WithObject("payload", mcp.Required()), mcp.WithString("idempotency_key"))
 	case "hadron_workflow_signal":
 		tool = mcp.NewTool(name, mcp.WithString("run_id", mcp.Required()), mcp.WithString("name", mcp.Required()), mcp.WithString("correlation", mcp.Required()), mcp.WithObject("payload", mcp.Required()), mcp.WithString("idempotency_key", mcp.Required()), mcp.WithBoolean("confirmed"))
+	case "hadron_workflow_catalog_inspect", "hadron_workflow_registry_pin_version", "hadron_workflow_registry_unpin_version", "hadron_workflow_registry_publish", "hadron_workflow_registry_clear_current":
+		tool = mcp.NewTool(name, mcp.WithString("name", mcp.Required()), mcp.WithString("version", mcp.Required()), mcp.WithString("digest", mcp.Required()))
+	case "hadron_workflow_author_validate":
+		tool = mcp.NewTool(name, mcp.WithDescription("Validate one bounded graph-native draft without mutating the workflow catalog."), workflowDraftToolOption())
+	case "hadron_workflow_author_scaffold":
+		tool = mcp.NewTool(name, mcp.WithDescription("Validate one bounded graph-native draft and generate an editable deterministic contract-test scaffold without catalog mutation."), workflowDraftToolOption())
+	case "hadron_workflow_author_test":
+		tool = mcp.NewTool(name, mcp.WithDescription("Validate a draft and execute its deterministic contract suite without registering it."), workflowDraftToolOption(), workflowContractSuiteToolOption())
+	case "hadron_workflow_author_register":
+		tool = mcp.NewTool(name, mcp.WithDescription("Validate and test a draft, then register its exact immutable version in an authorized namespace."), workflowDraftToolOption(), workflowContractSuiteToolOption(), mcp.WithBoolean("make_current", mcp.Description("Also move the registry current alias to this qualified exact version.")))
+	case "hadron_workflow_registry_package":
+		tool = mcp.NewTool(name, mcp.WithString("name", mcp.Required()), mcp.WithString("version", mcp.Required()), mcp.WithString("digest", mcp.Required()), workflowContractSuiteToolOption())
+	case "hadron_workflow_exposure_inspect":
+		tool = mcp.NewTool(name, mcp.WithString("profile_id", mcp.Required()))
+	case "hadron_workflow_exposure_pin_definition", "hadron_workflow_exposure_unpin_definition":
+		tool = mcp.NewTool(name, mcp.WithString("profile_id", mcp.Required()), mcp.WithString("name", mcp.Required()), mcp.WithString("version", mcp.Required()), mcp.WithString("digest", mcp.Required()), mcp.WithNumber("expected_generation", mcp.Required()))
 	default:
 		tool = mcp.NewTool(name)
 	}
-	if name == "hadron_workflows_search" || name == "hadron_workflow_run_events" || name == "hadron_workflow_run_subscribe" {
+	if name == "hadron_workflows_search" || name == "hadron_workflow_catalog_search" || name == "hadron_workflow_run_events" || name == "hadron_workflow_run_subscribe" {
 		tool.InputSchema.Properties["limit"] = map[string]any{"type": "integer"}
+	}
+	if name == "hadron_workflow_exposure_pin_definition" || name == "hadron_workflow_exposure_unpin_definition" {
+		tool.InputSchema.Properties["expected_generation"] = map[string]any{"type": "integer", "minimum": 1}
 	}
 	return applyToolBehavior(tool, workflowMetaBehavior(name))
 }
 
 func workflowMetaBehavior(name string) toolBehavior {
 	switch name {
-	case "hadron_workflows_search", "hadron_workflow_describe", "hadron_workflow_validate", "hadron_workflow_run_inspect", "hadron_workflow_run_events", "hadron_workflow_run_subscribe":
+	case "hadron_workflows_search", "hadron_workflow_catalog_search", "hadron_workflow_describe", "hadron_workflow_validate", "hadron_workflow_run_inspect", "hadron_workflow_run_events", "hadron_workflow_run_subscribe", "hadron_workflow_catalog_inspect", "hadron_workflow_author_validate", "hadron_workflow_author_scaffold", "hadron_workflow_author_test", "hadron_workflow_registry_package", "hadron_workflow_exposure_inspect":
 		return toolBehavior{readOnly: true, idempotent: true}
 	case "hadron_workflow_run_cancel":
 		return toolBehavior{destructive: true, idempotent: true}
-	case "hadron_workflows_load", "hadron_workflow_run_resume", "hadron_workflow_gate_submit", "hadron_workflow_message_submit", "hadron_workflow_signal":
+	case "hadron_workflows_load", "hadron_workflow_run_resume", "hadron_workflow_gate_submit", "hadron_workflow_message_submit", "hadron_workflow_signal", "hadron_workflow_author_register", "hadron_workflow_registry_pin_version", "hadron_workflow_registry_unpin_version", "hadron_workflow_registry_publish", "hadron_workflow_registry_clear_current", "hadron_workflow_exposure_pin_definition", "hadron_workflow_exposure_unpin_definition":
 		return toolBehavior{idempotent: true}
 	default:
 		return toolBehavior{}
@@ -159,19 +185,33 @@ func workflowMetaBehavior(name string) toolBehavior {
 
 func (w *workflowSurface) handlerMap() map[string]server.ToolHandlerFunc {
 	return map[string]server.ToolHandlerFunc{
-		"hadron_workflows_search":        w.handleSearch,
-		"hadron_workflows_load":          w.handleLoad,
-		"hadron_workflow_describe":       w.handleDescribe,
-		"hadron_workflow_validate":       w.handleValidate,
-		"hadron_workflow_run":            w.handleRun,
-		"hadron_workflow_run_inspect":    w.handleInspectRun,
-		"hadron_workflow_run_cancel":     w.handleCancelRun,
-		"hadron_workflow_run_events":     w.handleEvents,
-		"hadron_workflow_run_subscribe":  w.handleEvents,
-		"hadron_workflow_run_resume":     w.handleResume,
-		"hadron_workflow_gate_submit":    w.handleGate,
-		"hadron_workflow_message_submit": w.handleMessage,
-		"hadron_workflow_signal":         w.handleSignal,
+		"hadron_workflows_search":                   w.handleSearch,
+		"hadron_workflows_load":                     w.handleLoad,
+		"hadron_workflow_describe":                  w.handleDescribe,
+		"hadron_workflow_validate":                  w.handleValidate,
+		"hadron_workflow_run":                       w.handleRun,
+		"hadron_workflow_run_inspect":               w.handleInspectRun,
+		"hadron_workflow_run_cancel":                w.handleCancelRun,
+		"hadron_workflow_run_events":                w.handleEvents,
+		"hadron_workflow_run_subscribe":             w.handleEvents,
+		"hadron_workflow_run_resume":                w.handleResume,
+		"hadron_workflow_gate_submit":               w.handleGate,
+		"hadron_workflow_message_submit":            w.handleMessage,
+		"hadron_workflow_signal":                    w.handleSignal,
+		"hadron_workflow_catalog_search":            w.handleLifecycleCatalogSearch,
+		"hadron_workflow_catalog_inspect":           w.handleLifecycleCatalogInspect,
+		"hadron_workflow_author_validate":           w.handleLifecycleAuthorValidate,
+		"hadron_workflow_author_scaffold":           w.handleLifecycleAuthorScaffold,
+		"hadron_workflow_author_test":               w.handleLifecycleAuthorTest,
+		"hadron_workflow_author_register":           w.handleLifecycleAuthorRegister,
+		"hadron_workflow_registry_package":          w.handleLifecyclePackage,
+		"hadron_workflow_registry_pin_version":      w.handleLifecycleRegistryPin,
+		"hadron_workflow_registry_unpin_version":    w.handleLifecycleRegistryUnpin,
+		"hadron_workflow_registry_publish":          w.handleLifecycleRegistryPublish,
+		"hadron_workflow_registry_clear_current":    w.handleLifecycleClearCurrent,
+		"hadron_workflow_exposure_inspect":          w.handleLifecycleExposureInspect,
+		"hadron_workflow_exposure_pin_definition":   w.handleLifecycleExposurePin,
+		"hadron_workflow_exposure_unpin_definition": w.handleLifecycleExposureUnpin,
 	}
 }
 

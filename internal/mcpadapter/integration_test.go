@@ -167,7 +167,7 @@ func TestMCP_HadronSkills_IndexAndBody(t *testing.T) {
 	if !ok {
 		t.Fatal("expected text content from hadron_skills")
 	}
-	if !strings.Contains(text.Text, "hadron_blueprint_discover") {
+	if !strings.Contains(text.Text, "hadron_workflow_catalog_search") {
 		t.Fatalf("expected orientation body, got %q", text.Text)
 	}
 }

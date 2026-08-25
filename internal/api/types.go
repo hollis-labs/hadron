@@ -115,22 +115,23 @@ type AgentCardProvider interface {
 
 // Dependencies groups daemon services used by the API handlers.
 type Dependencies struct {
-	Runs          RunStore
-	Schedules     ScheduleStore
-	Pipelines     PipelineStore
-	Workspaces    WorkspaceStore
-	Triggers      TriggerStore
-	HumanGates    HumanGateStore
-	Messages      MessageStore
-	Runner        Runner
-	Scheduler     Scheduler
-	Pipeline      PipelineRunner
-	Workflows     appworkflow.WorkflowOperations
-	WorkflowReads appworkflow.WorkflowRunReadOperations
-	WorkflowAuth  WorkflowRequestAuthenticator
-	A2ATasks      A2ATaskService
-	AgentCard     AgentCardProvider
-	BlueprintDir  string
+	Runs              RunStore
+	Schedules         ScheduleStore
+	Pipelines         PipelineStore
+	Workspaces        WorkspaceStore
+	Triggers          TriggerStore
+	HumanGates        HumanGateStore
+	Messages          MessageStore
+	Runner            Runner
+	Scheduler         Scheduler
+	Pipeline          PipelineRunner
+	Workflows         appworkflow.WorkflowOperations
+	WorkflowReads     appworkflow.WorkflowRunReadOperations
+	WorkflowLifecycle appworkflow.WorkflowLifecycleOperations
+	WorkflowAuth      WorkflowRequestAuthenticator
+	A2ATasks          A2ATaskService
+	AgentCard         AgentCardProvider
+	BlueprintDir      string
 	// WebUI is the optional transport-neutral operator SPA. The daemon owns
 	// delivery; the handler owns only static browser assets and never workflow
 	// semantics.

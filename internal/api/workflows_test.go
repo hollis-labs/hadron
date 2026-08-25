@@ -468,15 +468,17 @@ func graphDefinitionWithLargeLocator() graph.DefinitionRef {
 }
 
 func TestWorkflowHTTPHandlerHasNoWorkflowInternalShortcuts(t *testing.T) {
-	parsed, err := parser.ParseFile(token.NewFileSet(), "workflows.go", nil, parser.ImportsOnly)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, imported := range parsed.Imports {
-		path := strings.Trim(imported.Path.Value, `"`)
-		for _, forbidden := range []string{"/workflow/compile", "/workflow/runtime", "/workflow/storage", "/internal/persistence"} {
-			if strings.Contains(path, forbidden) {
-				t.Fatalf("workflow HTTP handler imports forbidden shortcut %q", path)
+	for _, name := range []string{"workflows.go", "workflow_lifecycle.go"} {
+		parsed, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imported := range parsed.Imports {
+			path := strings.Trim(imported.Path.Value, `"`)
+			for _, forbidden := range []string{"/workflow/compile", "/workflow/runtime", "/workflow/storage", "/internal/persistence"} {
+				if strings.Contains(path, forbidden) {
+					t.Fatalf("%s imports forbidden shortcut %q", name, path)
+				}
 			}
 		}
 	}

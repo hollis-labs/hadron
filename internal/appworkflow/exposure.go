@@ -338,18 +338,29 @@ func (MCPIdentityProvider) BindIdentity(ctx context.Context, request IdentityReq
 }
 
 type WorkflowExposureDescriptor struct {
-	ToolName     string                     `json:"tool_name"`
-	Name         string                     `json:"name"`
-	Namespace    string                     `json:"namespace,omitempty"`
-	Version      string                     `json:"version"`
-	Digest       string                     `json:"digest"`
-	Description  string                     `json:"description,omitempty"`
-	Tags         []string                   `json:"tags"`
-	Definition   graph.DefinitionRef        `json:"definition"`
-	Provenance   WorkflowExposureProvenance `json:"provenance"`
-	InputSchema  graph.Schema               `json:"input_schema"`
-	OutputSchema graph.Schema               `json:"output_schema"`
-	Effects      graph.EffectSet            `json:"effects"`
+	ToolName     string                        `json:"tool_name"`
+	Name         string                        `json:"name"`
+	Namespace    string                        `json:"namespace,omitempty"`
+	Version      string                        `json:"version"`
+	Digest       string                        `json:"digest"`
+	Description  string                        `json:"description,omitempty"`
+	Tags         []string                      `json:"tags"`
+	Definition   graph.DefinitionRef           `json:"definition"`
+	Provenance   WorkflowExposureProvenance    `json:"provenance"`
+	InputSchema  graph.Schema                  `json:"input_schema"`
+	OutputSchema graph.Schema                  `json:"output_schema"`
+	Effects      graph.EffectSet               `json:"effects"`
+	Evidence     WorkflowQualificationEvidence `json:"evidence"`
+}
+
+// WorkflowQualificationEvidence is the bounded, non-secret proof that an
+// immutable workflow passed the canonical qualification boundary. It omits
+// source bytes, publisher identity, attestations, and contract mock payloads.
+type WorkflowQualificationEvidence struct {
+	PlanDigest          string `json:"plan_digest"`
+	ContractSuiteDigest string `json:"contract_suite_digest"`
+	ContractTestDigest  string `json:"contract_test_digest"`
+	TestsPassed         bool   `json:"tests_passed"`
 }
 
 // WorkflowExposureProvenance is the intentionally small, non-secret subset of
@@ -683,7 +694,114 @@ func (s *WorkflowExposureService) describeRecord(ctx context.Context, session Wo
 	if err := provenance.Validate(); err != nil {
 		return WorkflowExposureDescriptor{}, err
 	}
-	return WorkflowExposureDescriptor{ToolName: workflowToolName(record.Name), Name: record.Name, Namespace: record.Namespace, Version: record.Version, Digest: record.Digest, Description: description, Tags: tags, Definition: ref, Provenance: provenance, InputSchema: input, OutputSchema: output, Effects: effects}, nil
+	evidence := WorkflowQualificationEvidence{
+		PlanDigest: record.PlanDigest, ContractSuiteDigest: record.ContractSuiteDigest,
+		ContractTestDigest: record.ContractTestDigest, TestsPassed: record.TestsPassed,
+	}
+	return WorkflowExposureDescriptor{ToolName: workflowToolName(record.Name), Name: record.Name, Namespace: record.Namespace, Version: record.Version, Digest: record.Digest, Description: description, Tags: tags, Definition: ref, Provenance: provenance, InputSchema: input, OutputSchema: output, Effects: effects, Evidence: evidence}, nil
+}
+
+// PinProfileDefinition adds one published immutable workflow to a durable
+// exposure profile with an exact generation CAS. Every resulting direct tool
+// is resolved and policy-checked before the single profile write.
+func (s *WorkflowExposureService) PinProfileDefinition(ctx context.Context, profileID string, ref graph.DefinitionRef, expected uint64) (hoststate.ExposureProfileSnapshot, error) {
+	snapshot, err := s.GetProfile(ctx, profileID)
+	if err != nil {
+		return hoststate.ExposureProfileSnapshot{}, err
+	}
+	if expected == 0 || snapshot.Generation != expected {
+		return hoststate.ExposureProfileSnapshot{}, hoststate.ErrConflict
+	}
+	if err := validateExactExposureRef(ref); err != nil {
+		return hoststate.ExposureProfileSnapshot{}, err
+	}
+	profile := snapshot.Record.Clone()
+	for _, pin := range profile.Pins {
+		if pin.ID == ref.ID {
+			if pin == ref {
+				return snapshot.Clone(), nil
+			}
+			return hoststate.ExposureProfileSnapshot{}, hoststate.ErrConflict
+		}
+	}
+	profile.Pins = append(profile.Pins, ref)
+	profile = canonicalExposureProfile(profile)
+	if err := s.preflightProfilePins(ctx, profile); err != nil {
+		return hoststate.ExposureProfileSnapshot{}, err
+	}
+	return s.PutProfile(ctx, profile, expected)
+}
+
+// UnpinProfileDefinition removes only the supplied exact workflow from a
+// profile. A stale or different digest conflicts; an exact absence replays.
+func (s *WorkflowExposureService) UnpinProfileDefinition(ctx context.Context, profileID string, ref graph.DefinitionRef, expected uint64) (hoststate.ExposureProfileSnapshot, error) {
+	snapshot, err := s.GetProfile(ctx, profileID)
+	if err != nil {
+		return hoststate.ExposureProfileSnapshot{}, err
+	}
+	if expected == 0 || snapshot.Generation != expected {
+		return hoststate.ExposureProfileSnapshot{}, hoststate.ErrConflict
+	}
+	if err := validateExactExposureRef(ref); err != nil {
+		return hoststate.ExposureProfileSnapshot{}, err
+	}
+	profile := snapshot.Record.Clone()
+	index := -1
+	for current, pin := range profile.Pins {
+		if pin.ID == ref.ID {
+			if pin != ref {
+				return hoststate.ExposureProfileSnapshot{}, hoststate.ErrConflict
+			}
+			index = current
+			break
+		}
+	}
+	if index < 0 {
+		return snapshot.Clone(), nil
+	}
+	profile.Pins = append(profile.Pins[:index:index], profile.Pins[index+1:]...)
+	profile = canonicalExposureProfile(profile)
+	if err := s.preflightProfilePins(ctx, profile); err != nil {
+		return hoststate.ExposureProfileSnapshot{}, err
+	}
+	return s.PutProfile(ctx, profile, expected)
+}
+
+func validateExactExposureRef(ref graph.DefinitionRef) error {
+	probe := hoststate.ExposureProfileRecord{ID: "preflight", Pins: []graph.DefinitionRef{ref}, MaxDirectTools: 1, SearchScope: hoststate.ExposureSearchNone}
+	if err := probe.Validate(); err != nil {
+		return fmt.Errorf("%w: exposure definition is invalid", ErrWorkflowInvalidRequest)
+	}
+	return nil
+}
+
+func (s *WorkflowExposureService) preflightProfilePins(ctx context.Context, profile hoststate.ExposureProfileRecord) error {
+	if err := s.requireGraphDependencies(); err != nil {
+		return err
+	}
+	if err := profile.Validate(); err != nil {
+		return fmt.Errorf("%w: exposure profile is invalid", ErrWorkflowInvalidRequest)
+	}
+	if len(profile.Pins) > profile.MaxDirectTools {
+		return fmt.Errorf("%w: direct workflow tools exceed the profile budget", ErrPolicyDenied)
+	}
+	session := WorkflowExposureSession{Authenticated: true, Profile: profile.Clone()}
+	seen := make(map[string]string, len(profile.Pins))
+	for _, pin := range profile.Pins {
+		resolution, err := s.catalog.ResolveWorkflow(ctx, registry.WorkflowQuery{Name: pin.ID, Version: pin.Version, Digest: pin.Digest})
+		if err != nil || !resolution.Record.Published {
+			return ErrWorkflowHidden
+		}
+		descriptor, err := s.describeRecord(ctx, session, resolution.Record, "profile_pin")
+		if err != nil {
+			return err
+		}
+		if prior, exists := seen[descriptor.ToolName]; exists && prior != descriptor.Name {
+			return fmt.Errorf("%w: exposed workflows %q and %q collide", hoststate.ErrConflict, prior, descriptor.Name)
+		}
+		seen[descriptor.ToolName] = descriptor.Name
+	}
+	return nil
 }
 
 func (p WorkflowExposureProvenance) Validate() error {

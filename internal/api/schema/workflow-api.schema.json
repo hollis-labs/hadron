@@ -415,6 +415,22 @@
       ],
       "type": "object"
     },
+    "AppworkflowInspectWorkflowExposureRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "profile_id"
+      ],
+      "type": "object"
+    },
     "AppworkflowInspectWorkflowRunRequest": {
       "additionalProperties": false,
       "properties": {
@@ -452,6 +468,62 @@
       ],
       "type": "object"
     },
+    "AppworkflowInspectWorkflowVersionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        }
+      },
+      "required": [
+        "definition",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "AppworkflowMutateWorkflowExposureRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "expected_generation": {
+          "type": "integer"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "definition",
+        "expected_generation",
+        "identity",
+        "profile_id"
+      ],
+      "type": "object"
+    },
+    "AppworkflowMutateWorkflowVersionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        }
+      },
+      "required": [
+        "definition",
+        "identity"
+      ],
+      "type": "object"
+    },
     "AppworkflowOperationIssue": {
       "additionalProperties": false,
       "properties": {
@@ -465,6 +537,49 @@
       "required": [
         "code",
         "message"
+      ],
+      "type": "object"
+    },
+    "AppworkflowPackageWorkflowVersionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "suite": {
+          "$ref": "#/$defs/AppworkflowWorkflowContractSuite"
+        }
+      },
+      "required": [
+        "definition",
+        "identity",
+        "suite"
+      ],
+      "type": "object"
+    },
+    "AppworkflowRegisterWorkflowDraftRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "draft": {
+          "$ref": "#/$defs/AppworkflowWorkflowDraft"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "make_current": {
+          "type": "boolean"
+        },
+        "suite": {
+          "$ref": "#/$defs/AppworkflowWorkflowContractSuite"
+        }
+      },
+      "required": [
+        "draft",
+        "identity",
+        "suite"
       ],
       "type": "object"
     },
@@ -755,6 +870,27 @@
       ],
       "type": "object"
     },
+    "AppworkflowSearchWorkflowCatalogRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity"
+      ],
+      "type": "object"
+    },
     "AppworkflowStartRunResult": {
       "additionalProperties": false,
       "properties": {
@@ -805,6 +941,42 @@
       ],
       "type": "object"
     },
+    "AppworkflowTestWorkflowDraftRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "draft": {
+          "$ref": "#/$defs/AppworkflowWorkflowDraft"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "suite": {
+          "$ref": "#/$defs/AppworkflowWorkflowContractSuite"
+        }
+      },
+      "required": [
+        "draft",
+        "identity",
+        "suite"
+      ],
+      "type": "object"
+    },
+    "AppworkflowValidateWorkflowDraftRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "draft": {
+          "$ref": "#/$defs/AppworkflowWorkflowDraft"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        }
+      },
+      "required": [
+        "draft",
+        "identity"
+      ],
+      "type": "object"
+    },
     "AppworkflowValidateWorkflowRequest": {
       "additionalProperties": false,
       "properties": {
@@ -840,6 +1012,86 @@
       "required": [
         "definition",
         "diagnostics"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowCatalogMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "description": {
+          "type": "string"
+        },
+        "effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "evidence": {
+          "$ref": "#/$defs/AppworkflowWorkflowQualificationEvidence"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recommended_next": {
+          "type": "string"
+        },
+        "registry": {
+          "$ref": "#/$defs/AppworkflowWorkflowRegistryState"
+        },
+        "score": {
+          "type": "integer"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "definition",
+        "effects",
+        "evidence",
+        "name",
+        "namespace",
+        "reasons",
+        "recommended_next",
+        "registry",
+        "score",
+        "tags"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowCatalogSearchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "matches": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowWorkflowCatalogMatch"
+          },
+          "type": "array"
+        },
+        "next_step": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "matches",
+        "next_step",
+        "truncated"
       ],
       "type": "object"
     },
@@ -886,6 +1138,78 @@
       ],
       "type": "object"
     },
+    "AppworkflowWorkflowContractCaseEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "failure_code": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output_digest": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "effects",
+        "name",
+        "passed"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowContractEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "cases": {
+          "items": {
+            "$ref": "#/$defs/AppworkflowWorkflowContractCaseEvidence"
+          },
+          "type": "array"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "plan_digest": {
+          "type": "string"
+        },
+        "suite_digest": {
+          "type": "string"
+        },
+        "test_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cases",
+        "passed",
+        "plan_digest",
+        "suite_digest",
+        "test_digest"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowContractScaffoldResult": {
+      "additionalProperties": false,
+      "properties": {
+        "scaffold": {
+          "$ref": "#/$defs/AppworkflowWorkflowContractSuite"
+        },
+        "validation": {
+          "$ref": "#/$defs/AppworkflowWorkflowDraftValidationResult"
+        }
+      },
+      "required": [
+        "validation"
+      ],
+      "type": "object"
+    },
     "AppworkflowWorkflowContractSuite": {
       "additionalProperties": false,
       "properties": {
@@ -902,6 +1226,260 @@
       "required": [
         "cases",
         "schema_version"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowContractTestResult": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/AppworkflowWorkflowContractEvidence"
+        },
+        "validation": {
+          "$ref": "#/$defs/AppworkflowWorkflowDraftValidationResult"
+        }
+      },
+      "required": [
+        "validation"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "envelope": {
+          "$ref": "#/$defs/AuthoringEnvelope"
+        },
+        "id": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "envelope",
+        "id",
+        "namespace",
+        "version"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowDraftValidationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/AuthoringCompactDiagnostic"
+          },
+          "type": "array"
+        },
+        "plan": {
+          "$ref": "#/$defs/RuntimePlanRef"
+        }
+      },
+      "required": [
+        "diagnostics"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowExposureDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "description": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "evidence": {
+          "$ref": "#/$defs/AppworkflowWorkflowQualificationEvidence"
+        },
+        "input_schema": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Schema"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "output_schema": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/Schema"
+        },
+        "provenance": {
+          "$ref": "#/$defs/AppworkflowWorkflowExposureProvenance"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "definition",
+        "digest",
+        "effects",
+        "evidence",
+        "input_schema",
+        "name",
+        "output_schema",
+        "provenance",
+        "tags",
+        "tool_name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowExposureProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "trust_class": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authority",
+        "digest",
+        "origin",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowPackageResult": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "definition",
+        "digest",
+        "size_bytes"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowQualificationEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_suite_digest": {
+          "type": "string"
+        },
+        "contract_test_digest": {
+          "type": "string"
+        },
+        "plan_digest": {
+          "type": "string"
+        },
+        "tests_passed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contract_suite_digest",
+        "contract_test_digest",
+        "plan_digest",
+        "tests_passed"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowRegistrationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/AppworkflowWorkflowVersionDetail"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/AuthoringCompactDiagnostic"
+          },
+          "type": "array"
+        },
+        "evidence": {
+          "$ref": "#/$defs/AppworkflowWorkflowContractEvidence"
+        }
+      },
+      "required": [
+        "diagnostics"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowRegistryState": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "type": "boolean"
+        },
+        "published": {
+          "type": "boolean"
+        },
+        "registry_pinned": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "current",
+        "published",
+        "registry_pinned"
+      ],
+      "type": "object"
+    },
+    "AppworkflowWorkflowVersionDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "descriptor": {
+          "$ref": "#/$defs/AppworkflowWorkflowExposureDescriptor"
+        },
+        "registered_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "registry": {
+          "$ref": "#/$defs/AppworkflowWorkflowRegistryState"
+        }
+      },
+      "required": [
+        "descriptor",
+        "registered_at",
+        "registry"
       ],
       "type": "object"
     },
@@ -1055,6 +1633,9 @@
     "ExplainWorkflowRequest": {
       "$ref": "#/$defs/AppworkflowExplainWorkflowRequest"
     },
+    "GenerateWorkflowContractRequest": {
+      "$ref": "#/$defs/AppworkflowValidateWorkflowDraftRequest"
+    },
     "HoststateExecutionTarget": {
       "additionalProperties": false,
       "properties": {
@@ -1186,6 +1767,77 @@
         "version"
       ],
       "type": "object"
+    },
+    "HoststateExposureProfileRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "denied_effects": {
+          "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/EffectSet"
+        },
+        "display": {
+          "$ref": "#/$defs/ValuesDisplayPolicy"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lazy_load": {
+          "type": "boolean"
+        },
+        "max_direct_tools": {
+          "type": "integer"
+        },
+        "namespaces": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pins": {
+          "items": {
+            "$ref": "https://schemas.hollis-labs.dev/workflow/graph/v1/workflow.schema.json#/$defs/DefinitionRef"
+          },
+          "type": "array"
+        },
+        "search_scope": {
+          "$ref": "#/$defs/HoststateExposureSearchScope"
+        }
+      },
+      "required": [
+        "id",
+        "lazy_load",
+        "max_direct_tools",
+        "search_scope"
+      ],
+      "type": "object"
+    },
+    "HoststateExposureProfileSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer"
+        },
+        "record": {
+          "$ref": "#/$defs/HoststateExposureProfileRecord"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "generation",
+        "record",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "HoststateExposureSearchScope": {
+      "type": "string"
     },
     "HoststateIdentityBinding": {
       "additionalProperties": false,
@@ -1490,8 +2142,26 @@
       ],
       "type": "object"
     },
+    "InspectWorkflowExposureRequest": {
+      "$ref": "#/$defs/AppworkflowInspectWorkflowExposureRequest"
+    },
     "InspectWorkflowRunRequest": {
       "$ref": "#/$defs/AppworkflowInspectWorkflowRunRequest"
+    },
+    "InspectWorkflowVersionRequest": {
+      "$ref": "#/$defs/AppworkflowInspectWorkflowVersionRequest"
+    },
+    "MutateWorkflowExposureRequest": {
+      "$ref": "#/$defs/AppworkflowMutateWorkflowExposureRequest"
+    },
+    "MutateWorkflowVersionRequest": {
+      "$ref": "#/$defs/AppworkflowMutateWorkflowVersionRequest"
+    },
+    "PackageWorkflowVersionRequest": {
+      "$ref": "#/$defs/AppworkflowPackageWorkflowVersionRequest"
+    },
+    "RegisterWorkflowDraftRequest": {
+      "$ref": "#/$defs/AppworkflowRegisterWorkflowDraftRequest"
     },
     "RerunWorkflowRequest": {
       "$ref": "#/$defs/AppworkflowRerunWorkflowRequest"
@@ -3553,6 +4223,9 @@
       ],
       "type": "object"
     },
+    "SearchWorkflowCatalogRequest": {
+      "$ref": "#/$defs/AppworkflowSearchWorkflowCatalogRequest"
+    },
     "StepkindExecutionError": {
       "additionalProperties": false,
       "properties": {
@@ -3581,6 +4254,12 @@
     },
     "StepkindRetryClassification": {
       "type": "string"
+    },
+    "TestWorkflowDraftRequest": {
+      "$ref": "#/$defs/AppworkflowTestWorkflowDraftRequest"
+    },
+    "ValidateWorkflowDraftRequest": {
+      "$ref": "#/$defs/AppworkflowValidateWorkflowDraftRequest"
     },
     "ValidateWorkflowRequest": {
       "$ref": "#/$defs/AppworkflowValidateWorkflowRequest"
@@ -3862,6 +4541,15 @@
     "WorkflowAttemptID": {
       "$ref": "#/$defs/RuntimeAttemptID"
     },
+    "WorkflowCatalogSearchResult": {
+      "$ref": "#/$defs/AppworkflowWorkflowCatalogSearchResult"
+    },
+    "WorkflowContractScaffoldResult": {
+      "$ref": "#/$defs/AppworkflowWorkflowContractScaffoldResult"
+    },
+    "WorkflowContractTestResult": {
+      "$ref": "#/$defs/AppworkflowWorkflowContractTestResult"
+    },
     "WorkflowControlDecisionDiagnostic": {
       "$ref": "#/$defs/RundiagnosticsControlDecisionDiagnostic"
     },
@@ -3871,8 +4559,14 @@
     "WorkflowDiagnosticFinding": {
       "$ref": "#/$defs/DiagnosticDiagnostic"
     },
+    "WorkflowDraftValidationResult": {
+      "$ref": "#/$defs/AppworkflowWorkflowDraftValidationResult"
+    },
     "WorkflowEdgeValueFlowDiagnostic": {
       "$ref": "#/$defs/RundiagnosticsEdgeValueFlowDiagnostic"
+    },
+    "WorkflowExposureProfile": {
+      "$ref": "#/$defs/HoststateExposureProfileSnapshot"
     },
     "WorkflowFailureDiagnostic": {
       "$ref": "#/$defs/RundiagnosticsFailureDiagnostic"
@@ -3895,6 +4589,9 @@
     "WorkflowNodeResourceDiagnostic": {
       "$ref": "#/$defs/RundiagnosticsNodeResourceDiagnostic"
     },
+    "WorkflowPackageResult": {
+      "$ref": "#/$defs/AppworkflowWorkflowPackageResult"
+    },
     "WorkflowPlanDiagnostic": {
       "$ref": "#/$defs/RundiagnosticsPlanDiagnostic"
     },
@@ -3909,6 +4606,9 @@
     },
     "WorkflowPositionDiagnostic": {
       "$ref": "#/$defs/RundiagnosticsPositionDiagnostic"
+    },
+    "WorkflowRegistrationResult": {
+      "$ref": "#/$defs/AppworkflowWorkflowRegistrationResult"
     },
     "WorkflowRenderedEvent": {
       "$ref": "#/$defs/RuntimeRenderedEvent"
@@ -3957,6 +4657,9 @@
     },
     "WorkflowValueSetRef": {
       "$ref": "#/$defs/ValuesValueSetRef"
+    },
+    "WorkflowVersionDetail": {
+      "$ref": "#/$defs/AppworkflowWorkflowVersionDetail"
     },
     "WorkflowWaitDiagnostic": {
       "$ref": "#/$defs/RundiagnosticsWaitDiagnostic"
@@ -4038,6 +4741,104 @@
       "request": "RerunWorkflowRequest",
       "response": "WorkflowRerunResult",
       "idempotency_key": "idempotency_key"
+    },
+    {
+      "name": "searchWorkflowCatalog",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/catalog/search",
+      "request": "SearchWorkflowCatalogRequest",
+      "response": "WorkflowCatalogSearchResult"
+    },
+    {
+      "name": "inspectWorkflowVersion",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/catalog/inspect",
+      "request": "InspectWorkflowVersionRequest",
+      "response": "WorkflowVersionDetail"
+    },
+    {
+      "name": "validateWorkflowDraft",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/author/validate",
+      "request": "ValidateWorkflowDraftRequest",
+      "response": "WorkflowDraftValidationResult"
+    },
+    {
+      "name": "generateWorkflowContract",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/author/scaffold",
+      "request": "GenerateWorkflowContractRequest",
+      "response": "WorkflowContractScaffoldResult"
+    },
+    {
+      "name": "testWorkflowDraft",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/author/test",
+      "request": "TestWorkflowDraftRequest",
+      "response": "WorkflowContractTestResult"
+    },
+    {
+      "name": "registerWorkflowDraft",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/author/register",
+      "request": "RegisterWorkflowDraftRequest",
+      "response": "WorkflowRegistrationResult"
+    },
+    {
+      "name": "packageWorkflowVersion",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/registry/package",
+      "request": "PackageWorkflowVersionRequest",
+      "response": "WorkflowPackageResult"
+    },
+    {
+      "name": "publishWorkflowVersion",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/registry/publish",
+      "request": "MutateWorkflowVersionRequest",
+      "response": "WorkflowVersionDetail"
+    },
+    {
+      "name": "pinRegistryVersion",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/registry/pin-version",
+      "request": "MutateWorkflowVersionRequest",
+      "response": "WorkflowVersionDetail"
+    },
+    {
+      "name": "unpinRegistryVersion",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/registry/unpin-version",
+      "request": "MutateWorkflowVersionRequest",
+      "response": "WorkflowVersionDetail"
+    },
+    {
+      "name": "clearWorkflowCurrentExact",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/registry/clear-current",
+      "request": "MutateWorkflowVersionRequest",
+      "response": "WorkflowVersionDetail"
+    },
+    {
+      "name": "inspectWorkflowExposure",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/exposure/inspect",
+      "request": "InspectWorkflowExposureRequest",
+      "response": "WorkflowExposureProfile"
+    },
+    {
+      "name": "pinWorkflowExposure",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/exposure/pin-definition",
+      "request": "MutateWorkflowExposureRequest",
+      "response": "WorkflowExposureProfile"
+    },
+    {
+      "name": "unpinWorkflowExposure",
+      "method": "POST",
+      "path": "/v1/workflows/lifecycle/exposure/unpin-definition",
+      "request": "MutateWorkflowExposureRequest",
+      "response": "WorkflowExposureProfile"
     }
   ],
   "x-hadron-schema-version": "1",

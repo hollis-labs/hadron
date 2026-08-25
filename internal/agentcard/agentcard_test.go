@@ -41,6 +41,9 @@ func TestBuilderUsesExactPublishedContractsAndDefensiveCopies(t *testing.T) {
 	if card.Skills[0].Provenance.Authority != "registry.test" || card.Skills[0].InputSchema["required"] == nil || card.Skills[0].OutputSchema["required"] == nil || card.Skills[0].Effects[0] != graph.EffectRead {
 		t.Fatalf("exact contract = %#v", card.Skills[0])
 	}
+	if card.Skills[0].Evidence.ContractTestDigest != source.descriptors[0].Evidence.ContractTestDigest || !card.Skills[0].Evidence.TestsPassed {
+		t.Fatalf("qualification evidence = %#v", card.Skills[0].Evidence)
+	}
 	card.Skills[0].Tags[0] = "mutated"
 	card.Skills[0].InputSchema["type"] = "array"
 	if source.descriptors[0].Tags[0] != "reports" || source.descriptors[0].InputSchema["type"] != "object" {
@@ -77,6 +80,7 @@ func publishedDescriptor(name, version, digest string) appworkflow.WorkflowExpos
 		Description: "Generate a report.", Tags: []string{"reports"},
 		Definition:   graph.DefinitionRef{Kind: "registry", ID: name, Version: version, Digest: digest},
 		Provenance:   appworkflow.WorkflowExposureProvenance{Authority: "registry.test", Origin: "publisher", Revision: version, Digest: digest, TrustClass: "signed"},
+		Evidence:     appworkflow.WorkflowQualificationEvidence{PlanDigest: values.SHA256Digest([]byte("plan:" + digest)), ContractSuiteDigest: values.SHA256Digest([]byte("suite:" + digest)), ContractTestDigest: values.SHA256Digest([]byte("test:" + digest)), TestsPassed: true},
 		Effects:      graph.EffectSet{graph.EffectRead},
 		InputSchema:  graph.Schema{"type": "object", "additionalProperties": false, "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}},
 		OutputSchema: graph.Schema{"type": "object", "additionalProperties": false, "properties": map[string]any{"report": map[string]any{"type": "string"}}, "required": []string{"report"}},

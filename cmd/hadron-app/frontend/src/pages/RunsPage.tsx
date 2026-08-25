@@ -63,7 +63,7 @@ export function RunsPage() {
 
           <div className="flex items-start gap-2 border border-amber-500/25 bg-amber-500/[0.05] p-3 text-xs leading-relaxed text-amber-100/75">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
-            <span>Registry browsing and exposure-profile discovery remain unavailable until their shared daemon APIs land. No private file binding or alternate workflow model is used here.</span>
+            <span>Registry browsing and exposure-profile inspection now use the shared workflow lifecycle API. Open Workflow Registry to inspect exact versions and qualification evidence.</span>
           </div>
 
           {daemon.demoMode && (

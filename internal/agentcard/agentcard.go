@@ -40,15 +40,16 @@ type Capabilities struct {
 // Skill carries the exact published registry identity and canonical workflow
 // contract. Raw source locators and arbitrary provenance metadata are omitted.
 type Skill struct {
-	ID           string                                 `json:"id"`
-	Name         string                                 `json:"name"`
-	Description  string                                 `json:"description"`
-	Tags         []string                               `json:"tags"`
-	Definition   graph.DefinitionRef                    `json:"definition"`
-	Provenance   appworkflow.WorkflowExposureProvenance `json:"provenance"`
-	Effects      graph.EffectSet                        `json:"effects"`
-	InputSchema  graph.Schema                           `json:"inputSchema"`
-	OutputSchema graph.Schema                           `json:"outputSchema"`
+	ID           string                                    `json:"id"`
+	Name         string                                    `json:"name"`
+	Description  string                                    `json:"description"`
+	Tags         []string                                  `json:"tags"`
+	Definition   graph.DefinitionRef                       `json:"definition"`
+	Provenance   appworkflow.WorkflowExposureProvenance    `json:"provenance"`
+	Effects      graph.EffectSet                           `json:"effects"`
+	Evidence     appworkflow.WorkflowQualificationEvidence `json:"evidence"`
+	InputSchema  graph.Schema                              `json:"inputSchema"`
+	OutputSchema graph.Schema                              `json:"outputSchema"`
 }
 
 type PublishedWorkflowSource interface {
@@ -100,7 +101,7 @@ func (b *Builder) Card(ctx context.Context, baseURL string) (*AgentCard, error) 
 			Name: descriptor.Name, Description: description,
 			Tags: append([]string(nil), descriptor.Tags...), Definition: descriptor.Definition,
 			Provenance: descriptor.Provenance, Effects: append(graph.EffectSet(nil), descriptor.Effects...),
-			InputSchema: input, OutputSchema: output,
+			Evidence: descriptor.Evidence, InputSchema: input, OutputSchema: output,
 		}
 	}
 	card := &AgentCard{

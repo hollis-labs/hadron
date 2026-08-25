@@ -224,13 +224,15 @@ func TestWorkflowJSONParsingRejectsAmbiguityAndDuplicateData(t *testing.T) {
 }
 
 func TestWorkflowCommandImportBoundary(t *testing.T) {
-	source, err := os.ReadFile("workflow_cmd.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, forbidden := range []string{"internal/persistence", "workflow/compile", "workflow/runtime"} {
-		if bytes.Contains(source, []byte(`"github.com/hollis-labs/hadron/`+forbidden+`"`)) {
-			t.Fatalf("workflow command imports forbidden semantic layer %s", forbidden)
+	for _, name := range []string{"workflow_cmd.go", "workflow_lifecycle_cmd.go"} {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"internal/persistence", "workflow/compile", "workflow/runtime"} {
+			if bytes.Contains(source, []byte(`"github.com/hollis-labs/hadron/`+forbidden+`"`)) {
+				t.Fatalf("%s imports forbidden semantic layer %s", name, forbidden)
+			}
 		}
 	}
 }

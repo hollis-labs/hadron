@@ -3,13 +3,16 @@ import { getDemoWorkflowDiagnostic } from '../demo/workflowData';
 import { HadronWorkflowClient } from './generated/workflow';
 import { apiFetch } from './http';
 import type {
+  WorkflowCatalogSearchResult,
   WorkflowDefinitionRef,
+  WorkflowExposureProfile,
   WorkflowGraphDiagnostic,
   WorkflowRerunResult,
   WorkflowResumeRequest,
   WorkflowResumeResult,
   WorkflowStartResult,
   WorkflowValidateResult,
+  WorkflowVersionDetail,
 } from './types';
 
 const browserWorkflowIdentity = { source_authority: 'http' } as const;
@@ -77,6 +80,32 @@ export async function rerunWorkflowRun(sourceRunId: string, fromNodeId: string, 
     run_id: runId,
     from_node_id: fromNodeId,
     idempotency_key: idempotencyKey,
+    identity: browserWorkflowIdentity,
+  });
+}
+
+export async function searchWorkflowCatalog(
+  query: string,
+  namespace = '',
+  limit = 20,
+): Promise<WorkflowCatalogSearchResult> {
+  return workflowClient.searchWorkflowCatalog({
+    query,
+    namespace,
+    limit,
+    identity: browserWorkflowIdentity,
+  });
+}
+
+export async function inspectWorkflowVersion(
+  definition: WorkflowDefinitionRef,
+): Promise<WorkflowVersionDetail> {
+  return workflowClient.inspectWorkflowVersion({ definition, identity: browserWorkflowIdentity });
+}
+
+export async function inspectWorkflowExposure(profileId: string): Promise<WorkflowExposureProfile> {
+  return workflowClient.inspectWorkflowExposure({
+    profile_id: profileId,
     identity: browserWorkflowIdentity,
   });
 }

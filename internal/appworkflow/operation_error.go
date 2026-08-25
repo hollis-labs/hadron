@@ -3,6 +3,8 @@ package appworkflow
 import (
 	"errors"
 
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
 	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
 )
@@ -30,10 +32,16 @@ func SafeWorkflowOperationError(err error, result *StartRunResult) WorkflowOpera
 	if errors.Is(err, ErrWorkflowInvalidRequest) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeInvalidRequest}
 	}
+	if errors.Is(err, ErrInvalidAgentAuthoring) || errors.Is(err, ErrInvalidContractService) || errors.Is(err, ErrContractTestFailed) || errors.Is(err, hadronregistry.ErrInvalidWorkflow) || errors.Is(err, hoststate.ErrInvalidRecord) {
+		return WorkflowOperationError{Code: WorkflowErrorCodeInvalidRequest}
+	}
+	if errors.Is(err, ErrHostNotReady) || errors.Is(err, ErrInvalidHost) {
+		return WorkflowOperationError{Code: WorkflowErrorCodeUnavailable}
+	}
 	if errors.Is(err, ErrWorkflowHidden) || errors.Is(err, ErrDefinitionUnauthorized) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeNotFound}
 	}
-	if errors.Is(err, ErrPolicyDenied) {
+	if errors.Is(err, ErrPolicyDenied) || errors.Is(err, ErrNamespaceUnauthorized) {
 		return WorkflowOperationError{Code: WorkflowErrorCodePolicyDenied}
 	}
 	if errors.Is(err, ErrConfirmationRequired) {
@@ -42,7 +50,10 @@ func SafeWorkflowOperationError(err error, result *StartRunResult) WorkflowOpera
 	if errors.Is(err, workflowruntime.ErrNotFound) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeNotFound}
 	}
-	if errors.Is(err, workflowruntime.ErrIdempotencyConflict) {
+	if errors.Is(err, hadronregistry.ErrWorkflowNotFound) {
+		return WorkflowOperationError{Code: WorkflowErrorCodeNotFound}
+	}
+	if errors.Is(err, workflowruntime.ErrIdempotencyConflict) || errors.Is(err, hadronregistry.ErrWorkflowConflict) || errors.Is(err, hoststate.ErrConflict) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeIdempotencyConflict}
 	}
 	return WorkflowOperationError{Code: WorkflowErrorCodeInternal}

@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/hadron/workflow/authoring"
 	"github.com/hollis-labs/hadron/workflow/diagnostic"
@@ -47,6 +48,24 @@ func Generate() ([]byte, error) {
 		"CancelWorkflowRunResult":              reflect.TypeFor[appworkflow.CancelWorkflowRunResult](),
 		"ExplainWorkflowRequest":               reflect.TypeFor[appworkflow.ExplainWorkflowRequest](),
 		"InspectWorkflowRunRequest":            reflect.TypeFor[appworkflow.InspectWorkflowRunRequest](),
+		"SearchWorkflowCatalogRequest":         reflect.TypeFor[appworkflow.SearchWorkflowCatalogRequest](),
+		"WorkflowCatalogSearchResult":          reflect.TypeFor[appworkflow.WorkflowCatalogSearchResult](),
+		"InspectWorkflowVersionRequest":        reflect.TypeFor[appworkflow.InspectWorkflowVersionRequest](),
+		"WorkflowVersionDetail":                reflect.TypeFor[appworkflow.WorkflowVersionDetail](),
+		"ValidateWorkflowDraftRequest":         reflect.TypeFor[appworkflow.ValidateWorkflowDraftRequest](),
+		"WorkflowDraftValidationResult":        reflect.TypeFor[appworkflow.WorkflowDraftValidationResult](),
+		"GenerateWorkflowContractRequest":      reflect.TypeFor[appworkflow.GenerateWorkflowContractRequest](),
+		"WorkflowContractScaffoldResult":       reflect.TypeFor[appworkflow.WorkflowContractScaffoldResult](),
+		"TestWorkflowDraftRequest":             reflect.TypeFor[appworkflow.TestWorkflowDraftRequest](),
+		"WorkflowContractTestResult":           reflect.TypeFor[appworkflow.WorkflowContractTestResult](),
+		"RegisterWorkflowDraftRequest":         reflect.TypeFor[appworkflow.RegisterWorkflowDraftRequest](),
+		"WorkflowRegistrationResult":           reflect.TypeFor[appworkflow.WorkflowRegistrationResult](),
+		"PackageWorkflowVersionRequest":        reflect.TypeFor[appworkflow.PackageWorkflowVersionRequest](),
+		"WorkflowPackageResult":                reflect.TypeFor[appworkflow.WorkflowPackageResult](),
+		"MutateWorkflowVersionRequest":         reflect.TypeFor[appworkflow.MutateWorkflowVersionRequest](),
+		"InspectWorkflowExposureRequest":       reflect.TypeFor[appworkflow.InspectWorkflowExposureRequest](),
+		"MutateWorkflowExposureRequest":        reflect.TypeFor[appworkflow.MutateWorkflowExposureRequest](),
+		"WorkflowExposureProfile":              reflect.TypeFor[hoststate.ExposureProfileSnapshot](),
 		"RerunWorkflowRequest":                 reflect.TypeFor[appworkflow.RerunWorkflowRequest](),
 		"ResumeWorkflowRunRequest":             reflect.TypeFor[appworkflow.ResumeWorkflowRunRequest](),
 		"RunWorkflowRequest":                   reflect.TypeFor[appworkflow.RunWorkflowRequest](),
@@ -110,6 +129,20 @@ func Generate() ([]byte, error) {
 		{Name: "cancelWorkflowRun", Method: "POST", Path: "/v1/workflows/runs/{run_id}/cancel", PathField: "run_id", Request: "CancelWorkflowRunRequest", Response: "CancelWorkflowRunResult", IdempotencyKey: "idempotency_key"},
 		{Name: "resumeWorkflowRun", Method: "POST", Path: "/v1/workflows/runs/{run_id}/resume", PathField: "run_id", Request: "ResumeWorkflowRunRequest", Response: "WorkflowResumeResult", IdempotencyKey: "idempotency_key"},
 		{Name: "rerunWorkflow", Method: "POST", Path: "/v1/workflows/runs/{source_run_id}/rerun", PathField: "source_run_id", Request: "RerunWorkflowRequest", Response: "WorkflowRerunResult", IdempotencyKey: "idempotency_key"},
+		{Name: "searchWorkflowCatalog", Method: "POST", Path: "/v1/workflows/lifecycle/catalog/search", Request: "SearchWorkflowCatalogRequest", Response: "WorkflowCatalogSearchResult"},
+		{Name: "inspectWorkflowVersion", Method: "POST", Path: "/v1/workflows/lifecycle/catalog/inspect", Request: "InspectWorkflowVersionRequest", Response: "WorkflowVersionDetail"},
+		{Name: "validateWorkflowDraft", Method: "POST", Path: "/v1/workflows/lifecycle/author/validate", Request: "ValidateWorkflowDraftRequest", Response: "WorkflowDraftValidationResult"},
+		{Name: "generateWorkflowContract", Method: "POST", Path: "/v1/workflows/lifecycle/author/scaffold", Request: "GenerateWorkflowContractRequest", Response: "WorkflowContractScaffoldResult"},
+		{Name: "testWorkflowDraft", Method: "POST", Path: "/v1/workflows/lifecycle/author/test", Request: "TestWorkflowDraftRequest", Response: "WorkflowContractTestResult"},
+		{Name: "registerWorkflowDraft", Method: "POST", Path: "/v1/workflows/lifecycle/author/register", Request: "RegisterWorkflowDraftRequest", Response: "WorkflowRegistrationResult"},
+		{Name: "packageWorkflowVersion", Method: "POST", Path: "/v1/workflows/lifecycle/registry/package", Request: "PackageWorkflowVersionRequest", Response: "WorkflowPackageResult"},
+		{Name: "publishWorkflowVersion", Method: "POST", Path: "/v1/workflows/lifecycle/registry/publish", Request: "MutateWorkflowVersionRequest", Response: "WorkflowVersionDetail"},
+		{Name: "pinRegistryVersion", Method: "POST", Path: "/v1/workflows/lifecycle/registry/pin-version", Request: "MutateWorkflowVersionRequest", Response: "WorkflowVersionDetail"},
+		{Name: "unpinRegistryVersion", Method: "POST", Path: "/v1/workflows/lifecycle/registry/unpin-version", Request: "MutateWorkflowVersionRequest", Response: "WorkflowVersionDetail"},
+		{Name: "clearWorkflowCurrentExact", Method: "POST", Path: "/v1/workflows/lifecycle/registry/clear-current", Request: "MutateWorkflowVersionRequest", Response: "WorkflowVersionDetail"},
+		{Name: "inspectWorkflowExposure", Method: "POST", Path: "/v1/workflows/lifecycle/exposure/inspect", Request: "InspectWorkflowExposureRequest", Response: "WorkflowExposureProfile"},
+		{Name: "pinWorkflowExposure", Method: "POST", Path: "/v1/workflows/lifecycle/exposure/pin-definition", Request: "MutateWorkflowExposureRequest", Response: "WorkflowExposureProfile"},
+		{Name: "unpinWorkflowExposure", Method: "POST", Path: "/v1/workflows/lifecycle/exposure/unpin-definition", Request: "MutateWorkflowExposureRequest", Response: "WorkflowExposureProfile"},
 	}
 	document := map[string]any{
 		"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": ID,

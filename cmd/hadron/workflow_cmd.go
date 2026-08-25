@@ -37,15 +37,17 @@ const (
 )
 
 type workflowCommandDependencies struct {
-	service appworkflow.WorkflowOperations
-	now     func() time.Time
-	random  func([]byte) error
+	service   appworkflow.WorkflowOperations
+	lifecycle appworkflow.WorkflowLifecycleOperations
+	now       func() time.Time
+	random    func([]byte) error
 }
 
 func buildWorkflowCmd() *cobra.Command {
 	return buildWorkflowCmdWithDependencies(workflowCommandDependencies{
-		service: workflowDaemonClient{baseURL: func() string { return globalAddr }, client: httpClient},
-		now:     func() time.Time { return time.Now().UTC() },
+		service:   workflowDaemonClient{baseURL: func() string { return globalAddr }, client: httpClient},
+		lifecycle: workflowDaemonClient{baseURL: func() string { return globalAddr }, client: httpClient},
+		now:       func() time.Time { return time.Now().UTC() },
 		random: func(buffer []byte) error {
 			_, err := rand.Read(buffer)
 			return err
@@ -60,6 +62,8 @@ func buildWorkflowCmdWithDependencies(dependencies workflowCommandDependencies) 
 		buildWorkflowValidateCmd(dependencies), buildWorkflowExplainCmd(dependencies), buildWorkflowRunCmd(dependencies),
 		buildWorkflowInspectCmd(dependencies), buildWorkflowCancelCmd(dependencies), buildWorkflowResumeCmd(dependencies),
 		buildWorkflowRerunCmd(dependencies),
+		buildWorkflowCatalogCmd(dependencies), buildWorkflowAuthorCmd(dependencies),
+		buildWorkflowRegistryLifecycleCmd(dependencies), buildWorkflowExposureCmd(dependencies),
 	)
 	return command
 }
@@ -1004,4 +1008,62 @@ func (client workflowDaemonClient) RerunWorkflow(ctx context.Context, request ap
 	return
 }
 
+func (client workflowDaemonClient) SearchWorkflowCatalog(ctx context.Context, request appworkflow.SearchWorkflowCatalogRequest) (result appworkflow.WorkflowCatalogSearchResult, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/catalog/search", request, &result)
+	return
+}
+func (client workflowDaemonClient) InspectWorkflowVersion(ctx context.Context, request appworkflow.InspectWorkflowVersionRequest) (result appworkflow.WorkflowVersionDetail, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/catalog/inspect", request, &result)
+	return
+}
+func (client workflowDaemonClient) ValidateWorkflowDraft(ctx context.Context, request appworkflow.ValidateWorkflowDraftRequest) (result appworkflow.WorkflowDraftValidationResult, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/author/validate", request, &result)
+	return
+}
+func (client workflowDaemonClient) GenerateWorkflowContract(ctx context.Context, request appworkflow.GenerateWorkflowContractRequest) (result appworkflow.WorkflowContractScaffoldResult, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/author/scaffold", request, &result)
+	return
+}
+func (client workflowDaemonClient) TestWorkflowDraft(ctx context.Context, request appworkflow.TestWorkflowDraftRequest) (result appworkflow.WorkflowContractTestResult, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/author/test", request, &result)
+	return
+}
+func (client workflowDaemonClient) RegisterWorkflowDraft(ctx context.Context, request appworkflow.RegisterWorkflowDraftRequest) (result appworkflow.WorkflowRegistrationResult, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/author/register", request, &result)
+	return
+}
+func (client workflowDaemonClient) PackageWorkflowVersion(ctx context.Context, request appworkflow.PackageWorkflowVersionRequest) (result appworkflow.WorkflowPackageResult, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/registry/package", request, &result)
+	return
+}
+func (client workflowDaemonClient) PublishWorkflowVersion(ctx context.Context, request appworkflow.MutateWorkflowVersionRequest) (result appworkflow.WorkflowVersionDetail, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/registry/publish", request, &result)
+	return
+}
+func (client workflowDaemonClient) PinRegistryVersion(ctx context.Context, request appworkflow.MutateWorkflowVersionRequest) (result appworkflow.WorkflowVersionDetail, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/registry/pin-version", request, &result)
+	return
+}
+func (client workflowDaemonClient) UnpinRegistryVersion(ctx context.Context, request appworkflow.MutateWorkflowVersionRequest) (result appworkflow.WorkflowVersionDetail, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/registry/unpin-version", request, &result)
+	return
+}
+func (client workflowDaemonClient) ClearWorkflowCurrentExact(ctx context.Context, request appworkflow.MutateWorkflowVersionRequest) (result appworkflow.WorkflowVersionDetail, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/registry/clear-current", request, &result)
+	return
+}
+func (client workflowDaemonClient) InspectWorkflowExposure(ctx context.Context, request appworkflow.InspectWorkflowExposureRequest) (result hoststate.ExposureProfileSnapshot, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/exposure/inspect", request, &result)
+	return
+}
+func (client workflowDaemonClient) PinWorkflowExposure(ctx context.Context, request appworkflow.MutateWorkflowExposureRequest) (result hoststate.ExposureProfileSnapshot, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/exposure/pin-definition", request, &result)
+	return
+}
+func (client workflowDaemonClient) UnpinWorkflowExposure(ctx context.Context, request appworkflow.MutateWorkflowExposureRequest) (result hoststate.ExposureProfileSnapshot, err error) {
+	err = client.post(ctx, "/v1/workflows/lifecycle/exposure/unpin-definition", request, &result)
+	return
+}
+
 var _ appworkflow.WorkflowOperations = workflowDaemonClient{}
+var _ appworkflow.WorkflowLifecycleOperations = workflowDaemonClient{}

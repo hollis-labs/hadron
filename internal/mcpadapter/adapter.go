@@ -142,18 +142,19 @@ func messageRecordEnvelope(rec persistence.MessageRecord) (map[string]any, error
 
 // Adapter exposes Hadron read/query surfaces as MCP tools over stdio.
 type Adapter struct {
-	store         Store
-	runner        Runner
-	sched         SchedulerControl
-	pipeline      PipelineRunner
-	registry      *registry.Registry
-	token         string
-	scopes        map[string]struct{}
-	blueprintDir  string
-	serverVersion string
-	sessionID     string // unique ID for this MCP session, used for trigger ownership
-	workflowNonce string // restart-unique entropy for durable workflow invocation identities
-	workflow      *workflowSurface
+	store             Store
+	runner            Runner
+	sched             SchedulerControl
+	pipeline          PipelineRunner
+	registry          *registry.Registry
+	token             string
+	scopes            map[string]struct{}
+	blueprintDir      string
+	serverVersion     string
+	sessionID         string // unique ID for this MCP session, used for trigger ownership
+	workflowNonce     string // restart-unique entropy for durable workflow invocation identities
+	workflow          *workflowSurface
+	workflowLifecycle WorkflowLifecycleOperations
 }
 
 func New(store Store, runner Runner, sched SchedulerControl, pipeline PipelineRunner, token string, scopes []string, opts ...Option) *Adapter {
@@ -240,7 +241,19 @@ func WithServerVersion(version string) Option {
 // continues to route through transport-neutral appworkflow contracts.
 func WithWorkflowServices(exposure WorkflowExposureOperations, operations WorkflowOperations, reads WorkflowReadOperations, signals WorkflowSignalOperations) Option {
 	return func(a *Adapter) {
-		a.workflow = newWorkflowSurface(a, exposure, operations, reads, signals)
+		a.workflow = newWorkflowSurface(a, exposure, operations, reads, signals, a.workflowLifecycle)
+	}
+}
+
+// WithWorkflowLifecycle installs the shared authoring/catalog lifecycle. It is
+// independent of the run service option so option ordering cannot alter the
+// resulting MCP authority.
+func WithWorkflowLifecycle(lifecycle WorkflowLifecycleOperations) Option {
+	return func(a *Adapter) {
+		a.workflowLifecycle = lifecycle
+		if a.workflow != nil {
+			a.workflow.lifecycle = lifecycle
+		}
 	}
 }
 

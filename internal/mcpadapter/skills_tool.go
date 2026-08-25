@@ -18,14 +18,21 @@ var errHadronSkillNotFound = errors.New("skill not found")
 var hadronSkillBodies = map[string]string{
 	"start-here": `# Hadron MCP Start Here
 
-Hadron is an agent-first blueprint runner. The best MCP flow is:
-1. Use ` + "`hadron_skills`" + ` for orientation when the surface is unfamiliar.
-2. Use ` + "`hadron_blueprint_broker`" + ` or ` + "`hadron_blueprint_discover`" + ` to find the right blueprint.
-3. Use ` + "`hadron_blueprint_schema`" + ` to inspect required inputs before enqueueing.
-4. Use ` + "`hadron_run_enqueue`" + ` to start work.
-5. Use ` + "`hadron_run_operations`" + ` for structured diagnostics and ` + "`hadron_run_events`" + ` for the raw audit trail.
+Hadron is an agent-first graph-native workflow host. The preferred MCP flow is:
+1. Use ` + "`hadron_workflow_catalog_search`" + ` for ranked qualified versions and an explicit next authoring step.
+2. When no fit exists, validate a bounded draft, generate its scaffold, and run deterministic contract tests before registration.
+3. Qualify and publish one exact digest, then profile-pin it without conflating registry current, registry qualification pin, or exposure pin.
+4. Use ` + "`hadron_workflows_search`" + ` for the current profile's discoverable set and ` + "`hadron_workflows_load`" + ` to mount an exact generated tool.
+5. Invoke the generated tool and follow its asynchronous durable run through typed inspect, events, waits, and values operations.
 
-Prefer discovery and schema tools before guessing blueprint paths or inputs.`,
+Never guess mutable aliases, source paths, effects, credentials, or schemas when an exact qualified descriptor is available.`,
+	"workflow-lifecycle": `# Workflow Lifecycle
+
+` + "`hadron_workflow_catalog_search`" + ` ranks authorized catalog records and returns either ` + "`inspect_exact`" + ` or ` + "`draft_validate`" + ` as the next step.
+
+For a new workflow, use the author validate, scaffold, test, and register tools in order. A test call never registers. Registration may move the separate current alias only when ` + "`make_current`" + ` is explicitly supplied.
+
+Registry version pinning qualifies one exact version for publication. Exposure pinning is a separate profile-generation CAS that controls direct tool visibility. Use the exact name, version, and digest throughout.`,
 	"blueprint-discovery": `# Blueprint Discovery
 
 Use ` + "`hadron_blueprint_broker`" + ` when you want ranked blueprint recommendations with explicit reasons and next steps.
@@ -57,6 +64,7 @@ Prefer recipient and thread based reads over id-only polling when the workflow a
 func hadronSkillIndex() []hadronSkillDoc {
 	return []hadronSkillDoc{
 		{Name: "start-here", Description: "Orientation for the Hadron MCP surface and recommended tool flow."},
+		{Name: "workflow-lifecycle", Description: "How to discover, author, qualify, publish, and expose graph-native workflows."},
 		{Name: "blueprint-discovery", Description: "How agents should discover blueprints and derive input schemas."},
 		{Name: "run-inspection", Description: "How to inspect run status, structured operation diagnostics, and raw events."},
 		{Name: "message-workflows", Description: "How to use Hadron's local message tools for agent workflows."},

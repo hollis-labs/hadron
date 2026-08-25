@@ -9,6 +9,7 @@ import { Spinner } from './components/ui/Spinner';
 
 const PAGE_TITLES: Record<NavPage, string> = {
   dashboard: 'Operations',
+  workflowCatalog: 'Workflow Registry',
   blueprints: 'Blueprint Browser',
   blueprintDetail: 'Blueprint Detail',
   blueprintWizard: 'Blueprint Wizard',
@@ -24,6 +25,7 @@ const PAGE_TITLES: Record<NavPage, string> = {
 };
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const WorkflowCatalogPage = lazy(() => import('./pages/WorkflowCatalogPage').then(m => ({ default: m.WorkflowCatalogPage })));
 const BlueprintsPage = lazy(() => import('./pages/BlueprintsPage').then(m => ({ default: m.BlueprintsPage })));
 const BlueprintDetailPage = lazy(() => import('./pages/BlueprintDetailPage').then(m => ({ default: m.BlueprintDetailPage })));
 const BlueprintWizardPage = lazy(() => import('./pages/BlueprintWizardPage').then(m => ({ default: m.BlueprintWizardPage })));
@@ -89,6 +91,7 @@ function AppShell() {
         <main className="content">
           <Suspense fallback={<PageFallback />}>
             {nav.page === 'dashboard' && <DashboardPage />}
+            {nav.page === 'workflowCatalog' && <WorkflowCatalogPage />}
             {nav.page === 'blueprints' && <BlueprintsPage />}
             {nav.page === 'blueprintDetail' && nav.selectedBlueprintPath && <BlueprintDetailPage />}
             {nav.page === 'blueprintWizard' && <BlueprintWizardPage />}

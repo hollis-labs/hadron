@@ -3,12 +3,15 @@ import test from 'node:test';
 
 import { setAPIBaseURL } from './http';
 import {
-  explainWorkflow,
-  inspectWorkflowRun,
   cancelWorkflowRun,
+  explainWorkflow,
+  inspectWorkflowExposure,
+  inspectWorkflowRun,
+  inspectWorkflowVersion,
   rerunWorkflowRun,
   resumeWorkflowWait,
   runWorkflow,
+  searchWorkflowCatalog,
   validateWorkflow,
 } from './workflows';
 
@@ -46,6 +49,37 @@ test('workflow commands use the shared same-origin HTTP surface', async () => {
   }
   assert.equal(new Headers(calls[1].init?.headers).get('Idempotency-Key'), 'explain-1');
   assert.equal(new Headers(calls[2].init?.headers).get('Idempotency-Key'), 'run-1');
+});
+
+test('workflow lifecycle views use generated shared contracts', async () => {
+  setAPIBaseURL('');
+  const calls = captureFetch({ matches: [], next_step: 'draft_validate' });
+  const definition = {
+    kind: 'registry' as const,
+    id: 'team/release',
+    version: 'v1',
+    digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  };
+
+  await searchWorkflowCatalog('release', 'team', 12);
+  await inspectWorkflowVersion(definition);
+  await inspectWorkflowExposure('agents');
+
+  assert.deepEqual(calls.map(call => call.url), [
+    '/v1/workflows/lifecycle/catalog/search',
+    '/v1/workflows/lifecycle/catalog/inspect',
+    '/v1/workflows/lifecycle/exposure/inspect',
+  ]);
+  for (const call of calls) {
+    const body = JSON.parse(String(call.init?.body));
+    assert.equal(body.identity.source_authority, 'http');
+    assert.equal(call.init?.method, 'POST');
+  }
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+    query: 'release', namespace: 'team', limit: 12, identity: { source_authority: 'http' },
+  });
+  assert.deepEqual(JSON.parse(String(calls[1].init?.body)).definition, definition);
+  assert.equal(JSON.parse(String(calls[2].init?.body)).profile_id, 'agents');
 });
 
 test('workflow replay preserves an escaped opaque run ID', async () => {

@@ -258,7 +258,7 @@ func TestA2ATaskCorrelationUnresolvedInsertConflictDoesNotExposeIdempotency(t *t
 	if errors.Is(putErr, workflowruntime.ErrIdempotencyConflict) || !errors.Is(putErr, ErrHostNotReady) {
 		t.Fatalf("unresolved conflict error = %v", putErr)
 	}
-	if safe := SafeWorkflowOperationError(putErr, nil); safe.Code != WorkflowErrorCodeInternal {
+	if safe := SafeWorkflowOperationError(putErr, nil); safe.Code != WorkflowErrorCodeUnavailable {
 		t.Fatalf("safe unresolved conflict = %#v", safe)
 	}
 }

@@ -46,6 +46,7 @@ func NewServer(addr string, deps Dependencies) *Server {
 	mux.HandleFunc("/v1/workflows/explain", s.handleWorkflowExplain)
 	mux.HandleFunc("/v1/workflows/runs", s.handleWorkflowRuns)
 	mux.HandleFunc("/v1/workflows/runs/", s.handleWorkflowRunAction)
+	mux.HandleFunc("/v1/workflows/lifecycle/", s.handleWorkflowLifecycle)
 
 	// Workspaces
 	mux.HandleFunc("/v1/workspaces", s.handleWorkspaces)

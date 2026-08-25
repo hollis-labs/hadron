@@ -10,7 +10,7 @@ import (
 
 const serverInstructions = "Hadron by Hollis Labs is an agent-first blueprint automation runner. Prefer hadron_skills for orientation, hadron_blueprint_broker or hadron_blueprint_discover to choose workflows, hadron_blueprint_schema before hadron_run_enqueue, and hadron_run_operations before scraping raw run events. This server is in active public beta."
 
-const workflowServerInstructions = "Hadron exposes graph-native workflows through profile-authorized meta-tools and session-scoped generated tools. Search with hadron_workflows_search, mount exact schemas with hadron_workflows_load, and inspect runs through the typed workflow tools. Hidden workflows and secret values are never returned."
+const workflowServerInstructions = "Hadron exposes qualified graph-native workflows through profile-authorized meta-tools and session-scoped generated tools. Use hadron_workflow_catalog_search for ranked catalog recommendations and authoring next steps; use hadron_workflows_search only for the current session's exposure discovery. Validate, scaffold, contract-test, register, qualify, publish, and profile-pin exact versions before mounting with hadron_workflows_load. Hidden workflows, raw source, credentials, and secret values are never returned."
 
 type toolBehavior struct {
 	readOnly    bool
