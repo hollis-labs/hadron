@@ -460,10 +460,16 @@ func TestDefinitionResolverCapturesPlanSourceAndCompileSnapshotInOneResolution(t
 		t.Fatal(err)
 	}
 	resolver := newTestDefinitionResolverWithKinds(t, root, nil, DefinitionAuthorizerFunc(allowDefinitions), "noop", "alternative")
-	requested := graph.DefinitionRef{Kind: DefinitionKindFile, ID: "snapshot", Locator: "snapshot.workflow.yaml", Version: "1.0.0"}
+	// The ordinary CLI supplies only a file locator. Durable capture must bind
+	// the authored ID/version from the validated exact bytes without weakening
+	// any host-resolved source identity fields.
+	requested := graph.DefinitionRef{Kind: DefinitionKindFile, Locator: path}
 	initial, err := resolver.ResolvePlanSnapshot(t.Context(), requested)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if initial.Source == nil || !reflect.DeepEqual(initial.Source.Definition, initial.Plan.Definition) {
+		t.Fatalf("snapshot source definition = %#v, want plan definition %#v", initial.Source, initial.Plan.Definition)
 	}
 	if initial.Source == nil || !bytes.Equal(initial.Source.Content, first) || initial.Source.Digest != values.SHA256Digest(first) || !initial.Compile.Available || initial.Compile.SemanticRevision != "definition-tests-v1" || initial.Digest == initial.Plan.Digest {
 		t.Fatalf("resolved snapshot = %#v", initial)

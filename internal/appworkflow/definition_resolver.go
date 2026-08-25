@@ -321,6 +321,17 @@ func (r *DefinitionResolver) ResolvePlanSnapshot(ctx context.Context, requested 
 	if err != nil {
 		return hoststate.PlanSnapshot{}, err
 	}
+	// File and package locators may be requested without repeating the
+	// workflow's authored ID or version. Compilation validates any caller pins
+	// and supplies those two semantic fields from the exact selected bytes.
+	// Fill only missing fields here; authority, locator, digest, and provenance
+	// remain the host-resolved source identity and must still compare exactly.
+	if source.Definition.ID == "" {
+		source.Definition.ID = plan.Definition.ID
+	}
+	if source.Definition.Version == "" {
+		source.Definition.Version = plan.Definition.Version
+	}
 	descriptor, err := cloneCompileDescriptor(r.compileDescriptor)
 	if err != nil {
 		return hoststate.PlanSnapshot{}, err
