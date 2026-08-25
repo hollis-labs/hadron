@@ -76,12 +76,17 @@ references remain masked. Private values require explicit authorized display;
 
 ## 4. Use a registry definition
 
-File references are useful for local authoring. Published operation should use
-an immutable registry version:
+File references are useful for local authoring. `workflow validate`, `explain`,
+and `run` accept one registry selector, either a version or a digest:
 
 ```text
-namespace/name@version#sha256:<digest>
+namespace/name@version
+namespace/name@sha256:<digest>
 ```
+
+They do not accept the combined lifecycle grammar. Catalog inspection and
+registry/exposure lifecycle mutations bind both version and digest using
+`namespace/name@version#sha256:<digest>`.
 
 Search and inspect authorized records with:
 

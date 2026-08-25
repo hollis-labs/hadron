@@ -21,15 +21,24 @@ cannot override authenticated context.
 ## Definition references
 
 A command accepting `<file|registry-ref>` takes either a supplied file path or
-an exact registry reference. Lifecycle commands always require the exact form:
+one operational registry selector:
+
+```text
+namespace/name@version
+namespace/name@sha256:<hex-digest>
+```
+
+These forms are used by `validate`, `explain`, and `run`; they do not accept a
+combined version-plus-digest reference. Catalog inspection and lifecycle
+registry/exposure mutations instead require the fully qualified exact form:
 
 ```text
 namespace/name@version#sha256:<hex-digest>
 ```
 
-The parser keeps the full namespace/name, version, and digest. It does not
-derive semantic identity from a filename or accept an ambiguous current alias
-where an exact mutation is required.
+Both parsers keep the full namespace/name and their declared selector fields.
+They do not derive semantic identity from a filename or accept an ambiguous
+current alias where an exact lifecycle mutation is required.
 
 ## Validate and explain
 

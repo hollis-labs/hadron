@@ -5,8 +5,10 @@
 A graph-native YAML document contains `workflow`, optional `on`, typed
 `inputs`, typed `outputs`, `steps`, and optional `finally`. Structural objects
 are closed: unsupported fields produce diagnostics instead of being ignored.
-Bindings use one explicit mode—`literal`, `expression`, or `interpolation`—and
-`needs` is the only dependency source. See
+Bindings use one explicit mode—`literal`, `expression`, or `interpolation`.
+`needs` is the only dependency declaration lowered directly from source; the
+production resolver subsequently infers deterministic data edges and value
+visibility from static step-output references. See
 [`workflow/compile/SOURCE.md`](../workflow/compile/SOURCE.md) for the complete
 lowering contract.
 
@@ -47,9 +49,9 @@ fake-adapter conformance fixtures.
 ## Validate, explain, and run
 
 ```sh
-hadron workflow validate <file|exact-registry-ref> --json
-hadron workflow explain <file|exact-registry-ref> --input-json '{}' --json
-hadron workflow run <file|exact-registry-ref> \
+hadron workflow validate <file|registry-selector> --json
+hadron workflow explain <file|registry-selector> --input-json '{}' --json
+hadron workflow run <file|registry-selector> \
   --run-id <id> --idempotency-key <key> --input-json '{}' --json
 ```
 
@@ -59,9 +61,12 @@ idempotency key bind immutable start intent; a replay converges, while changed
 definition/input/scope/target intent conflicts. Pins are immutable value refs
 included in that digest and bound before any node becomes ready.
 
-File refs retain the clean supplied path as their locator. Registry refs use
-the exact form `namespace/name@version#sha256:<digest>`; current aliases are not
-accepted for exact mutations.
+File refs retain the clean supplied path as their locator. These operational
+commands accept `namespace/name@version` or
+`namespace/name@sha256:<digest>`, but not the combined lifecycle grammar.
+Catalog inspection and registry/exposure mutations require
+`namespace/name@version#sha256:<digest>` so version and digest are bound
+together; current aliases are not accepted for exact mutations.
 
 ## Durable waits and signals
 

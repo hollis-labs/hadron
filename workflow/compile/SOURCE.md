@@ -85,9 +85,15 @@ for `interpolation`; another string is shorthand for `expression`; non-string
 YAML is shorthand for `literal`. The compiler preserves expression text and
 does not evaluate or resolve it.
 
-`needs` is the only dependency source lowered in this task. Each need produces
-both a `graph.Need` and a normalized explicit edge; expressions never infer
-hidden edges. Scalar `for_each` is an items expression, and integer
+`needs` is the only dependency declaration lowered directly by `Compile`.
+Each need produces both a `graph.Need` and a normalized explicit edge; this
+low-level source phase does not infer expression dependencies. The production
+definition resolver subsequently runs the distinct
+`compile.InferValueDependencies` pass. Static step-output references across
+expression-bearing fields add deterministic data edges and direct value
+visibility. Computed step lookups and optional, conditional, branch-selected,
+or fan-out-shaped availability remain explicitly deferred under the value-pass
+rules rather than guessed. Scalar `for_each` is an items expression, and integer
 `concurrency` sets its bounded fan-out. `retry.idempotency_key` lowers to keyed
 idempotency. The full IR-shaped forms remain available for backoff,
 idempotency, timeouts, catch, finally, switch, and call.
@@ -97,8 +103,10 @@ Every graph declaration and nested expression/binding carries its exact
 input, output, and node identities. Edge map keys use
 `compile.EdgeSourceKey(from, to, kind)`.
 
-Compilation does not evaluate expressions, resolve child definitions, infer
-dependencies, query registries, validate kinds, or run topology/policy checks.
+The low-level `Compile` phase does not evaluate expressions, resolve child
+definitions, infer value dependencies, query registries, validate kinds, or
+run topology/policy checks. Production resolution composes the later inference
+and validation phases rather than changing this source-lowering contract.
 
 ## Examples and conformance fixtures
 
