@@ -59,7 +59,7 @@ Status values are `blocked`, `eligible`, `dispatched`, `reviewing`,
 | W06-T04 | W05-T01, W06-T02 | integrated | `05a97b5` |
 | W06-T05 | W01-T04, W05-T06 | integrated | `0fbea80` |
 | W06-T06 | W06-T01, W06-T02, W06-T03, W06-T04, W06-T05 | integrated | `c714e0b`, `3e694a3`, `5124860`, `87c0e56` |
-| W06-T07 | W06-T06, W06-T08, W06-T09, W06-T10 | eligible | |
+| W06-T07 | W06-T06, W06-T08, W06-T09, W06-T10 | dispatched | |
 | W06-T08 | W05-T07, W06-T01, W06-T03, W06-T04 | integrated | `c9274ca` |
 | W06-T09 | W03-T04, W03-T07, W03-T08, W04-T02, W04-T05, W05-T01, W05-T03, W05-T07, W06-T03 | integrated | `c2a7dec`, `7a4895c` |
 | W06-T10 | W06-T02, W06-T05 | integrated | `2fdb665`, `e2ee5ee`, `225d113`, `bc3b589` |
