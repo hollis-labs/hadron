@@ -16,9 +16,9 @@ import (
 	"sync/atomic"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/hadron/workflow/diagnostic"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/diagnostic"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/values"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )

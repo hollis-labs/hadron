@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/hadron/internal/api/internal/workflowschema"
-	graphschema "github.com/hollis-labs/hadron/workflow/graph/schema"
+	graphschema "github.com/hollis-labs/go-workflow/graph/schema"
 )
 
 func TestGeneratedWorkflowSchemasAreCurrent(t *testing.T) {

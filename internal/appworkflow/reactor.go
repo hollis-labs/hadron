@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
-	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
+	"github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
 type ReactorDeliveryRequest struct {

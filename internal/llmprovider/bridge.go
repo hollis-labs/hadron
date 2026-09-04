@@ -16,8 +16,8 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	providers "github.com/hollis-labs/go-providers/provider"
 
-	workflowllm "github.com/hollis-labs/hadron/workflow/adapters/llm"
-	"github.com/hollis-labs/hadron/workflow/values"
+	workflowllm "github.com/hollis-labs/go-workflow/adapters/llm"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 var (

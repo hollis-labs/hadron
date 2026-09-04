@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	calladapter "github.com/hollis-labs/hadron/workflow/adapters/call"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
+	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 const (

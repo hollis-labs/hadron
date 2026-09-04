@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/hadron/workflow/graph"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/graph"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 var _ workflowruntime.CompensationStore = (*WorkflowStateStore)(nil)

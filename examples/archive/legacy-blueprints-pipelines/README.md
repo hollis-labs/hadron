@@ -6,4 +6,5 @@ format. Their contents and relative directory layout are retained for that
 purpose; neither these formats nor these paths are public compatibility
 commitments or preferred authoring guidance.
 
-New graph-native examples belong in [`../../workflow/`](../../workflow/).
+New graph-native examples belong in the
+[`go-workflow` repository](https://github.com/hollis-labs/go-workflow/tree/v0.1.0).

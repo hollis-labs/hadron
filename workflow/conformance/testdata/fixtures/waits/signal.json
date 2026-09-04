@@ -1,1 +1,0 @@
-{"name":"wait-signal","expect":"pass","input":{"kind":"signal","wake_source":"signal","correlation":"signal:release"}}

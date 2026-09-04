@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 )
 
 // LoadWait implements runtime.StateStore.

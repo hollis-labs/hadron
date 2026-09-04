@@ -1,9 +1,0 @@
-{
-  "name": "wait-checkpoint-gate",
-  "expect": "pass",
-  "input": {
-    "kind": "gate",
-    "wake_source": "gate",
-    "correlation": "checkpoint:release"
-  }
-}

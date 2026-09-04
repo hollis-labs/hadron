@@ -1,5 +1,0 @@
-{
-  "name": "verification-missing-evidence",
-  "expect": "fail",
-  "input": {"scenario": "missing_evidence"}
-}

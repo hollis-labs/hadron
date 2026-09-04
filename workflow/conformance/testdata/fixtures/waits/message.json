@@ -1,1 +1,0 @@
-{"name":"wait-message","expect":"pass","input":{"kind":"message","wake_source":"message","correlation":"message:order-42"}}

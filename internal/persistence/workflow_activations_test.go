@@ -13,10 +13,10 @@ import (
 
 	gosched "github.com/hollis-labs/go-scheduler"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
-	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
+	"github.com/hollis-labs/go-workflow/graph"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
 func TestWorkflowActivationRegistrationScheduleFireRecoveryAndObserver(t *testing.T) {

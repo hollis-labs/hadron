@@ -24,7 +24,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/trigger"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 )
 
 // Handler returns the underlying HTTP handler (useful for testing with httptest).

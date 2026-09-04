@@ -1,9 +1,0 @@
-workflow:
-  name: Privileged Activation
-on:
-  webhook:
-    authority: host
-    path: /hooks/privileged
-steps:
-  - name: Done
-    transform: {expression: inputs.value}

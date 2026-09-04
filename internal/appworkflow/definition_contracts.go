@@ -11,11 +11,11 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/diagnostic"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/verification"
+	"github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/diagnostic"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/verification"
 )
 
 const (

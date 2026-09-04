@@ -9,17 +9,13 @@ Bindings use one explicit mode—`literal`, `expression`, or `interpolation`.
 `needs` is the only dependency declaration lowered directly from source; the
 production resolver subsequently infers deterministic data edges and value
 visibility from static step-output references. See
-[`workflow/compile/SOURCE.md`](../workflow/compile/SOURCE.md) for the complete
+[go-workflow's source contract](https://github.com/hollis-labs/go-workflow/blob/v0.1.0/compile/SOURCE.md) for the complete
 lowering contract.
 
 The authoritative generated JSON Schema is
-[`workflow/graph/schema/workflow.schema.json`](../workflow/graph/schema/workflow.schema.json).
-It is generated from Go graph types with:
-
-```sh
-go generate ./workflow/graph
-go test ./workflow/graph/...
-```
+[published by go-workflow](https://github.com/hollis-labs/go-workflow/blob/v0.1.0/graph/schema/workflow.schema.json).
+Hadron consumes it through `github.com/hollis-labs/go-workflow/graph/schema`;
+schema generation and compatibility checks run in that module.
 
 Do not edit the schema or copy graph DTOs into a client by hand. The HTTP
 schema and TypeScript client consume the same generated graph schema.

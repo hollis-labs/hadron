@@ -4,7 +4,6 @@ go 1.26.6
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/dop251/goja v0.0.0-20260822123354-58e940e0d230
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/hollis-labs/agentkit v0.5.0
@@ -15,6 +14,7 @@ require (
 	github.com/hollis-labs/go-otel v0.1.0
 	github.com/hollis-labs/go-providers v0.23.0
 	github.com/hollis-labs/go-scheduler v0.1.1
+	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
@@ -29,6 +29,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
+	github.com/dop251/goja v0.0.0-20260822123354-58e940e0d230 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

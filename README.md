@@ -88,7 +88,8 @@ pins, lazy mounts, and the graph-native tool families.
 | [Safety](docs/safety.md) | Identity, effects, secrets, redaction, and compatibility boundaries |
 | [Workflow development](docs/workflow-development.md) | Package ownership, host composition, adapters, conformance, and release checks |
 | [Embed the workflow engine](docs/workflow-engine-adoption.md) | Public Go boundary, minimal host, storage/timers, conformance, compatibility, and extraction criteria |
-| [Generated graph schema](workflow/graph/schema/README.md) | Authoritative JSON Schema and generation command |
+| [Shared workflow library](https://github.com/hollis-labs/go-workflow/tree/v0.1.0) | Engine contracts, generated graph schema, adapters, and conformance suite |
+| [Workflow library migration](docs/workflow-library-migration.md) | Hadron's pinned dependency and extraction boundary |
 | [Architecture](docs/architecture/ARCHITECTURE.md) | Current graph-native system boundary |
 | [Beta status](docs/beta-status.md) | Implemented surface and current constraints |
 

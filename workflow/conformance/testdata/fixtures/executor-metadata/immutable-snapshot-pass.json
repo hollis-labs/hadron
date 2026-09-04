@@ -1,9 +1,0 @@
-{
-  "name": "immutable-registered-snapshot-pass",
-  "expect": "pass",
-  "input": {
-    "operation": "immutable_snapshot",
-    "name": "fixture",
-    "version": "v1"
-  }
-}

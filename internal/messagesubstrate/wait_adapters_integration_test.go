@@ -9,15 +9,15 @@ import (
 
 	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/hadron/internal/messagesubstrate"
-	gateadapter "github.com/hollis-labs/hadron/workflow/adapters/gate"
-	waitadapter "github.com/hollis-labs/hadron/workflow/adapters/wait"
-	workflowgate "github.com/hollis-labs/hadron/workflow/gate"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/runtime/inmemory"
-	"github.com/hollis-labs/hadron/workflow/stepkind"
-	"github.com/hollis-labs/hadron/workflow/values"
-	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
+	gateadapter "github.com/hollis-labs/go-workflow/adapters/gate"
+	waitadapter "github.com/hollis-labs/go-workflow/adapters/wait"
+	workflowgate "github.com/hollis-labs/go-workflow/gate"
+	"github.com/hollis-labs/go-workflow/graph"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/runtime/inmemory"
+	"github.com/hollis-labs/go-workflow/stepkind"
+	"github.com/hollis-labs/go-workflow/values"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
 func TestSleepDispatcherSuccessfulTimerContinuationEndToEnd(t *testing.T) {

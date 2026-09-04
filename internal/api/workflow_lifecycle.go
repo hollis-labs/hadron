@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/go-workflow/graph"
 )
 
 func (s *Server) handleWorkflowLifecycle(w http.ResponseWriter, r *http.Request) {

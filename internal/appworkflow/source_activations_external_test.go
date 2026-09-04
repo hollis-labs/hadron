@@ -15,18 +15,18 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	calladapter "github.com/hollis-labs/hadron/workflow/adapters/call"
-	waitadapter "github.com/hollis-labs/hadron/workflow/adapters/wait"
-	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/stepkind"
-	"github.com/hollis-labs/hadron/workflow/values"
-	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
+	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
+	waitadapter "github.com/hollis-labs/go-workflow/adapters/wait"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/stepkind"
+	"github.com/hollis-labs/go-workflow/values"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
 func TestSourceActivationsMaterializeCompiledDeclarationsAndUseCommonHostStart(t *testing.T) {
-	loaded, loadErr := workflowcompile.LoadFile("../../workflow/compile/testdata/activations.workflow.yaml")
+	loaded, loadErr := workflowcompile.LoadFile("testdata/activations.workflow.yaml")
 	if loadErr != nil || loaded.Source == nil || len(loaded.Diagnostics) != 0 {
 		t.Fatalf("LoadFile = %#v, %v", loaded, loadErr)
 	}
@@ -1181,7 +1181,7 @@ func reactorUpdateKeyForTest(reactorID, deliveryKey string, waitID runtime.WaitI
 }
 
 func TestSourceActivationMaterializationValidatesBeforeWriting(t *testing.T) {
-	loaded, _ := workflowcompile.LoadFile("../../workflow/compile/testdata/activations.workflow.yaml")
+	loaded, _ := workflowcompile.LoadFile("testdata/activations.workflow.yaml")
 	compiled := workflowcompile.Compile(loaded.Source)
 	fixture := newHostFixtureWithPlan(t, hoststate.PolicyAllow, time.Hour, nil, compiled.Plan)
 	store, _ := persistence.NewWorkflowActivationStore(fixture.store)

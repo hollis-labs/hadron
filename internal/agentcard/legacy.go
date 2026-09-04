@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/hadron/internal/blueprint"
-	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/go-workflow/graph"
 )
 
 // SkillFromBlueprint remains only for the legacy CLI/MCP blueprint discovery

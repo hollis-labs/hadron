@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"sync"
 
-	agentadapter "github.com/hollis-labs/hadron/workflow/adapters/agent"
-	"github.com/hollis-labs/hadron/workflow/values"
+	agentadapter "github.com/hollis-labs/go-workflow/adapters/agent"
+	"github.com/hollis-labs/go-workflow/values"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 

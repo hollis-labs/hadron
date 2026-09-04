@@ -1,9 +1,0 @@
-{
-  "name": "optional-lifecycle-pass",
-  "expect": "pass",
-  "input": {
-    "operation": "optional_lifecycle",
-    "name": "fixture",
-    "version": "v1"
-  }
-}

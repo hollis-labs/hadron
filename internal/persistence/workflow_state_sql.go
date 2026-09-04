@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 const workflowValueIDPrefix = "values-"

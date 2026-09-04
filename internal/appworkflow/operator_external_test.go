@@ -17,13 +17,13 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
-	calladapter "github.com/hollis-labs/hadron/workflow/adapters/call"
-	"github.com/hollis-labs/hadron/workflow/adapters/transform"
-	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/stepkind"
-	"github.com/hollis-labs/hadron/workflow/values"
-	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
+	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
+	"github.com/hollis-labs/go-workflow/adapters/transform"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/stepkind"
+	"github.com/hollis-labs/go-workflow/values"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
 type graphInspectorFunc func(context.Context, rundiagnostics.Query) (rundiagnostics.Result, error)

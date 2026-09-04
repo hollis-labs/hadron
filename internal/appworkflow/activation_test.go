@@ -5,12 +5,12 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
 )
 
 func TestMaterializeCanonicalActivationLocalsAndEvaluateBindings(t *testing.T) {
-	loaded, loadErr := workflowcompile.LoadFile("../../workflow/compile/testdata/activations.workflow.yaml")
+	loaded, loadErr := workflowcompile.LoadFile("testdata/activations.workflow.yaml")
 	if loadErr != nil || loaded.Source == nil || len(loaded.Diagnostics) != 0 {
 		t.Fatalf("LoadFile = %#v, %v", loaded, loadErr)
 	}

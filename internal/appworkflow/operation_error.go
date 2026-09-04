@@ -5,8 +5,8 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/hadron/workflow/diagnostic"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	"github.com/hollis-labs/go-workflow/diagnostic"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 )
 
 var (

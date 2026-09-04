@@ -1,5 +1,0 @@
-{
-  "name": "verification-retry-safety",
-  "expect": "pass",
-  "input": {"scenario": "retry_safety"}
-}

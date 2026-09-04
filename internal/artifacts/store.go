@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 // Store combines Hadron-local run/project storage with explicitly approved

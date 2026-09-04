@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/execution"
-	workflowmcp "github.com/hollis-labs/hadron/workflow/adapters/mcp"
+	workflowmcp "github.com/hollis-labs/go-workflow/adapters/mcp"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )

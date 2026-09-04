@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/hadron/internal/offlinebuild"
-	"github.com/hollis-labs/hadron/workflow/diagnostic"
-	"github.com/hollis-labs/hadron/workflow/offline"
+	"github.com/hollis-labs/go-workflow/diagnostic"
+	"github.com/hollis-labs/go-workflow/offline"
 	"github.com/spf13/cobra"
 )
 

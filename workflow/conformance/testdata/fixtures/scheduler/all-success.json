@@ -1,9 +1,0 @@
-{
-  "name": "readiness-all-success",
-  "expect": "pass",
-  "input": {
-    "rule": "all_success",
-    "dependencies": ["succeeded", "pending"],
-    "want": "waiting"
-  }
-}

@@ -1,1 +1,0 @@
-{"name":"wait-callback","expect":"pass","input":{"kind":"callback","wake_source":"callback","correlation":"callback:invoice-42"}}

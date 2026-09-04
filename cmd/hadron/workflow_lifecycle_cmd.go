@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/values"
 	"github.com/spf13/cobra"
 )
 

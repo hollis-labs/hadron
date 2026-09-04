@@ -1,9 +1,0 @@
-{
-  "name": "readiness-unsupported-rule",
-  "expect": "fail",
-  "input": {
-    "rule": "sometimes",
-    "dependencies": ["succeeded"],
-    "want": "ready"
-  }
-}

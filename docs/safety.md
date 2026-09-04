@@ -74,7 +74,8 @@ does not reveal secrets.
 ## Output compatibility boundary
 
 Global `::set-output` scraping is removed from graph-native execution paths.
-The retained shim exists only in the embeddable `workflow/adapters/cmd`
+The retained shim exists only in the embeddable
+`github.com/hollis-labs/go-workflow/adapters/cmd`
 executor: one explicitly selected stream may use `parse: set-output` together
 with `compatibility: true`, and validation emits a deprecation warning. It is
 not enabled by the stock daemon because `cmd@v1` is outside the frozen six-kind

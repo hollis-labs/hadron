@@ -1,9 +1,0 @@
-{
-  "name": "readiness-all-done",
-  "expect": "pass",
-  "input": {
-    "rule": "all_done",
-    "dependencies": ["failed", "skipped"],
-    "want": "ready"
-  }
-}

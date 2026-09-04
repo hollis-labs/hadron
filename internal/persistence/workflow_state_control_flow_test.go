@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 func TestWorkflowSQLiteControlFlowAtomicReplayFencingAndCorruption(t *testing.T) {

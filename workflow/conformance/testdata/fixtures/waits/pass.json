@@ -1,9 +1,0 @@
-{
-  "name": "wait-gate",
-  "expect": "pass",
-  "input": {
-    "kind": "gate",
-    "wake_source": "gate",
-    "correlation": "gate:approval"
-  }
-}

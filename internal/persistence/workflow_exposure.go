@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 )
 
 const maximumExposureListRecords = 1000

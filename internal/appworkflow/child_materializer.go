@@ -11,11 +11,11 @@ import (
 	"sort"
 	"time"
 
-	calladapter "github.com/hollis-labs/hadron/workflow/adapters/call"
-	"github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
+	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
+	"github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 var ErrInvalidChildRunMaterializer = errors.New("invalid child-run materializer")

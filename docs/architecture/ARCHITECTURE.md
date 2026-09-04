@@ -62,15 +62,15 @@ does not own workflow semantics.
 
 ## Package ownership
 
-- `workflow/graph`: graph IR and generated JSON Schema.
-- `workflow/compile`: graph source lowering and immutable execution plan.
-- `workflow/stepkind`: frozen executor contract registry.
-- `workflow/runtime`: durable run/node transitions, replay, dispatch, and
+- `github.com/hollis-labs/go-workflow/graph`: graph IR and generated JSON Schema.
+- `github.com/hollis-labs/go-workflow/compile`: graph source lowering and immutable execution plan.
+- `github.com/hollis-labs/go-workflow/stepkind`: frozen executor contract registry.
+- `github.com/hollis-labs/go-workflow/runtime`: durable run/node transitions, replay, dispatch, and
   recovery.
-- `workflow/wait`: durable waits, resume authority, timers, and signals.
-- `workflow/values`: typed values, expression binding, artifacts, visibility,
+- `github.com/hollis-labs/go-workflow/wait`: durable waits, resume authority, timers, and signals.
+- `github.com/hollis-labs/go-workflow/values`: typed values, expression binding, artifacts, visibility,
   and redaction.
-- `workflow/adapters`: independently embeddable step-kind implementations.
+- `github.com/hollis-labs/go-workflow/adapters`: independently embeddable step-kind implementations.
 - `internal/appworkflow`: authenticated workflow operations, diagnostics,
   lifecycle, registration, exposure, and activation authority.
 - `internal/persistence`: append-only SQLite migrations and workflow stores.

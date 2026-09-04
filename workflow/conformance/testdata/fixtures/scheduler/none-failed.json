@@ -1,9 +1,0 @@
-{
-  "name": "readiness-none-failed",
-  "expect": "pass",
-  "input": {
-    "rule": "none_failed",
-    "dependencies": ["succeeded", "skipped"],
-    "want": "ready"
-  }
-}

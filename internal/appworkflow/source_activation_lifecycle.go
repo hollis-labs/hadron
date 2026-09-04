@@ -8,9 +8,9 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/values"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 // SourceActivationRegistry is the immutable registry lookup required by the

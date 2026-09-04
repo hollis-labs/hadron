@@ -14,12 +14,12 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/hadron/workflow/authoring"
-	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/stepkind"
-	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/authoring"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/stepkind"
+	"github.com/hollis-labs/go-workflow/stepkind/stepkindtest"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 func TestWorkflowExposureSessionIdentitySchemasEffectsAndGeneration(t *testing.T) {

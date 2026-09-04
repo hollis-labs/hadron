@@ -1,5 +1,0 @@
-{
-  "name": "verification-deterministic-pass",
-  "expect": "pass",
-  "input": {"scenario": "deterministic_pass"}
-}

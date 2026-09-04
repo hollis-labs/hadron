@@ -1,5 +1,0 @@
-workflow:
-  name: malformed
-steps:
-  - id: broken
-    config: [unterminated

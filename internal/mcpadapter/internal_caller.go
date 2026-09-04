@@ -14,7 +14,7 @@ import (
 
 	"github.com/hollis-labs/go-otel/propagation"
 	"github.com/hollis-labs/hadron/internal/execution"
-	workflowmcp "github.com/hollis-labs/hadron/workflow/adapters/mcp"
+	workflowmcp "github.com/hollis-labs/go-workflow/adapters/mcp"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"

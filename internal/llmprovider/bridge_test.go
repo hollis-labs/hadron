@@ -16,9 +16,9 @@ import (
 	providers "github.com/hollis-labs/go-providers/provider"
 
 	"github.com/hollis-labs/hadron/internal/llmprovider"
-	workflowllm "github.com/hollis-labs/hadron/workflow/adapters/llm"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/values"
+	workflowllm "github.com/hollis-labs/go-workflow/adapters/llm"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 type fakeProvider struct {

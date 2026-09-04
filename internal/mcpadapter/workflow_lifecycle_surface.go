@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/go-workflow/graph"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 

@@ -1,9 +1,0 @@
-{
-  "name": "readiness-one-failed",
-  "expect": "pass",
-  "input": {
-    "rule": "one_failed",
-    "dependencies": ["timed_out", "running"],
-    "want": "ready"
-  }
-}

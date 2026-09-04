@@ -10,7 +10,7 @@ import (
 	"reflect"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/go-workflow/graph"
 )
 
 const MaximumAgentCardBytes = 1 << 20

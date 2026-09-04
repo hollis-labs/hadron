@@ -20,12 +20,12 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
-	"github.com/hollis-labs/hadron/workflow/adapters/transform"
-	"github.com/hollis-labs/hadron/workflow/authoring"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/stepkind"
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/adapters/transform"
+	"github.com/hollis-labs/go-workflow/authoring"
+	"github.com/hollis-labs/go-workflow/graph"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/stepkind"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 func TestWorkflowLifecycleCrossSurfaceFlywheel(t *testing.T) {

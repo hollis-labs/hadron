@@ -22,7 +22,7 @@ const graph = {
 };
 
 test('generated authoring decoder negotiates exact schemas and rejects unknown fields', () => {
-  const canonicalFixture = JSON.parse(readFileSync(new URL('../../../../../../workflow/authoring/testdata/equivalent.graph.json', import.meta.url), 'utf8'));
+  const canonicalFixture = JSON.parse(readFileSync(new URL('./testdata/equivalent.graph.json', import.meta.url), 'utf8'));
   assert.deepEqual(createGraphAuthoringEnvelope(canonicalFixture).graph, canonicalFixture);
   const envelope = createGraphAuthoringEnvelope(graph);
   assert.equal(envelope.schema_id, WORKFLOW_AUTHORING_SCHEMA.id);

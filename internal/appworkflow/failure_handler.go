@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/offline"
-	"github.com/hollis-labs/hadron/workflow/runtime"
+	"github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/offline"
+	"github.com/hollis-labs/go-workflow/runtime"
 )
 
 func (h *Host) recoverFailureHooks(ctx context.Context) error {

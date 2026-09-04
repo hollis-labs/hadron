@@ -16,14 +16,14 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/pack"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/hadron/workflow/adapters/transform"
-	"github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/stepkind"
-	"github.com/hollis-labs/hadron/workflow/stepkind/stepkindtest"
-	"github.com/hollis-labs/hadron/workflow/values"
-	"github.com/hollis-labs/hadron/workflow/verification"
+	"github.com/hollis-labs/go-workflow/adapters/transform"
+	"github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/stepkind"
+	"github.com/hollis-labs/go-workflow/stepkind/stepkindtest"
+	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/go-workflow/verification"
 )
 
 type contractReversibleFixtureKind struct{ *stepkindtest.Kind }

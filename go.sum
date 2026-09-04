@@ -68,6 +68,8 @@ github.com/hollis-labs/go-sandbox v0.2.1 h1:0/JTCIl6S/XhRXPBRRlPR/zqQ2bNBlbR3Q2g
 github.com/hollis-labs/go-sandbox v0.2.1/go.mod h1:SY3Io7cTHnMahfN1zkQzHvVkcevXzus8mo9ZmtaaHPg=
 github.com/hollis-labs/go-scheduler v0.1.1 h1:WfHi3YKN6trdJhmo1bhqcEriagA8UG+Lb2ADBEg+LtI=
 github.com/hollis-labs/go-scheduler v0.1.1/go.mod h1:1LXp3YFPE5CPh0hwHgoBRDLoUUR6jieS+Pzg2bzXyIE=
+github.com/hollis-labs/go-workflow v0.1.0 h1:Rose0BcdHySd3RT2+HTuAzD/dELPsEREKmosg+3SySg=
+github.com/hollis-labs/go-workflow v0.1.0/go.mod h1:LfBd90u0l4/CBtIaxJPl7RLRm9JYS3XcOyYju8aNfBg=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/invopop/jsonschema v0.13.0 h1:KvpoAJWEjR3uD9Kbm2HWJmqsEaHt8lBUpd0qHcIi21E=

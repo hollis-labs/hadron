@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/hadron/workflow/authoring"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/authoring"
+	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 func TestLegacyCatalogRecordDefaultsToWorkflowSourceWithoutContentInference(t *testing.T) {

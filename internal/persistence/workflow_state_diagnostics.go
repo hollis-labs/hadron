@@ -9,7 +9,7 @@ import (
 
 	gosched "github.com/hollis-labs/go-scheduler"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	workflowruntime "github.com/hollis-labs/hadron/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 )
 
 // WorkflowActivationAttemptDiagnosticRecord is the bounded, credential-free

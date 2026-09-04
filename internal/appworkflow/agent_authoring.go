@@ -10,12 +10,12 @@ import (
 	"unicode/utf8"
 
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/hadron/workflow/authoring"
-	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/graph"
-	graphschema "github.com/hollis-labs/hadron/workflow/graph/schema"
-	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/authoring"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/graph"
+	graphschema "github.com/hollis-labs/go-workflow/graph/schema"
+	"github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 const (

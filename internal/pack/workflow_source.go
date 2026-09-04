@@ -13,7 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/hollis-labs/hadron/workflow/values"
+	"github.com/hollis-labs/go-workflow/values"
 )
 
 var ErrInvalidWorkflowArchive = errors.New("invalid graph-native workflow package")

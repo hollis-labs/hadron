@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/workflow/runtime"
-	"github.com/hollis-labs/hadron/workflow/values"
-	workflowwait "github.com/hollis-labs/hadron/workflow/wait"
+	"github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/values"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
 type QueryRunRequest struct {

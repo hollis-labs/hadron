@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/runtime"
+	"github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/runtime"
 )
 
 // RecoveryDependencySource exposes the frozen compiler dependency extractors

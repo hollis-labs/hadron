@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/workflow/graph"
+	"github.com/hollis-labs/go-workflow/graph"
 )
 
 func TestRunScopeIsLogicalOnlyAndDefensivelyCloned(t *testing.T) {

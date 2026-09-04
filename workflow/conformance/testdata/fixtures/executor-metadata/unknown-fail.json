@@ -1,9 +1,0 @@
-{
-  "name": "unknown-kind-fail",
-  "expect": "fail",
-  "input": {
-    "operation": "resolve",
-    "name": "missing",
-    "version": "v1"
-  }
-}

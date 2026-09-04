@@ -12,8 +12,8 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	workflowcompile "github.com/hollis-labs/hadron/workflow/compile"
-	"github.com/hollis-labs/hadron/workflow/runtime"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/go-workflow/runtime"
 )
 
 func TestSourceActivationLifecycleReconcilesRegistryUpdatesDisableAndRemove(t *testing.T) {
