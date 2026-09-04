@@ -222,6 +222,9 @@ func TestWorkflowHostChildStartContentionAndCancellationFence(t *testing.T) {
 	t.Cleanup(func() { _ = secondStore.Close() })
 	first, _ := NewWorkflowHostStore(firstStore)
 	second, _ := NewWorkflowHostStore(secondStore)
+	hostNow := func() time.Time { return workflowTestTime().Add(4 * time.Hour) }
+	first.now = hostNow
+	second.now = hostNow
 	started, _ := prepareWorkflowSQLiteRunning(t, firstState, "child-race", workflowTestTime())
 	request := workflowChildStartFixture(t, started.Node.ID, "child-race")
 	results := make(chan calladapter.ChildRunResult, 2)
