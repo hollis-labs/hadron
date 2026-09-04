@@ -24,8 +24,11 @@ It performs the complete portable sequence:
 5. validate the inferred plan with `compile.ValidatePlan`;
 6. build an immutable offline manifest and execute it through the ordinary
    runtime with `offline.Execute`; and
-7. call the exhaustive `conformance.RunComplete` entry point from outside the
-   conformance package.
+7. call the exhaustive `conformance.RunExhaustive` entry point from outside the
+   conformance package; and
+8. exercise durable compensation directly. A durable host that implements the
+   compensation fixture family should use `conformance.RunExhaustive` for its
+   final qualification gate.
 
 `offline.Execute` is the smallest embedded host loop. It uses the canonical
 binding, recovery, ready-queue, dispatch, wait, and output-finalization paths;
@@ -115,13 +118,17 @@ Use the embedded, bounded fixture store and isolated factories:
 ```go
 conformance.RunRequired(t, conformance.EmbeddedFixtures(), requiredHost)
 conformance.RunComplete(t, conformance.EmbeddedFixtures(), completeHost)
+conformance.RunExhaustive(t, conformance.EmbeddedFixtures(), compensationHost)
 ```
 
 `RunRequired` covers compiler/source maps, state values, scheduler and control
 flow, waits, and step-kind metadata. `RunComplete` additionally covers
-verification and memoization and is the truthful exhaustive entry point.
-`Host` and `RunAll` remain deprecated source-compatible names for the original
-required set so existing adopters are not silently broken.
+verification and memoization while preserving the pre-compensation host
+contract. `RunExhaustive` requires `CompensationHost` and adds the durable
+compensation fixture family; it is the final qualification entry point for a
+host that enables compensation. `Host` and `RunAll` remain deprecated
+source-compatible names for the original required set so existing adopters are
+not silently broken.
 
 Fixture inputs are opaque to the harness. Each factory must create an isolated
 runner that exercises the downstream implementation; merely matching the

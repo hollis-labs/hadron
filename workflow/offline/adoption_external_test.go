@@ -203,12 +203,12 @@ func customExternalPlan(t *testing.T, kind string) *compile.ExecutionPlan {
 	return compiled.Plan
 }
 
-// TestCompleteConformanceEntryPointIsCallableFromExternalPackage demonstrates
+// TestExhaustiveConformanceEntryPointIsCallableFromExternalPackage demonstrates
 // downstream wiring. The expectation runner is intentionally a harness fake;
 // a real host replaces each factory with an adapter that exercises its own
 // implementation against the opaque fixture input.
-func TestCompleteConformanceEntryPointIsCallableFromExternalPackage(t *testing.T) {
-	conformance.RunComplete(t, conformance.EmbeddedFixtures(), adoptionConformanceHost{})
+func TestExhaustiveConformanceEntryPointIsCallableFromExternalPackage(t *testing.T) {
+	conformance.RunExhaustive(t, conformance.EmbeddedFixtures(), adoptionConformanceHost{})
 }
 
 type adoptionConformanceHost struct{}
@@ -222,6 +222,7 @@ func (adoptionConformanceHost) StepKindRegistryFactory() conformance.Factory {
 }
 func (adoptionConformanceHost) VerificationFactory() conformance.Factory { return expectationFactory }
 func (adoptionConformanceHost) MemoizationFactory() conformance.Factory  { return expectationFactory }
+func (adoptionConformanceHost) CompensationFactory() conformance.Factory { return expectationFactory }
 
 func expectationFactory() (conformance.Runner, error) {
 	return conformance.RunnerFunc(func(_ context.Context, fixture conformance.Fixture) error {

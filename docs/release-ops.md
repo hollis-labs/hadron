@@ -21,16 +21,19 @@ Current artifact targets:
 ## Cut A Release
 
 1. Ensure `main` is green.
-2. Create and push a tag:
+2. Add reviewed release notes at `docs/releases/<tag>.md`. Immutable releases
+   cannot be repaired after publication, so the workflow intentionally fails
+   if the exact tag's notes file is absent.
+3. Create and push a tag:
 
 ```sh
 git tag -a v0.4.2-beta.1 -m "Hadron v0.4.2-beta.1"
 git push origin v0.4.2-beta.1
 ```
 
-3. GitHub Actions runs `.github/workflows/release.yml`, verifies the tag, stages
+4. GitHub Actions runs `.github/workflows/release.yml`, verifies the tag, stages
    the complete asset set on a draft, and then publishes the immutable release.
-4. Verify the release page is immutable and contains:
+5. Verify the release page is immutable, contains the reviewed notes, and has:
    - the four tarballs
    - `checksums.txt`
 
