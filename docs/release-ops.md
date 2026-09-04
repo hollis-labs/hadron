@@ -28,10 +28,21 @@ git tag -a v0.4.2-beta.1 -m "Hadron v0.4.2-beta.1"
 git push origin v0.4.2-beta.1
 ```
 
-3. GitHub Actions runs `.github/workflows/release.yml`.
-4. Verify the release page contains:
+3. GitHub Actions runs `.github/workflows/release.yml`, verifies the tag, stages
+   the complete asset set on a draft, and then publishes the immutable release.
+4. Verify the release page is immutable and contains:
    - the four tarballs
    - `checksums.txt`
+
+To recover packaging for an existing tag without moving it, dispatch the same
+workflow from `main`:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.4.2-beta.1
+```
+
+The recovery run checks out the supplied tag, not `main`, and uses the same
+draft-first immutable publication path.
 
 ## Build Artifacts Locally
 

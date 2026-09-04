@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to verify and package
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
@@ -16,6 +25,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -40,7 +51,7 @@ jobs:
 
       - name: Run verification suite
         run: |
-          make build VERSION="${GITHUB_REF_NAME}"
+          make build VERSION="${RELEASE_TAG}"
           make test
           make test-ui
           make typecheck
@@ -55,6 +66,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -74,11 +87,19 @@ jobs:
         run: npm ci
 
       - name: Build release artifacts
-        run: make package-release VERSION="${GITHUB_REF_NAME}"
+        run: make package-release VERSION="${RELEASE_TAG}"
 
-      - name: Publish GitHub release
+      - name: Stage GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: true
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
           files: |
             dist/hadron_*.tar.gz
             dist/checksums.txt
+
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --verify-tag
