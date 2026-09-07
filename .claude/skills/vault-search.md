@@ -1,1 +1,0 @@
-/Users/chrispian/Projects-apps/hadron/.agentrc/skills/vault-search.md

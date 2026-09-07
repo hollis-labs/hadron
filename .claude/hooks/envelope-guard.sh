@@ -1,1 +1,0 @@
-/Users/chrispian/.agentrc/hooks/shared/envelope-guard.sh

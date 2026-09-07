@@ -1,1 +1,0 @@
-/Users/chrispian/Projects-apps/hadron/.agentrc/skills/agentrc-install.md

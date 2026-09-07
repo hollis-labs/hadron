@@ -36,8 +36,6 @@ vendor/
 .windsurf/
 .nanite/
 .agentrc/
-AGENTS.md
-CLAUDE.md
 
 # Node / Frontend
 node_modules/
@@ -45,6 +43,3 @@ node_modules/
 /cmd/hadron-app/build/bin/
 # The generated operator SPA under internal/webui/dist is committed so direct
 # headless Go builds embed the browser UI without requiring Node at build time.
-
-# Agent transient
-.agentrc/.session-unclean.flag
