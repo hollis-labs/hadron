@@ -1,0 +1,51 @@
+kind: cerberus-project/v1
+owner: hadron
+namespace: local
+project:
+  id: hadron
+  name: Hadron
+resources:
+  - id: hadron-daemon-service
+    name: Hadron Daemon Service
+    type: process
+    project: hadron
+    connector: local
+    config:
+      build_strategy:
+        kind: make_standard
+      command:
+        - ./bin/hadrond
+        - serve
+      dir: /Users/chrispian/dev/hollis-labs/apps/hadron
+      mode: os_service
+      port: 8095
+      run_from: artifact
+      supervisor: launchd
+      url: http://127.0.0.1:8095
+    tags:
+      - api
+      - go
+      - launchd
+      - v2
+  - id: hadron-gui
+    name: Hadron GUI
+    type: process
+    project: hadron
+    connector: local
+    config:
+      command:
+        - wails
+        - dev
+      dir: /Users/chrispian/dev/hollis-labs/apps/hadron/cmd/hadron-app
+      env:
+        HADRON_DAEMON_EXTERNAL: "true"
+        CLAUDE_CODE_OAUTH_TOKEN: keychain://anthropic/claude-code-oauth
+      mode: dev_session
+      port: 34116
+      run_from: workspace
+    tags:
+      - gui
+      - desktop
+      - wails
+      - v2
+registry_urn: msg://agent/agent-mux/prj_46qak5fkx1
