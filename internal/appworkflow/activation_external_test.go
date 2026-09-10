@@ -8,13 +8,13 @@ import (
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/go-workflow/graph"
 	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/go-workflow/values"
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/persistence"
 )
 
 func TestActivationExternalUsesHostStartPathAndReplaysStableFire(t *testing.T) {
@@ -367,7 +367,8 @@ func dispatchScheduleOccurrence(t *testing.T, service appworkflow.ActivationServ
 	if created, err := store.CreateFire(t.Context(), gosched.FireCreation{ScheduleID: registration.ID, ExpectedNext: next, NextRun: nextRun, Fire: fire}); err != nil || !created {
 		t.Fatalf("CreateFire(%s) = %v, %v", registration.ID, created, err)
 	}
-	claimed, won, claimErr := store.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ClaimedAt: next})
+	claimed, won, claimErr := store.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ClaimedAt: next,
+		ClaimExpiresAt: next.Add(hoststate.ActivationClaimLease)})
 	if claimErr != nil || !won {
 		t.Fatalf("ClaimFire(%s) = %#v, %v, %v", registration.ID, claimed, won, claimErr)
 	}
@@ -380,7 +381,7 @@ func dispatchScheduleOccurrence(t *testing.T, service appworkflow.ActivationServ
 		t.Fatalf("LoadActivationDispatch(%s) = %#v, %v", registration.ID, dispatch, loadErr)
 	}
 	if applied, err := store.TransitionFire(t.Context(), gosched.FireTransition{FireID: claimed.ID, Attempt: claimed.Attempt,
-		From: gosched.FireClaimed, To: gosched.FireSucceeded, At: claimed.FiredAt.Add(time.Second)}); err != nil || !applied {
+		From: gosched.FireClaimed, To: gosched.FireSucceeded, ClaimedAt: claimed.FiredAt, At: claimed.FiredAt.Add(time.Second)}); err != nil || !applied {
 		t.Fatalf("TransitionFire(%s) = %v, %v", registration.ID, applied, err)
 	}
 	return dispatch

@@ -9,12 +9,12 @@ import (
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/go-workflow/compile"
 	"github.com/hollis-labs/go-workflow/graph"
 	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/persistence"
 )
 
 func TestPersistenceActivationAttemptsJoinReopenBoundsAndCorruption(t *testing.T) {
@@ -45,7 +45,8 @@ func TestPersistenceActivationAttemptsJoinReopenBoundsAndCorruption(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, won, err := activations.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: fire.Status, ExpectedAttempt: fire.Attempt, ClaimedAt: event.OccurredAt})
+	first, won, err := activations.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: fire.Status, ExpectedAttempt: fire.Attempt, ExpectedFiredAt: fire.FiredAt,
+		ClaimedAt: event.OccurredAt, ClaimExpiresAt: event.OccurredAt.Add(hoststate.ActivationClaimLease)})
 	if err != nil || !won {
 		t.Fatalf("ClaimFire(first) = %#v, %v, %v", first, won, err)
 	}
@@ -60,11 +61,12 @@ func TestPersistenceActivationAttemptsJoinReopenBoundsAndCorruption(t *testing.T
 	retryAt := first.FiredAt.Add(time.Second)
 	if applied, transitionErr := activations.TransitionFire(t.Context(), gosched.FireTransition{
 		FireID: first.ID, Attempt: first.Attempt, From: gosched.FireClaimed, To: gosched.FireRetrying,
-		At: retryAt, NextAttemptAt: retryAt.Add(time.Second), Reason: "temporary_unavailable",
+		ClaimedAt: first.FiredAt, At: retryAt, NextAttemptAt: retryAt.Add(time.Second), Reason: "temporary_unavailable",
 	}); transitionErr != nil || !applied {
 		t.Fatalf("TransitionFire(retry) = %v, %v", applied, transitionErr)
 	}
-	second, won, err := activations.ClaimFire(t.Context(), gosched.FireClaim{FireID: first.ID, ExpectedStatus: gosched.FireRetrying, ExpectedAttempt: first.Attempt, ClaimedAt: retryAt.Add(time.Second)})
+	second, won, err := activations.ClaimFire(t.Context(), gosched.FireClaim{FireID: first.ID, ExpectedStatus: gosched.FireRetrying, ExpectedAttempt: first.Attempt, ExpectedFiredAt: first.FiredAt,
+		ClaimedAt: retryAt.Add(time.Second), ClaimExpiresAt: retryAt.Add(time.Second).Add(hoststate.ActivationClaimLease)})
 	if err != nil || !won {
 		t.Fatalf("ClaimFire(second) = %#v, %v, %v", second, won, err)
 	}
@@ -92,7 +94,7 @@ func TestPersistenceActivationAttemptsJoinReopenBoundsAndCorruption(t *testing.T
 	}); completeErr != nil {
 		t.Fatal(completeErr)
 	}
-	if applied, transitionErr := activations.TransitionFire(t.Context(), gosched.FireTransition{FireID: second.ID, Attempt: second.Attempt, From: gosched.FireClaimed, To: gosched.FireSucceeded, At: second.FiredAt.Add(time.Second)}); transitionErr != nil || !applied {
+	if applied, transitionErr := activations.TransitionFire(t.Context(), gosched.FireTransition{FireID: second.ID, Attempt: second.Attempt, From: gosched.FireClaimed, To: gosched.FireSucceeded, ClaimedAt: second.FiredAt, At: second.FiredAt.Add(time.Second)}); transitionErr != nil || !applied {
 		t.Fatalf("TransitionFire(success) = %v, %v", applied, transitionErr)
 	}
 	if closeErr := database.Close(); closeErr != nil {

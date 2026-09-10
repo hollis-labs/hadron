@@ -301,6 +301,12 @@ func (p ActivationPrincipal) Clone() ActivationPrincipal {
 	return p
 }
 
+// ActivationClaimLease bounds how long one activation fire stays exclusively
+// owned. go-scheduler v0.2.0 moved lease ownership to the engine, so both the
+// scheduled path and the external path hand this same value down rather than
+// each hardcoding a lease the other cannot see.
+const ActivationClaimLease = 2 * time.Minute
+
 type ActivationRetryPolicy struct {
 	MaxAttempts int           `json:"max_attempts"`
 	Strategy    string        `json:"strategy,omitempty"`

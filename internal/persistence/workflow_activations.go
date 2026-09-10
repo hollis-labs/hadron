@@ -14,13 +14,13 @@ import (
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/go-workflow/graph"
 	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
 
-const workflowActivationClaimLease = 2 * time.Minute
+const workflowActivationClaimLease = hoststate.ActivationClaimLease
 
 type WorkflowActivationStore struct {
 	db    *sql.DB
@@ -695,13 +695,26 @@ func (s *WorkflowActivationStore) ClaimFire(ctx context.Context, claim gosched.F
 		if err != nil {
 			return err
 		}
-		if fire.Status != claim.ExpectedStatus || fire.Attempt != claim.ExpectedAttempt || claim.ClaimedAt.Before(fire.ScheduledAt) {
+		// ExpectedFiredAt fences an owner whose claim has already been replaced
+		// by a recovery; the engine's lease is persisted verbatim so the lease
+		// the engine believes it holds is the one this store enforces.
+		if fire.Status != claim.ExpectedStatus || fire.Attempt != claim.ExpectedAttempt ||
+			!fire.FiredAt.Equal(claim.ExpectedFiredAt) || claim.ClaimedAt.Before(fire.ScheduledAt) {
+			return nil
+		}
+		// A recovered claim keeps its attempt so a crashed owner does not spend
+		// another application-level retry.
+		recovering := fire.Status == gosched.FireClaimed
+		if recovering && fire.ClaimExpiresAt.After(claim.ClaimedAt) {
 			return nil
 		}
 		claimed = fire
-		claimed.Attempt++
+		if !recovering {
+			claimed.Attempt++
+		}
 		claimed.Status, claimed.FiredAt, claimed.NextAttemptAt = gosched.FireClaimed, claim.ClaimedAt.UTC(), time.Time{}
-		expires := claim.ClaimedAt.UTC().Add(workflowActivationClaimLease)
+		expires := claim.ClaimExpiresAt.UTC()
+		claimed.ClaimExpiresAt = expires
 		result, err := query.ExecContext(ctx, `UPDATE workflow_activation_fires SET fired_at = ?, attempt = ?, status = ?,
 next_attempt_at = NULL, claim_expires_at = ?, generation = generation + 1
 WHERE fire_id = ? AND status = ? AND attempt = ?`, workflowTime(claimed.FiredAt), claimed.Attempt, claimed.Status,
@@ -713,7 +726,8 @@ WHERE fire_id = ? AND status = ? AND attempt = ?`, workflowTime(claimed.FiredAt)
 		if count != 1 {
 			return nil
 		}
-		if _, err := query.ExecContext(ctx, `INSERT INTO workflow_activation_attempts(fire_id, attempt, claimed_at, claim_expires_at) VALUES (?, ?, ?, ?)`, fire.ID, claimed.Attempt, workflowTime(claimed.FiredAt), workflowTime(expires)); err != nil {
+		if _, err := query.ExecContext(ctx, `INSERT INTO workflow_activation_attempts(fire_id, attempt, claimed_at, claim_expires_at) VALUES (?, ?, ?, ?)
+ON CONFLICT(fire_id, attempt) DO UPDATE SET claimed_at = excluded.claimed_at, claim_expires_at = excluded.claim_expires_at`, fire.ID, claimed.Attempt, workflowTime(claimed.FiredAt), workflowTime(expires)); err != nil {
 			return err
 		}
 		won = true
@@ -729,22 +743,17 @@ func (s *WorkflowActivationStore) TransitionFire(ctx context.Context, transition
 		if err != nil {
 			return err
 		}
-		if fire.Status != transition.From || fire.Attempt != transition.Attempt {
+		// Matching ClaimedAt against the stored fired-at fences an owner whose
+		// expired claim has since been recovered by another engine, while a late
+		// but uncontested owner still records its outcome.
+		if fire.Status != transition.From || fire.Attempt != transition.Attempt ||
+			!fire.FiredAt.Equal(transition.ClaimedAt) {
 			return nil
 		}
-		var claimExpires string
-		claimErr := query.QueryRowContext(ctx, `SELECT claim_expires_at FROM workflow_activation_fires
-WHERE fire_id = ? AND status = ? AND attempt = ?`, fire.ID, gosched.FireClaimed, fire.Attempt).Scan(&claimExpires)
-		if errors.Is(claimErr, sql.ErrNoRows) {
-			return nil
-		} else if claimErr != nil {
-			return claimErr
-		}
-		expiresAt, err := parseWorkflowTime("activation claim expiry", claimExpires)
-		if err != nil {
-			return err
-		}
-		if !transition.At.Before(expiresAt) {
+		// Hadron keeps a stricter rule than the go-scheduler contract requires: a
+		// claim that has outlived its lease loses even when uncontested, so a late
+		// commit can never race a recovery that may already be in flight.
+		if fire.ClaimExpiresAt.IsZero() || !transition.At.Before(fire.ClaimExpiresAt) {
 			return nil
 		}
 		switch transition.To {
@@ -828,11 +837,11 @@ last_error_code, retry_json, job_type, payload_json, generation
 func loadWorkflowActivationFire(ctx context.Context, query workflowSQL, id string) (gosched.Fire, error) {
 	var fire gosched.Fire
 	var scheduled string
-	var fired, next sql.NullString
+	var fired, next, claimExpires sql.NullString
 	var retryJSON []byte
 	err := query.QueryRowContext(ctx, `SELECT fire_id, registration_id, scheduled_at, fired_at, attempt, status,
-next_attempt_at, COALESCE(last_error_code, ''), retry_json, job_type, payload_json FROM workflow_activation_fires WHERE fire_id = ?`, id).
-		Scan(&fire.ID, &fire.ScheduleID, &scheduled, &fired, &fire.Attempt, &fire.Status, &next, &fire.LastError, &retryJSON, &fire.JobType, &fire.Payload)
+next_attempt_at, claim_expires_at, COALESCE(last_error_code, ''), retry_json, job_type, payload_json FROM workflow_activation_fires WHERE fire_id = ?`, id).
+		Scan(&fire.ID, &fire.ScheduleID, &scheduled, &fired, &fire.Attempt, &fire.Status, &next, &claimExpires, &fire.LastError, &retryJSON, &fire.JobType, &fire.Payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fire, fmt.Errorf("%w: workflow activation fire %q", workflowruntime.ErrNotFound, id)
 	}
@@ -846,6 +855,9 @@ next_attempt_at, COALESCE(last_error_code, ''), retry_json, job_type, payload_js
 		return fire, err
 	}
 	if fire.NextAttemptAt, err = parseOptionalWorkflowTime("activation fire next_attempt_at", next); err != nil {
+		return fire, err
+	}
+	if fire.ClaimExpiresAt, err = parseOptionalWorkflowTime("activation fire claim_expires_at", claimExpires); err != nil {
 		return fire, err
 	}
 	if err := decodeActivationJSON(retryJSON, &fire.Retry); err != nil || fire.Retry.Validate() != nil {

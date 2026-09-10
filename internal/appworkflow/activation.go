@@ -15,12 +15,12 @@ import (
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/go-workflow/graph"
 	"github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/go-workflow/values"
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 )
 
 var (
@@ -376,8 +376,14 @@ func (s ActivationService) activateExternal(ctx context.Context, request Externa
 		return ActivationStartResult{}, err
 	}
 	if fire.Status == gosched.FirePending || fire.Status == gosched.FireRetrying {
+		// go-scheduler v0.2.0 makes the caller supply the claim fence and lease:
+		// ExpectedFiredAt pins the attempt being replaced, and ClaimExpiresAt is
+		// the lease the store records for this claim.
+		claimedAt := request.ReceivedAt.UTC()
 		claimed, won, claimErr := s.Store.ClaimFire(context.WithoutCancel(ctx), gosched.FireClaim{
-			FireID: fire.ID, ExpectedStatus: fire.Status, ExpectedAttempt: fire.Attempt, ClaimedAt: request.ReceivedAt.UTC(),
+			FireID: fire.ID, ExpectedStatus: fire.Status, ExpectedAttempt: fire.Attempt,
+			ExpectedFiredAt: fire.FiredAt, ClaimedAt: claimedAt,
+			ClaimExpiresAt: claimedAt.Add(hoststate.ActivationClaimLease),
 		})
 		if claimErr != nil {
 			return ActivationStartResult{}, claimErr
@@ -414,7 +420,8 @@ func (s ActivationService) activateExternal(ctx context.Context, request Externa
 	if completedAt.Before(request.ReceivedAt) {
 		completedAt = request.ReceivedAt.UTC()
 	}
-	transition := gosched.FireTransition{FireID: fire.ID, Attempt: fire.Attempt, From: gosched.FireClaimed, At: completedAt}
+	transition := gosched.FireTransition{FireID: fire.ID, Attempt: fire.Attempt, From: gosched.FireClaimed,
+		ClaimedAt: fire.FiredAt, At: completedAt}
 	if startErr == nil {
 		transition.To = gosched.FireSucceeded
 	} else if errors.Is(startErr, ErrActivationSkipped) {

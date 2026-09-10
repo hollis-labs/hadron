@@ -23,6 +23,10 @@ func NewWorkflowWithService(service appworkflow.ActivationService, options ...go
 	if service.Host == nil || nilActivationStore(service.Store) {
 		return nil, errors.New("workflow activation scheduler requires host and durable store")
 	}
+	// go-scheduler v0.2.0 moved claim-lease ownership from the store to the
+	// engine. Seeding the store's historical lease first keeps the effective
+	// lease unchanged, while a caller-supplied option still wins.
+	options = append([]gosched.Option{gosched.WithClaimLease(hoststate.ActivationClaimLease)}, options...)
 	options = append(options, gosched.WithObserver(appworkflow.ActivationObserver{Store: service.Store}))
 	return gosched.New(service.Store, service, options...), nil
 }

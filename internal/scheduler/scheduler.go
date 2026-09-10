@@ -28,7 +28,7 @@ type Status = gosched.Status
 // execution manager. The returned engine dispatches due blueprint schedules
 // through the manager's run queue.
 func New(store *persistence.Store, mgr *execution.Manager) *Engine {
-	return gosched.New(storeAdapter{Store: store}, runnerAdapter{mgr: mgr})
+	return gosched.New(storeAdapter{Store: store}, runnerAdapter{mgr: mgr}, gosched.WithClaimLease(legacyClaimLease))
 }
 
 // ValidateCron reports whether expr is a valid standard cron expression.

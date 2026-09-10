@@ -10,6 +10,8 @@ import (
 	gosched "github.com/hollis-labs/go-scheduler"
 )
 
+// legacyClaimLease preserves the lease this store enforced before
+// go-scheduler v0.2.0 owned it; scheduler.New hands it to the engine.
 const legacyClaimLease = 2 * time.Minute
 
 func (a storeAdapter) CreateFire(ctx context.Context, creation gosched.FireCreation) (bool, error) {
@@ -56,6 +58,10 @@ WHERE id = ? AND next_run_at = ? AND enabled = 1`, legacyTime(creation.ExpectedN
 	return created, err
 }
 
+// ListDueFires recovers fires whose claim lease expired and then returns the
+// due attempts. Recovery is recorded as a retry rather than surfaced as an
+// expired claim, matching WorkflowActivationStore so both schedulers keep the
+// same recovery semantics they had before go-scheduler v0.2.0.
 func (a storeAdapter) ListDueFires(ctx context.Context, now time.Time, limit int) ([]gosched.Fire, error) {
 	var result []gosched.Fire
 	err := a.legacyWrite(ctx, func(query *sql.Conn) error {
@@ -86,6 +92,10 @@ AND next_attempt_at <= ? ORDER BY next_attempt_at, fire_id LIMIT ?`, gosched.Fir
 	return result, err
 }
 
+// ClaimFire performs the per-fire compare-and-swap. ExpectedFiredAt fences a
+// stale owner whose lease was already replaced by a recovery, and the engine's
+// ClaimExpiresAt is persisted verbatim so the lease the engine believes it
+// holds is the one this store enforces.
 func (a storeAdapter) ClaimFire(ctx context.Context, claim gosched.FireClaim) (gosched.Fire, bool, error) {
 	var claimed gosched.Fire
 	won := false
@@ -94,14 +104,26 @@ func (a storeAdapter) ClaimFire(ctx context.Context, claim gosched.FireClaim) (g
 		if err != nil {
 			return err
 		}
-		if fire.Status != claim.ExpectedStatus || fire.Attempt != claim.ExpectedAttempt {
+		if fire.Status != claim.ExpectedStatus || fire.Attempt != claim.ExpectedAttempt ||
+			!fire.FiredAt.Equal(claim.ExpectedFiredAt) {
+			return nil
+		}
+		recovering := fire.Status == gosched.FireClaimed
+		if recovering && fire.ClaimExpiresAt.After(claim.ClaimedAt) {
 			return nil
 		}
 		claimed = fire
-		claimed.Status, claimed.Attempt, claimed.FiredAt, claimed.NextAttemptAt = gosched.FireClaimed, fire.Attempt+1, claim.ClaimedAt.UTC(), time.Time{}
+		claimed.Status = gosched.FireClaimed
+		if !recovering {
+			claimed.Attempt = fire.Attempt + 1
+		}
+		claimed.FiredAt = claim.ClaimedAt.UTC()
+		claimed.ClaimExpiresAt = claim.ClaimExpiresAt.UTC()
+		claimed.NextAttemptAt = time.Time{}
 		updated, err := query.ExecContext(ctx, `UPDATE legacy_schedule_fires SET status = ?, attempt = ?, fired_at = ?,
-next_attempt_at = NULL, claim_expires_at = ? WHERE fire_id = ? AND status = ? AND attempt = ?`, claimed.Status,
-			claimed.Attempt, legacyTime(claimed.FiredAt), legacyTime(claimed.FiredAt.Add(legacyClaimLease)), fire.ID, fire.Status, fire.Attempt)
+next_attempt_at = NULL, claim_expires_at = ? WHERE fire_id = ? AND status = ? AND attempt = ? AND fired_at IS ?`,
+			claimed.Status, claimed.Attempt, legacyTime(claimed.FiredAt), legacyTime(claimed.ClaimExpiresAt),
+			fire.ID, fire.Status, fire.Attempt, legacyOptionalTime(fire.FiredAt))
 		if err != nil {
 			return err
 		}
@@ -109,7 +131,11 @@ next_attempt_at = NULL, claim_expires_at = ? WHERE fire_id = ? AND status = ? AN
 		if count != 1 {
 			return nil
 		}
-		if _, err := query.ExecContext(ctx, `INSERT INTO legacy_schedule_fire_attempts(fire_id, attempt, claimed_at) VALUES (?, ?, ?)`, fire.ID, claimed.Attempt, legacyTime(claimed.FiredAt)); err != nil {
+		// A recovered claim reuses its attempt row, so the insert has to fold
+		// into the existing one rather than collide with its primary key.
+		if _, err := query.ExecContext(ctx, `INSERT INTO legacy_schedule_fire_attempts(fire_id, attempt, claimed_at)
+VALUES (?, ?, ?) ON CONFLICT(fire_id, attempt) DO UPDATE SET claimed_at = excluded.claimed_at,
+completed_at = NULL, outcome = NULL`, fire.ID, claimed.Attempt, legacyTime(claimed.FiredAt)); err != nil {
 			return err
 		}
 		won = true
@@ -118,6 +144,9 @@ next_attempt_at = NULL, claim_expires_at = ? WHERE fire_id = ? AND status = ? AN
 	return claimed, won, err
 }
 
+// TransitionFire applies an attempt result. Matching ClaimedAt against the
+// stored fired-at fences an owner whose expired claim has since been recovered
+// by another engine; a late but uncontested owner still records its outcome.
 func (a storeAdapter) TransitionFire(ctx context.Context, transition gosched.FireTransition) (bool, error) {
 	applied := false
 	err := a.legacyWrite(ctx, func(query *sql.Conn) error {
@@ -125,22 +154,12 @@ func (a storeAdapter) TransitionFire(ctx context.Context, transition gosched.Fir
 		if err != nil {
 			return err
 		}
-		if fire.Status != transition.From || fire.Attempt != transition.Attempt {
+		if fire.Status != transition.From || fire.Attempt != transition.Attempt ||
+			!fire.FiredAt.Equal(transition.ClaimedAt) {
 			return nil
 		}
-		var claimExpires string
-		claimErr := query.QueryRowContext(ctx, `SELECT claim_expires_at FROM legacy_schedule_fires
-WHERE fire_id = ? AND status = ? AND attempt = ?`, fire.ID, gosched.FireClaimed, fire.Attempt).Scan(&claimExpires)
-		if errors.Is(claimErr, sql.ErrNoRows) {
-			return nil
-		} else if claimErr != nil {
-			return claimErr
-		}
-		expiresAt, err := time.Parse(time.RFC3339Nano, claimExpires)
-		if err != nil {
-			return err
-		}
-		if !transition.At.Before(expiresAt) {
+		// Matches the activation store: an expired claim loses even uncontested.
+		if fire.ClaimExpiresAt.IsZero() || !transition.At.Before(fire.ClaimExpiresAt) {
 			return nil
 		}
 		reason := transition.Reason
@@ -148,8 +167,9 @@ WHERE fire_id = ? AND status = ? AND attempt = ?`, fire.ID, gosched.FireClaimed,
 			reason = "dispatch_failed"
 		}
 		updated, err := query.ExecContext(ctx, `UPDATE legacy_schedule_fires SET status = ?, next_attempt_at = ?,
-claim_expires_at = NULL, last_error_code = ? WHERE fire_id = ? AND status = ? AND attempt = ?`, transition.To,
-			legacyOptionalTime(transition.NextAttemptAt), reason, fire.ID, fire.Status, fire.Attempt)
+claim_expires_at = NULL, last_error_code = ? WHERE fire_id = ? AND status = ? AND attempt = ? AND fired_at IS ?`,
+			transition.To, legacyOptionalTime(transition.NextAttemptAt), reason, fire.ID, fire.Status, fire.Attempt,
+			legacyOptionalTime(fire.FiredAt))
 		if err != nil {
 			return err
 		}
@@ -170,11 +190,11 @@ WHERE fire_id = ? AND attempt = ? AND completed_at IS NULL`, legacyTime(transiti
 func loadLegacyFire(ctx context.Context, query *sql.Conn, id string) (gosched.Fire, error) {
 	var fire gosched.Fire
 	var scheduled string
-	var fired, next sql.NullString
+	var fired, next, claimExpires sql.NullString
 	var retryJSON []byte
 	err := query.QueryRowContext(ctx, `SELECT fire_id, schedule_id, scheduled_at, fired_at, attempt, status,
-next_attempt_at, retry_json, job_type, payload_json, COALESCE(last_error_code, '') FROM legacy_schedule_fires WHERE fire_id = ?`, id).
-		Scan(&fire.ID, &fire.ScheduleID, &scheduled, &fired, &fire.Attempt, &fire.Status, &next, &retryJSON, &fire.JobType, &fire.Payload, &fire.LastError)
+next_attempt_at, claim_expires_at, retry_json, job_type, payload_json, COALESCE(last_error_code, '') FROM legacy_schedule_fires WHERE fire_id = ?`, id).
+		Scan(&fire.ID, &fire.ScheduleID, &scheduled, &fired, &fire.Attempt, &fire.Status, &next, &claimExpires, &retryJSON, &fire.JobType, &fire.Payload, &fire.LastError)
 	if err != nil {
 		return fire, err
 	}
@@ -190,6 +210,12 @@ next_attempt_at, retry_json, job_type, payload_json, COALESCE(last_error_code, '
 	}
 	if next.Valid {
 		fire.NextAttemptAt, err = time.Parse(time.RFC3339Nano, next.String)
+		if err != nil {
+			return fire, err
+		}
+	}
+	if claimExpires.Valid {
+		fire.ClaimExpiresAt, err = time.Parse(time.RFC3339Nano, claimExpires.String)
 		if err != nil {
 			return fire, err
 		}

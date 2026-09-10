@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/server/servertest"
 )
 
 // ── Fakes ──────────────────────────────────────────────────────────────────────
@@ -613,7 +614,7 @@ func TestInternalCaller_ExternalStreamableHTTPServer(t *testing.T) {
 		})
 		return mcp.NewToolResultText(string(payload)), nil
 	})
-	testServer := server.NewTestStreamableHTTPServer(mcpServer, server.WithStateLess(true))
+	testServer := servertest.NewTestStreamableHTTPServer(mcpServer, server.WithStateLess(true))
 	defer testServer.Close()
 
 	caller := mcpadapter.NewInternalCaller(adapter, mcpadapter.WithExternalServers(map[string]mcpadapter.ExternalServerConfig{
@@ -658,7 +659,7 @@ func TestInternalCaller_ExternalSSEServer(t *testing.T) {
 		})
 		return mcp.NewToolResultText(string(payload)), nil
 	})
-	testServer := server.NewTestServer(mcpServer)
+	testServer := servertest.NewTestServer(mcpServer)
 	defer testServer.Close()
 
 	caller := mcpadapter.NewInternalCaller(adapter, mcpadapter.WithExternalServers(map[string]mcpadapter.ExternalServerConfig{

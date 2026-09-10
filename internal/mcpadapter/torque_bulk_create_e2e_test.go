@@ -13,13 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/internal/artifacts"
-	"github.com/hollis-labs/hadron/internal/execution"
-	"github.com/hollis-labs/hadron/internal/persistence"
-	"github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
 	workflowmcp "github.com/hollis-labs/go-workflow/adapters/mcp"
 	"github.com/hollis-labs/go-workflow/adapters/transform"
@@ -29,8 +22,16 @@ import (
 	"github.com/hollis-labs/go-workflow/stepkind"
 	"github.com/hollis-labs/go-workflow/values"
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/artifacts"
+	"github.com/hollis-labs/hadron/internal/execution"
+	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/registry"
+	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/server/servertest"
 )
 
 // TestTorqueBulkCreateThroughPinnedWorkflowMCP is the Hadron-owned release
@@ -123,7 +124,7 @@ func TestTorqueBulkCreateThroughPinnedWorkflowMCP(t *testing.T) {
 	hadron := New(nil, nil, nil, nil, token, nil,
 		withWorkflowInstanceNonceForTest("torque-e2e"),
 		WithWorkflowServices(exposure, operator, operator, operator))
-	hadronServer := server.NewTestServer(hadron.newServer())
+	hadronServer := servertest.NewTestServer(hadron.newServer())
 	t.Cleanup(hadronServer.Close)
 	transport := NewInternalCaller(&Adapter{}, WithExternalServers(map[string]ExternalServerConfig{
 		"hadron-e2e": {Transport: "sse", URL: hadronServer.URL + "/sse", Headers: map[string]string{"Authorization": "Bearer " + token}},
@@ -200,7 +201,7 @@ func TestTorqueBulkCreateThroughPinnedWorkflowMCP(t *testing.T) {
 	reopenedHadron := New(nil, nil, nil, nil, token, nil,
 		withWorkflowInstanceNonceForTest("torque-e2e-reopened"),
 		WithWorkflowServices(reopenedExposure, reopenedOperator, reopenedOperator, reopenedOperator))
-	reopenedServer := server.NewTestServer(reopenedHadron.newServer())
+	reopenedServer := servertest.NewTestServer(reopenedHadron.newServer())
 	t.Cleanup(reopenedServer.Close)
 	reopenedTransport := NewInternalCaller(&Adapter{}, WithExternalServers(map[string]ExternalServerConfig{
 		"hadron-e2e-reopened": {Transport: "sse", URL: reopenedServer.URL + "/sse", Headers: map[string]string{"Authorization": "Bearer " + token}},
@@ -528,7 +529,7 @@ func newTorqueCreateFake(t *testing.T) *torqueCreateFake {
 	}
 	mcpServer := server.NewMCPServer("torque-e2e-fake", "1.0.0", server.WithToolCapabilities(true))
 	mcpServer.AddTool(tool, fake.create)
-	testServer := server.NewTestStreamableHTTPServer(mcpServer, server.WithStateLess(true))
+	testServer := servertest.NewTestStreamableHTTPServer(mcpServer, server.WithStateLess(true))
 	fake.url = testServer.URL
 	t.Cleanup(testServer.Close)
 	return fake

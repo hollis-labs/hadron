@@ -12,11 +12,11 @@ import (
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/go-workflow/graph"
 	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/go-workflow/values"
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
 
 func TestWorkflowActivationRegistrationScheduleFireRecoveryAndObserver(t *testing.T) {
@@ -52,11 +52,12 @@ func TestWorkflowActivationRegistrationScheduleFireRecoveryAndObserver(t *testin
 		t.Fatalf("CreateFire = %v, %v", createdFire, createErr)
 	}
 	claimedAt := next.Add(time.Second)
-	claimed, won, claimErr := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ClaimedAt: claimedAt})
+	claimed, won, claimErr := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ClaimedAt: claimedAt,
+		ClaimExpiresAt: claimedAt.Add(workflowActivationClaimLease)})
 	if claimErr != nil || !won || claimed.Attempt != 1 {
 		t.Fatalf("ClaimFire = %#v, %v, %v", claimed, won, claimErr)
 	}
-	if oldApplied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: fire.ID, Attempt: 1, From: gosched.FireClaimed, To: gosched.FireSucceeded, At: claimedAt.Add(workflowActivationClaimLease + time.Nanosecond)}); err != nil || oldApplied {
+	if oldApplied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: fire.ID, Attempt: 1, From: gosched.FireClaimed, To: gosched.FireSucceeded, ClaimedAt: claimed.FiredAt, At: claimedAt.Add(workflowActivationClaimLease + time.Nanosecond)}); err != nil || oldApplied {
 		t.Fatalf("expired transition before recovery = %v, %v", oldApplied, err)
 	}
 	// Create another fire and prove a process-loss lease is reclaimed exactly
@@ -67,7 +68,8 @@ func TestWorkflowActivationRegistrationScheduleFireRecoveryAndObserver(t *testin
 	if ok, err := adapter.CreateFire(t.Context(), gosched.FireCreation{ScheduleID: loaded.ID, ExpectedNext: next2, NextRun: next2.Add(time.Minute), Fire: fire2}); err != nil || !ok {
 		t.Fatalf("CreateFire 2 = %v, %v", ok, err)
 	}
-	first, won, firstClaimErr := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire2.ID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ClaimedAt: next2.Add(time.Second)})
+	first, won, firstClaimErr := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire2.ID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ClaimedAt: next2.Add(time.Second),
+		ClaimExpiresAt: next2.Add(time.Second).Add(workflowActivationClaimLease)})
 	if firstClaimErr != nil || !won {
 		t.Fatalf("first claim = %#v, %v", first, firstClaimErr)
 	}
@@ -94,14 +96,15 @@ func TestWorkflowActivationRegistrationScheduleFireRecoveryAndObserver(t *testin
 	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: fire2.ID, Attempt: 1, From: gosched.FireClaimed, To: gosched.FireSucceeded, At: recoveryAt}); err != nil || applied {
 		t.Fatalf("stale transition before reclaim = %v, %v", applied, err)
 	}
-	second, won, secondClaimErr := recoveryAdapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire2.ID, ExpectedStatus: gosched.FireRetrying, ExpectedAttempt: 1, ClaimedAt: recoveryAt})
+	second, won, secondClaimErr := recoveryAdapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire2.ID, ExpectedStatus: gosched.FireRetrying, ExpectedAttempt: 1,
+		ExpectedFiredAt: recoveredSecond.FiredAt, ClaimedAt: recoveryAt, ClaimExpiresAt: recoveryAt.Add(workflowActivationClaimLease)})
 	if secondClaimErr != nil || !won || second.Attempt != 2 {
 		t.Fatalf("second claim = %#v, %v, %v", second, won, secondClaimErr)
 	}
 	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: fire2.ID, Attempt: 1, From: gosched.FireClaimed, To: gosched.FireSucceeded, At: recoveryAt}); err != nil || applied {
 		t.Fatalf("stale transition after reclaim = %v, %v", applied, err)
 	}
-	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: fire2.ID, Attempt: 2, From: gosched.FireClaimed, To: gosched.FireSucceeded, At: recoveryAt.Add(time.Second)}); err != nil || !applied {
+	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: fire2.ID, Attempt: 2, From: gosched.FireClaimed, To: gosched.FireSucceeded, ClaimedAt: second.FiredAt, At: recoveryAt.Add(time.Second)}); err != nil || !applied {
 		t.Fatalf("current transition = %v, %v", applied, err)
 	}
 	secretErr := errors.New("bearer never-persist-this")
@@ -164,7 +167,8 @@ func TestWorkflowActivationExternalReplayPoliciesAndTwoHandleContention(t *testi
 		wg.Add(1)
 		go func(adapter *WorkflowActivationStore) {
 			defer wg.Done()
-			if _, won, _ := adapter.ClaimFire(context.Background(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ClaimedAt: event.OccurredAt}); won {
+			if _, won, _ := adapter.ClaimFire(context.Background(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ClaimedAt: event.OccurredAt,
+				ClaimExpiresAt: event.OccurredAt.Add(workflowActivationClaimLease)}); won {
 				winners.Add(1)
 			}
 		}(adapter)
@@ -262,7 +266,7 @@ func TestWorkflowActivationDeadlineCatchupExhaustionAndReopen(t *testing.T) {
 		t.Fatalf("missed CreateFire = %v, %v", created, err)
 	}
 	missedClaim, won, claimErr := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: missedFire.ID, ExpectedStatus: gosched.FirePending,
-		ExpectedAttempt: 0, ClaimedAt: missedNext.Add(2 * time.Minute)})
+		ExpectedAttempt: 0, ClaimedAt: missedNext.Add(2 * time.Minute), ClaimExpiresAt: missedNext.Add(2*time.Minute + workflowActivationClaimLease)})
 	if claimErr != nil || !won {
 		t.Fatalf("missed ClaimFire = %#v, %v, %v", missedClaim, won, claimErr)
 	}
@@ -303,11 +307,11 @@ func TestWorkflowActivationDeadlineCatchupExhaustionAndReopen(t *testing.T) {
 	}
 	retryAt := one.FiredAt.Add(time.Second)
 	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: one.ID, Attempt: one.Attempt, From: gosched.FireClaimed,
-		To: gosched.FireRetrying, At: retryAt, NextAttemptAt: retryAt, Reason: "dispatch_failed"}); err != nil || !applied {
+		To: gosched.FireRetrying, ClaimedAt: one.FiredAt, At: retryAt, NextAttemptAt: retryAt, Reason: "dispatch_failed"}); err != nil || !applied {
 		t.Fatalf("retry = %v, %v", applied, err)
 	}
 	retrying, won, retryClaimErr := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: one.ID, ExpectedStatus: gosched.FireRetrying,
-		ExpectedAttempt: one.Attempt, ClaimedAt: retryAt})
+		ExpectedAttempt: one.Attempt, ExpectedFiredAt: one.FiredAt, ClaimedAt: retryAt, ClaimExpiresAt: retryAt.Add(workflowActivationClaimLease)})
 	if retryClaimErr != nil || !won || retrying.Attempt != 2 {
 		t.Fatalf("retry claim = %#v, %v, %v", retrying, won, retryClaimErr)
 	}
@@ -317,7 +321,7 @@ func TestWorkflowActivationDeadlineCatchupExhaustionAndReopen(t *testing.T) {
 		t.Fatalf("replayed prepare = %#v, %v", replayedPrepare, replayPrepareErr)
 	}
 	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: retrying.ID, Attempt: retrying.Attempt, From: gosched.FireClaimed,
-		To: gosched.FireExhausted, At: retrying.FiredAt.Add(time.Second), Reason: "maximum_attempts_reached"}); err != nil || !applied {
+		To: gosched.FireExhausted, ClaimedAt: retrying.FiredAt, At: retrying.FiredAt.Add(time.Second), Reason: "maximum_attempts_reached"}); err != nil || !applied {
 		t.Fatalf("exhaust = %v, %v", applied, err)
 	}
 	exhausted, loadDispatchErr := loadWorkflowActivationDispatch(t.Context(), adapter.db, one.ID)
@@ -368,7 +372,7 @@ func TestWorkflowActivationPreparedStartReplaysAfterExpiredClaim(t *testing.T) {
 	}
 	expiredAt := first.FiredAt.Add(workflowActivationClaimLease)
 	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: first.ID, Attempt: first.Attempt, From: gosched.FireClaimed,
-		To: gosched.FireSucceeded, At: expiredAt}); err != nil || applied {
+		ClaimedAt: first.FiredAt, To: gosched.FireSucceeded, At: expiredAt}); err != nil || applied {
 		t.Fatalf("expired first result = %v, %v", applied, err)
 	}
 	if err := store.Close(); err != nil {
@@ -385,7 +389,7 @@ func TestWorkflowActivationPreparedStartReplaysAfterExpiredClaim(t *testing.T) {
 		t.Fatalf("recovered fire = %#v, %v", due, err)
 	}
 	second, won, err := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: first.ID, ExpectedStatus: gosched.FireRetrying,
-		ExpectedAttempt: first.Attempt, ClaimedAt: expiredAt})
+		ExpectedAttempt: first.Attempt, ExpectedFiredAt: first.FiredAt, ClaimedAt: expiredAt, ClaimExpiresAt: expiredAt.Add(workflowActivationClaimLease)})
 	if err != nil || !won || second.Attempt != first.Attempt+1 {
 		t.Fatalf("reclaimed fire = %#v, %v, %v", second, won, err)
 	}
@@ -401,7 +405,7 @@ func TestWorkflowActivationPreparedStartReplaysAfterExpiredClaim(t *testing.T) {
 		t.Fatalf("dispatch completion replay = %#v, %v", completed, err)
 	}
 	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: second.ID, Attempt: second.Attempt, From: gosched.FireClaimed,
-		To: gosched.FireSucceeded, At: second.FiredAt.Add(time.Second)}); err != nil || !applied {
+		ClaimedAt: second.FiredAt, To: gosched.FireSucceeded, At: second.FiredAt.Add(time.Second)}); err != nil || !applied {
 		t.Fatalf("reclaimed result = %v, %v", applied, err)
 	}
 }
@@ -533,9 +537,78 @@ func claimExternalActivation(t *testing.T, store *WorkflowActivationStore, event
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, won, err := store.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: fire.Status, ExpectedAttempt: fire.Attempt, ClaimedAt: event.OccurredAt})
+	claimed, won, err := store.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: fire.Status, ExpectedAttempt: fire.Attempt,
+		ExpectedFiredAt: fire.FiredAt, ClaimedAt: event.OccurredAt, ClaimExpiresAt: event.OccurredAt.Add(workflowActivationClaimLease)})
 	if err != nil || !won {
 		t.Fatalf("ClaimFire = %#v, %v, %v", claimed, won, err)
 	}
 	return claimed
+}
+
+// TestWorkflowActivationStoreHonoursEngineClaimFence pins the go-scheduler
+// v0.2.0 Store contract that this package previously satisfied by signature
+// only. The engine validates the claim it gets back, so a store that invents
+// its own lease instead of persisting ClaimExpiresAt fails validateClaim and
+// silently stops dispatching every scheduled activation.
+func TestWorkflowActivationStoreHonoursEngineClaimFence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claim-fence.db")
+	store, _ := openWorkflowStateTest(t, path)
+	adapter, adapterErr := NewWorkflowActivationStore(store)
+	if adapterErr != nil {
+		t.Fatal(adapterErr)
+	}
+	registration := workflowActivationFixture(t, "fenced", hoststate.ActivationSourceSchedule)
+	if _, _, err := adapter.RegisterActivation(t.Context(), registration); err != nil {
+		t.Fatal(err)
+	}
+	next, nextErr := gosched.NextRun(registration.Source.Config["cron"].(string), registration.CreatedAt)
+	if nextErr != nil {
+		t.Fatal(nextErr)
+	}
+	due, dueErr := adapter.ListDueSchedules(t.Context(), next, 10)
+	if dueErr != nil || len(due) != 1 {
+		t.Fatalf("ListDueSchedules = %#v, %v", due, dueErr)
+	}
+	fire := gosched.Fire{ID: gosched.DeriveFireID(registration.ID, next), ScheduleID: registration.ID, ScheduledAt: next,
+		Status: gosched.FirePending, NextAttemptAt: next, Retry: due[0].Retry, JobType: due[0].JobType, Payload: due[0].Payload}
+	if created, err := adapter.CreateFire(t.Context(), gosched.FireCreation{ScheduleID: registration.ID,
+		ExpectedNext: next, NextRun: next.Add(time.Minute), Fire: fire}); err != nil || !created {
+		t.Fatalf("CreateFire = %v, %v", created, err)
+	}
+
+	// A claim whose ExpectedFiredAt does not match the stored attempt loses.
+	claimedAt := next.Add(time.Second)
+	expires := claimedAt.Add(90 * time.Second)
+	if stale, won, err := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: gosched.FirePending,
+		ExpectedAttempt: 0, ExpectedFiredAt: claimedAt, ClaimedAt: claimedAt, ClaimExpiresAt: expires}); err != nil || won {
+		t.Fatalf("claim with mismatched ExpectedFiredAt = %#v, %v, %v", stale, won, err)
+	}
+
+	// The engine's lease is persisted verbatim rather than replaced by a lease
+	// this store picks, and it is what a reload reports.
+	claimed, won, claimErr := adapter.ClaimFire(t.Context(), gosched.FireClaim{FireID: fire.ID, ExpectedStatus: gosched.FirePending,
+		ExpectedAttempt: 0, ClaimedAt: claimedAt, ClaimExpiresAt: expires})
+	if claimErr != nil || !won {
+		t.Fatalf("ClaimFire = %#v, %v, %v", claimed, won, claimErr)
+	}
+	if !claimed.ClaimExpiresAt.Equal(expires) || !claimed.FiredAt.Equal(claimedAt) || claimed.Attempt != 1 {
+		t.Fatalf("claimed fire = %#v, want ClaimExpiresAt %s and FiredAt %s", claimed, expires, claimedAt)
+	}
+	reloaded, reloadErr := loadWorkflowActivationFire(t.Context(), adapter.db, fire.ID)
+	if reloadErr != nil || !reloaded.ClaimExpiresAt.Equal(expires) {
+		t.Fatalf("reloaded fire lease = %#v, %v, want %s", reloaded, reloadErr, expires)
+	}
+
+	// ClaimedAt fences an owner whose claim has been replaced; the true owner
+	// still commits inside the lease the engine handed down.
+	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: fire.ID, Attempt: claimed.Attempt,
+		From: gosched.FireClaimed, To: gosched.FireSucceeded, ClaimedAt: claimedAt.Add(-time.Second),
+		At: claimedAt.Add(time.Second)}); err != nil || applied {
+		t.Fatalf("transition with stale ClaimedAt = %v, %v", applied, err)
+	}
+	if applied, err := adapter.TransitionFire(t.Context(), gosched.FireTransition{FireID: fire.ID, Attempt: claimed.Attempt,
+		From: gosched.FireClaimed, To: gosched.FireSucceeded, ClaimedAt: claimed.FiredAt,
+		At: claimedAt.Add(time.Second)}); err != nil || !applied {
+		t.Fatalf("transition from the true owner = %v, %v", applied, err)
+	}
 }
