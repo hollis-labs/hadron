@@ -18,6 +18,7 @@ Or build from source:
 ```sh
 git clone git@github.com:hollis-labs/hadron.git
 cd hadron
+npm --prefix cmd/hadron-app/frontend ci
 make build
 export PATH="$PWD/bin:$PATH"
 ```

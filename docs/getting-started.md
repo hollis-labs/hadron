@@ -10,7 +10,10 @@ Install from Homebrew or build the repository:
 ```sh
 brew install hollis-labs/tap/hadron
 
-# Or, from a checkout:
+# Or, from a source checkout:
+git clone git@github.com:hollis-labs/hadron.git
+cd hadron
+npm --prefix cmd/hadron-app/frontend ci
 make build
 export PATH="$PWD/bin:$PATH"
 ```
