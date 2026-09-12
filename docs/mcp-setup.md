@@ -15,10 +15,11 @@ hadrond mcp \
 ```
 
 `-token` is required. On first use Hadron persists only its digest, creates a
-local principal, and creates a bounded meta-only/default-agent-namespace
-exposure profile. Restarting with the same token reuses that principal and
-preserves profile changes such as exact pins. Surrounding whitespace and
-control-bearing tokens are rejected rather than silently normalized.
+local MCP principal, and creates the bounded `profile:local-operator` exposure
+profile with search-all discovery, lazy loading, and no direct pins yet.
+Restarting with the same token reuses that principal and preserves profile
+changes such as exact pins. Surrounding whitespace and control-bearing tokens
+are rejected rather than silently normalized.
 
 Example client configuration:
 
@@ -78,7 +79,9 @@ The graph-native families are:
   `_register`;
 - registry: `hadron_workflow_registry_package`, `_pin_version`,
   `_unpin_version`, `_publish`, and `_clear_current`;
-- exposure: `hadron_workflow_exposure_inspect`, `_pin`, and `_unpin`.
+- exposure: `hadron_workflow_exposure_inspect`,
+  `hadron_workflow_exposure_pin_definition`, and
+  `hadron_workflow_exposure_unpin_definition`.
 
 Use `hadron_skills` for the active start-here, workflow-lifecycle, and typed
 run-inspection guidance. Workflow-only mode filters legacy blueprint, pipeline,
