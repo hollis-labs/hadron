@@ -1,9 +1,12 @@
 # Run Inspection
 
-Use `hadron_run_get` for the current run summary.
+Use `hadron_workflow_run_inspect` for the current graph-native run summary,
+nodes, waits, values, resources, activation attempts, and redacted events.
 
-Use `hadron_run_operations` for structured diagnostics across MCP calls, HTTP calls, message waits, and agent launches.
+Use `hadron_workflow_run_events` when you need the raw redacted graph-native
+event trail.
 
-Use `hadron_run_events` when you need the raw audit trail.
+Prefer `hadron_workflow_run_inspect` before reading event text when you need to
+understand a failed or waiting step.
 
-Prefer `hadron_run_operations` before scraping event text when you need to understand a failed step.
+For the operator CLI/HTTP sequence, see `docs/workflow-diagnostics.md`.
