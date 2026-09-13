@@ -25,14 +25,19 @@ per surface either — the CLI and UI are transports over the daemon.
 ```bash
 go test ./internal/appworkflow ./internal/api ./internal/mcpadapter ./internal/a2a
 make test
+make test-race
 make lint
 make e2e
 ```
 
 The four-package run is the cross-surface suite: identity binding, redaction,
-idempotency and hidden/not-found equivalence. `make e2e` builds the binaries and
-exercises the production daemon. Add `make test-ui` and `make typecheck` when
-`cmd/hadron-app/frontend` changes.
+idempotency and hidden/not-found equivalence. It is a focused property suite,
+not the complete backend gate. `make test` runs the backend package set in the
+Makefile, including `./cmd/hadrond` production composition tests. Use
+`make test-race` when runtime, wait, persistence, trigger, activation,
+application-host, or production daemon composition code changes. `make e2e`
+builds the binaries and exercises the production daemon. Add `make test-ui` and
+`make typecheck` when `cmd/hadron-app/frontend` changes.
 
 ## Boundaries
 

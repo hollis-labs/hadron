@@ -120,8 +120,35 @@ git diff --check
 
 After generation and `go mod tidy`, the relevant committed artifacts and module
 files must have no diff. Risk-sensitive changes should also repeat focused
-suites and run `-race` for runtime, wait, persistence, and application-host
-packages.
+suites and run `make test-race` for runtime, wait, persistence, trigger,
+activation, application-host, and production daemon composition packages.
+
+## Developer checks
+
+`make test` is the complete fast backend target and uses the Makefile package
+set, including `./cmd/hadrond` production composition tests. The four-package
+command in `AGENTS.md` is a focused cross-surface property suite, not a
+replacement for `make test`. `make test-race` runs the same backend package set
+under the race detector; run it before review when runtime, wait, persistence,
+trigger, activation, application-host, or production daemon composition code
+changes.
+
+When retaining a short view of long test output, keep the test process exit
+status separate from any display pipeline. For example:
+
+```sh
+log=/tmp/hadron-test.log
+if make test >"$log" 2>&1; then
+  rc=0
+else
+  rc=$?
+fi
+tail -n 80 "$log"
+exit "$rc"
+```
+
+Do the same with `make test-race`. Piping directly to `tail` reports the
+pipeline's semantics, not something a Make target can override.
 
 ## Legacy boundary
 
