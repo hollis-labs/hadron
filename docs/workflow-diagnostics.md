@@ -85,8 +85,8 @@ jq '.events[] | {sequence, type, occurred_at, invocation, attempt, masked}' /tmp
 Use `--reveal-private` only when the caller is authorized and the private value
 is necessary. Secret material remains masked.
 
-For HTTP clients, set the daemon address, run ID, and authentication headers
-explicitly. The first example is for a local operator on the daemon's loopback
+For HTTP clients, use Bash for the examples below and set the daemon address,
+run ID, and authentication headers explicitly. The first example is for a local operator on the daemon's loopback
 interface, where Hadron binds unauthenticated loopback requests to the local
 operator identity. Do not copy that as remote authentication; remote clients
 must send an authorized bearer token created for their workflow profile.
@@ -232,7 +232,10 @@ under the same `-data` root it gives the daemon. It creates state/log/data
 directories, fails on command, HTTP, or JSON errors, bounds startup and terminal
 polling, and cleans up only the daemon it spawned and its temporary directory.
 
-Syntax-check it before use:
+The CLI bounds each HTTP request at 30 seconds. The terminal loop allows 100
+polls with 0.1 second pauses; its total duration also includes request time.
+Run from the repository root with built `hadron` and `hadrond` binaries on PATH,
+plus `curl`, `jq`, and Python 3. Syntax-check it before use:
 
 ```sh
 sh -n /path/to/measure-hadron-workflow.sh
@@ -351,7 +354,7 @@ PY
     sleep 0.1
   done
   [ "$terminal" -eq 1 ] || {
-    echo "$run_id did not reach a terminal status within 10s" >&2
+    echo "$run_id did not reach a terminal status after 100 polls" >&2
     jq '.run.status, [.nodes[]? | {id, status, wait: .wait, failure: .explanation.failure}]' \
       "$tmp/$run_id.json" >&2
     exit 1
