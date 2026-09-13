@@ -20,7 +20,7 @@ func NewManager(store RunStore, settings SettingsValidator, workers int, logDir 
 		store:    store,
 		settings: settings,
 		workers:  workers,
-		queue:    make(chan Request, 128),
+		dispatch: make(chan Request, 128),
 		logDir:   logDir,
 		tel:      tel,
 		subs:     make(map[int]chan Event),
@@ -68,10 +68,10 @@ func (m *Manager) Subscribe(buffer int) (<-chan Event, func()) {
 	return ch, cancel
 }
 
-// Close drains the queue, waits for workers, and closes all subscriber channels.
+// Close drains the dispatch buffer, waits for workers, and closes all subscriber channels.
 func (m *Manager) Close() {
 	if m.closed.CompareAndSwap(false, true) {
-		close(m.queue)
+		close(m.dispatch)
 		m.wg.Wait()
 		m.subMu.Lock()
 		for id, ch := range m.subs {
@@ -98,7 +98,7 @@ func (m *Manager) Cancel(runID string) bool {
 	return true
 }
 
-// Enqueue persists the run record and adds it to the work queue.
+// Enqueue persists the run record and adds it to the in-memory dispatch buffer.
 func (m *Manager) Enqueue(ctx context.Context, req Request) error {
 	if req.RunID == "" {
 		return fmt.Errorf("run id is required")
@@ -137,7 +137,7 @@ func (m *Manager) Enqueue(ctx context.Context, req Request) error {
 	m.emit(req.RunID, "", "", "queued", "run queued")
 
 	select {
-	case m.queue <- req:
+	case m.dispatch <- req:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

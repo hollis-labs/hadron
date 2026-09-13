@@ -122,7 +122,7 @@ type Manager struct {
 	messages  MessageSource
 	agents    AgentLauncher
 	workers   int
-	queue     chan Request
+	dispatch  chan Request
 	logDir    string
 	tel       *telemetry.Logger
 	wg        sync.WaitGroup
