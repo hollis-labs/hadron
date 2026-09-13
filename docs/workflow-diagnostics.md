@@ -78,22 +78,46 @@ Start every incident with a redacted diagnostic snapshot:
 ```sh
 hadron workflow inspect <run-id> --json > /tmp/hadron-run.json
 jq '.run.status, .truncated, .omissions' /tmp/hadron-run.json
-jq '.nodes[] | {id: .id, status: .status, wait: .wait, failure: .failure}' /tmp/hadron-run.json
+jq '.nodes[] | {id: .id, status: .status, wait: .wait, failure: .explanation.failure, attempts: [.attempts[]? | {number, status, failure}]}' /tmp/hadron-run.json
 jq '.events[] | {sequence, type, occurred_at, invocation, attempt, masked}' /tmp/hadron-run.json
 ```
 
 Use `--reveal-private` only when the caller is authorized and the private value
 is necessary. Secret material remains masked.
 
-For HTTP clients, use the authenticated workflow routes:
+For HTTP clients, set the daemon address, run ID, and authentication headers
+explicitly. The first example is for a local operator on the daemon's loopback
+interface, where Hadron binds unauthenticated loopback requests to the local
+operator identity. Do not copy that as remote authentication; remote clients
+must send an authorized bearer token created for their workflow profile.
+
+```sh
+HADRON_ADDR="http://127.0.0.1:8095"
+RUN_ID="<run-id>"
+AUTH_HEADER=()
+```
+
+For a remote or non-loopback caller, set:
+
+```sh
+HADRON_ADDR="https://hadron.example.internal"
+RUN_ID="<run-id>"
+AUTH_HEADER=(-H "Authorization: Bearer $HADRON_WORKFLOW_TOKEN")
+```
+
+Then use the authenticated workflow routes:
 
 ```sh
 curl -sS -X POST "$HADRON_ADDR/v1/workflows/runs/$RUN_ID/inspect" \
+  --connect-timeout 2 --max-time 10 \
+  "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d "{\"run_id\":\"$RUN_ID\",\"event_limit\":200,\"node_limit\":200}" |
   jq '.run.status, .nodes[]?.status'
 
 curl -sS -X POST "$HADRON_ADDR/v1/workflows/runs/$RUN_ID/events" \
+  --connect-timeout 2 --max-time 10 \
+  "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d "{\"run_id\":\"$RUN_ID\",\"event_limit\":200}" |
   jq '.events[] | {sequence,type,redaction,masked}'
@@ -201,40 +225,147 @@ The project does not publish measured beta baselines for throughput, event
 volume, or scheduling precision. Treat any expectations as unmeasured until
 you run a bounded local measurement on your machine.
 
-Use temporary local state and a small graph-native production example:
+Use temporary local state, an explicitly chosen unused loopback endpoint, and a
+small graph-native production example. The daemon resolves file workflows from
+`filepath.Join(cfg.DataDir, "workflows")`, so the script stages the workflow
+under the same `-data` root it gives the daemon. It creates state/log/data
+directories, fails on command, HTTP, or JSON errors, bounds startup and terminal
+polling, and cleans up only the daemon it spawned and its temporary directory.
+
+Syntax-check it before use:
 
 ```sh
+sh -n /path/to/measure-hadron-workflow.sh
+```
+
+Example script:
+
+```sh
+#!/bin/sh
+set -eu
+
 tmp="$(mktemp -d)"
-install -d "$tmp/workflows"
+daemon_pid=""
+cleanup() {
+  if [ -n "$daemon_pid" ]; then
+    if kill -0 "$daemon_pid" 2>/dev/null; then
+      kill "$daemon_pid" 2>/dev/null || true
+      for _ in $(seq 1 20); do
+        if ! kill -0 "$daemon_pid" 2>/dev/null; then
+          break
+        fi
+        sleep 0.1
+      done
+      if kill -0 "$daemon_pid" 2>/dev/null; then
+        kill -KILL "$daemon_pid" 2>/dev/null || true
+      fi
+    fi
+    wait "$daemon_pid" 2>/dev/null || true
+    daemon_pid=""
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+
+addr="$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+host, port = s.getsockname()
+s.close()
+print(f"{host}:{port}")
+PY
+)"
+base_url="http://$addr"
+data_dir="$tmp/data"
+state_dir="$tmp/state"
+logs_dir="$tmp/logs"
+workflow_dir="$data_dir/workflows"
+install -d "$workflow_dir" "$state_dir" "$logs_dir"
 install -m 0600 examples/workflow/production/hello-transform.workflow.yaml \
-  "$tmp/workflows/hello-transform.workflow.yaml"
+  "$workflow_dir/hello-transform.workflow.yaml"
 
 hadrond serve \
-  -addr 127.0.0.1:8095 \
-  -db "$tmp/state/hadron.db" \
-  -data "$tmp/data" \
-  -logs "$tmp/logs" >"$tmp/hadrond.log" 2>&1 &
+  -addr "$addr" \
+  -db "$state_dir/hadron.db" \
+  -data "$data_dir" \
+  -logs "$logs_dir" >"$tmp/hadrond.log" 2>&1 &
 daemon_pid=$!
-trap 'kill "$daemon_pid" 2>/dev/null || true; rm -rf "$tmp"' EXIT
 
-hadron workflow validate "$tmp/workflows/hello-transform.workflow.yaml" --json
+sleep 0.2
+if ! kill -0 "$daemon_pid" 2>/dev/null; then
+  echo "hadrond exited before the first health check" >&2
+  tail -n 40 "$tmp/hadrond.log" >&2 || true
+  exit 1
+fi
+
+ready=0
+for _ in $(seq 1 50); do
+  if ! kill -0 "$daemon_pid" 2>/dev/null; then
+    echo "hadrond exited before readiness" >&2
+    tail -n 40 "$tmp/hadrond.log" >&2 || true
+    exit 1
+  fi
+  if curl -fsS --connect-timeout 1 --max-time 2 \
+    "$base_url/v1/health" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 0.1
+done
+[ "$ready" -eq 1 ] || {
+  echo "hadrond did not become ready at $base_url" >&2
+  tail -n 40 "$tmp/hadrond.log" >&2 || true
+  exit 1
+}
+
+hadron --addr "$base_url" workflow validate \
+  "$workflow_dir/hello-transform.workflow.yaml" --json >/dev/null
 
 for i in $(seq 1 10); do
   run_id="measure-$i"
-  started="$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')"
-  hadron workflow run "$tmp/workflows/hello-transform.workflow.yaml" \
+  started_ns="$(python3 - <<'PY'
+import time
+print(time.monotonic_ns())
+PY
+)"
+  hadron --addr "$base_url" workflow run \
+    "$workflow_dir/hello-transform.workflow.yaml" \
     --run-id "$run_id" \
     --idempotency-key "measure-start-$i" \
-    --input-json '{"name":"operator"}' \
+    --input-json '{"message":"operator"}' \
     --json >/dev/null
-  until hadron workflow inspect "$run_id" --json |
-    jq -e '.run.status == "succeeded" or .run.status == "failed" or .run.status == "canceled"' >/dev/null; do
-    sleep 0.2
+
+  terminal=0
+  for _ in $(seq 1 100); do
+    hadron --addr "$base_url" workflow inspect "$run_id" --json \
+      >"$tmp/$run_id.json"
+    status="$(jq -er '.run.status' "$tmp/$run_id.json")"
+    case "$status" in
+      succeeded|failed|canceled)
+        terminal=1
+        break
+        ;;
+    esac
+    sleep 0.1
   done
-  ended="$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')"
-  hadron workflow inspect "$run_id" --json >"$tmp/$run_id.json"
+  [ "$terminal" -eq 1 ] || {
+    echo "$run_id did not reach a terminal status within 10s" >&2
+    jq '.run.status, [.nodes[]? | {id, status, wait: .wait, failure: .explanation.failure}]' \
+      "$tmp/$run_id.json" >&2
+    exit 1
+  }
+
+  ended_ns="$(python3 - <<'PY'
+import time
+print(time.monotonic_ns())
+PY
+)"
+  latency_ms="$(( (ended_ns - started_ns) / 1000000 ))"
   events="$(jq '.events | length' "$tmp/$run_id.json")"
-  printf '%s latency_ms=%s events=%s\n' "$run_id" "$((ended-started))" "$events"
+  printf '%s status=%s latency_ms=%s events=%s\n' \
+    "$run_id" "$status" "$latency_ms" "$events"
 done
 ```
 
