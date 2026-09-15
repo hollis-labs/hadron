@@ -57,7 +57,7 @@ type Launcher struct {
 	closed     bool
 	closeOnce  sync.Once
 	closeCtx   context.Context
-	close      context.CancelFunc
+	cancel     context.CancelFunc
 }
 
 type replyMessenger interface {
@@ -70,13 +70,13 @@ func NewLauncher(dataDir string, substrates map[string]settings.AgentSubstrateSe
 	for name, cfg := range substrates {
 		cloned[name] = cfg
 	}
-	closeCtx, close := context.WithCancel(context.Background())
+	closeCtx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel func is stored on Launcher and invoked from Close()
 	return &Launcher{
 		dataDir:    dataDir,
 		substrates: cloned,
 		sessions:   agentsessions.NewManager(nil),
 		closeCtx:   closeCtx,
-		close:      close,
+		cancel:     cancel,
 	}
 }
 
@@ -135,8 +135,8 @@ func (l *Launcher) Close() error {
 	l.mu.Lock()
 	l.closed = true
 	l.mu.Unlock()
-	if l.close != nil {
-		l.closeOnce.Do(l.close)
+	if l.cancel != nil {
+		l.closeOnce.Do(l.cancel)
 	}
 	for _, info := range l.sessions.List() {
 		_ = l.sessions.Stop(ctx, info.ID)

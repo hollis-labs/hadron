@@ -51,7 +51,7 @@ func TestOpen_DropsObsoleteQueueEntriesAndPreservesWorkflowState(t *testing.T) {
 	}
 	legacy.SetMaxOpenConns(1)
 	legacy.SetMaxIdleConns(1)
-	if _, err := legacy.ExecContext(ctx, `
+	if _, err = legacy.ExecContext(ctx, `
 INSERT INTO runs (id, blueprint_path, status, input_json, created_at)
 VALUES ('legacy-run', './legacy.yaml', 'queued', '{}', ?);
 INSERT INTO queue_entries (run_id, state, available_at)
@@ -84,7 +84,7 @@ VALUES ('legacy-run', 'ready', ?);
 		_ = legacy.Close()
 		t.Fatalf("seed scheduler state = %#v, %v", admitted, err)
 	}
-	if err := legacy.Close(); err != nil {
+	if err = legacy.Close(); err != nil {
 		t.Fatalf("close legacy db: %v", err)
 	}
 
@@ -93,7 +93,7 @@ VALUES ('legacy-run', 'ready', ?);
 		t.Fatalf("open upgraded db: %v", err)
 	}
 	assertQueueEntriesRemovedAndWorkflowStatePreserved(t, upgraded, run.ID, node.ID, base.Add(2*time.Second))
-	if err := upgraded.Close(); err != nil {
+	if err = upgraded.Close(); err != nil {
 		t.Fatalf("close upgraded db: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func seedLegacyDatabaseThroughMigration(t *testing.T, path string, maxVersion in
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `
+	if _, err = db.ExecContext(ctx, `
 		PRAGMA journal_mode=WAL;
 		PRAGMA synchronous=NORMAL;
 		PRAGMA busy_timeout=5000;
