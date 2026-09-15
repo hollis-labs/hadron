@@ -58,6 +58,7 @@ type fileWatcher struct {
 	cancel   context.CancelFunc
 	trigID   string
 	debounce time.Duration
+	done     chan struct{}
 }
 
 // New creates a new trigger Manager.
@@ -129,6 +130,7 @@ func (m *Manager) startWatcherLocked(trigger persistence.TriggerRecord) {
 		cancel:   cancel,
 		trigID:   trigger.ID,
 		debounce: debounce,
+		done:     make(chan struct{}),
 	}
 	m.watchers[trigger.ID] = fw
 
@@ -145,6 +147,7 @@ func (m *Manager) runFileWatcher(ctx context.Context, fw *fileWatcher, trigger p
 		attribute.Bool("hadron.trigger.one_shot", trigger.OneShot),
 		attribute.Int64("hadron.trigger.debounce_ms", fw.debounce.Milliseconds()),
 	)
+	defer close(fw.done)
 	defer span.End()
 	defer func() { _ = fw.watcher.Close() }()
 
@@ -163,17 +166,29 @@ func (m *Manager) runFileWatcher(ctx context.Context, fw *fileWatcher, trigger p
 	}
 
 	var debounceTimer *time.Timer
+	var debounceC <-chan time.Time
 	var lastEvent fsnotify.Event
+	stopDebounce := func() {
+		if debounceTimer == nil {
+			return
+		}
+		if !debounceTimer.Stop() {
+			select {
+			case <-debounceTimer.C:
+			default:
+			}
+		}
+		debounceC = nil
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			if debounceTimer != nil {
-				debounceTimer.Stop()
-			}
+			stopDebounce()
 			return
 		case event, ok := <-fw.watcher.Events:
 			if !ok {
+				stopDebounce()
 				return
 			}
 			eventType := fsEventType(event.Op)
@@ -181,17 +196,28 @@ func (m *Manager) runFileWatcher(ctx context.Context, fw *fileWatcher, trigger p
 				continue
 			}
 			lastEvent = event
-			if debounceTimer != nil {
-				debounceTimer.Stop()
+			stopDebounce()
+			if debounceTimer == nil {
+				debounceTimer = time.NewTimer(fw.debounce)
+			} else {
+				debounceTimer.Reset(fw.debounce)
 			}
-			debounceTimer = time.AfterFunc(fw.debounce, func() {
-				m.fireFileWatch(trigger, lastEvent)
-			})
+			debounceC = debounceTimer.C
 		case err, ok := <-fw.watcher.Errors:
 			if !ok {
+				stopDebounce()
 				return
 			}
 			log.Printf("trigger: fsnotify error for %s: %v", fw.trigID, err)
+		case <-debounceC:
+			debounceC = nil
+			select {
+			case <-ctx.Done():
+				stopDebounce()
+				return
+			default:
+			}
+			m.fireFileWatch(trigger, lastEvent)
 		}
 	}
 }
@@ -261,13 +287,19 @@ func (m *Manager) AddFileWatcher(trigger persistence.TriggerRecord) {
 // StopFileWatchers stops all file watchers.
 func (m *Manager) StopFileWatchers() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.watchCancel != nil {
 		m.watchCancel()
 	}
+	var done []chan struct{}
 	for id, fw := range m.watchers {
 		fw.cancel()
+		done = append(done, fw.done)
 		delete(m.watchers, id)
+	}
+	m.mu.Unlock()
+
+	for _, ch := range done {
+		<-ch
 	}
 }
 

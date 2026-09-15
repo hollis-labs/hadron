@@ -24,7 +24,7 @@ import (
 
 func (m *Manager) worker() {
 	defer m.wg.Done()
-	for req := range m.queue {
+	for req := range m.dispatch {
 		bgCtx := context.Background()
 		runCtx, runCancel := context.WithCancel(bgCtx)
 		m.activeMu.Lock()

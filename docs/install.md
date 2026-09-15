@@ -73,6 +73,7 @@ Use this if you want repo-local binaries:
 ```sh
 git clone git@github.com:hollis-labs/hadron.git
 cd hadron
+npm --prefix cmd/hadron-app/frontend ci
 make build
 export PATH="$PWD/bin:$PATH"
 ```
@@ -84,6 +85,7 @@ Use this if you want shell-visible binaries from a source checkout:
 ```sh
 git clone git@github.com:hollis-labs/hadron.git
 cd hadron
+npm --prefix cmd/hadron-app/frontend ci
 make install PREFIX="$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 ```

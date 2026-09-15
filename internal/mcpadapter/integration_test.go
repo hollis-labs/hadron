@@ -21,14 +21,29 @@ import (
 
 // ── Fakes ──────────────────────────────────────────────────────────────────────
 
-type fakeRunner struct{}
+type fakeRunner struct {
+	enqueueCalls int
+	cancelCalls  int
+	cancelOK     bool
+}
 
-func (f *fakeRunner) Enqueue(_ context.Context, _ execution.Request) error { return nil }
-func (f *fakeRunner) Cancel(_ string) bool                                 { return false }
+func (f *fakeRunner) Enqueue(_ context.Context, _ execution.Request) error {
+	f.enqueueCalls++
+	return nil
+}
+func (f *fakeRunner) Cancel(_ string) bool {
+	f.cancelCalls++
+	return f.cancelOK
+}
 
-type fakePipelineRunner struct{}
+type fakePipelineRunner struct {
+	startCalls int
+}
 
-func (f *fakePipelineRunner) Start(_ context.Context, _, _, _ string) error { return nil }
+func (f *fakePipelineRunner) Start(_ context.Context, _, _, _ string) error {
+	f.startCalls++
+	return nil
+}
 
 type fakeScheduler struct{}
 
@@ -36,6 +51,34 @@ func (f *fakeScheduler) Start()                          {}
 func (f *fakeScheduler) Stop()                           {}
 func (f *fakeScheduler) TickNow(_ context.Context) error { return nil }
 func (f *fakeScheduler) Status() scheduler.Status        { return scheduler.Status{Running: true} }
+
+type recordingStore struct {
+	*persistence.Store
+	createWorkspaceCalls int
+	getWorkspaceCalls    int
+	createScheduleCalls  int
+	createTriggerCalls   int
+}
+
+func (s *recordingStore) CreateWorkspace(ctx context.Context, id, name string) error {
+	s.createWorkspaceCalls++
+	return s.Store.CreateWorkspace(ctx, id, name)
+}
+
+func (s *recordingStore) GetWorkspace(ctx context.Context, id string) (persistence.WorkspaceRecord, error) {
+	s.getWorkspaceCalls++
+	return s.Store.GetWorkspace(ctx, id)
+}
+
+func (s *recordingStore) CreateSchedule(ctx context.Context, rec persistence.ScheduleRecord) error {
+	s.createScheduleCalls++
+	return s.Store.CreateSchedule(ctx, rec)
+}
+
+func (s *recordingStore) CreateTrigger(ctx context.Context, rec persistence.TriggerRecord) error {
+	s.createTriggerCalls++
+	return s.Store.CreateTrigger(ctx, rec)
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -80,6 +123,21 @@ steps:
 		t.Fatalf("write blueprint: %v", err)
 	}
 	return dir
+}
+
+func newPipelineFile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	content := strings.TrimSpace(`
+stages:
+  - name: build
+    blueprint_path: /tmp/build.yaml
+`)
+	path := filepath.Join(dir, "pipeline.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write pipeline: %v", err)
+	}
+	return path
 }
 
 // callTool invokes a registered tool and returns the text result.
@@ -314,6 +372,204 @@ func TestMCP_MessageSendGetAndInbox(t *testing.T) {
 	consumed := callTool(t, adapter, "hadron_message_consume", map[string]any{"message_id": messageID})
 	if consumed["consumed_at"] == nil {
 		t.Fatalf("expected consumed_at after consume: %#v", consumed)
+	}
+}
+
+func TestMCP_MutatingToolsEnforceExactScopesBeforeSideEffects(t *testing.T) {
+	blueprintPath := filepath.Join(newBlueprintDir(t), "release-docs.yaml")
+	pipelinePath := newPipelineFile(t)
+
+	tests := []struct {
+		name             string
+		tool             string
+		requiredScope    string
+		wrongScope       string
+		args             map[string]any
+		configure        func(*fakeRunner)
+		assertNoSideFx   func(*testing.T, *recordingStore, *fakeRunner, *fakePipelineRunner)
+		assertAuthorized func(*testing.T, map[string]any, *recordingStore, *fakeRunner, *fakePipelineRunner)
+	}{
+		{
+			name:          "run enqueue uses run.write",
+			tool:          "hadron_run_enqueue",
+			requiredScope: mcpadapter.ScopeRunWrite,
+			wrongScope:    mcpadapter.ScopeRunCancel,
+			args: map[string]any{
+				"workspace_id":   "default",
+				"blueprint_path": blueprintPath,
+				"inputs_json":    `{"version":"1.2.3"}`,
+			},
+			assertNoSideFx: func(t *testing.T, store *recordingStore, runner *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if store.getWorkspaceCalls != 0 || runner.enqueueCalls != 0 {
+					t.Fatalf("denied run enqueue invoked dependencies: getWorkspace=%d enqueue=%d", store.getWorkspaceCalls, runner.enqueueCalls)
+				}
+			},
+			assertAuthorized: func(t *testing.T, out map[string]any, store *recordingStore, runner *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if out["status"] != "queued" || store.getWorkspaceCalls != 1 || runner.enqueueCalls != 1 {
+					t.Fatalf("authorized run enqueue = out:%#v getWorkspace:%d enqueue:%d", out, store.getWorkspaceCalls, runner.enqueueCalls)
+				}
+			},
+		},
+		{
+			name:          "run cancel uses run.cancel not run.write",
+			tool:          "hadron_run_cancel",
+			requiredScope: mcpadapter.ScopeRunCancel,
+			wrongScope:    mcpadapter.ScopeRunWrite,
+			args:          map[string]any{"run_id": "run-cancel-me"},
+			configure: func(runner *fakeRunner) {
+				runner.cancelOK = true
+			},
+			assertNoSideFx: func(t *testing.T, _ *recordingStore, runner *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if runner.cancelCalls != 0 {
+					t.Fatalf("denied run cancel invoked runner: cancel=%d", runner.cancelCalls)
+				}
+			},
+			assertAuthorized: func(t *testing.T, out map[string]any, _ *recordingStore, runner *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if out["status"] != "cancellation_requested" || runner.cancelCalls != 1 {
+					t.Fatalf("authorized run cancel = out:%#v cancel:%d", out, runner.cancelCalls)
+				}
+			},
+		},
+		{
+			name:          "schedule create uses schedule.write",
+			tool:          "hadron_schedule_create",
+			requiredScope: mcpadapter.ScopeScheduleWrite,
+			wrongScope:    mcpadapter.ScopeRunWrite,
+			args: map[string]any{
+				"workspace_id":   "default",
+				"name":           "nightly",
+				"blueprint_path": blueprintPath,
+				"cron_expr":      "0 1 * * *",
+			},
+			assertNoSideFx: func(t *testing.T, store *recordingStore, _ *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if store.createScheduleCalls != 0 {
+					t.Fatalf("denied schedule create invoked store: createSchedule=%d", store.createScheduleCalls)
+				}
+			},
+			assertAuthorized: func(t *testing.T, out map[string]any, store *recordingStore, _ *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if out["cron_expr"] != "0 1 * * *" || store.createScheduleCalls != 1 {
+					t.Fatalf("authorized schedule create = out:%#v createSchedule:%d", out, store.createScheduleCalls)
+				}
+			},
+		},
+		{
+			name:          "pipeline enqueue uses pipeline.write",
+			tool:          "hadron_pipeline_enqueue",
+			requiredScope: mcpadapter.ScopePipelineWrite,
+			wrongScope:    mcpadapter.ScopeRunWrite,
+			args: map[string]any{
+				"workspace_id":  "default",
+				"pipeline_path": pipelinePath,
+			},
+			assertNoSideFx: func(t *testing.T, store *recordingStore, _ *fakeRunner, pipeline *fakePipelineRunner) {
+				t.Helper()
+				if store.getWorkspaceCalls != 0 || pipeline.startCalls != 0 {
+					t.Fatalf("denied pipeline enqueue invoked dependencies: getWorkspace=%d start=%d", store.getWorkspaceCalls, pipeline.startCalls)
+				}
+			},
+			assertAuthorized: func(t *testing.T, out map[string]any, store *recordingStore, _ *fakeRunner, pipeline *fakePipelineRunner) {
+				t.Helper()
+				if out["status"] != "queued" || store.getWorkspaceCalls != 1 || pipeline.startCalls != 1 {
+					t.Fatalf("authorized pipeline enqueue = out:%#v getWorkspace:%d start:%d", out, store.getWorkspaceCalls, pipeline.startCalls)
+				}
+			},
+		},
+		{
+			name:          "workspace create uses workspace.write",
+			tool:          "hadron_workspace_create",
+			requiredScope: mcpadapter.ScopeWorkspaceWrite,
+			wrongScope:    mcpadapter.ScopeRunWrite,
+			args:          map[string]any{"workspace_id": "team-scope", "name": "Team Scope"},
+			assertNoSideFx: func(t *testing.T, store *recordingStore, _ *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if store.createWorkspaceCalls != 0 {
+					t.Fatalf("denied workspace create invoked store: createWorkspace=%d", store.createWorkspaceCalls)
+				}
+			},
+			assertAuthorized: func(t *testing.T, out map[string]any, store *recordingStore, _ *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if out["id"] != "team-scope" || store.createWorkspaceCalls != 1 {
+					t.Fatalf("authorized workspace create = out:%#v createWorkspace:%d", out, store.createWorkspaceCalls)
+				}
+			},
+		},
+		{
+			name:          "trigger create uses trigger.write",
+			tool:          "hadron_trigger_create",
+			requiredScope: mcpadapter.ScopeTriggerWrite,
+			wrongScope:    mcpadapter.ScopeRunWrite,
+			args: map[string]any{
+				"workspace_id":   "default",
+				"name":           "incoming",
+				"path":           "incoming",
+				"blueprint_path": blueprintPath,
+			},
+			assertNoSideFx: func(t *testing.T, store *recordingStore, _ *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if store.createTriggerCalls != 0 {
+					t.Fatalf("denied trigger create invoked store: createTrigger=%d", store.createTriggerCalls)
+				}
+			},
+			assertAuthorized: func(t *testing.T, out map[string]any, store *recordingStore, _ *fakeRunner, _ *fakePipelineRunner) {
+				t.Helper()
+				if out["webhook_url"] != "/hooks/incoming" || store.createTriggerCalls != 1 {
+					t.Fatalf("authorized trigger create = out:%#v createTrigger:%d", out, store.createTriggerCalls)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+"/missing token", func(t *testing.T) {
+			store := &recordingStore{Store: newTestStore(t)}
+			runner := &fakeRunner{}
+			pipeline := &fakePipelineRunner{}
+			if tt.configure != nil {
+				tt.configure(runner)
+			}
+			adapter := mcpadapter.New(store, runner, &fakeScheduler{}, pipeline, "", nil)
+			out := callTool(t, adapter, tt.tool, tt.args)
+			if out["code"] != "auth_required" {
+				t.Fatalf("expected auth_required, got %#v", out)
+			}
+			tt.assertNoSideFx(t, store, runner, pipeline)
+		})
+
+		t.Run(tt.name+"/wrong scope", func(t *testing.T) {
+			store := &recordingStore{Store: newTestStore(t)}
+			runner := &fakeRunner{}
+			pipeline := &fakePipelineRunner{}
+			if tt.configure != nil {
+				tt.configure(runner)
+			}
+			adapter := mcpadapter.New(store, runner, &fakeScheduler{}, pipeline, "token", []string{tt.wrongScope})
+			out := callTool(t, adapter, tt.tool, tt.args)
+			if out["code"] != "insufficient_scope" {
+				t.Fatalf("expected insufficient_scope, got %#v", out)
+			}
+			tt.assertNoSideFx(t, store, runner, pipeline)
+		})
+
+		t.Run(tt.name+"/correct scope", func(t *testing.T) {
+			store := &recordingStore{Store: newTestStore(t)}
+			runner := &fakeRunner{}
+			pipeline := &fakePipelineRunner{}
+			if tt.configure != nil {
+				tt.configure(runner)
+			}
+			adapter := mcpadapter.New(store, runner, &fakeScheduler{}, pipeline, "token", []string{tt.requiredScope})
+			out := callTool(t, adapter, tt.tool, tt.args)
+			if code, denied := out["code"]; denied {
+				t.Fatalf("authorized call returned tool error %v: %#v", code, out)
+			}
+			tt.assertAuthorized(t, out, store, runner, pipeline)
+		})
 	}
 }
 

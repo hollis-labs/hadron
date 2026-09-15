@@ -5,8 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/go-workflow/graph"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
 )
 
 func TestOpen_AppliesMigrations(t *testing.T) {
@@ -20,7 +24,7 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 
 	ctx := context.Background()
 
-	tables := []string{"runs", "schedules", "queue_entries", "pipeline_runs", "pipeline_stage_runs", "settings", "schema_migrations", "run_events", "workspaces", "human_gates", "messages"}
+	tables := []string{"runs", "schedules", "pipeline_runs", "pipeline_stage_runs", "settings", "schema_migrations", "run_events", "workspaces", "human_gates", "messages"}
 	for _, tbl := range tables {
 		var name string
 		err := store.DB().QueryRowContext(ctx,
@@ -30,6 +34,200 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 			t.Fatalf("table %s not found: %v", tbl, err)
 		}
 	}
+	if tableExists(t, store.DB(), "queue_entries") {
+		t.Fatalf("queue_entries should be removed by the forward migration")
+	}
+}
+
+func TestOpen_DropsObsoleteQueueEntriesAndPreservesWorkflowState(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "hadron-upgrade.db")
+	base := workflowTestTime()
+	seedLegacyDatabaseThroughMigration(t, dbPath, 29)
+
+	legacy, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	legacy.SetMaxOpenConns(1)
+	legacy.SetMaxIdleConns(1)
+	if _, err = legacy.ExecContext(ctx, `
+INSERT INTO runs (id, blueprint_path, status, input_json, created_at)
+VALUES ('legacy-run', './legacy.yaml', 'queued', '{}', ?);
+INSERT INTO queue_entries (run_id, state, available_at)
+VALUES ('legacy-run', 'ready', ?);
+`, base.Format(time.RFC3339), base.Format(time.RFC3339)); err != nil {
+		_ = legacy.Close()
+		t.Fatalf("seed obsolete queue entries: %v", err)
+	}
+	legacyStore := &Store{db: legacy}
+	legacyState, err := NewWorkflowStateStore(legacyStore)
+	if err != nil {
+		_ = legacy.Close()
+		t.Fatalf("legacy workflow state store: %v", err)
+	}
+	run := createWorkflowTestRun(t, legacyState, "upgrade-workflow-run", base)
+	node := createWorkflowTestNode(t, legacyState, run.ID, "resource-node", base)
+	ready, err := legacyState.TransitionNode(ctx, workflowruntime.NodeTransitionRequest{
+		InvocationID: node.ID, ExpectedGeneration: node.Generation, To: workflowruntime.NodeReady, At: base,
+	})
+	if err != nil {
+		_ = legacy.Close()
+		t.Fatalf("ready seed node: %v", err)
+	}
+	requirements := workflowSchedulerRequirements(t, run.ID, workflowruntime.SchedulerLimits{
+		Workers: 1,
+		Named:   map[string]int{"upgrade-resource": 1},
+	}, workflowruntime.SchedulerDemand{Concurrency: []graph.ConcurrencyClaim{{Resource: "upgrade-resource"}}})
+	admitted, err := legacyState.AdmitNode(ctx, workflowSchedulerAdmission(ready.Snapshot.ID, "upgrade", requirements, base.Add(time.Second), base.Add(time.Minute)))
+	if err != nil || !admitted.Claim.Acquired {
+		_ = legacy.Close()
+		t.Fatalf("seed scheduler state = %#v, %v", admitted, err)
+	}
+	if err = legacy.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	upgraded, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open upgraded db: %v", err)
+	}
+	assertQueueEntriesRemovedAndWorkflowStatePreserved(t, upgraded, run.ID, node.ID, base.Add(2*time.Second))
+	if err = upgraded.Close(); err != nil {
+		t.Fatalf("close upgraded db: %v", err)
+	}
+
+	reopened, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen upgraded db: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+	assertQueueEntriesRemovedAndWorkflowStatePreserved(t, reopened, run.ID, node.ID, base.Add(3*time.Second))
+}
+
+func seedLegacyDatabaseThroughMigration(t *testing.T, path string, maxVersion int) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open legacy seed db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	ctx := context.Background()
+	if _, err = db.ExecContext(ctx, `
+		PRAGMA journal_mode=WAL;
+		PRAGMA synchronous=NORMAL;
+		PRAGMA busy_timeout=5000;
+	`); err != nil {
+		t.Fatalf("set legacy pragmas: %v", err)
+	}
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatalf("read migrations: %v", err)
+	}
+	type migration struct {
+		version int
+		name    string
+	}
+	var migrations []migration
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		version, err := parseMigrationVersion(entry.Name())
+		if err != nil {
+			t.Fatalf("parse migration %s: %v", entry.Name(), err)
+		}
+		if version <= maxVersion {
+			migrations = append(migrations, migration{version: version, name: entry.Name()})
+		}
+	}
+	sort.Slice(migrations, func(i, j int) bool {
+		return migrations[i].version < migrations[j].version
+	})
+	for _, migration := range migrations {
+		content, err := migrationsFS.ReadFile(filepath.Join("migrations", migration.name))
+		if err != nil {
+			t.Fatalf("read migration %s: %v", migration.name, err)
+		}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin migration %s: %v", migration.name, err)
+		}
+		if _, err := tx.ExecContext(ctx, string(content)); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("exec migration %s: %v", migration.name, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)`,
+			migration.version,
+			time.Now().UTC().Format(time.RFC3339),
+		); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("record migration %s: %v", migration.name, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit migration %s: %v", migration.name, err)
+		}
+	}
+}
+
+func assertQueueEntriesRemovedAndWorkflowStatePreserved(t *testing.T, store *Store, runID workflowruntime.RunID, nodeID workflowruntime.NodeInvocationID, now time.Time) {
+	t.Helper()
+	if tableExists(t, store.DB(), "queue_entries") {
+		t.Fatalf("queue_entries should be absent after migration 30; obsolete rows are intentionally removed")
+	}
+	var applied int
+	if err := store.DB().QueryRow(`SELECT COUNT(1) FROM schema_migrations WHERE version = 30`).Scan(&applied); err != nil {
+		t.Fatalf("read migration 30 marker: %v", err)
+	}
+	if applied != 1 {
+		t.Fatalf("migration 30 marker count = %d, want 1", applied)
+	}
+	state, err := NewWorkflowStateStore(store)
+	if err != nil {
+		t.Fatalf("workflow state store after upgrade: %v", err)
+	}
+	run, err := state.LoadRun(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("load preserved workflow run: %v", err)
+	}
+	if run.ID != runID {
+		t.Fatalf("preserved run ID = %s, want %s", run.ID, runID)
+	}
+	node, err := state.LoadNodeInvocation(context.Background(), nodeID)
+	if err != nil {
+		t.Fatalf("load preserved workflow node: %v", err)
+	}
+	if node.ID != nodeID || node.Lease == nil {
+		t.Fatalf("preserved node = %#v, want leased %s", node, nodeID)
+	}
+	resources, err := state.InspectSchedulerResources(context.Background(), workflowruntime.SchedulerResourceQuery{Now: now})
+	if err != nil {
+		t.Fatalf("inspect preserved scheduler resources: %v", err)
+	}
+	if len(resources.Holders) == 0 {
+		t.Fatalf("preserved scheduler holders = %#v, want holders for %s", resources.Holders, nodeID)
+	}
+	for _, holder := range resources.Holders {
+		if holder.Invocation != nodeID {
+			t.Fatalf("preserved scheduler holders = %#v, want only %s", resources.Holders, nodeID)
+		}
+	}
+}
+
+func tableExists(t *testing.T, db *sql.DB, table string) bool {
+	t.Helper()
+	var name string
+	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("query table %s: %v", table, err)
+	}
+	return true
 }
 
 func TestWorkspaceMigrationAndScopedQueries(t *testing.T) {

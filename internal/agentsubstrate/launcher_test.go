@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/messagesubstrate"
 	"github.com/hollis-labs/hadron/internal/persistence"
@@ -226,54 +228,16 @@ func TestLaunchAgent_CodexJSONRPCKickoffRelaysExplicitReplyOutbox(t *testing.T) 
 		t.Skip("jsonrpc fixture uses /bin/sh")
 	}
 
-	store, err := persistence.Open(filepath.Join(t.TempDir(), "hadron.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer func() { _ = store.Close() }()
-
-	messageService := messagesubstrate.New(store, map[string]settings.MessageSubstrateSetting{
-		"local_mailbox": {Kind: "go_messaging", Authority: "hadron"},
-	})
-
 	dataDir := t.TempDir()
 	scriptPath := writeLauncherJSONRPCReplyScript(t, dataDir)
-	blueprintDir := filepath.Join(dataDir, "blueprints")
-	if mkErr := os.MkdirAll(blueprintDir, 0o755); mkErr != nil {
-		t.Fatalf("mkdir blueprint dir: %v", mkErr)
-	}
-	blueprintPath := filepath.Join(blueprintDir, "agent.yaml")
-	if writeErr := os.WriteFile(blueprintPath, []byte("blueprint: {}\n"), 0o644); writeErr != nil {
-		t.Fatalf("write blueprint path: %v", writeErr)
-	}
+	fixture := newJSONRPCKickoffFixture(t, dataDir, scriptPath)
 
-	launcher := NewLauncher(dataDir, map[string]settings.AgentSubstrateSettings{
-		"local_runtime": {
-			Kind:      kindGoAgentRuntime,
-			Provider:  "codex",
-			Runtime:   "jsonrpc-stdio",
-			Command:   scriptPath,
-			Authority: "hadron",
-			Boot: settings.AgentBootSettings{
-				CallbacksProfile: sharedCallbacksProfile,
-				PlantNativeFiles: true,
-			},
-			WorkingDirMode: defaultWorkingDirMode,
-		},
-	})
-	launcher.SetReplyMessenger(messageService)
-	defer func() {
-		if closeErr := launcher.Close(); closeErr != nil {
-			t.Fatalf("close launcher: %v", closeErr)
-		}
-	}()
-
-	result, err := launcher.LaunchAgent(context.Background(), execution.AgentLaunchRequest{
+	result, err := fixture.launcher.LaunchAgent(context.Background(), execution.AgentLaunchRequest{
 		Substrate:      "local_runtime",
 		LaunchID:       "jsonrpc-explicit-reply-proof",
 		LogicalAgentID: "reviewer-explicit",
 		PromptAppend:   "Reply using the helper.",
-		BlueprintPath:  blueprintPath,
+		BlueprintPath:  fixture.blueprintPath,
 		Metadata: map[string]any{
 			"correlation_id":  "jsonrpc-explicit-reply-123",
 			"reply_substrate": "local_mailbox",
@@ -283,25 +247,22 @@ func TestLaunchAgent_CodexJSONRPCKickoffRelaysExplicitReplyOutbox(t *testing.T) 
 		t.Fatalf("launch agent: %v", err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		thread, err := messageService.Thread(context.Background(), "local_mailbox", "jsonrpc-explicit-reply-123", 10)
-		if err == nil && len(thread) > 0 {
-			payload, err := json.Marshal(thread[0].Payload)
-			if err != nil {
-				t.Fatalf("marshal explicit reply payload: %v", err)
-			}
-			if !strings.Contains(string(payload), "jsonrpc explicit reply ok") {
-				t.Fatalf("unexpected explicit reply payload: %s", string(payload))
-			}
-			if thread[0].To.URN() != result.Mailbox {
-				t.Fatalf("reply target = %q, want %q", thread[0].To.URN(), result.Mailbox)
-			}
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
+	env := fixture.replies.waitForThread(t, "jsonrpc-explicit-reply-123")
+	if closeErr := fixture.closeLauncher(); closeErr != nil {
+		t.Fatalf("close launcher: %v", closeErr)
 	}
-	t.Fatal("timed out waiting for explicit outbox reply")
+	if env.To.URN() != result.Mailbox {
+		t.Fatalf("reply target = %q, want %q", env.To.URN(), result.Mailbox)
+	}
+	payload, err := json.Marshal(env.Payload)
+	if err != nil {
+		t.Fatalf("marshal explicit reply payload: %v", err)
+	}
+	if !strings.Contains(string(payload), "jsonrpc explicit reply ok") {
+		t.Fatalf("unexpected explicit reply payload: %s", string(payload))
+	}
+	assertThreadContainsReply(t, fixture.messageService, "jsonrpc-explicit-reply-123", result.Mailbox, "jsonrpc explicit reply ok")
+	assertOutboxDrained(t, result)
 }
 
 func TestLaunchAgent_CodexJSONRPCKickoffPostsFallbackReply(t *testing.T) {
@@ -309,15 +270,91 @@ func TestLaunchAgent_CodexJSONRPCKickoffPostsFallbackReply(t *testing.T) {
 		t.Skip("jsonrpc fixture uses /bin/sh")
 	}
 
-	store, err := persistence.Open(filepath.Join(t.TempDir(), "hadron.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer func() { _ = store.Close() }()
+	dataDir := t.TempDir()
+	scriptPath := writeLauncherJSONRPCTestScript(t, dataDir)
+	fixture := newJSONRPCKickoffFixture(t, dataDir, scriptPath)
 
-	messageService := messagesubstrate.New(store, map[string]settings.MessageSubstrateSetting{
-		"local_mailbox": {Kind: "go_messaging", Authority: "hadron"},
+	result, err := fixture.launcher.LaunchAgent(context.Background(), execution.AgentLaunchRequest{
+		Substrate:      "local_runtime",
+		LaunchID:       "jsonrpc-reply-proof",
+		LogicalAgentID: "reviewer-jsonrpc",
+		PromptAppend:   "Reply on the mailbox.",
+		BlueprintPath:  fixture.blueprintPath,
+		Metadata: map[string]any{
+			"correlation_id":  "jsonrpc-reply-123",
+			"reply_substrate": "local_mailbox",
+		},
 	})
+	if err != nil {
+		t.Fatalf("launch agent: %v", err)
+	}
+
+	env := fixture.replies.waitForThread(t, "jsonrpc-reply-123")
+	if closeErr := fixture.closeLauncher(); closeErr != nil {
+		t.Fatalf("close launcher: %v", closeErr)
+	}
+	if env.To.URN() != result.Mailbox {
+		t.Fatalf("reply target = %q, want %q", env.To.URN(), result.Mailbox)
+	}
+	payload, err := json.Marshal(env.Payload)
+	if err != nil {
+		t.Fatalf("marshal helper payload: %v", err)
+	}
+	if !strings.Contains(string(payload), `"status":"assistant_output"`) &&
+		!strings.Contains(string(payload), `"status":"agent_completed_no_output"`) {
+		t.Fatalf("unexpected fallback payload: %s", string(payload))
+	}
+	assertThreadContainsReply(t, fixture.messageService, "jsonrpc-reply-123", result.Mailbox, `"status":`)
+	assertOutboxDrained(t, result)
+}
+
+func TestLaunchAgent_CodexJSONRPCKickoffKeepsOutboxWatcherUntilLateExplicitReply(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("jsonrpc fixture uses /bin/sh")
+	}
+
+	dataDir := t.TempDir()
+	scriptPath := writeLauncherJSONRPCLateReplyScript(t, dataDir)
+	fixture := newJSONRPCKickoffFixture(t, dataDir, scriptPath)
+
+	result, err := fixture.launcher.LaunchAgent(context.Background(), execution.AgentLaunchRequest{
+		Substrate:      "local_runtime",
+		LaunchID:       "jsonrpc-late-explicit-reply-proof",
+		LogicalAgentID: "reviewer-late-explicit",
+		PromptAppend:   "Reply using the helper after accepting the turn.",
+		BlueprintPath:  fixture.blueprintPath,
+		Metadata: map[string]any{
+			"correlation_id":         "jsonrpc-late-explicit-reply-123",
+			"reply_substrate":        "local_mailbox",
+			"disable_fallback_reply": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("launch agent: %v", err)
+	}
+
+	env := fixture.replies.waitForThread(t, "jsonrpc-late-explicit-reply-123")
+	if closeErr := fixture.closeLauncher(); closeErr != nil {
+		t.Fatalf("close launcher: %v", closeErr)
+	}
+	if env.To.URN() != result.Mailbox {
+		t.Fatalf("reply target = %q, want %q", env.To.URN(), result.Mailbox)
+	}
+	payload, err := json.Marshal(env.Payload)
+	if err != nil {
+		t.Fatalf("marshal late explicit reply payload: %v", err)
+	}
+	if !strings.Contains(string(payload), "jsonrpc late explicit reply ok") {
+		t.Fatalf("unexpected late explicit reply payload: %s", string(payload))
+	}
+	assertThreadContainsReply(t, fixture.messageService, "jsonrpc-late-explicit-reply-123", result.Mailbox, "jsonrpc late explicit reply ok")
+	assertOutboxDrained(t, result)
+}
+
+func TestLaunchAgent_CloseCancelsAndWaitsForInFlightReplyDelivery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("jsonrpc fixture uses /bin/sh")
+	}
 
 	dataDir := t.TempDir()
 	scriptPath := writeLauncherJSONRPCTestScript(t, dataDir)
@@ -330,6 +367,7 @@ func TestLaunchAgent_CodexJSONRPCKickoffPostsFallbackReply(t *testing.T) {
 		t.Fatalf("write blueprint path: %v", writeErr)
 	}
 
+	replies := newBlockingReplyMessenger()
 	launcher := NewLauncher(dataDir, map[string]settings.AgentSubstrateSettings{
 		"local_runtime": {
 			Kind:      kindGoAgentRuntime,
@@ -344,48 +382,249 @@ func TestLaunchAgent_CodexJSONRPCKickoffPostsFallbackReply(t *testing.T) {
 			WorkingDirMode: defaultWorkingDirMode,
 		},
 	})
-	launcher.SetReplyMessenger(messageService)
-	defer func() {
-		if closeErr := launcher.Close(); closeErr != nil {
-			t.Fatalf("close launcher: %v", closeErr)
-		}
-	}()
+	launcher.SetReplyMessenger(replies)
+	t.Cleanup(func() { _ = launcher.Close() })
+	t.Cleanup(replies.releaseSend)
 
-	result, err := launcher.LaunchAgent(context.Background(), execution.AgentLaunchRequest{
+	if _, err := launcher.LaunchAgent(context.Background(), execution.AgentLaunchRequest{
 		Substrate:      "local_runtime",
-		LaunchID:       "jsonrpc-reply-proof",
-		LogicalAgentID: "reviewer-jsonrpc",
-		PromptAppend:   "Reply on the mailbox.",
+		LaunchID:       "jsonrpc-blocking-reply-proof",
+		LogicalAgentID: "reviewer-blocking",
+		PromptAppend:   "Complete without an explicit helper reply.",
 		BlueprintPath:  blueprintPath,
 		Metadata: map[string]any{
-			"correlation_id":  "jsonrpc-reply-123",
+			"correlation_id":  "jsonrpc-blocking-reply-123",
 			"reply_substrate": "local_mailbox",
 		},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("launch agent: %v", err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		thread, err := messageService.Thread(context.Background(), "local_mailbox", "jsonrpc-reply-123", 10)
-		if err == nil && len(thread) > 0 {
-			payload, err := json.Marshal(thread[0].Payload)
-			if err != nil {
-				t.Fatalf("marshal helper payload: %v", err)
-			}
-			if !strings.Contains(string(payload), `"status":"assistant_output"`) &&
-				!strings.Contains(string(payload), `"status":"agent_completed_no_output"`) {
-				t.Fatalf("unexpected fallback payload: %s", string(payload))
-			}
-			if thread[0].To.URN() != result.Mailbox {
-				t.Fatalf("reply target = %q, want %q", thread[0].To.URN(), result.Mailbox)
-			}
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
+	replies.waitEntered(t)
+	closeResult := make(chan error, 1)
+	go func() {
+		closeResult <- launcher.Close()
+	}()
+	replies.waitCanceled(t)
+	select {
+	case closeErr := <-closeResult:
+		t.Fatalf("launcher close returned before blocked reply delivery exited: %v", closeErr)
+	default:
 	}
-	t.Fatal("timed out waiting for jsonrpc kickoff fallback reply")
+	replies.releaseSend()
+	if closeErr := <-closeResult; closeErr != nil {
+		t.Fatalf("close launcher: %v", closeErr)
+	}
+	replies.requireExited(t)
+}
+
+type jsonRPCKickoffFixture struct {
+	launcher       *Launcher
+	messageService *messagesubstrate.Service
+	replies        *signalingReplyMessenger
+	store          *persistence.Store
+	blueprintPath  string
+	launcherClosed bool
+}
+
+func newJSONRPCKickoffFixture(t *testing.T, dataDir, scriptPath string) *jsonRPCKickoffFixture {
+	t.Helper()
+	store, err := persistence.Open(filepath.Join(t.TempDir(), "hadron.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	messageService := messagesubstrate.New(store, map[string]settings.MessageSubstrateSetting{
+		"local_mailbox": {Kind: "go_messaging", Authority: "hadron"},
+	})
+	replies := &signalingReplyMessenger{
+		inner: messageService,
+		sent:  make(chan messaging.Envelope, 4),
+	}
+
+	blueprintDir := filepath.Join(dataDir, "blueprints")
+	if mkErr := os.MkdirAll(blueprintDir, 0o755); mkErr != nil {
+		t.Fatalf("mkdir blueprint dir: %v", mkErr)
+	}
+	blueprintPath := filepath.Join(blueprintDir, "agent.yaml")
+	if writeErr := os.WriteFile(blueprintPath, []byte("blueprint: {}\n"), 0o644); writeErr != nil {
+		t.Fatalf("write blueprint path: %v", writeErr)
+	}
+
+	launcher := NewLauncher(dataDir, map[string]settings.AgentSubstrateSettings{
+		"local_runtime": {
+			Kind:      kindGoAgentRuntime,
+			Provider:  "codex",
+			Runtime:   "jsonrpc-stdio",
+			Command:   scriptPath,
+			Authority: "hadron",
+			Boot: settings.AgentBootSettings{
+				CallbacksProfile: sharedCallbacksProfile,
+				PlantNativeFiles: true,
+			},
+			WorkingDirMode: defaultWorkingDirMode,
+		},
+	})
+	launcher.SetReplyMessenger(replies)
+
+	fixture := &jsonRPCKickoffFixture{
+		launcher:       launcher,
+		messageService: messageService,
+		replies:        replies,
+		store:          store,
+		blueprintPath:  blueprintPath,
+	}
+	t.Cleanup(func() {
+		if !fixture.launcherClosed {
+			_ = fixture.closeLauncher()
+		}
+		_ = store.Close()
+	})
+	return fixture
+}
+
+func (f *jsonRPCKickoffFixture) closeLauncher() error {
+	f.launcherClosed = true
+	return f.launcher.Close()
+}
+
+type signalingReplyMessenger struct {
+	inner *messagesubstrate.Service
+	sent  chan messaging.Envelope
+}
+
+func (m *signalingReplyMessenger) Send(ctx context.Context, substrate string, env messaging.Envelope) (messaging.Envelope, error) {
+	sent, err := m.inner.Send(ctx, substrate, env)
+	if err != nil {
+		return messaging.Envelope{}, err
+	}
+	m.sent <- sent
+	return sent, nil
+}
+
+func (m *signalingReplyMessenger) List(ctx context.Context, substrate, toURN, correlationID string, limit int) ([]messaging.Envelope, error) {
+	return m.inner.List(ctx, substrate, toURN, correlationID, limit)
+}
+
+func (m *signalingReplyMessenger) waitForThread(t *testing.T, threadID string) messaging.Envelope {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	for {
+		select {
+		case env := <-m.sent:
+			if env.ThreadID == threadID {
+				return env
+			}
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for reply on thread %q: %v", threadID, ctx.Err())
+		}
+	}
+}
+
+type blockingReplyMessenger struct {
+	entered     chan struct{}
+	canceled    chan struct{}
+	release     chan struct{}
+	exited      chan struct{}
+	enterOnce   sync.Once
+	cancelOnce  sync.Once
+	releaseOnce sync.Once
+	exitOnce    sync.Once
+}
+
+func newBlockingReplyMessenger() *blockingReplyMessenger {
+	return &blockingReplyMessenger{
+		entered:  make(chan struct{}),
+		canceled: make(chan struct{}),
+		release:  make(chan struct{}),
+		exited:   make(chan struct{}),
+	}
+}
+
+func (m *blockingReplyMessenger) Send(ctx context.Context, _ string, _ messaging.Envelope) (messaging.Envelope, error) {
+	m.enterOnce.Do(func() { close(m.entered) })
+	<-ctx.Done()
+	m.cancelOnce.Do(func() { close(m.canceled) })
+	<-m.release
+	m.exitOnce.Do(func() { close(m.exited) })
+	return messaging.Envelope{}, ctx.Err()
+}
+
+func (m *blockingReplyMessenger) List(context.Context, string, string, string, int) ([]messaging.Envelope, error) {
+	return nil, nil
+}
+
+func (m *blockingReplyMessenger) waitEntered(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	select {
+	case <-m.entered:
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for reply send to block: %v", ctx.Err())
+	}
+}
+
+func (m *blockingReplyMessenger) waitCanceled(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	select {
+	case <-m.canceled:
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for blocked reply send to observe launcher close: %v", ctx.Err())
+	}
+}
+
+func (m *blockingReplyMessenger) releaseSend() {
+	m.releaseOnce.Do(func() { close(m.release) })
+}
+
+func (m *blockingReplyMessenger) requireExited(t *testing.T) {
+	t.Helper()
+	select {
+	case <-m.exited:
+	default:
+		t.Fatal("blocked reply send had not exited when launcher close returned")
+	}
+}
+
+func assertThreadContainsReply(t *testing.T, messageService *messagesubstrate.Service, threadID, mailbox, want string) {
+	t.Helper()
+	thread, err := messageService.Thread(context.Background(), "local_mailbox", threadID, 10)
+	if err != nil {
+		t.Fatalf("read reply thread: %v", err)
+	}
+	if len(thread) != 1 {
+		t.Fatalf("reply thread length = %d, want 1", len(thread))
+	}
+	if thread[0].To.URN() != mailbox {
+		t.Fatalf("reply target = %q, want %q", thread[0].To.URN(), mailbox)
+	}
+	payload, err := json.Marshal(thread[0].Payload)
+	if err != nil {
+		t.Fatalf("marshal thread payload: %v", err)
+	}
+	if !strings.Contains(string(payload), want) {
+		t.Fatalf("reply payload = %s, want substring %q", string(payload), want)
+	}
+}
+
+func assertOutboxDrained(t *testing.T, result execution.AgentLaunchResult) {
+	t.Helper()
+	bootDir, _ := result.Handles["boot_dir"].(string)
+	if bootDir == "" {
+		t.Fatal("expected boot_dir handle")
+	}
+	entries, err := os.ReadDir(filepath.Join(bootDir, replyOutboxRelDir))
+	if err != nil {
+		t.Fatalf("read reply outbox: %v", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			t.Fatalf("reply outbox still contains %s", entry.Name())
+		}
+	}
 }
 
 func writeLauncherTestScript(t *testing.T, dir string) string {
@@ -462,6 +701,41 @@ exit 0
 `
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatalf("write jsonrpc reply script: %v", err)
+	}
+	return path
+}
+
+func writeLauncherJSONRPCLateReplyScript(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "fake-jsonrpc-late-reply.sh")
+	body := `#!/bin/sh
+printf '%s\n' '{"jsonrpc":"2.0","method":"server.ready","params":{"port":0}}'
+while IFS= read -r line; do
+    id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+    method=$(printf '%s' "$line" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+    if [ -n "$id" ]; then
+        case "$method" in
+        initialize)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"capabilities":{}}}\n' "$id"
+            ;;
+        thread/start)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"thread":{"id":"thread-test-003"}}}\n' "$id"
+            ;;
+        turn/start)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"accepted":true}}\n' "$id"
+            sleep 0.1
+            ./hadron-reply "jsonrpc late explicit reply ok" >/dev/null 2>&1 || true
+            ;;
+        *)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"echoed":true,"method":"%s"}}\n' "$id" "$method"
+            ;;
+        esac
+    fi
+done
+exit 0
+`
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write jsonrpc late reply script: %v", err)
 	}
 	return path
 }

@@ -127,6 +127,9 @@ external trigger handles.
 
 ## Troubleshooting
 
+For a fuller graph-native operator walkthrough, see
+[Workflow diagnostics and recovery](workflow-diagnostics.md).
+
 - **`unknown command` for `run`/`validate`:** use `hadron workflow run` or
   `hadron workflow validate`; legacy root commands were retired.
 - **unknown step kind:** compare the plan with the six production kinds above.

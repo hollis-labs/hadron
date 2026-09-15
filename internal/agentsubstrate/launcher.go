@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -51,6 +52,12 @@ type Launcher struct {
 	codexTurns turn.CodexAppServerCache
 	replies    replyMessenger
 	seq        atomic.Uint64
+	mu         sync.Mutex
+	goroutines sync.WaitGroup
+	closed     bool
+	closeOnce  sync.Once
+	closeCtx   context.Context
+	cancel     context.CancelFunc
 }
 
 type replyMessenger interface {
@@ -63,15 +70,60 @@ func NewLauncher(dataDir string, substrates map[string]settings.AgentSubstrateSe
 	for name, cfg := range substrates {
 		cloned[name] = cfg
 	}
+	closeCtx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel func is stored on Launcher and invoked from Close()
 	return &Launcher{
 		dataDir:    dataDir,
 		substrates: cloned,
 		sessions:   agentsessions.NewManager(nil),
+		closeCtx:   closeCtx,
+		cancel:     cancel,
 	}
 }
 
 func (l *Launcher) SetReplyMessenger(m replyMessenger) {
 	l.replies = m
+}
+
+func (l *Launcher) lifecycleContext(ctx context.Context) context.Context {
+	if l == nil || l.closeCtx == nil {
+		return context.WithoutCancel(ctx)
+	}
+	return launcherLifecycleContext{Context: context.WithoutCancel(ctx), done: l.closeCtx.Done()}
+}
+
+func (l *Launcher) startLifecycleGoroutine(fn func()) bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return false
+	}
+	l.goroutines.Add(1)
+	go func() {
+		defer l.goroutines.Done()
+		fn()
+	}()
+	return true
+}
+
+type launcherLifecycleContext struct {
+	context.Context
+	done <-chan struct{}
+}
+
+func (c launcherLifecycleContext) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c launcherLifecycleContext) Err() error {
+	select {
+	case <-c.done:
+		return context.Canceled
+	default:
+		return nil
+	}
 }
 
 func (l *Launcher) Close() error {
@@ -80,8 +132,24 @@ func (l *Launcher) Close() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sessionShutdownTimeout)
 	defer cancel()
+	l.mu.Lock()
+	l.closed = true
+	l.mu.Unlock()
+	if l.cancel != nil {
+		l.closeOnce.Do(l.cancel)
+	}
 	for _, info := range l.sessions.List() {
 		_ = l.sessions.Stop(ctx, info.ID)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		l.goroutines.Wait()
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	return l.sessions.Shutdown(ctx)
 }
@@ -159,9 +227,16 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 		return execution.AgentLaunchResult{}, fmt.Errorf("start session: %w", err)
 	}
 	if len(kickoffPayload) > 0 {
-		kickoffCtx := context.WithoutCancel(ctx)
+		kickoffCtx := l.lifecycleContext(ctx)
 		//nolint:gosec // kickoff turn is intentionally async and detached from request cancellation
-		go l.runKickoffTurn(kickoffCtx, sessionID, mailbox, bootDir, req, binding.Provider, eventCh, kickoffPayload)
+		if !l.startLifecycleGoroutine(func() {
+			l.runKickoffTurn(kickoffCtx, sessionID, mailbox, bootDir, req, binding.Provider, eventCh, kickoffPayload)
+		}) {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), sessionShutdownTimeout)
+			defer stopCancel()
+			_ = l.sessions.Stop(stopCtx, sessionID)
+			return execution.AgentLaunchResult{}, errors.New("launcher is closing")
+		}
 	}
 
 	result := execution.AgentLaunchResult{
@@ -346,15 +421,17 @@ func (l *Launcher) runKickoffTurn(ctx context.Context, sessionID, mailbox, bootD
 		}
 	}()
 	if replySubstrate != "" && correlationID != "" && l.replies != nil {
-		watchCtx, watchCancel := context.WithTimeout(context.Background(), replyOutboxWatchWindow)
-		go func() {
+		watchCtx, watchCancel := context.WithTimeout(ctx, replyOutboxWatchWindow)
+		if !l.startLifecycleGoroutine(func() {
 			defer watchCancel()
 			l.watchReplyOutbox(watchCtx, outboxDir)
-		}()
+		}) {
+			watchCancel()
+		}
 	}
 
 	sendErr := l.sendTurn(ctx, sessionID, providerName, string(payload))
-	finalCtx, finalCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	finalCtx, finalCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer finalCancel()
 finalReplyDrain:
 	for {
@@ -378,7 +455,7 @@ finalReplyDrain:
 	if disableFallbackReply {
 		return
 	}
-	sendCtx, sendCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	sendCtx, sendCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer sendCancel()
 	if existing, err := l.replies.List(sendCtx, replySubstrate, mailbox, correlationID, 1); err == nil && len(existing) > 0 {
 		return

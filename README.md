@@ -18,6 +18,7 @@ Or build from source:
 ```sh
 git clone git@github.com:hollis-labs/hadron.git
 cd hadron
+npm --prefix cmd/hadron-app/frontend ci
 make build
 export PATH="$PWD/bin:$PATH"
 ```
@@ -83,6 +84,7 @@ pins, lazy mounts, and the graph-native tool families.
 |---|---|
 | [Getting started](docs/getting-started.md) | First daemon, validation, run, and inspection |
 | [Workflow authoring and operations](docs/workflows.md) | Source form, references, kinds, waits, values, registry, and troubleshooting |
+| [Workflow diagnostics and recovery](docs/workflow-diagnostics.md) | Graph-native inspect/events, telemetry export wiring, recovery actions, and local measurement |
 | [CLI reference](docs/cli-reference.md) | Active root and `hadron workflow` command contracts |
 | [MCP setup](docs/mcp-setup.md) | Token bootstrap, exposure profiles, discovery, and tools |
 | [Safety](docs/safety.md) | Identity, effects, secrets, redaction, and compatibility boundaries |
