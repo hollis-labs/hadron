@@ -13,14 +13,13 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-messaging"
+	gomcpserver "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/agentsubstrate"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
 	"github.com/hollis-labs/hadron/internal/messagesubstrate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/settings"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 func openStore(t *testing.T) *persistence.Store {
@@ -1563,14 +1562,18 @@ func TestHelperProcessExternalMCPServer(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS_EXTERNAL_MCP") != "1" {
 		return
 	}
-	s := server.NewMCPServer("fake-helper", "1.0.0", server.WithToolCapabilities(true))
-	s.AddTool(mcp.NewTool("echo_json",
-		mcp.WithString("name", mcp.Required()),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload := fmt.Sprintf(`{"echo":%q,"server":"fake-helper"}`, req.GetString("name", ""))
-		return mcp.NewToolResultText(payload), nil
+	s := gomcpserver.NewServer("fake-helper", "1.0.0")
+	s.RegisterTool(gomcpserver.Tool{
+		Name:         "echo_json",
+		Description:  "echo_json",
+		InputSchema:  gomcpserver.ObjectSchema(map[string]any{"name": map[string]any{"type": "string"}}, "name"),
+		ReadOnlyHint: true,
+		Handler: func(_ context.Context, args map[string]any) (any, error) {
+			name, _ := args["name"].(string)
+			return map[string]any{"echo": name, "server": "fake-helper"}, nil
+		},
 	})
-	if err := server.ServeStdio(s); err != nil {
+	if err := s.Run(context.Background()); err != nil {
 		os.Exit(1)
 	}
 	os.Exit(0)

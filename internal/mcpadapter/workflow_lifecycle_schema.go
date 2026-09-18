@@ -4,79 +4,79 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/go-workflow/authoring"
 	graphschema "github.com/hollis-labs/go-workflow/graph/schema"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-func workflowDraftToolOption() mcp.ToolOption {
-	return func(tool *mcp.Tool) {
-		mcp.WithObject("draft",
-			mcp.Description("Bounded authoring material plus the source-local workflow identity and authorized target namespace."),
-			mcp.Properties(map[string]any{
-				"envelope": map[string]any{
-					"type":                 "object",
-					"description":          "Strict Hadron authoring envelope. Use graph_ir with graph, or workflow_source with source; never send both material fields.",
-					"additionalProperties": false,
-					"properties": map[string]any{
-						"schema_id":               map[string]any{"type": "string", "const": authoring.EnvelopeSchemaID},
-						"schema_version":          map[string]any{"type": "string", "const": authoring.EnvelopeSchemaVersion},
-						"material_schema_id":      map[string]any{"type": "string", "description": "Use the committed graph IR schema ID or workflow-source schema ID selected by format."},
-						"material_schema_version": map[string]any{"type": "string", "description": "Exact version of material_schema_id."},
-						"format":                  map[string]any{"type": "string", "enum": []any{string(authoring.FormatGraphIR), string(authoring.FormatWorkflowSource)}},
-						"graph":                   map[string]any{"type": "object", "description": "Canonical graph IR satisfying " + graphschema.ID + ".", "additionalProperties": true},
-						"source":                  map[string]any{"type": "string", "description": "Bounded graph-native workflow source when format is workflow_source."},
-					},
-					"required": []any{"schema_id", "schema_version", "material_schema_id", "material_schema_version", "format"},
+// workflowDraftProperty returns the "draft" input-schema property shared by
+// every authoring tool, for a caller to merge into its own properties/
+// required lists.
+func workflowDraftProperty() map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": "Bounded authoring material plus the source-local workflow identity and authorized target namespace.",
+		"properties": map[string]any{
+			"envelope": map[string]any{
+				"type":                 "object",
+				"description":          "Strict Hadron authoring envelope. Use graph_ir with graph, or workflow_source with source; never send both material fields.",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"schema_id":               map[string]any{"type": "string", "const": authoring.EnvelopeSchemaID},
+					"schema_version":          map[string]any{"type": "string", "const": authoring.EnvelopeSchemaVersion},
+					"material_schema_id":      map[string]any{"type": "string", "description": "Use the committed graph IR schema ID or workflow-source schema ID selected by format."},
+					"material_schema_version": map[string]any{"type": "string", "description": "Exact version of material_schema_id."},
+					"format":                  map[string]any{"type": "string", "enum": []any{string(authoring.FormatGraphIR), string(authoring.FormatWorkflowSource)}},
+					"graph":                   map[string]any{"type": "object", "description": "Canonical graph IR satisfying " + graphschema.ID + ".", "additionalProperties": true},
+					"source":                  map[string]any{"type": "string", "description": "Bounded graph-native workflow source when format is workflow_source."},
 				},
-				"id":        map[string]any{"type": "string", "description": "Source-local workflow ID; it must match the authored graph/source identity."},
-				"version":   map[string]any{"type": "string", "description": "Source-local immutable version; it must match the authored graph/source version."},
-				"namespace": map[string]any{"type": "string", "description": "Authorized registry namespace. The host binds this namespace into the staged graph."},
-			}),
-			func(schema map[string]any) { schema["required"] = []any{"envelope", "id", "version", "namespace"} },
-			mcp.AdditionalProperties(false),
-		)(tool)
-		tool.InputSchema.Required = append(tool.InputSchema.Required, "draft")
+				"required": []any{"schema_id", "schema_version", "material_schema_id", "material_schema_version", "format"},
+			},
+			"id":        map[string]any{"type": "string", "description": "Source-local workflow ID; it must match the authored graph/source identity."},
+			"version":   map[string]any{"type": "string", "description": "Source-local immutable version; it must match the authored graph/source version."},
+			"namespace": map[string]any{"type": "string", "description": "Authorized registry namespace. The host binds this namespace into the staged graph."},
+		},
+		"required":             []any{"envelope", "id", "version", "namespace"},
+		"additionalProperties": false,
 	}
 }
 
-func workflowContractSuiteToolOption() mcp.ToolOption {
-	return func(tool *mcp.Tool) {
-		mcp.WithObject("suite",
-			mcp.Description("Deterministic contract suite. Start from hadron_workflow_author_scaffold, replace editable placeholders, and preserve typed Value envelopes."),
-			mcp.Properties(map[string]any{
-				"schema_version": map[string]any{"type": "string", "const": appworkflow.ContractSuiteSchemaVersion},
-				"cases": map[string]any{
-					"type":        "array",
-					"description": "Bounded deterministic cases. Each case chooses exactly one of expected_outputs or expected_error.",
-					"items": map[string]any{
-						"type":                 "object",
-						"additionalProperties": false,
-						"properties": map[string]any{
-							"name":             map[string]any{"type": "string", "description": "Stable unique case name."},
-							"editable":         map[string]any{"type": "boolean", "description": "Generated placeholder marker; must be false or omitted before execution."},
-							"inputs":           workflowValueSetToolSchema("Exact typed workflow inputs."),
-							"expected_outputs": workflowValueSetToolSchema("Exact typed terminal outputs for a successful case."),
-							"expected_error": map[string]any{
-								"type":                 "object",
-								"description":          "Safe expected terminal error; mutually exclusive with expected_outputs.",
-								"additionalProperties": false,
-								"properties": map[string]any{
-									"code":    map[string]any{"type": "string"},
-									"message": map[string]any{"type": "string"},
-								},
-								"required": []any{"code"},
+// workflowContractSuiteProperty returns the "suite" input-schema property
+// shared by the test/register/package authoring tools.
+func workflowContractSuiteProperty() map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": "Deterministic contract suite. Start from hadron_workflow_author_scaffold, replace editable placeholders, and preserve typed Value envelopes.",
+		"properties": map[string]any{
+			"schema_version": map[string]any{"type": "string", "const": appworkflow.ContractSuiteSchemaVersion},
+			"cases": map[string]any{
+				"type":        "array",
+				"description": "Bounded deterministic cases. Each case chooses exactly one of expected_outputs or expected_error.",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"name":             map[string]any{"type": "string", "description": "Stable unique case name."},
+						"editable":         map[string]any{"type": "boolean", "description": "Generated placeholder marker; must be false or omitted before execution."},
+						"inputs":           workflowValueSetToolSchema("Exact typed workflow inputs."),
+						"expected_outputs": workflowValueSetToolSchema("Exact typed terminal outputs for a successful case."),
+						"expected_error": map[string]any{
+							"type":                 "object",
+							"description":          "Safe expected terminal error; mutually exclusive with expected_outputs.",
+							"additionalProperties": false,
+							"properties": map[string]any{
+								"code":    map[string]any{"type": "string"},
+								"message": map[string]any{"type": "string"},
 							},
-							"expected_effects": map[string]any{"type": "array", "description": "Exact policy-visible effect vocabulary expected from the run.", "items": map[string]any{"type": "string"}},
-							"expected_calls":   map[string]any{"type": "array", "description": "Optional exact external-call observations copied from the scaffold contract.", "items": map[string]any{"type": "object"}},
-							"mocks":            map[string]any{"type": "array", "description": "Exact executor mocks generated by the scaffold; fill editable expected inputs/results without changing node kind or schemas.", "items": workflowExecutorMockToolSchema()},
+							"required": []any{"code"},
 						},
-						"required": []any{"name", "inputs", "expected_effects", "mocks"},
+						"expected_effects": map[string]any{"type": "array", "description": "Exact policy-visible effect vocabulary expected from the run.", "items": map[string]any{"type": "string"}},
+						"expected_calls":   map[string]any{"type": "array", "description": "Optional exact external-call observations copied from the scaffold contract.", "items": map[string]any{"type": "object"}},
+						"mocks":            map[string]any{"type": "array", "description": "Exact executor mocks generated by the scaffold; fill editable expected inputs/results without changing node kind or schemas.", "items": workflowExecutorMockToolSchema()},
 					},
+					"required": []any{"name", "inputs", "expected_effects", "mocks"},
 				},
-			}),
-			func(schema map[string]any) { schema["required"] = []any{"schema_version", "cases"} },
-			mcp.AdditionalProperties(false),
-		)(tool)
-		tool.InputSchema.Required = append(tool.InputSchema.Required, "suite")
+			},
+		},
+		"required":             []any{"schema_version", "cases"},
+		"additionalProperties": false,
 	}
 }
 

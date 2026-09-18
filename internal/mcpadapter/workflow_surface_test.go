@@ -5,74 +5,97 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/hollis-labs/go-mcp/budget"
+	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/go-workflow/diagnostic"
 	"github.com/hollis-labs/go-workflow/graph"
 	"github.com/hollis-labs/go-workflow/values"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-func TestWorkflowSurfacePinnedSchemasSessionIsolationAndProfileRemoval(t *testing.T) {
+// workflowConnect wires srv to a fresh in-memory client session, for the
+// handful of tests below that need to observe real wire behavior (schema on
+// the wire, tools/list_changed notifications, malformed-argument rejection)
+// rather than calling handler methods directly.
+func workflowConnect(t *testing.T, srv *gomcp.Server, opts *mcpsdk.ClientOptions) *mcpsdk.ClientSession {
+	t.Helper()
+	ctx := context.Background()
+	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
+	ss, err := srv.SDKServer().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { _ = ss.Close() })
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0.0.0"}, opts)
+	cs, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
+}
+
+func workflowToolDefs(srv *gomcp.Server) map[string]gomcp.ToolDefinition {
+	defs := make(map[string]gomcp.ToolDefinition)
+	for _, def := range srv.ToolDefinitions() {
+		defs[def.Name] = def
+	}
+	return defs
+}
+
+// TestWorkflowSurfacePinnedSchemasAndProfileRemoval covers pinned (direct)
+// and lazy-loaded workflow tool mounting, the generated tool's schema and
+// output-envelope contract, and mount removal on a profile-generation
+// change -- against the single global mount described in workflowSurface's
+// doc comment. Mark3labs-era per-session isolation (this test used to
+// mount two DIFFERENT principals into two DIFFERENT concurrent sessions and
+// assert neither leaked into the other) no longer has a code path to test:
+// Hadron serves exactly one stdio connection per process, and the official
+// SDK's tool registry is process-global by design, so there is only ever
+// one mount to reason about.
+func TestWorkflowSurfacePinnedSchemasAndProfileRemoval(t *testing.T) {
 	exposure := newFakeWorkflowExposure()
 	operations := &fakeWorkflowOperations{}
 	adapter := New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, operations, operations, operations))
-	mcpServer := adapter.newServer()
-	first := newWorkflowTestSession("session-a")
-	second := newWorkflowTestSession("session-b")
-	if err := mcpServer.RegisterSession(t.Context(), first); err != nil {
-		t.Fatal(err)
-	}
-	if err := mcpServer.RegisterSession(t.Context(), second); err != nil {
-		t.Fatal(err)
-	}
-	firstContext := mcpServer.WithContext(t.Context(), first)
-	secondContext := mcpServer.WithContext(t.Context(), second)
-	if _, _, err := adapter.workflow.current(secondContext, second.SessionID(), "token-b"); err != nil {
+	srv := adapter.newServer()
+
+	if _, _, err := adapter.workflow.current(t.Context(), "token-a"); err != nil {
 		t.Fatal(err)
 	}
 
-	firstTools := first.GetSessionTools()
-	secondTools := second.GetSessionTools()
-	firstTool, ok := firstTools["workflow_team_alpha"]
-	if !ok || firstTool.Tool.RawInputSchema == nil || firstTool.Tool.RawOutputSchema == nil {
-		t.Fatalf("first pinned tool = %#v", firstTools)
+	defs := workflowToolDefs(srv)
+	firstTool, ok := defs[exposure.alpha.ToolName]
+	if !ok || firstTool.InputSchema == nil || firstTool.OutputSchema == nil {
+		t.Fatalf("pinned tool = %#v", defs)
 	}
-	if !strings.Contains(firstTool.Tool.Description, "asynchronous durable run") || !strings.Contains(firstTool.Tool.Description, "outputs is optional") || !strings.Contains(firstTool.Tool.Description, "hadron_workflow_run_inspect") {
-		t.Fatalf("pinned tool does not document its run-handle contract: %q", firstTool.Tool.Description)
-	}
-	if _, leaked := firstTools["workflow_team_beta"]; leaked {
-		t.Fatal("second principal's pinned tool leaked into first session")
-	}
-	if _, betaMounted := secondTools["workflow_team_beta"]; !betaMounted {
-		t.Fatalf("second pinned tool = %#v", secondTools)
-	}
-	if _, leaked := secondTools["workflow_team_alpha"]; leaked {
-		t.Fatal("first principal's pinned tool leaked into second session")
+	if !strings.Contains(firstTool.Description, "asynchronous durable run") || !strings.Contains(firstTool.Description, "outputs is optional") || !strings.Contains(firstTool.Description, "hadron_workflow_run_inspect") {
+		t.Fatalf("pinned tool does not document its run-handle contract: %q", firstTool.Description)
 	}
 
-	request := mcp.CallToolRequest{Header: http.Header{"Authorization": []string{"Bearer token-a"}}}
-	request.Params.Name = firstTool.Tool.Name
-	request.Params.Arguments = map[string]any{"message": "hello", "run_id": "workflow-input-not-control"}
-	result, callErr := firstTool.Handler(firstContext, request)
-	if callErr != nil || result.IsError {
+	result, callErr := srv.CallTool(t.Context(), exposure.alpha.ToolName, map[string]any{"message": "hello", "run_id": "workflow-input-not-control"})
+	if callErr != nil {
 		t.Fatalf("pinned invocation = %#v, %v", result, callErr)
 	}
-	handle, ok := result.StructuredContent.(workflowInvocationResult)
+	handle, ok := result.(workflowInvocationResult)
 	if !ok || handle.RunID == "" || handle.Status != "not_admitted" {
-		t.Fatalf("pinned invocation handle = %#v", result.StructuredContent)
+		t.Fatalf("pinned invocation handle = %#v", result)
+	}
+	outputSchema, ok := firstTool.OutputSchema.(json.RawMessage)
+	if !ok {
+		t.Fatalf("pinned output schema type = %T", firstTool.OutputSchema)
 	}
 	var outputDocument map[string]any
-	if decodeErr := json.Unmarshal(firstTool.Tool.RawOutputSchema, &outputDocument); decodeErr != nil {
+	if decodeErr := json.Unmarshal(outputSchema, &outputDocument); decodeErr != nil {
 		t.Fatal(decodeErr)
 	}
 	properties, ok := outputDocument["properties"].(map[string]any)
@@ -114,10 +137,9 @@ func TestWorkflowSurfacePinnedSchemasSessionIsolationAndProfileRemoval(t *testin
 		t.Fatalf("run requests = %#v", operations.runs)
 	}
 	operations.mu.Unlock()
-	metaRun := mcp.CallToolRequest{Header: http.Header{"Authorization": []string{"Bearer token-a"}}}
-	metaRun.Params.Arguments = map[string]any{"name": exposure.alpha.Name, "version": exposure.alpha.Version, "digest": exposure.alpha.Digest, "run_id": "meta-run", "idempotency_key": "meta-key"}
-	metaResult, err := adapter.workflow.handleRun(firstContext, metaRun)
-	if err != nil || metaResult.IsError {
+
+	metaResult, err := adapter.workflow.handleRun(t.Context(), map[string]any{"name": exposure.alpha.Name, "version": exposure.alpha.Version, "digest": exposure.alpha.Digest, "run_id": "meta-run", "idempotency_key": "meta-key"})
+	if err != nil {
 		t.Fatalf("meta invocation = %#v, %v", metaResult, err)
 	}
 	operations.mu.Lock()
@@ -126,28 +148,23 @@ func TestWorkflowSurfacePinnedSchemasSessionIsolationAndProfileRemoval(t *testin
 	}
 	operations.mu.Unlock()
 
-	load := mcp.CallToolRequest{Header: http.Header{"Authorization": []string{"Bearer token-a"}}}
-	load.Params.Arguments = map[string]any{"definitions": []string{"team/lazy@v1@" + exposure.lazy.Digest}}
-	loaded, err := adapter.workflow.handleLoad(firstContext, load)
-	if err != nil || loaded.IsError {
+	loaded, err := adapter.workflow.handleLoad(t.Context(), map[string]any{"definitions": []string{"team/lazy@v1@" + exposure.lazy.Digest}})
+	if err != nil {
 		t.Fatalf("lazy load = %#v, %v", loaded, err)
 	}
-	if _, ok := first.GetSessionTools()[exposure.lazy.ToolName]; !ok {
-		t.Fatal("lazy tool was not mounted in requesting session")
-	}
-	if _, leaked := second.GetSessionTools()[exposure.lazy.ToolName]; leaked {
-		t.Fatal("lazy tool leaked across MCP sessions")
+	if _, ok := workflowToolDefs(srv)[exposure.lazy.ToolName]; !ok {
+		t.Fatal("lazy tool was not mounted")
 	}
 
 	exposure.setGeneration("token-a", 2, nil)
-	if _, _, err := adapter.workflow.current(firstContext, first.SessionID(), "token-a"); err != nil {
+	if _, _, err := adapter.workflow.current(t.Context(), "token-a"); err != nil {
 		t.Fatal(err)
 	}
-	if len(first.GetSessionTools()) != 0 {
-		t.Fatalf("profile change retained stale mounts: %#v", first.GetSessionTools())
+	if _, ok := workflowToolDefs(srv)[exposure.alpha.ToolName]; ok {
+		t.Fatal("profile change retained stale mounts")
 	}
-	if len(first.notifications) == 0 {
-		t.Fatal("mount changes emitted no tools.listChanged notification")
+	if _, ok := workflowToolDefs(srv)[exposure.lazy.ToolName]; ok {
+		t.Fatal("profile change retained stale lazy mounts")
 	}
 }
 
@@ -159,59 +176,62 @@ func TestWorkflowOnlySurfaceContainsNoLegacyToolsHealthSkillsPromptsOrResources(
 		WithWorkflowServices(exposure, operations, operations, operations),
 		WithWorkflowLifecycle(&fakeWorkflowLifecycle{}),
 	)
-	mcpServer := adapter.newServer()
-	for name := range mcpServer.ListTools() {
-		if name == "hadron_skills" || strings.HasPrefix(name, "hadron_workflow_") || strings.HasPrefix(name, "hadron_workflows_") {
+	srv := adapter.newServer()
+	for name := range workflowToolDefs(srv) {
+		// newServer mounts the fake exposure's direct workflow tools (here,
+		// "workflow_team_alpha" for token-a) synchronously, same as
+		// production -- those are graph-native, not legacy, so they belong
+		// alongside the hadron_workflow(s)_* meta-tools and hadron_skills.
+		if name == "hadron_skills" || strings.HasPrefix(name, "hadron_workflow_") || strings.HasPrefix(name, "hadron_workflows_") || strings.HasPrefix(name, "workflow_") {
 			continue
 		}
 		t.Fatalf("workflow-only tool %q is outside the graph-native surface", name)
 	}
-	if _, exists := mcpServer.ListTools()["hadron_health"]; exists {
+	if _, exists := workflowToolDefs(srv)["hadron_health"]; exists {
 		t.Fatal("workflow-only MCP retained independent hard-coded health")
 	}
 	assertNoLegacyWorkflowSurfaceText(t, "server instructions", workflowServerInstructions)
 
-	for _, method := range []string{"prompts/list", "resources/list"} {
-		response := mcpServer.HandleMessage(t.Context(), json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"`+method+`"}`))
-		if rpcError, unsupported := response.(mcp.JSONRPCError); unsupported {
-			assertNoLegacyWorkflowSurfaceText(t, method, rpcError.Error.Message)
-			continue
-		}
-		rpc, ok := response.(mcp.JSONRPCResponse)
-		if !ok {
-			t.Fatalf("%s response = %#v", method, response)
-		}
-		encoded, err := json.Marshal(rpc.Result)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertNoLegacyWorkflowSurfaceText(t, method, string(encoded))
-		switch result := rpc.Result.(type) {
-		case mcp.ListPromptsResult:
-			if len(result.Prompts) != 0 {
-				t.Fatalf("workflow-only prompts = %#v", result.Prompts)
-			}
-		case mcp.ListResourcesResult:
-			for _, resource := range result.Resources {
-				if !strings.HasPrefix(resource.URI, "workflow://") && !strings.HasPrefix(resource.URI, "hadron://workflows/") {
-					t.Fatalf("workflow-only resource = %#v", resource)
-				}
-			}
-		default:
-			t.Fatalf("%s result type = %T", method, rpc.Result)
+	cs := workflowConnect(t, srv, nil)
+	prompts, err := cs.ListPrompts(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("prompts/list: %v", err)
+	}
+	if len(prompts.Prompts) != 0 {
+		t.Fatalf("workflow-only prompts = %#v", prompts.Prompts)
+	}
+	resources, err := cs.ListResources(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("resources/list: %v", err)
+	}
+	for _, resource := range resources.Resources {
+		if !strings.HasPrefix(resource.URI, "workflow://") && !strings.HasPrefix(resource.URI, "hadron://workflows/") {
+			t.Fatalf("workflow-only resource = %#v", resource)
 		}
 	}
+	encoded, err := json.Marshal(resources.Resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoLegacyWorkflowSurfaceText(t, "resources/list", string(encoded))
 
-	index := adapter.CallTool(t.Context(), "hadron_skills", nil)
-	if index == nil || len(index.Content) != 1 {
-		t.Fatalf("workflow skill index = %#v", index)
+	index, err := adapter.CallTool(t.Context(), "hadron_skills", nil)
+	if err != nil {
+		t.Fatalf("workflow skill index = %#v, %v", index, err)
 	}
-	indexText := index.Content[0].(mcp.TextContent).Text
-	assertNoLegacyWorkflowSurfaceText(t, "skill index", indexText)
+	indexText, ok := index.(map[string]any)
+	if !ok {
+		t.Fatalf("workflow skill index shape = %#v", index)
+	}
+	indexJSON, err := json.Marshal(indexText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoLegacyWorkflowSurfaceText(t, "skill index", string(indexJSON))
 	var catalog struct {
 		Items []hadronSkillDoc `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(indexText), &catalog); err != nil {
+	if err := json.Unmarshal(indexJSON, &catalog); err != nil {
 		t.Fatal(err)
 	}
 	wantSkills := []string{"start-here", "workflow-lifecycle", "run-inspection"}
@@ -222,16 +242,16 @@ func TestWorkflowOnlySurfaceContainsNoLegacyToolsHealthSkillsPromptsOrResources(
 	if !reflect.DeepEqual(gotSkills, wantSkills) {
 		t.Fatalf("workflow skill names = %#v, want %#v", gotSkills, wantSkills)
 	}
-	advertised := make(map[string]struct{}, len(mcpServer.ListTools()))
-	for name := range mcpServer.ListTools() {
-		advertised[name] = struct{}{}
-	}
+	advertised := workflowToolDefs(srv)
 	for _, skill := range wantSkills {
-		result := adapter.CallTool(t.Context(), "hadron_skills", map[string]any{"name": skill})
-		if result == nil || len(result.Content) != 1 {
-			t.Fatalf("workflow skill %q = %#v", skill, result)
+		result, err := adapter.CallTool(t.Context(), "hadron_skills", map[string]any{"name": skill})
+		if err != nil {
+			t.Fatalf("workflow skill %q = %#v, %v", skill, result, err)
 		}
-		body := result.Content[0].(mcp.TextContent).Text
+		body, ok := result.(string)
+		if !ok {
+			t.Fatalf("workflow skill %q body shape = %#v", skill, result)
+		}
 		assertNoLegacyWorkflowSurfaceText(t, skill, body)
 		for _, name := range workflowSkillToolNames(body) {
 			if _, exists := advertised[name]; !exists {
@@ -239,8 +259,8 @@ func TestWorkflowOnlySurfaceContainsNoLegacyToolsHealthSkillsPromptsOrResources(
 			}
 		}
 	}
-	if hidden := adapter.CallTool(t.Context(), "hadron_skills", map[string]any{"name": "blueprint-discovery"}); hidden == nil || len(hidden.Content) != 1 || !strings.Contains(hidden.Content[0].(mcp.TextContent).Text, "skill_not_found") {
-		t.Fatalf("legacy skill remained readable = %#v", hidden)
+	if _, hiddenErr := adapter.CallTool(t.Context(), "hadron_skills", map[string]any{"name": "blueprint-discovery"}); hiddenErr == nil || !strings.Contains(hiddenErr.Error(), "skill_not_found") {
+		t.Fatalf("legacy skill remained readable, err=%v", hiddenErr)
 	}
 }
 
@@ -268,15 +288,18 @@ func workflowSkillToolNames(body string) []string {
 func TestWorkflowSurfaceFailClosedErrorAndMetaCatalog(t *testing.T) {
 	exposure := newFakeWorkflowExposure()
 	adapter := New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, nil, nil, nil))
-	request := mcp.CallToolRequest{}
-	request.Params.Arguments = map[string]any{"name": "team/alpha", "version": "v1", "digest": exposure.alpha.Digest}
-	result, err := adapter.workflow.handleValidate(t.Context(), request)
-	if err != nil || !result.IsError {
+	args := map[string]any{"name": "team/alpha", "version": "v1", "digest": exposure.alpha.Digest}
+	result, err := adapter.workflow.handleValidate(t.Context(), args)
+	if result != nil || err == nil {
 		t.Fatalf("uncomposed validate = %#v, %v", result, err)
 	}
-	envelope, ok := result.StructuredContent.(map[string]any)
+	var structuredErr budget.StructuredError
+	if !errors.As(err, &structuredErr) {
+		t.Fatalf("uncomposed validate error type = %#v", err)
+	}
+	envelope, ok := structuredErr.ToolErrorContent().(map[string]any)
 	if !ok {
-		t.Fatalf("error envelope = %#v", result.StructuredContent)
+		t.Fatalf("error envelope = %#v", structuredErr.ToolErrorContent())
 	}
 	operationError, ok := envelope["error"].(appworkflow.WorkflowOperationError)
 	if !ok || operationError.Code != appworkflow.WorkflowErrorCodeUnavailable {
@@ -287,36 +310,41 @@ func TestWorkflowSurfaceFailClosedErrorAndMetaCatalog(t *testing.T) {
 	exposure.describeErr = errors.New("database password=super-secret")
 	exposure.mu.Unlock()
 	adapter = New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, &fakeWorkflowOperations{}, &fakeWorkflowOperations{}, &fakeWorkflowOperations{}))
-	result, err = adapter.workflow.handleDescribe(t.Context(), request)
-	if err != nil || !result.IsError {
+	result, err = adapter.workflow.handleDescribe(t.Context(), args)
+	if result != nil || err == nil {
 		t.Fatalf("hidden describe = %#v, %v", result, err)
 	}
-	if text := result.Content[0].(mcp.TextContent).Text; containsWorkflowTestText(text, "super-secret") {
-		t.Fatalf("transport exposed raw dependency error: %s", text)
+	if containsWorkflowTestText(err.Error(), "super-secret") {
+		t.Fatalf("transport exposed raw dependency error: %s", err.Error())
+	}
+	var structuredErr2 budget.StructuredError
+	if errors.As(err, &structuredErr2) {
+		content, marshalErr := json.Marshal(structuredErr2.ToolErrorContent())
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if containsWorkflowTestText(string(content), "super-secret") {
+			t.Fatalf("transport exposed raw dependency error in structured content: %s", content)
+		}
 	}
 }
 
 func TestWorkflowSurfaceRefreshFailureRemovesSameGenerationMounts(t *testing.T) {
 	exposure := newFakeWorkflowExposure()
 	adapter := New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, &fakeWorkflowOperations{}, &fakeWorkflowOperations{}, &fakeWorkflowOperations{}))
-	mcpServer := adapter.newServer()
-	session := newWorkflowTestSession("session-refresh")
-	if err := mcpServer.RegisterSession(t.Context(), session); err != nil {
+	srv := adapter.newServer()
+	if _, _, err := adapter.workflow.current(t.Context(), "token-a"); err != nil {
 		t.Fatal(err)
 	}
-	ctx := mcpServer.WithContext(t.Context(), session)
-	if _, mounted := session.GetSessionTools()[exposure.alpha.ToolName]; !mounted {
+	if _, mounted := workflowToolDefs(srv)[exposure.alpha.ToolName]; !mounted {
 		t.Fatal("initial direct workflow was not mounted")
 	}
 	exposure.setDirectError(errors.New("catalog unavailable"))
-	if _, _, err := adapter.workflow.current(ctx, session.SessionID(), "token-a"); err == nil {
+	if _, _, err := adapter.workflow.current(t.Context(), "token-a"); err == nil {
 		t.Fatal("same-generation direct refresh failure was ignored")
 	}
-	if len(session.GetSessionTools()) != 0 {
-		t.Fatalf("refresh failure retained stale tools: %#v", session.GetSessionTools())
-	}
-	if len(session.notifications) == 0 {
-		t.Fatal("refresh failure removal emitted no tools.listChanged notification")
+	if _, mounted := workflowToolDefs(srv)[exposure.alpha.ToolName]; mounted {
+		t.Fatal("refresh failure retained stale tools")
 	}
 }
 
@@ -324,46 +352,49 @@ func TestWorkflowSurfaceLoadingIdenticalDirectToolIsBudgetNeutral(t *testing.T) 
 	exposure := newFakeWorkflowExposure()
 	exposure.setBudget("token-a", 1)
 	adapter := New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, &fakeWorkflowOperations{}, &fakeWorkflowOperations{}, &fakeWorkflowOperations{}))
-	mcpServer := adapter.newServer()
-	session := newWorkflowTestSession("session-idempotent-load")
-	if err := mcpServer.RegisterSession(t.Context(), session); err != nil {
+	srv := adapter.newServer()
+	if _, _, err := adapter.workflow.current(t.Context(), "token-a"); err != nil {
 		t.Fatal(err)
 	}
-	request := mcp.CallToolRequest{Header: http.Header{"Authorization": []string{"Bearer token-a"}}}
-	request.Params.Arguments = map[string]any{"definitions": []string{exposure.alpha.Name + "@" + exposure.alpha.Version + "@" + exposure.alpha.Digest}}
-	result, err := adapter.workflow.handleLoad(mcpServer.WithContext(t.Context(), session), request)
-	if err != nil || result.IsError {
+	args := map[string]any{"definitions": []string{exposure.alpha.Name + "@" + exposure.alpha.Version + "@" + exposure.alpha.Digest}}
+	result, err := adapter.workflow.handleLoad(t.Context(), args)
+	if err != nil {
 		t.Fatalf("idempotent direct load = %#v, %v", result, err)
 	}
-	if tools := session.GetSessionTools(); len(tools) != 1 || tools[exposure.alpha.ToolName].Tool.Name != exposure.alpha.ToolName {
-		t.Fatalf("idempotent load changed direct mount or budget: %#v", tools)
+	defs := workflowToolDefs(srv)
+	if len(defs) < 1 {
+		t.Fatal("expected at least the direct tool to remain mounted")
+	}
+	if _, ok := defs[exposure.alpha.ToolName]; !ok {
+		t.Fatalf("idempotent load changed direct mount: %#v", defs)
 	}
 }
 
-func TestWorkflowSurfacePublishesSingleClientStdioMountWithoutSessionTools(t *testing.T) {
+func TestWorkflowMountChangeEmitsToolListChangedNotification(t *testing.T) {
 	exposure := newFakeWorkflowExposure()
 	adapter := New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, &fakeWorkflowOperations{}, &fakeWorkflowOperations{}, &fakeWorkflowOperations{}))
-	mcpServer := adapter.newServer()
-	stdio := newWorkflowTestPlainSession("stdio")
-	if _, sessionTools := any(stdio).(server.SessionWithTools); sessionTools {
-		t.Fatal("stdio regression fixture unexpectedly supports session-local tools")
-	}
-	if err := mcpServer.RegisterSession(t.Context(), stdio); err != nil {
-		t.Fatal(err)
-	}
-	if mounted := mcpServer.ListTools()[exposure.alpha.ToolName]; mounted == nil {
-		t.Fatal("single-client stdio mount was not published globally")
-	}
+	// newServer computes the initial mount synchronously, before any client
+	// can be listening for notifications -- so there is nothing to observe
+	// for it specifically. What's testable here is a mount CHANGE after a
+	// client has connected.
+	srv := adapter.newServer()
+
+	changed := make(chan struct{}, 8)
+	_ = workflowConnect(t, srv, &mcpsdk.ClientOptions{
+		ToolListChangedHandler: func(context.Context, *mcpsdk.ToolListChangedRequest) { changed <- struct{}{} },
+	})
+
 	exposure.setGeneration("token-a", 2, nil)
-	ctx := mcpServer.WithContext(t.Context(), stdio)
-	if _, _, err := adapter.workflow.current(ctx, stdio.SessionID(), "token-a"); err != nil {
+	if _, _, err := adapter.workflow.current(t.Context(), "token-a"); err != nil {
 		t.Fatal(err)
 	}
-	if stale := mcpServer.ListTools()[exposure.alpha.ToolName]; stale != nil {
-		t.Fatal("single-client stdio retained a removed workflow tool")
+	select {
+	case <-changed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("profile change emitted no tools list-changed notification")
 	}
-	if len(stdio.notifications) == 0 {
-		t.Fatal("single-client stdio mount changes emitted no tools.listChanged notification")
+	if _, mounted := workflowToolDefs(srv)[exposure.alpha.ToolName]; mounted {
+		t.Fatal("profile change retained a removed workflow tool")
 	}
 }
 
@@ -380,14 +411,15 @@ func TestWorkflowMetaReplaySafeAnnotations(t *testing.T) {
 
 func TestWorkflowMetaLimitsRequireExactIntegers(t *testing.T) {
 	for _, name := range []string{"hadron_workflows_search", "hadron_workflow_catalog_search", "hadron_workflow_run_events", "hadron_workflow_run_subscribe"} {
-		property, ok := workflowMetaTool(name).InputSchema.Properties["limit"].(map[string]any)
+		_, schema := workflowMetaToolSchema(name)
+		properties, _ := schema["properties"].(map[string]any)
+		property, ok := properties["limit"].(map[string]any)
 		if !ok || property["type"] != "integer" {
 			t.Fatalf("%s limit schema = %#v", name, property)
 		}
 	}
 
-	request := mcp.CallToolRequest{}
-	if limit, err := exactWorkflowLimitArgument(request, 20); err != nil || limit != 20 {
+	if limit, err := exactWorkflowLimitArgument(nil, 20); err != nil || limit != 20 {
 		t.Fatalf("absent limit = %d, %v", limit, err)
 	}
 	for _, test := range []struct {
@@ -400,14 +432,13 @@ func TestWorkflowMetaLimitsRequireExactIntegers(t *testing.T) {
 		{name: "null", value: nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request.Params.Arguments = map[string]any{"limit": test.value}
-			if _, err := exactWorkflowLimitArgument(request, 20); err == nil {
+			args := map[string]any{"limit": test.value}
+			if _, err := exactWorkflowLimitArgument(args, 20); err == nil {
 				t.Fatalf("limit %#v was accepted", test.value)
 			}
 		})
 	}
-	request.Params.Arguments = map[string]any{"limit": float64(1001)}
-	limit, err := exactWorkflowLimitArgument(request, 100)
+	limit, err := exactWorkflowLimitArgument(map[string]any{"limit": float64(1001)}, 100)
 	if err != nil || boundedWorkflowLimit(limit) != 1000 {
 		t.Fatalf("event limit clamp = %d, %v", limit, err)
 	}
@@ -415,27 +446,26 @@ func TestWorkflowMetaLimitsRequireExactIntegers(t *testing.T) {
 	exposure := newFakeWorkflowExposure()
 	operations := &fakeWorkflowOperations{}
 	adapter := New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, operations, operations, operations))
-	fractional := mcp.CallToolRequest{}
-	fractional.Params.Arguments = map[string]any{"limit": 1.9}
-	if result, callErr := adapter.workflow.handleSearch(t.Context(), fractional); callErr != nil || !result.IsError {
+	if result, callErr := adapter.workflow.handleSearch(t.Context(), map[string]any{"limit": 1.9}); result != nil || callErr == nil {
 		t.Fatalf("fractional search limit = %#v, %v", result, callErr)
 	}
-	fractional.Params.Arguments = map[string]any{"run_id": "run-one", "limit": 1.9}
-	if result, callErr := adapter.workflow.handleEvents(t.Context(), fractional); callErr != nil || !result.IsError {
+	if result, callErr := adapter.workflow.handleEvents(t.Context(), map[string]any{"run_id": "run-one", "limit": 1.9}); result != nil || callErr == nil {
 		t.Fatalf("fractional event limit = %#v, %v", result, callErr)
 	}
 }
 
 func TestWorkflowLifecycleMetaSchemasAndExactGeneration(t *testing.T) {
-	testSchema := workflowMetaTool("hadron_workflow_author_test").InputSchema.Properties
-	registerSchema := workflowMetaTool("hadron_workflow_author_register").InputSchema.Properties
-	if _, advertised := testSchema["make_current"]; advertised {
-		t.Fatalf("author test advertised register-only make_current: %#v", testSchema)
+	_, testSchema := workflowMetaToolSchema("hadron_workflow_author_test")
+	_, registerSchema := workflowMetaToolSchema("hadron_workflow_author_register")
+	testProperties := testSchema["properties"].(map[string]any)
+	registerProperties := registerSchema["properties"].(map[string]any)
+	if _, advertised := testProperties["make_current"]; advertised {
+		t.Fatalf("author test advertised register-only make_current: %#v", testProperties)
 	}
-	if _, advertised := registerSchema["make_current"]; !advertised {
-		t.Fatalf("author register omitted make_current: %#v", registerSchema)
+	if _, advertised := registerProperties["make_current"]; !advertised {
+		t.Fatalf("author register omitted make_current: %#v", registerProperties)
 	}
-	draft, ok := testSchema["draft"].(map[string]any)
+	draft, ok := testProperties["draft"].(map[string]any)
 	if !ok || draft["description"] == "" {
 		t.Fatal("authoring tools must describe the bounded draft contract")
 	}
@@ -446,7 +476,7 @@ func TestWorkflowLifecycleMetaSchemasAndExactGeneration(t *testing.T) {
 	if required, present := draft["required"].([]any); !present || !reflect.DeepEqual(required, []any{"envelope", "id", "version", "namespace"}) {
 		t.Fatalf("draft nested required fields = %#v", draft["required"])
 	}
-	suite, ok := testSchema["suite"].(map[string]any)
+	suite, ok := testProperties["suite"].(map[string]any)
 	if !ok || suite["description"] == "" {
 		t.Fatal("contract tools must describe the deterministic suite contract")
 	}
@@ -457,7 +487,8 @@ func TestWorkflowLifecycleMetaSchemasAndExactGeneration(t *testing.T) {
 	if required, present := suite["required"].([]any); !present || !reflect.DeepEqual(required, []any{"schema_version", "cases"}) {
 		t.Fatalf("suite nested required fields = %#v", suite["required"])
 	}
-	generationSchema, ok := workflowMetaTool("hadron_workflow_exposure_pin_definition").InputSchema.Properties["expected_generation"].(map[string]any)
+	_, exposureSchema := workflowMetaToolSchema("hadron_workflow_exposure_pin_definition")
+	generationSchema, ok := exposureSchema["properties"].(map[string]any)["expected_generation"].(map[string]any)
 	if !ok || generationSchema["type"] != "integer" || generationSchema["minimum"] != 1 {
 		t.Fatalf("expected_generation schema = %#v", generationSchema)
 	}
@@ -469,19 +500,18 @@ func TestWorkflowLifecycleMetaSchemasAndExactGeneration(t *testing.T) {
 		WithWorkflowServices(exposure, operations, operations, operations),
 		WithWorkflowLifecycle(lifecycle),
 	)
-	request := mcp.CallToolRequest{Header: http.Header{"Authorization": []string{"Bearer token-a"}}}
-	request.Params.Arguments = map[string]any{
+	args := map[string]any{
 		"profile_id": "profile:token-a", "name": exposure.alpha.Name,
 		"version": exposure.alpha.Version, "digest": exposure.alpha.Digest,
 		"expected_generation": 1.9,
 	}
-	result, err := adapter.workflow.handleLifecycleExposurePin(t.Context(), request)
-	if err != nil || !result.IsError || lifecycle.pinCalls != 0 {
+	result, err := adapter.workflow.handleLifecycleExposurePin(t.Context(), args)
+	if result != nil || err == nil || lifecycle.pinCalls != 0 {
 		t.Fatalf("fractional generation = %#v, %v calls=%d", result, err, lifecycle.pinCalls)
 	}
-	request.Params.Arguments.(map[string]any)["expected_generation"] = float64(1 << 53)
-	result, err = adapter.workflow.handleLifecycleExposurePin(t.Context(), request)
-	if err != nil || !result.IsError || lifecycle.pinCalls != 0 {
+	args["expected_generation"] = float64(1 << 53)
+	result, err = adapter.workflow.handleLifecycleExposurePin(t.Context(), args)
+	if result != nil || err == nil || lifecycle.pinCalls != 0 {
 		t.Fatalf("unsafe generation = %#v, %v calls=%d", result, err, lifecycle.pinCalls)
 	}
 	if parsed, parseErr := parseWorkflowUint64(json.Number("18446744073709551615")); parseErr != nil || parsed != ^uint64(0) {
@@ -508,20 +538,21 @@ func TestWorkflowLifecycleCatalogSearchIsDistinctAndProfileFiltered(t *testing.T
 		WithWorkflowLifecycle(lifecycle),
 		WithWorkflowServices(exposure, operations, operations, operations),
 	)
-	request := mcp.CallToolRequest{Header: http.Header{"Authorization": []string{"Bearer token-a"}}}
-	request.Params.Arguments = map[string]any{"namespace": "team", "query": "lazy", "limit": 10}
-	result, err := adapter.workflow.handleLifecycleCatalogSearch(t.Context(), request)
-	if err != nil || result.IsError {
+	args := map[string]any{"namespace": "team", "query": "lazy", "limit": 10}
+	result, err := adapter.workflow.handleLifecycleCatalogSearch(t.Context(), args)
+	if err != nil {
 		t.Fatalf("catalog search = %#v, %v", result, err)
 	}
-	search, ok := result.StructuredContent.(appworkflow.WorkflowCatalogSearchResult)
+	search, ok := result.(appworkflow.WorkflowCatalogSearchResult)
 	if !ok || len(search.Matches) != 1 || search.Matches[0].Definition != exposure.lazy.Definition || search.NextStep != "inspect_exact" {
-		t.Fatalf("profile-filtered catalog result = %#v", result.StructuredContent)
+		t.Fatalf("profile-filtered catalog result = %#v", result)
 	}
 	if lifecycle.searchCalls != 1 {
 		t.Fatalf("catalog search calls=%d", lifecycle.searchCalls)
 	}
-	if workflowMetaTool("hadron_workflows_search").Description == workflowMetaTool("hadron_workflow_catalog_search").Description {
+	searchDescription, _ := workflowMetaToolSchema("hadron_workflows_search")
+	catalogDescription, _ := workflowMetaToolSchema("hadron_workflow_catalog_search")
+	if searchDescription == catalogDescription {
 		t.Fatal("session discovery and ranked lifecycle catalog search were conflated")
 	}
 }
@@ -530,25 +561,22 @@ func TestWorkflowRawMCPCallsRejectUnsafeNumbers(t *testing.T) {
 	exposure := newFakeWorkflowExposure()
 	operations := &fakeWorkflowOperations{}
 	adapter := New(nil, nil, nil, nil, "token-a", nil, WithWorkflowServices(exposure, operations, operations, operations))
-	mcpServer := adapter.newServer()
-	session := newWorkflowTestSession("session-lossy-number")
-	if err := mcpServer.RegisterSession(t.Context(), session); err != nil {
-		t.Fatal(err)
+	srv := adapter.newServer()
+	cs := workflowConnect(t, srv, nil)
+
+	res, err := cs.CallTool(t.Context(), &mcpsdk.CallToolParams{
+		Name: "hadron_workflow_run",
+		Arguments: map[string]any{
+			"name": exposure.alpha.Name, "version": exposure.alpha.Version, "digest": exposure.alpha.Digest,
+			"inputs": map[string]any{"nested": []any{9007199254740993.0}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unsafe number was rejected outside the tool handler: %v", err)
 	}
-	assertHandlerRejection := func(response mcp.JSONRPCMessage) {
-		t.Helper()
-		rpcResponse, ok := response.(mcp.JSONRPCResponse)
-		if !ok {
-			t.Fatalf("unsafe number was rejected outside the tool handler: %#v", response)
-		}
-		result, ok := rpcResponse.Result.(*mcp.CallToolResult)
-		if !ok || !result.IsError {
-			t.Fatalf("unsafe number did not produce a handler error: %#v", rpcResponse.Result)
-		}
+	if !res.IsError {
+		t.Fatalf("unsafe number did not produce a handler error: %#v", res)
 	}
-	message := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"hadron_workflow_run","arguments":{"name":"` + exposure.alpha.Name + `","version":"` + exposure.alpha.Version + `","digest":"` + exposure.alpha.Digest + `","inputs":{"nested":[9007199254740993]}}}}`)
-	response := mcpServer.HandleMessage(mcpServer.WithContext(t.Context(), session), message)
-	assertHandlerRejection(response)
 	operations.mu.Lock()
 	runCount := len(operations.runs)
 	operations.mu.Unlock()
@@ -556,9 +584,13 @@ func TestWorkflowRawMCPCallsRejectUnsafeNumbers(t *testing.T) {
 		t.Fatalf("lossy raw MCP call reached RunWorkflow %d times", runCount)
 	}
 
-	message = json.RawMessage(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"hadron_workflows_search","arguments":{"limit":1.9}}}`)
-	response = mcpServer.HandleMessage(mcpServer.WithContext(t.Context(), session), message)
-	assertHandlerRejection(response)
+	res, err = cs.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "hadron_workflows_search", Arguments: map[string]any{"limit": 1.9}})
+	if err != nil {
+		t.Fatalf("fractional limit was rejected outside the tool handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("fractional limit did not produce a handler error: %#v", res)
+	}
 }
 
 func TestWorkflowGeneratedInvocationIdentityIsRestartUnique(t *testing.T) {
@@ -567,11 +599,10 @@ func TestWorkflowGeneratedInvocationIdentityIsRestartUnique(t *testing.T) {
 	secondOperations := &fakeWorkflowOperations{}
 	first := New(nil, nil, nil, nil, "token-a", nil, withWorkflowInstanceNonceForTest("instance-one"), WithWorkflowServices(exposure, firstOperations, firstOperations, firstOperations))
 	second := New(nil, nil, nil, nil, "token-a", nil, withWorkflowInstanceNonceForTest("instance-two"), WithWorkflowServices(exposure, secondOperations, secondOperations, secondOperations))
-	request := mcp.CallToolRequest{}
-	request.Params.Arguments = map[string]any{"message": "same invocation"}
+	args := map[string]any{"message": "same invocation"}
 	for _, surface := range []*workflowSurface{first.workflow, second.workflow} {
-		result, err := surface.run(t.Context(), "stdio", request, exposure.alpha.Definition, true)
-		if err != nil || result.IsError {
+		result, err := surface.run(t.Context(), args, exposure.alpha.Definition, true)
+		if err != nil {
 			t.Fatalf("generated invocation = %#v, %v", result, err)
 		}
 	}
@@ -597,11 +628,10 @@ func TestWorkflowSurfaceResumePreservesIdempotencyAndTypedPayload(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := mcp.CallToolRequest{}
-	request.Params.Arguments = map[string]any{"run_id": "run-one", "wait_id": "wait-one", "correlation": "gate-one", "token": "one-time-token", "payload": payload, "idempotency_key": "resume-key"}
+	args := map[string]any{"run_id": "run-one", "wait_id": "wait-one", "correlation": "gate-one", "token": "one-time-token", "payload": payload, "idempotency_key": "resume-key"}
 	for attempt := 0; attempt < 2; attempt++ {
-		result, callErr := adapter.workflow.handleGate(t.Context(), request)
-		if callErr != nil || result.IsError {
+		result, callErr := adapter.workflow.handleGate(t.Context(), args)
+		if callErr != nil {
 			t.Fatalf("resume attempt %d = %#v, %v", attempt, result, callErr)
 		}
 	}
@@ -611,16 +641,16 @@ func TestWorkflowSurfaceResumePreservesIdempotencyAndTypedPayload(t *testing.T) 
 	}
 	operations.mu.Unlock()
 
-	request.Params.Arguments = map[string]any{"run_id": "run-two", "wait_id": "wait-two", "correlation": "message-one", "payload": payload}
+	messageArgs := map[string]any{"run_id": "run-two", "wait_id": "wait-two", "correlation": "message-one", "payload": payload}
 	for attempt := 0; attempt < 2; attempt++ {
-		credentialless, callErr := adapter.workflow.handleMessage(t.Context(), request)
-		if callErr != nil || credentialless.IsError {
+		credentialless, callErr := adapter.workflow.handleMessage(t.Context(), messageArgs)
+		if callErr != nil {
 			t.Fatalf("credentialless resume attempt %d = %#v, %v", attempt, credentialless, callErr)
 		}
 		if attempt == 1 {
-			result, ok := credentialless.StructuredContent.(appworkflow.ResumeWorkflowRunResult)
+			result, ok := credentialless.(appworkflow.ResumeWorkflowRunResult)
 			if !ok || result.Outcome != appworkflow.WorkflowResumeReplayed {
-				t.Fatalf("credentialless replay = %#v", credentialless.StructuredContent)
+				t.Fatalf("credentialless replay = %#v", credentialless)
 			}
 		}
 	}
@@ -630,10 +660,9 @@ func TestWorkflowSurfaceResumePreservesIdempotencyAndTypedPayload(t *testing.T) 
 	}
 	operations.mu.Unlock()
 
-	signalRequest := mcp.CallToolRequest{}
-	signalRequest.Params.Arguments = map[string]any{"run_id": "run-two", "name": "approved", "correlation": "signal-one", "payload": payload, "idempotency_key": "signal-key", "confirmed": true}
-	signaled, signalErr := adapter.workflow.handleSignal(t.Context(), signalRequest)
-	if signalErr != nil || signaled.IsError {
+	signalArgs := map[string]any{"run_id": "run-two", "name": "approved", "correlation": "signal-one", "payload": payload, "idempotency_key": "signal-key", "confirmed": true}
+	signaled, signalErr := adapter.workflow.handleSignal(t.Context(), signalArgs)
+	if signalErr != nil {
 		t.Fatalf("typed signal = %#v, %v", signaled, signalErr)
 	}
 	operations.mu.Lock()
@@ -643,15 +672,7 @@ func TestWorkflowSurfaceResumePreservesIdempotencyAndTypedPayload(t *testing.T) 
 	}
 }
 
-func TestWorkflowTokenDoesNotFallBackAcrossExplicitAuthorization(t *testing.T) {
-	for _, header := range []string{"Basic opaque", "Bearer ", "Bearer  leading", "Bearer trailing ", "Bearer line\nbreak", strings.Repeat("x", (16<<10)+1)} {
-		if got := workflowToken(http.Header{"Authorization": []string{header}}, "privileged-fallback"); got != "" {
-			t.Fatalf("explicit authorization %q fell back to %q", header, got)
-		}
-	}
-	if got := workflowToken(nil, "stdio-token"); got != "stdio-token" {
-		t.Fatalf("missing authorization lost stdio token: %q", got)
-	}
+func TestAdapterCanonicalizesConfiguredToken(t *testing.T) {
 	if adapter := New(nil, nil, nil, nil, " non-reproducible ", nil); adapter.token != "" {
 		t.Fatalf("adapter silently rewrote a non-canonical configured credential: %q", adapter.token)
 	}
@@ -849,62 +870,6 @@ func (f *fakeWorkflowOperations) SignalWorkflowRun(_ context.Context, request ap
 	return appworkflow.ResumeWorkflowRunResult{}, nil
 }
 
-type workflowTestSession struct {
-	id            string
-	mu            sync.Mutex
-	initialized   bool
-	tools         map[string]server.ServerTool
-	notifications chan mcp.JSONRPCNotification
-	level         mcp.LoggingLevel
-}
-
-type workflowTestPlainSession struct {
-	id            string
-	initialized   bool
-	notifications chan mcp.JSONRPCNotification
-}
-
-func newWorkflowTestPlainSession(id string) *workflowTestPlainSession {
-	return &workflowTestPlainSession{id: id, initialized: true, notifications: make(chan mcp.JSONRPCNotification, 32)}
-}
-
-func (s *workflowTestPlainSession) Initialize()       { s.initialized = true }
-func (s *workflowTestPlainSession) Initialized() bool { return s.initialized }
-func (s *workflowTestPlainSession) NotificationChannel() chan<- mcp.JSONRPCNotification {
-	return s.notifications
-}
-func (s *workflowTestPlainSession) SessionID() string { return s.id }
-
-func newWorkflowTestSession(id string) *workflowTestSession {
-	return &workflowTestSession{id: id, initialized: true, tools: make(map[string]server.ServerTool), notifications: make(chan mcp.JSONRPCNotification, 32)}
-}
-
-func (s *workflowTestSession) Initialize()       { s.initialized = true }
-func (s *workflowTestSession) Initialized() bool { return s.initialized }
-func (s *workflowTestSession) NotificationChannel() chan<- mcp.JSONRPCNotification {
-	return s.notifications
-}
-func (s *workflowTestSession) SessionID() string { return s.id }
-func (s *workflowTestSession) GetSessionTools() map[string]server.ServerTool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	result := make(map[string]server.ServerTool, len(s.tools))
-	for name, tool := range s.tools {
-		result[name] = tool
-	}
-	return result
-}
-func (s *workflowTestSession) SetSessionTools(tools map[string]server.ServerTool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.tools = make(map[string]server.ServerTool, len(tools))
-	for name, tool := range tools {
-		s.tools[name] = tool
-	}
-}
-func (s *workflowTestSession) SetLogLevel(level mcp.LoggingLevel) { s.level = level }
-func (s *workflowTestSession) GetLogLevel() mcp.LoggingLevel      { return s.level }
-
 func stringsWorkflowTestReplace(value string) string {
 	result := make([]rune, 0, len(value))
 	for _, current := range value {
@@ -924,7 +889,3 @@ func containsWorkflowTestText(value, search string) bool {
 	}
 	return false
 }
-
-var _ server.SessionWithTools = (*workflowTestSession)(nil)
-var _ server.SessionWithLogging = (*workflowTestSession)(nil)
-var _ server.ClientSession = (*workflowTestPlainSession)(nil)

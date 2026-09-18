@@ -9,14 +9,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/persistence"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-func (a *Adapter) handleTriggersList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (a *Adapter) handleTriggersList(ctx context.Context, _ map[string]any) (any, error) {
 	items, err := a.store.ListTriggers(ctx)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, t := range items {
@@ -33,26 +33,26 @@ func (a *Adapter) handleTriggersList(ctx context.Context, _ mcp.CallToolRequest)
 			"created_at":     t.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+	return map[string]any{"items": out, "count": len(out)}, nil
 }
 
-func (a *Adapter) handleTriggerCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeTriggerWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handleTriggerCreate(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeTriggerWrite); err != nil {
+		return nil, err
 	}
-	name := strings.TrimSpace(req.GetString("name", ""))
+	name := strings.TrimSpace(argString(args, "name", ""))
 	if name == "" {
-		return toolError("validation_error", "name is required"), nil
+		return nil, budget.NewToolError("validation_error", "name is required").WithField("name")
 	}
-	path := strings.TrimSpace(req.GetString("path", ""))
+	path := strings.TrimSpace(argString(args, "path", ""))
 	if path == "" {
-		return toolError("validation_error", "path is required"), nil
+		return nil, budget.NewToolError("validation_error", "path is required").WithField("path")
 	}
-	blueprintPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	blueprintPath := strings.TrimSpace(argString(args, "blueprint_path", ""))
 	if blueprintPath == "" {
-		return toolError("validation_error", "blueprint_path is required"), nil
+		return nil, budget.NewToolError("validation_error", "blueprint_path is required").WithField("blueprint_path")
 	}
-	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
+	workspaceID := workspaceDefault(argString(args, "workspace_id", "default"))
 
 	triggerID := fmt.Sprintf("mcp-trig-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&runSeq, 1))
 	rec := persistence.TriggerRecord{
@@ -63,63 +63,63 @@ func (a *Adapter) handleTriggerCreate(ctx context.Context, req mcp.CallToolReque
 		BlueprintPath: blueprintPath,
 		WorkspaceID:   workspaceID,
 		Enabled:       true,
-		OneShot:       req.GetBool("one_shot", false),
+		OneShot:       argBool(args, "one_shot", false),
 	}
-	if secret := strings.TrimSpace(req.GetString("secret", "")); secret != "" {
+	if secret := strings.TrimSpace(argString(args, "secret", "")); secret != "" {
 		rec.SecretHash = sql.NullString{String: secret, Valid: true}
 	}
-	if ei := strings.TrimSpace(req.GetString("extract_inputs", "")); ei != "" {
+	if ei := strings.TrimSpace(argString(args, "extract_inputs", "")); ei != "" {
 		rec.ExtractInputs = sql.NullString{String: ei, Valid: true}
 	}
-	ttlMinutes := req.GetFloat("ttl_minutes", 0)
+	ttlMinutes := argFloat(args, "ttl_minutes", 0)
 	if ttlMinutes > 0 {
 		expires := time.Now().UTC().Add(time.Duration(ttlMinutes) * time.Minute)
 		rec.TTLExpiresAt = sql.NullString{String: expires.Format(time.RFC3339), Valid: true}
 	}
 
 	if err := a.store.CreateTrigger(ctx, rec); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"trigger_id":     triggerID,
 		"name":           name,
 		"path":           path,
 		"blueprint_path": blueprintPath,
 		"webhook_url":    "/hooks/" + path,
-	}), nil
+	}, nil
 }
 
-func (a *Adapter) handleTriggerWatch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeTriggerWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handleTriggerWatch(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeTriggerWrite); err != nil {
+		return nil, err
 	}
 
-	trigType := strings.TrimSpace(req.GetString("type", ""))
+	trigType := strings.TrimSpace(argString(args, "type", ""))
 	if trigType != "webhook" && trigType != "file_watch" {
-		return toolError("validation_error", "type must be 'webhook' or 'file_watch'"), nil
+		return nil, budget.NewToolError("validation_error", "type must be 'webhook' or 'file_watch'").WithField("type")
 	}
-	blueprintPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	blueprintPath := strings.TrimSpace(argString(args, "blueprint_path", ""))
 	if blueprintPath == "" {
-		return toolError("validation_error", "blueprint_path is required"), nil
+		return nil, budget.NewToolError("validation_error", "blueprint_path is required").WithField("blueprint_path")
 	}
-	configJSON := strings.TrimSpace(req.GetString("config", ""))
+	configJSON := strings.TrimSpace(argString(args, "config", ""))
 	if configJSON == "" {
-		return toolError("validation_error", "config is required"), nil
+		return nil, budget.NewToolError("validation_error", "config is required").WithField("config")
 	}
-	ttlMinutes := req.GetFloat("ttl_minutes", 0)
+	ttlMinutes := argFloat(args, "ttl_minutes", 0)
 	if ttlMinutes <= 0 {
-		return toolError("validation_error", "ttl_minutes is required and must be > 0"), nil
+		return nil, budget.NewToolError("validation_error", "ttl_minutes is required and must be > 0").WithField("ttl_minutes")
 	}
 	if ttlMinutes > 1440 {
-		return toolError("validation_error", "ttl_minutes max is 1440 (24 hours)"), nil
+		return nil, budget.NewToolError("validation_error", "ttl_minutes max is 1440 (24 hours)").WithField("ttl_minutes")
 	}
-	oneShot := req.GetBool("one_shot", true)
-	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
+	oneShot := argBool(args, "one_shot", true)
+	workspaceID := workspaceDefault(argString(args, "workspace_id", "default"))
 
 	// Parse config
 	var cfg map[string]any
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
-		return toolError("validation_error", "config must be valid JSON: "+err.Error()), nil //nolint:nilerr
+		return nil, budget.NewToolError("validation_error", "config must be valid JSON: "+err.Error()).WithField("config")
 	}
 
 	triggerID := fmt.Sprintf("mcp-trig-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&runSeq, 1))
@@ -147,7 +147,7 @@ func (a *Adapter) handleTriggerWatch(ctx context.Context, req mcp.CallToolReques
 	case "webhook":
 		path, _ := cfg["path"].(string)
 		if path == "" {
-			return toolError("validation_error", "config.path is required for webhook triggers"), nil
+			return nil, budget.NewToolError("validation_error", "config.path is required for webhook triggers").WithField("config")
 		}
 		rec.Path = path
 	case "file_watch":
@@ -159,7 +159,7 @@ func (a *Adapter) handleTriggerWatch(ctx context.Context, req mcp.CallToolReques
 		case string:
 			rec.Path = v
 		default:
-			return toolError("validation_error", "config.paths is required for file_watch triggers"), nil
+			return nil, budget.NewToolError("validation_error", "config.paths is required for file_watch triggers").WithField("config")
 		}
 
 		// Optional debounce
@@ -175,7 +175,7 @@ func (a *Adapter) handleTriggerWatch(ctx context.Context, req mcp.CallToolReques
 	}
 
 	if err := a.store.CreateTrigger(ctx, rec); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 
 	result := map[string]any{
@@ -189,13 +189,13 @@ func (a *Adapter) handleTriggerWatch(ctx context.Context, req mcp.CallToolReques
 	if trigType == "webhook" {
 		result["webhook_url"] = "/hooks/" + rec.Path
 	}
-	return toolJSON(result), nil
+	return result, nil
 }
 
-func (a *Adapter) handleTriggerListMine(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (a *Adapter) handleTriggerListMine(ctx context.Context, _ map[string]any) (any, error) {
 	items, err := a.store.ListTriggersByCreatedBy(ctx, a.sessionID)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, t := range items {
@@ -213,19 +213,19 @@ func (a *Adapter) handleTriggerListMine(ctx context.Context, _ mcp.CallToolReque
 			"created_at":     t.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out), "session_id": a.sessionID}), nil
+	return map[string]any{"items": out, "count": len(out), "session_id": a.sessionID}, nil
 }
 
-func (a *Adapter) handleTriggerDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeTriggerWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handleTriggerDelete(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeTriggerWrite); err != nil {
+		return nil, err
 	}
-	triggerID := strings.TrimSpace(req.GetString("trigger_id", ""))
+	triggerID := strings.TrimSpace(argString(args, "trigger_id", ""))
 	if triggerID == "" {
-		return toolError("validation_error", "trigger_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "trigger_id is required").WithField("trigger_id")
 	}
 	if err := a.store.DeleteTrigger(ctx, triggerID); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{"trigger_id": triggerID, "deleted": true}), nil
+	return map[string]any{"trigger_id": triggerID, "deleted": true}, nil
 }

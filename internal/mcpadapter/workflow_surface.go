@@ -8,19 +8,19 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/hollis-labs/go-mcp/budget"
+	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/go-workflow/diagnostic"
 	"github.com/hollis-labs/go-workflow/graph"
 	"github.com/hollis-labs/go-workflow/values"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const maximumWorkflowMCPArguments = 1 << 20
@@ -51,6 +51,24 @@ type WorkflowLifecycleOperations interface {
 	appworkflow.WorkflowLifecycleOperations
 }
 
+// workflowSurface mounts graph-native workflows as dynamically generated MCP
+// tools for the single MCP principal Hadron serves.
+//
+// This is deliberately simpler than the mark3labs-era design it replaces,
+// which tracked a workflowMount per client session (keyed by session ID) to
+// support mark3labs' SessionWithTools interface for stateful multi-client
+// HTTP sessions. Hadron only ever serves one transport, stdio
+// (cmd/hadrond/main.go's only call site is Adapter.Run), which is
+// single-session by construction -- and the go-mcp/official-SDK direction is
+// stateless-first at the protocol layer besides (apps needing cross-call
+// continuity use Tether's agent-session layer, not protocol sessions; see
+// project/atlas/knowledge/mcp/mcp-go-sdk-migration-playbook). So there is
+// exactly one mount, updated in place via the official SDK's global
+// RegisterTool/RemoveTools, computed synchronously in Adapter.newServer
+// (not deferred to whatever later serves the *gomcp.Server it returns --
+// Run's stdio, an HTTP handler wrapping it directly in a test, or anything
+// else) and refreshed in place by handlers that need to (a token's profile
+// generation changing, an explicit hadron_workflows_load).
 type workflowSurface struct {
 	adapter    *Adapter
 	exposure   WorkflowExposureOperations
@@ -60,10 +78,9 @@ type workflowSurface struct {
 	lifecycle  WorkflowLifecycleOperations
 	sequence   atomic.Uint64
 
-	mu       sync.Mutex
-	server   *server.MCPServer
-	base     map[string]server.ServerTool
-	sessions map[string]workflowMount
+	mu     sync.Mutex
+	server *gomcp.Server
+	mount  workflowMount
 }
 
 type workflowMount struct {
@@ -73,40 +90,16 @@ type workflowMount struct {
 }
 
 func newWorkflowSurface(adapter *Adapter, exposure WorkflowExposureOperations, operations WorkflowOperations, reads WorkflowReadOperations, signals WorkflowSignalOperations, lifecycle WorkflowLifecycleOperations) *workflowSurface {
-	return &workflowSurface{adapter: adapter, exposure: exposure, operations: operations, reads: reads, signals: signals, lifecycle: lifecycle, sessions: make(map[string]workflowMount)}
+	return &workflowSurface{adapter: adapter, exposure: exposure, operations: operations, reads: reads, signals: signals, lifecycle: lifecycle}
 }
 
-func (w *workflowSurface) bindServer(s *server.MCPServer) {
+func (w *workflowSurface) bindServer(s *gomcp.Server) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.server = s
-	w.base = cloneListedServerTools(s.ListTools())
 }
 
-func (w *workflowSurface) onRegisterSession(ctx context.Context, session server.ClientSession) {
-	if session == nil {
-		return
-	}
-	if w.server == nil {
-		return
-	}
-	ctx = w.server.WithContext(ctx, session)
-	_, _, _ = w.current(ctx, session.SessionID(), w.adapter.token)
-}
-
-func (w *workflowSurface) onUnregisterSession(_ context.Context, session server.ClientSession) {
-	if session == nil {
-		return
-	}
-	w.mu.Lock()
-	if session.SessionID() == "stdio" && w.server != nil {
-		w.server.SetTools(serverToolsSlice(cloneServerTools(w.base))...)
-	}
-	delete(w.sessions, session.SessionID())
-	w.mu.Unlock()
-}
-
-func (w *workflowSurface) registerTools(s *server.MCPServer) {
+func (w *workflowSurface) registerTools(s *gomcp.Server) {
 	handlers := w.handlerMap()
 	names := make([]string, 0, len(handlers))
 	for name := range handlers {
@@ -114,60 +107,131 @@ func (w *workflowSurface) registerTools(s *server.MCPServer) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		handler := handlers[name]
-		s.AddTool(workflowMetaTool(name), handler)
+		description, schema := workflowMetaToolSchema(name)
+		b := workflowMetaBehavior(name)
+		s.RegisterTool(gomcp.Tool{
+			Name:            name,
+			Description:     description,
+			InputSchema:     schema,
+			Handler:         handlers[name],
+			ReadOnlyHint:    b.readOnly,
+			DestructiveHint: b.destructive,
+			IdempotentHint:  b.idempotent,
+			OpenWorldHint:   b.openWorld,
+		})
 	}
 }
 
-func workflowMetaTool(name string) mcp.Tool {
-	var tool mcp.Tool
+// workflowMetaToolSchema returns the description and input schema for one of
+// the static, profile-authorized meta-tools (as opposed to the dynamically
+// generated per-workflow tools built by workflowDescriptorGomcpTool).
+func workflowMetaToolSchema(name string) (string, map[string]any) {
+	props := map[string]any{}
+	var required []any
+	description := ""
 	switch name {
 	case "hadron_workflows_search":
-		tool = mcp.NewTool(name, mcp.WithDescription("Search workflows visible to this MCP principal."), mcp.WithString("query"), mcp.WithNumber("limit"))
+		description = "Search workflows visible to this MCP principal."
+		props["query"] = map[string]any{"type": "string"}
+		props["limit"] = map[string]any{"type": "integer"}
 	case "hadron_workflow_catalog_search":
-		tool = mcp.NewTool(name, mcp.WithDescription("Return bounded ranked workflow recommendations and the next authoring step."), mcp.WithString("query"), mcp.WithString("namespace"), mcp.WithNumber("limit"))
+		description = "Return bounded ranked workflow recommendations and the next authoring step."
+		props["query"] = map[string]any{"type": "string"}
+		props["namespace"] = map[string]any{"type": "string"}
+		props["limit"] = map[string]any{"type": "integer"}
 	case "hadron_workflows_load":
-		tool = mcp.NewTool(name, mcp.WithDescription("Mount exact discoverable workflow schemas for this MCP session."), mcp.WithArray("definitions", mcp.WithStringItems()))
+		description = "Mount exact discoverable workflow schemas for this MCP session."
+		props["definitions"] = map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 	case "hadron_workflow_describe", "hadron_workflow_validate":
-		tool = mcp.NewTool(name, mcp.WithString("name", mcp.Required()), mcp.WithString("version", mcp.Required()), mcp.WithString("digest", mcp.Required()))
+		props["name"] = map[string]any{"type": "string"}
+		props["version"] = map[string]any{"type": "string"}
+		props["digest"] = map[string]any{"type": "string"}
+		required = []any{"name", "version", "digest"}
 	case "hadron_workflow_run":
-		tool = mcp.NewTool(name, mcp.WithString("name", mcp.Required()), mcp.WithString("version", mcp.Required()), mcp.WithString("digest", mcp.Required()), mcp.WithObject("inputs"), mcp.WithString("run_id"), mcp.WithString("idempotency_key"), mcp.WithBoolean("confirmed"))
+		props["name"] = map[string]any{"type": "string"}
+		props["version"] = map[string]any{"type": "string"}
+		props["digest"] = map[string]any{"type": "string"}
+		props["inputs"] = map[string]any{"type": "object"}
+		props["run_id"] = map[string]any{"type": "string"}
+		props["idempotency_key"] = map[string]any{"type": "string"}
+		props["confirmed"] = map[string]any{"type": "boolean"}
+		required = []any{"name", "version", "digest"}
 	case "hadron_workflow_run_inspect":
-		tool = mcp.NewTool(name, mcp.WithString("run_id", mcp.Required()), mcp.WithBoolean("reveal_private"))
+		props["run_id"] = map[string]any{"type": "string"}
+		props["reveal_private"] = map[string]any{"type": "boolean"}
+		required = []any{"run_id"}
 	case "hadron_workflow_run_cancel":
-		tool = mcp.NewTool(name, mcp.WithString("run_id", mcp.Required()), mcp.WithString("idempotency_key", mcp.Required()), mcp.WithString("reason"))
+		props["run_id"] = map[string]any{"type": "string"}
+		props["idempotency_key"] = map[string]any{"type": "string"}
+		props["reason"] = map[string]any{"type": "string"}
+		required = []any{"run_id", "idempotency_key"}
 	case "hadron_workflow_run_events", "hadron_workflow_run_subscribe":
-		tool = mcp.NewTool(name, mcp.WithString("run_id", mcp.Required()), mcp.WithNumber("limit"), mcp.WithBoolean("reveal_private"))
+		props["run_id"] = map[string]any{"type": "string"}
+		props["limit"] = map[string]any{"type": "integer"}
+		props["reveal_private"] = map[string]any{"type": "boolean"}
+		required = []any{"run_id"}
 	case "hadron_workflow_run_resume", "hadron_workflow_gate_submit", "hadron_workflow_message_submit":
-		tool = mcp.NewTool(name, mcp.WithString("run_id", mcp.Required()), mcp.WithString("wait_id", mcp.Required()), mcp.WithString("correlation", mcp.Required()), mcp.WithString("token"), mcp.WithObject("payload", mcp.Required()), mcp.WithString("idempotency_key"))
+		props["run_id"] = map[string]any{"type": "string"}
+		props["wait_id"] = map[string]any{"type": "string"}
+		props["correlation"] = map[string]any{"type": "string"}
+		props["token"] = map[string]any{"type": "string"}
+		props["payload"] = map[string]any{"type": "object"}
+		props["idempotency_key"] = map[string]any{"type": "string"}
+		required = []any{"run_id", "wait_id", "correlation", "payload"}
 	case "hadron_workflow_signal":
-		tool = mcp.NewTool(name, mcp.WithString("run_id", mcp.Required()), mcp.WithString("name", mcp.Required()), mcp.WithString("correlation", mcp.Required()), mcp.WithObject("payload", mcp.Required()), mcp.WithString("idempotency_key", mcp.Required()), mcp.WithBoolean("confirmed"))
+		props["run_id"] = map[string]any{"type": "string"}
+		props["name"] = map[string]any{"type": "string"}
+		props["correlation"] = map[string]any{"type": "string"}
+		props["payload"] = map[string]any{"type": "object"}
+		props["idempotency_key"] = map[string]any{"type": "string"}
+		props["confirmed"] = map[string]any{"type": "boolean"}
+		required = []any{"run_id", "name", "correlation", "payload", "idempotency_key"}
 	case "hadron_workflow_catalog_inspect", "hadron_workflow_registry_pin_version", "hadron_workflow_registry_unpin_version", "hadron_workflow_registry_publish", "hadron_workflow_registry_clear_current":
-		tool = mcp.NewTool(name, mcp.WithString("name", mcp.Required()), mcp.WithString("version", mcp.Required()), mcp.WithString("digest", mcp.Required()))
+		props["name"] = map[string]any{"type": "string"}
+		props["version"] = map[string]any{"type": "string"}
+		props["digest"] = map[string]any{"type": "string"}
+		required = []any{"name", "version", "digest"}
 	case "hadron_workflow_author_validate":
-		tool = mcp.NewTool(name, mcp.WithDescription("Validate one bounded graph-native draft without mutating the workflow catalog."), workflowDraftToolOption())
+		description = "Validate one bounded graph-native draft without mutating the workflow catalog."
+		props["draft"] = workflowDraftProperty()
+		required = []any{"draft"}
 	case "hadron_workflow_author_scaffold":
-		tool = mcp.NewTool(name, mcp.WithDescription("Validate one bounded graph-native draft and generate an editable deterministic contract-test scaffold without catalog mutation."), workflowDraftToolOption())
+		description = "Validate one bounded graph-native draft and generate an editable deterministic contract-test scaffold without catalog mutation."
+		props["draft"] = workflowDraftProperty()
+		required = []any{"draft"}
 	case "hadron_workflow_author_test":
-		tool = mcp.NewTool(name, mcp.WithDescription("Validate a draft and execute its deterministic contract suite without registering it."), workflowDraftToolOption(), workflowContractSuiteToolOption())
+		description = "Validate a draft and execute its deterministic contract suite without registering it."
+		props["draft"] = workflowDraftProperty()
+		props["suite"] = workflowContractSuiteProperty()
+		required = []any{"draft", "suite"}
 	case "hadron_workflow_author_register":
-		tool = mcp.NewTool(name, mcp.WithDescription("Validate and test a draft, then register its exact immutable version in an authorized namespace."), workflowDraftToolOption(), workflowContractSuiteToolOption(), mcp.WithBoolean("make_current", mcp.Description("Also move the registry current alias to this qualified exact version.")))
+		description = "Validate and test a draft, then register its exact immutable version in an authorized namespace."
+		props["draft"] = workflowDraftProperty()
+		props["suite"] = workflowContractSuiteProperty()
+		props["make_current"] = map[string]any{"type": "boolean", "description": "Also move the registry current alias to this qualified exact version."}
+		required = []any{"draft", "suite"}
 	case "hadron_workflow_registry_package":
-		tool = mcp.NewTool(name, mcp.WithString("name", mcp.Required()), mcp.WithString("version", mcp.Required()), mcp.WithString("digest", mcp.Required()), workflowContractSuiteToolOption())
+		props["name"] = map[string]any{"type": "string"}
+		props["version"] = map[string]any{"type": "string"}
+		props["digest"] = map[string]any{"type": "string"}
+		props["suite"] = workflowContractSuiteProperty()
+		required = []any{"name", "version", "digest", "suite"}
 	case "hadron_workflow_exposure_inspect":
-		tool = mcp.NewTool(name, mcp.WithString("profile_id", mcp.Required()))
+		props["profile_id"] = map[string]any{"type": "string"}
+		required = []any{"profile_id"}
 	case "hadron_workflow_exposure_pin_definition", "hadron_workflow_exposure_unpin_definition":
-		tool = mcp.NewTool(name, mcp.WithString("profile_id", mcp.Required()), mcp.WithString("name", mcp.Required()), mcp.WithString("version", mcp.Required()), mcp.WithString("digest", mcp.Required()), mcp.WithNumber("expected_generation", mcp.Required()))
-	default:
-		tool = mcp.NewTool(name)
+		props["profile_id"] = map[string]any{"type": "string"}
+		props["name"] = map[string]any{"type": "string"}
+		props["version"] = map[string]any{"type": "string"}
+		props["digest"] = map[string]any{"type": "string"}
+		props["expected_generation"] = map[string]any{"type": "integer", "minimum": 1}
+		required = []any{"profile_id", "name", "version", "digest", "expected_generation"}
 	}
-	if name == "hadron_workflows_search" || name == "hadron_workflow_catalog_search" || name == "hadron_workflow_run_events" || name == "hadron_workflow_run_subscribe" {
-		tool.InputSchema.Properties["limit"] = map[string]any{"type": "integer"}
+	schema := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
+	if len(required) > 0 {
+		schema["required"] = required
 	}
-	if name == "hadron_workflow_exposure_pin_definition" || name == "hadron_workflow_exposure_unpin_definition" {
-		tool.InputSchema.Properties["expected_generation"] = map[string]any{"type": "integer", "minimum": 1}
-	}
-	return applyToolBehavior(tool, workflowMetaBehavior(name))
+	return description, schema
 }
 
 func workflowMetaBehavior(name string) toolBehavior {
@@ -183,43 +247,47 @@ func workflowMetaBehavior(name string) toolBehavior {
 	}
 }
 
-func (w *workflowSurface) handlerMap() map[string]server.ToolHandlerFunc {
-	return map[string]server.ToolHandlerFunc{
+func (w *workflowSurface) handlerMap() map[string]gomcp.ToolHandler {
+	return map[string]gomcp.ToolHandler{
 		"hadron_workflows_search":                   w.handleSearch,
 		"hadron_workflows_load":                     w.handleLoad,
 		"hadron_workflow_describe":                  w.handleDescribe,
 		"hadron_workflow_validate":                  w.handleValidate,
 		"hadron_workflow_run":                       w.handleRun,
-		"hadron_workflow_run_inspect":               w.handleInspectRun,
+		"hadron_workflow_run_inspect":                w.handleInspectRun,
 		"hadron_workflow_run_cancel":                w.handleCancelRun,
 		"hadron_workflow_run_events":                w.handleEvents,
-		"hadron_workflow_run_subscribe":             w.handleEvents,
+		"hadron_workflow_run_subscribe":              w.handleEvents,
 		"hadron_workflow_run_resume":                w.handleResume,
-		"hadron_workflow_gate_submit":               w.handleGate,
-		"hadron_workflow_message_submit":            w.handleMessage,
-		"hadron_workflow_signal":                    w.handleSignal,
-		"hadron_workflow_catalog_search":            w.handleLifecycleCatalogSearch,
-		"hadron_workflow_catalog_inspect":           w.handleLifecycleCatalogInspect,
-		"hadron_workflow_author_validate":           w.handleLifecycleAuthorValidate,
-		"hadron_workflow_author_scaffold":           w.handleLifecycleAuthorScaffold,
-		"hadron_workflow_author_test":               w.handleLifecycleAuthorTest,
-		"hadron_workflow_author_register":           w.handleLifecycleAuthorRegister,
-		"hadron_workflow_registry_package":          w.handleLifecyclePackage,
-		"hadron_workflow_registry_pin_version":      w.handleLifecycleRegistryPin,
-		"hadron_workflow_registry_unpin_version":    w.handleLifecycleRegistryUnpin,
-		"hadron_workflow_registry_publish":          w.handleLifecycleRegistryPublish,
-		"hadron_workflow_registry_clear_current":    w.handleLifecycleClearCurrent,
-		"hadron_workflow_exposure_inspect":          w.handleLifecycleExposureInspect,
-		"hadron_workflow_exposure_pin_definition":   w.handleLifecycleExposurePin,
-		"hadron_workflow_exposure_unpin_definition": w.handleLifecycleExposureUnpin,
+		"hadron_workflow_gate_submit":                w.handleGate,
+		"hadron_workflow_message_submit":             w.handleMessage,
+		"hadron_workflow_signal":                     w.handleSignal,
+		"hadron_workflow_catalog_search":             w.handleLifecycleCatalogSearch,
+		"hadron_workflow_catalog_inspect":            w.handleLifecycleCatalogInspect,
+		"hadron_workflow_author_validate":            w.handleLifecycleAuthorValidate,
+		"hadron_workflow_author_scaffold":            w.handleLifecycleAuthorScaffold,
+		"hadron_workflow_author_test":                w.handleLifecycleAuthorTest,
+		"hadron_workflow_author_register":            w.handleLifecycleAuthorRegister,
+		"hadron_workflow_registry_package":           w.handleLifecyclePackage,
+		"hadron_workflow_registry_pin_version":       w.handleLifecycleRegistryPin,
+		"hadron_workflow_registry_unpin_version":     w.handleLifecycleRegistryUnpin,
+		"hadron_workflow_registry_publish":           w.handleLifecycleRegistryPublish,
+		"hadron_workflow_registry_clear_current":     w.handleLifecycleClearCurrent,
+		"hadron_workflow_exposure_inspect":           w.handleLifecycleExposureInspect,
+		"hadron_workflow_exposure_pin_definition":    w.handleLifecycleExposurePin,
+		"hadron_workflow_exposure_unpin_definition":  w.handleLifecycleExposureUnpin,
 	}
 }
 
-func (w *workflowSurface) registerResources(s *server.MCPServer) {
+func (w *workflowSurface) registerResources(s *gomcp.Server) {
 	const uri = "hadron://workflows/namespaces"
-	s.AddResource(mcp.NewResource(uri, "Hadron Workflow Namespaces", mcp.WithMIMEType("application/json"), mcp.WithResourceDescription("Compact namespace counts visible to this MCP principal.")), func(ctx context.Context, _ mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-		sessionID := workflowSessionID(ctx, w.adapter.sessionID)
-		bound, session, err := w.current(ctx, sessionID, w.adapter.token)
+	s.SDKServer().AddResource(&mcpsdk.Resource{
+		URI:         uri,
+		Name:        "Hadron Workflow Namespaces",
+		Description: "Compact namespace counts visible to this MCP principal.",
+		MIMEType:    "application/json",
+	}, func(ctx context.Context, _ *mcpsdk.ReadResourceRequest) (*mcpsdk.ReadResourceResult, error) {
+		bound, session, err := w.current(ctx, w.adapter.token)
 		if err != nil {
 			return nil, errors.New("workflow namespace catalog is unavailable")
 		}
@@ -231,28 +299,30 @@ func (w *workflowSurface) registerResources(s *server.MCPServer) {
 		if err != nil {
 			return nil, errors.New("workflow namespace catalog is unavailable")
 		}
-		return []mcp.ResourceContents{mcp.TextResourceContents{URI: uri, MIMEType: "application/json", Text: string(encoded)}}, nil
+		return &mcpsdk.ReadResourceResult{
+			Contents: []*mcpsdk.ResourceContents{{URI: uri, MIMEType: "application/json", Text: string(encoded)}},
+		}, nil
 	})
 }
 
-func (w *workflowSurface) current(ctx context.Context, sessionID, token string) (context.Context, appworkflow.WorkflowExposureSession, error) {
+func (w *workflowSurface) current(ctx context.Context, token string) (context.Context, appworkflow.WorkflowExposureSession, error) {
 	if nilInterfaceValue(w.exposure) {
-		w.clear(ctx, sessionID)
+		w.clear()
 		return ctx, appworkflow.WorkflowExposureSession{}, appworkflow.ErrHostNotReady
 	}
-	bound, session, err := w.exposure.ResolveSession(ctx, sessionID, token)
+	bound, session, err := w.exposure.ResolveSession(ctx, w.adapter.sessionID, token)
 	if err != nil {
-		w.clear(ctx, sessionID)
+		w.clear()
 		return ctx, appworkflow.WorkflowExposureSession{}, err
 	}
 	direct, err := w.exposure.DirectWorkflows(bound, session)
 	if err != nil {
-		w.clear(ctx, sessionID)
+		w.clear()
 		return bound, session, err
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	prior := w.sessions[sessionID]
+	prior := w.mount
 	changed := !sameWorkflowSession(prior.session, session)
 	next := workflowMount{session: session.Clone(), direct: descriptorMap(direct), lazy: make(map[string]appworkflow.WorkflowExposureDescriptor)}
 	if !changed {
@@ -264,93 +334,71 @@ func (w *workflowSurface) current(ctx context.Context, sessionID, token string) 
 		}
 	}
 	if len(next.direct)+len(next.lazy) > session.Profile.MaxDirectTools {
-		_ = w.applyLocked(ctx, sessionID, workflowMount{session: session.Clone(), direct: map[string]appworkflow.WorkflowExposureDescriptor{}, lazy: map[string]appworkflow.WorkflowExposureDescriptor{}})
+		_ = w.applyLocked(workflowMount{session: session.Clone(), direct: map[string]appworkflow.WorkflowExposureDescriptor{}, lazy: map[string]appworkflow.WorkflowExposureDescriptor{}})
 		return bound, session, appworkflow.ErrPolicyDenied
 	}
-	if err := w.applyLocked(ctx, sessionID, next); err != nil {
+	if err := w.applyLocked(next); err != nil {
 		return bound, session, err
 	}
 	return bound, session.Clone(), nil
 }
 
-func (w *workflowSurface) clear(ctx context.Context, sessionID string) {
+func (w *workflowSurface) clear() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_ = w.applyLocked(ctx, sessionID, workflowMount{direct: map[string]appworkflow.WorkflowExposureDescriptor{}, lazy: map[string]appworkflow.WorkflowExposureDescriptor{}})
+	_ = w.applyLocked(workflowMount{direct: map[string]appworkflow.WorkflowExposureDescriptor{}, lazy: map[string]appworkflow.WorkflowExposureDescriptor{}})
 }
 
-func (w *workflowSurface) applyLocked(ctx context.Context, sessionID string, next workflowMount) error {
-	prior := w.sessions[sessionID]
+// applyLocked reconciles the dynamically registered tool set with next,
+// directly against the official SDK's global tool registry via
+// RegisterTool/RemoveTools -- see workflowSurface's doc comment for why a
+// single global mount (not a per-session one) is correct here. Caller must
+// hold w.mu.
+func (w *workflowSurface) applyLocked(next workflowMount) error {
+	prior := w.mount
 	if reflect.DeepEqual(prior.direct, next.direct) && reflect.DeepEqual(prior.lazy, next.lazy) && sameWorkflowSession(prior.session, next.session) {
 		return nil
 	}
-	tools, err := w.toolsForMount(next)
-	if err != nil {
-		return err
-	}
-	if client := server.ClientSessionFromContext(ctx); client != nil && client.SessionID() == sessionID {
-		if sessionTools, ok := client.(server.SessionWithTools); ok {
-			sessionTools.SetSessionTools(tools)
-			w.sessions[sessionID] = next
-			if client.Initialized() && w.server != nil {
-				_ = w.server.SendNotificationToSpecificClient(sessionID, mcp.MethodNotificationToolsListChanged, nil)
+	if w.server != nil {
+		merged := mergeDescriptorMaps(next.direct, next.lazy)
+		for _, descriptor := range merged {
+			tool, err := w.workflowDescriptorGomcpTool(descriptor)
+			if err != nil {
+				return err
 			}
-			return nil
+			w.server.RegisterTool(tool)
 		}
-		// mcp-go's stdio session is deliberately single-client and does not
-		// implement SessionWithTools. Its exact reserved session ID is the only
-		// safe place to publish a mount through the server-global tool set.
-		if sessionID == "stdio" && w.server != nil {
-			combined := cloneServerTools(w.base)
-			for name, tool := range tools {
-				combined[name] = tool
+		var toRemove []string
+		for name := range mergeDescriptorMaps(prior.direct, prior.lazy) {
+			if _, keep := merged[name]; !keep {
+				toRemove = append(toRemove, name)
 			}
-			w.server.SetTools(serverToolsSlice(combined)...)
-			w.sessions[sessionID] = next
-			return nil
+		}
+		if len(toRemove) > 0 {
+			w.server.RemoveTools(toRemove...)
 		}
 	}
-	if sessionID == w.adapter.sessionID && w.server != nil {
-		combined := cloneServerTools(w.base)
-		for name, tool := range tools {
-			combined[name] = tool
-		}
-		ordered := serverToolsSlice(combined)
-		w.server.SetTools(ordered...)
-	}
-	w.sessions[sessionID] = next
+	w.mount = next
 	return nil
 }
 
-func (w *workflowSurface) toolsForMount(mount workflowMount) (map[string]server.ServerTool, error) {
-	result := make(map[string]server.ServerTool, len(mount.direct)+len(mount.lazy))
-	for _, descriptors := range []map[string]appworkflow.WorkflowExposureDescriptor{mount.direct, mount.lazy} {
-		for name, descriptor := range descriptors {
-			tool, err := workflowDescriptorTool(descriptor)
-			if err != nil {
-				return nil, err
-			}
-			captured := descriptor
-			result[name] = server.ServerTool{Tool: tool, Handler: func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				return w.handleDirect(ctx, request, captured)
-			}}
-		}
+func mergeDescriptorMaps(a, b map[string]appworkflow.WorkflowExposureDescriptor) map[string]appworkflow.WorkflowExposureDescriptor {
+	result := make(map[string]appworkflow.WorkflowExposureDescriptor, len(a)+len(b))
+	for name, descriptor := range a {
+		result[name] = descriptor
 	}
-	return result, nil
+	for name, descriptor := range b {
+		result[name] = descriptor
+	}
+	return result
 }
 
-func workflowDescriptorTool(descriptor appworkflow.WorkflowExposureDescriptor) (mcp.Tool, error) {
-	input, err := json.Marshal(descriptor.InputSchema)
-	if err != nil {
-		return mcp.Tool{}, err
-	}
+func (w *workflowSurface) workflowDescriptorGomcpTool(descriptor appworkflow.WorkflowExposureDescriptor) (gomcp.Tool, error) {
 	output, err := workflowInvocationOutputSchema(descriptor)
 	if err != nil {
-		return mcp.Tool{}, err
+		return gomcp.Tool{}, err
 	}
 	description := "Start an asynchronous durable run of " + descriptor.Name + "@" + descriptor.Version + " (" + descriptor.Digest + "). The result is a run handle; outputs is optional and only valid for a terminal result. Follow with hadron_workflow_run_inspect, hadron_workflow_run_events, or hadron_workflow_run_subscribe."
-	tool := mcp.NewToolWithRawSchema(descriptor.ToolName, description, input)
-	tool.RawOutputSchema = output
 	readOnly, destructive := true, false
 	for _, effect := range descriptor.Effects {
 		if effect == graph.EffectMaterialize || effect == graph.EffectMutate || effect == graph.EffectDestructive {
@@ -360,7 +408,19 @@ func workflowDescriptorTool(descriptor appworkflow.WorkflowExposureDescriptor) (
 			destructive = true
 		}
 	}
-	return applyToolBehavior(tool, toolBehavior{readOnly: readOnly, destructive: destructive, idempotent: false}), nil
+	captured := descriptor
+	return gomcp.Tool{
+		Name:            descriptor.ToolName,
+		Description:     description,
+		InputSchema:     descriptor.InputSchema,
+		OutputSchema:    json.RawMessage(output),
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: destructive,
+		IdempotentHint:  false,
+		Handler: func(ctx context.Context, args map[string]any) (any, error) {
+			return w.handleDirect(ctx, args, captured)
+		},
+	}, nil
 }
 
 func workflowInvocationOutputSchema(descriptor appworkflow.WorkflowExposureDescriptor) ([]byte, error) {
@@ -394,266 +454,266 @@ type workflowInvocationResult struct {
 	Outputs     map[string]any          `json:"outputs,omitempty"`
 }
 
-func (w *workflowSurface) handleSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, session, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
-	}
-	limit, err := exactWorkflowLimitArgument(request, 20)
+func (w *workflowSurface) handleSearch(ctx context.Context, args map[string]any) (any, error) {
+	bound, session, err := w.requestSession(ctx, args)
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	items, err := w.exposure.Search(bound, session, request.GetString("query", ""), limit)
+	limit, err := exactWorkflowLimitArgument(args, 20)
+	if err != nil {
+		return nil, workflowFailure(err)
+	}
+	items, err := w.exposure.Search(bound, session, argString(args, "query", ""), limit)
 	return workflowResult(items, err)
 }
 
-func (w *workflowSurface) handleLoad(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, session, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleLoad(ctx context.Context, args map[string]any) (any, error) {
+	bound, session, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
 	var input struct {
 		Definitions []string `json:"definitions"`
 	}
-	if err := decodeWorkflowArguments(request, &input); err != nil || len(input.Definitions) == 0 {
-		return workflowFailure(errors.New("invalid workflow load request")), nil
+	if decodeErr := decodeWorkflowArguments(args, &input); decodeErr != nil || len(input.Definitions) == 0 {
+		return nil, workflowFailure(errors.New("invalid workflow load request"))
 	}
 	refs := make([]graph.DefinitionRef, 0, len(input.Definitions))
 	for _, raw := range input.Definitions {
-		ref, err := parseExactWorkflowRef(raw)
-		if err != nil {
-			return workflowFailure(err), nil
+		ref, parseErr := parseExactWorkflowRef(raw)
+		if parseErr != nil {
+			return nil, workflowFailure(parseErr)
 		}
 		refs = append(refs, ref)
 	}
 	descriptors, err := w.exposure.Load(bound, session, refs)
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	mount := w.sessions[session.SessionID]
+	mount := w.mount
 	if !sameWorkflowSession(mount.session, session) {
-		return workflowFailure(appworkflow.ErrPolicyDenied), nil
+		return nil, workflowFailure(appworkflow.ErrPolicyDenied)
 	}
 	next := workflowMount{session: mount.session.Clone(), direct: cloneDescriptorMap(mount.direct), lazy: cloneDescriptorMap(mount.lazy)}
 	for _, descriptor := range descriptors {
 		if prior, exists := next.direct[descriptor.ToolName]; exists {
 			if prior.Definition != descriptor.Definition {
-				return workflowFailure(hostConflict()), nil
+				return nil, workflowFailure(hostConflict())
 			}
 			continue
 		}
 		if prior, exists := next.lazy[descriptor.ToolName]; exists && prior.Definition != descriptor.Definition {
-			return workflowFailure(hostConflict()), nil
+			return nil, workflowFailure(hostConflict())
 		}
 		next.lazy[descriptor.ToolName] = descriptor
 	}
 	if len(next.direct)+len(next.lazy) > session.Profile.MaxDirectTools {
-		return workflowFailure(appworkflow.ErrPolicyDenied), nil
+		return nil, workflowFailure(appworkflow.ErrPolicyDenied)
 	}
-	if err := w.applyLocked(ctx, session.SessionID, next); err != nil {
-		return workflowFailure(err), nil
+	if err := w.applyLocked(next); err != nil {
+		return nil, workflowFailure(err)
 	}
 	return workflowSuccess(map[string]any{"mounted": descriptorNames(descriptors), "count": len(descriptors)}), nil
 }
 
-func (w *workflowSurface) handleDescribe(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, session, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleDescribe(ctx context.Context, args map[string]any) (any, error) {
+	bound, session, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
-	descriptor, err := w.exposure.Describe(bound, session, workflowRefFromRequest(request), "inspect")
+	descriptor, err := w.exposure.Describe(bound, session, workflowRefFromArgs(args), "inspect")
 	return workflowResult(descriptor, err)
 }
 
-func (w *workflowSurface) handleValidate(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, session, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleValidate(ctx context.Context, args map[string]any) (any, error) {
+	bound, session, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
-	ref := workflowRefFromRequest(request)
-	if _, err := w.exposure.Describe(bound, session, ref, "validate"); err != nil {
-		return workflowFailure(err), nil
+	ref := workflowRefFromArgs(args)
+	if _, err = w.exposure.Describe(bound, session, ref, "validate"); err != nil {
+		return nil, workflowFailure(err)
 	}
 	if nilInterfaceValue(w.operations) {
-		return workflowFailure(appworkflow.ErrHostNotReady), nil
+		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
 	validated, err := w.operations.ValidateWorkflow(bound, appworkflow.ValidateWorkflowRequest{Definition: ref, Identity: workflowIdentityRequest()})
 	return workflowResult(validated, err)
 }
 
-func (w *workflowSurface) handleRun(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, session, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleRun(ctx context.Context, args map[string]any) (any, error) {
+	bound, session, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
-	ref := workflowRefFromRequest(request)
+	ref := workflowRefFromArgs(args)
 	if _, err := w.exposure.Describe(bound, session, ref, "run"); err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	return w.run(bound, session.SessionID, request, ref, false)
+	return w.run(bound, args, ref, false)
 }
 
-func (w *workflowSurface) handleDirect(ctx context.Context, request mcp.CallToolRequest, descriptor appworkflow.WorkflowExposureDescriptor) (*mcp.CallToolResult, error) {
-	bound, session, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleDirect(ctx context.Context, args map[string]any, descriptor appworkflow.WorkflowExposureDescriptor) (any, error) {
+	bound, session, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
-	if !w.mounted(session.SessionID, descriptor) {
-		return workflowFailure(appworkflow.ErrWorkflowHidden), nil
+	if !w.mounted(descriptor) {
+		return nil, workflowFailure(appworkflow.ErrWorkflowHidden)
 	}
 	if _, err := w.exposure.Describe(bound, session, descriptor.Definition, "run"); err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	return w.run(bound, session.SessionID, request, descriptor.Definition, true)
+	return w.run(bound, args, descriptor.Definition, true)
 }
 
-func (w *workflowSurface) run(ctx context.Context, sessionID string, request mcp.CallToolRequest, ref graph.DefinitionRef, direct bool) (*mcp.CallToolResult, error) {
+func (w *workflowSurface) run(ctx context.Context, args map[string]any, ref graph.DefinitionRef, direct bool) (any, error) {
 	if nilInterfaceValue(w.operations) {
-		return workflowFailure(appworkflow.ErrHostNotReady), nil
+		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
-	args, err := boundedWorkflowArguments(request)
+	boundedArgs, err := boundedWorkflowArguments(args)
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	inputs := args
+	inputs := boundedArgs
 	if !direct {
 		inputs = map[string]any{}
-		if nested, exists := args["inputs"]; exists {
+		if nested, exists := boundedArgs["inputs"]; exists {
 			var ok bool
 			inputs, ok = nested.(map[string]any)
 			if !ok {
-				return workflowFailure(errors.New("workflow inputs must be an object")), nil
+				return nil, workflowFailure(errors.New("workflow inputs must be an object"))
 			}
 		}
 	}
 	sequence := w.sequence.Add(1)
 	if w.adapter.workflowNonce == "" {
-		return workflowFailure(appworkflow.ErrHostNotReady), nil
+		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
 	nonce := w.adapter.workflowNonce
 	runID := ""
 	if !direct {
-		runID = request.GetString("run_id", "")
+		runID = argString(args, "run_id", "")
 	}
 	if runID == "" {
-		runID = fmt.Sprintf("mcp-%s-%s-%d", safeSessionFragment(sessionID), nonce, sequence)
+		runID = fmt.Sprintf("mcp-%s-%s-%d", safeSessionFragment(w.adapter.sessionID), nonce, sequence)
 	}
 	key := ""
 	if !direct {
-		key = request.GetString("idempotency_key", "")
+		key = argString(args, "idempotency_key", "")
 	}
 	if key == "" {
-		key = fmt.Sprintf("mcp-start-%s-%s-%d", safeSessionFragment(sessionID), nonce, sequence)
+		key = fmt.Sprintf("mcp-start-%s-%s-%d", safeSessionFragment(w.adapter.sessionID), nonce, sequence)
 	}
 	confirmed := false
 	if !direct {
-		confirmed = request.GetBool("confirmed", false)
+		confirmed = argBool(args, "confirmed", false)
 	}
 	started, runErr := w.operations.RunWorkflow(ctx, appworkflow.RunWorkflowRequest{RunID: appworkflow.RunID(runID), Definition: ref, Inputs: inputs, IdempotencyKey: key, Identity: workflowIdentityRequest(), Confirmed: confirmed})
 	return workflowStartResult(appworkflow.RunID(runID), started, runErr)
 }
 
-func (w *workflowSurface) handleInspectRun(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, session, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleInspectRun(ctx context.Context, args map[string]any) (any, error) {
+	bound, session, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
 	if nilInterfaceValue(w.operations) {
-		return workflowFailure(appworkflow.ErrHostNotReady), nil
+		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
-	display, err := w.display(bound, session, request.GetBool("reveal_private", false))
+	display, err := w.display(bound, session, argBool(args, "reveal_private", false))
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	inspected, err := w.operations.InspectWorkflowRun(bound, appworkflow.InspectWorkflowRunRequest{RunID: appworkflow.RunID(request.GetString("run_id", "")), Identity: workflowIdentityRequest(), Display: display, NodeLimit: 100, AttemptLimit: 100, EventLimit: 100, ValueLimit: 100, ResourceLimit: 100, ActivationLimit: 100})
+	inspected, err := w.operations.InspectWorkflowRun(bound, appworkflow.InspectWorkflowRunRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Identity: workflowIdentityRequest(), Display: display, NodeLimit: 100, AttemptLimit: 100, EventLimit: 100, ValueLimit: 100, ResourceLimit: 100, ActivationLimit: 100})
 	return workflowResult(inspected, err)
 }
 
-func (w *workflowSurface) handleCancelRun(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, _, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleCancelRun(ctx context.Context, args map[string]any) (any, error) {
+	bound, _, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
 	if nilInterfaceValue(w.operations) {
-		return workflowFailure(appworkflow.ErrHostNotReady), nil
+		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
-	canceled, err := w.operations.CancelWorkflowRun(bound, appworkflow.CancelWorkflowRunRequest{RunID: appworkflow.RunID(request.GetString("run_id", "")), Identity: workflowIdentityRequest(), IdempotencyKey: request.GetString("idempotency_key", ""), Reason: request.GetString("reason", "")})
+	canceled, err := w.operations.CancelWorkflowRun(bound, appworkflow.CancelWorkflowRunRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Identity: workflowIdentityRequest(), IdempotencyKey: argString(args, "idempotency_key", ""), Reason: argString(args, "reason", "")})
 	return workflowResult(canceled, err)
 }
 
-func (w *workflowSurface) handleEvents(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, session, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleEvents(ctx context.Context, args map[string]any) (any, error) {
+	bound, session, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
 	if nilInterfaceValue(w.reads) {
-		return workflowFailure(appworkflow.ErrHostNotReady), nil
+		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
-	display, err := w.display(bound, session, request.GetBool("reveal_private", false))
+	display, err := w.display(bound, session, argBool(args, "reveal_private", false))
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	limit, err := exactWorkflowLimitArgument(request, 100)
+	limit, err := exactWorkflowLimitArgument(args, 100)
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	events, err := w.reads.FetchWorkflowEvents(bound, appworkflow.WorkflowRunReadRequest{RunID: appworkflow.RunID(request.GetString("run_id", "")), Identity: workflowIdentityRequest(), Display: display, EventLimit: boundedWorkflowLimit(limit)})
+	events, err := w.reads.FetchWorkflowEvents(bound, appworkflow.WorkflowRunReadRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Identity: workflowIdentityRequest(), Display: display, EventLimit: boundedWorkflowLimit(limit)})
 	return workflowResult(events, err)
 }
 
-func (w *workflowSurface) handleResume(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return w.resume(ctx, request, appworkflow.WorkflowWakeCallback)
+func (w *workflowSurface) handleResume(ctx context.Context, args map[string]any) (any, error) {
+	return w.resume(ctx, args, appworkflow.WorkflowWakeCallback)
 }
 
-func (w *workflowSurface) handleGate(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return w.resume(ctx, request, appworkflow.WorkflowWakeGate)
+func (w *workflowSurface) handleGate(ctx context.Context, args map[string]any) (any, error) {
+	return w.resume(ctx, args, appworkflow.WorkflowWakeGate)
 }
 
-func (w *workflowSurface) handleMessage(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return w.resume(ctx, request, appworkflow.WorkflowWakeMessage)
+func (w *workflowSurface) handleMessage(ctx context.Context, args map[string]any) (any, error) {
+	return w.resume(ctx, args, appworkflow.WorkflowWakeMessage)
 }
 
-func (w *workflowSurface) resume(ctx context.Context, request mcp.CallToolRequest, source appworkflow.WorkflowWakeSource) (*mcp.CallToolResult, error) {
-	bound, _, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) resume(ctx context.Context, args map[string]any, source appworkflow.WorkflowWakeSource) (any, error) {
+	bound, _, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
 	if nilInterfaceValue(w.operations) {
-		return workflowFailure(appworkflow.ErrHostNotReady), nil
+		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
-	payload, err := workflowValueArgument(request, "payload")
+	payload, err := workflowValueArgument(args, "payload")
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	resumed, err := w.operations.ResumeWorkflowRun(bound, appworkflow.ResumeWorkflowRunRequest{RunID: appworkflow.RunID(request.GetString("run_id", "")), Identity: workflowIdentityRequest(), WaitID: appworkflow.WaitID(request.GetString("wait_id", "")), Correlation: request.GetString("correlation", ""), Token: request.GetString("token", ""), WakeSource: source, Payload: payload, IdempotencyKey: request.GetString("idempotency_key", "")})
+	resumed, err := w.operations.ResumeWorkflowRun(bound, appworkflow.ResumeWorkflowRunRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Identity: workflowIdentityRequest(), WaitID: appworkflow.WaitID(argString(args, "wait_id", "")), Correlation: argString(args, "correlation", ""), Token: argString(args, "token", ""), WakeSource: source, Payload: payload, IdempotencyKey: argString(args, "idempotency_key", "")})
 	return workflowResult(resumed, err)
 }
 
-func (w *workflowSurface) handleSignal(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bound, _, result := w.requestSession(ctx, request)
-	if result != nil {
-		return result, nil
+func (w *workflowSurface) handleSignal(ctx context.Context, args map[string]any) (any, error) {
+	bound, _, err := w.requestSession(ctx, args)
+	if err != nil {
+		return nil, workflowFailure(err)
 	}
 	if nilInterfaceValue(w.signals) {
-		return workflowFailure(appworkflow.ErrHostNotReady), nil
+		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
-	payload, err := workflowValueArgument(request, "payload")
+	payload, err := workflowValueArgument(args, "payload")
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
-	signaled, err := w.signals.SignalWorkflowRun(bound, appworkflow.SignalWorkflowRunRequest{RunID: appworkflow.RunID(request.GetString("run_id", "")), Name: request.GetString("name", ""), Correlation: request.GetString("correlation", ""), Payload: payload, IdempotencyKey: request.GetString("idempotency_key", ""), Identity: workflowIdentityRequest(), Confirmed: request.GetBool("confirmed", false)})
+	signaled, err := w.signals.SignalWorkflowRun(bound, appworkflow.SignalWorkflowRunRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Name: argString(args, "name", ""), Correlation: argString(args, "correlation", ""), Payload: payload, IdempotencyKey: argString(args, "idempotency_key", ""), Identity: workflowIdentityRequest(), Confirmed: argBool(args, "confirmed", false)})
 	return workflowResult(signaled, err)
 }
 
-func (w *workflowSurface) requestSession(ctx context.Context, request mcp.CallToolRequest) (context.Context, appworkflow.WorkflowExposureSession, *mcp.CallToolResult) {
-	if _, err := boundedWorkflowArguments(request); err != nil {
-		return ctx, appworkflow.WorkflowExposureSession{}, workflowFailure(err)
+func (w *workflowSurface) requestSession(ctx context.Context, args map[string]any) (context.Context, appworkflow.WorkflowExposureSession, error) {
+	if _, err := boundedWorkflowArguments(args); err != nil {
+		return ctx, appworkflow.WorkflowExposureSession{}, err
 	}
-	bound, session, err := w.current(ctx, workflowSessionID(ctx, w.adapter.sessionID), workflowToken(request.Header, w.adapter.token))
+	bound, session, err := w.current(ctx, w.adapter.token)
 	if err != nil {
-		return ctx, appworkflow.WorkflowExposureSession{}, workflowFailure(err)
+		return ctx, appworkflow.WorkflowExposureSession{}, err
 	}
 	return bound, session, nil
 }
@@ -666,19 +726,18 @@ func (w *workflowSurface) display(ctx context.Context, session appworkflow.Workf
 	return w.exposure.DisplayPolicy(ctx, session, requested)
 }
 
-func (w *workflowSurface) mounted(sessionID string, descriptor appworkflow.WorkflowExposureDescriptor) bool {
+func (w *workflowSurface) mounted(descriptor appworkflow.WorkflowExposureDescriptor) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	mount := w.sessions[sessionID]
-	current, ok := mount.direct[descriptor.ToolName]
+	current, ok := w.mount.direct[descriptor.ToolName]
 	if !ok {
-		current, ok = mount.lazy[descriptor.ToolName]
+		current, ok = w.mount.lazy[descriptor.ToolName]
 	}
 	return ok && current.Definition == descriptor.Definition
 }
 
-func workflowRefFromRequest(request mcp.CallToolRequest) graph.DefinitionRef {
-	return graph.DefinitionRef{Kind: "registry", ID: request.GetString("name", ""), Version: request.GetString("version", ""), Digest: request.GetString("digest", "")}
+func workflowRefFromArgs(args map[string]any) graph.DefinitionRef {
+	return graph.DefinitionRef{Kind: "registry", ID: argString(args, "name", ""), Version: argString(args, "version", ""), Digest: argString(args, "digest", "")}
 }
 
 func parseExactWorkflowRef(raw string) (graph.DefinitionRef, error) {
@@ -700,8 +759,8 @@ func workflowIdentityRequest() appworkflow.IdentityRequest {
 	return appworkflow.IdentityRequest{SourceAuthority: "mcp"}
 }
 
-func workflowValueArgument(request mcp.CallToolRequest, key string) (values.Value, error) {
-	arguments, err := boundedWorkflowArguments(request)
+func workflowValueArgument(args map[string]any, key string) (values.Value, error) {
+	arguments, err := boundedWorkflowArguments(args)
 	if err != nil {
 		return values.Value{}, err
 	}
@@ -726,15 +785,14 @@ func workflowValueArgument(request mcp.CallToolRequest, key string) (values.Valu
 	return payload, nil
 }
 
-func boundedWorkflowArguments(request mcp.CallToolRequest) (map[string]any, error) {
-	arguments := request.GetArguments()
-	if arguments == nil {
-		arguments = map[string]any{}
+func boundedWorkflowArguments(args map[string]any) (map[string]any, error) {
+	if args == nil {
+		args = map[string]any{}
 	}
-	if err := validateWorkflowArgumentNumbers(reflect.ValueOf(arguments), 0); err != nil {
+	if err := validateWorkflowArgumentNumbers(reflect.ValueOf(args), 0); err != nil {
 		return nil, err
 	}
-	encoded, err := json.Marshal(arguments)
+	encoded, err := json.Marshal(args)
 	if err != nil || len(encoded) > maximumWorkflowMCPArguments {
 		return nil, errors.New("workflow tool arguments are invalid or exceed the supported bound")
 	}
@@ -792,8 +850,8 @@ func validateWorkflowArgumentNumbers(value reflect.Value, depth int) error {
 	return nil
 }
 
-func exactWorkflowLimitArgument(request mcp.CallToolRequest, defaultValue int) (int, error) {
-	value, exists := request.GetArguments()["limit"]
+func exactWorkflowLimitArgument(args map[string]any, defaultValue int) (int, error) {
+	value, exists := args["limit"]
 	if !exists {
 		return defaultValue, nil
 	}
@@ -843,8 +901,8 @@ func checkedWorkflowInteger(value int64) (int, error) {
 	return int(value), nil
 }
 
-func decodeWorkflowArguments(request mcp.CallToolRequest, target any) error {
-	arguments, err := boundedWorkflowArguments(request)
+func decodeWorkflowArguments(args map[string]any, target any) error {
+	arguments, err := boundedWorkflowArguments(args)
 	if err != nil {
 		return err
 	}
@@ -864,17 +922,17 @@ func decodeWorkflowArguments(request mcp.CallToolRequest, target any) error {
 	return nil
 }
 
-func workflowResult(value any, err error) (*mcp.CallToolResult, error) {
+func workflowResult(value any, err error) (any, error) {
 	if err != nil {
-		return workflowFailure(err), nil
+		return nil, workflowFailure(err)
 	}
 	return workflowSuccess(value), nil
 }
 
-func workflowStartResult(runID appworkflow.RunID, value appworkflow.StartRunResult, err error) (*mcp.CallToolResult, error) {
+func workflowStartResult(runID appworkflow.RunID, value appworkflow.StartRunResult, err error) (any, error) {
 	if err != nil {
 		safe := appworkflow.SafeWorkflowOperationError(err, &value)
-		return workflowFailureEnvelope(safe), nil
+		return nil, workflowOperationErr{safe: safe}
 	}
 	status := "not_admitted"
 	if value.Run != nil {
@@ -885,43 +943,27 @@ func workflowStartResult(runID appworkflow.RunID, value appworkflow.StartRunResu
 	return workflowSuccess(workflowInvocationResult{RunID: runID, Status: status, Outcome: string(value.Outcome), Diagnostics: append([]diagnostic.Diagnostic(nil), value.Diagnostics...)}), nil
 }
 
-func workflowSuccess(value any) *mcp.CallToolResult {
-	return mcp.NewToolResultStructuredOnly(value)
+func workflowSuccess(value any) any { return value }
+
+// workflowOperationErr adapts appworkflow.WorkflowOperationError to
+// budget.StructuredError: the type deliberately carries no human-readable
+// message ("Message text is intentionally not transported"), so it can't
+// satisfy budget.ToolError's required Message field, but still needs
+// StructuredContent+IsError treatment for its own safe, bounded shape.
+type workflowOperationErr struct {
+	safe appworkflow.WorkflowOperationError
 }
 
-func workflowFailure(err error) *mcp.CallToolResult {
+func (e workflowOperationErr) Error() string        { return "workflow error: " + e.safe.Code }
+func (e workflowOperationErr) ToolErrorContent() any { return map[string]any{"error": e.safe} }
+
+var _ budget.StructuredError = workflowOperationErr{}
+
+func workflowFailure(err error) error {
 	if errors.Is(err, appworkflow.ErrHostNotReady) || errors.Is(err, appworkflow.ErrInvalidHost) {
-		return workflowFailureEnvelope(appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable})
+		return workflowOperationErr{safe: appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable}}
 	}
-	return workflowFailureEnvelope(appworkflow.SafeWorkflowOperationError(err, nil))
-}
-
-func workflowFailureEnvelope(safe appworkflow.WorkflowOperationError) *mcp.CallToolResult {
-	result := mcp.NewToolResultStructuredOnly(map[string]any{"error": safe})
-	result.IsError = true
-	return result
-}
-
-func workflowToken(header http.Header, fallback string) string {
-	value := header.Get("Authorization")
-	if value == "" {
-		return canonicalWorkflowToken(fallback)
-	}
-	if len(value) > 16<<10 {
-		return ""
-	}
-	scheme, token, found := strings.Cut(value, " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
-		return ""
-	}
-	return canonicalWorkflowToken(token)
-}
-
-func workflowSessionID(ctx context.Context, fallback string) string {
-	if session := server.ClientSessionFromContext(ctx); session != nil && strings.TrimSpace(session.SessionID()) != "" {
-		return session.SessionID()
-	}
-	return fallback
+	return workflowOperationErr{safe: appworkflow.SafeWorkflowOperationError(err, nil)}
 }
 
 func sameWorkflowSession(left, right appworkflow.WorkflowExposureSession) bool {
@@ -950,37 +992,6 @@ func descriptorNames(input []appworkflow.WorkflowExposureDescriptor) []string {
 		result = append(result, descriptor.ToolName)
 	}
 	sort.Strings(result)
-	return result
-}
-
-func cloneServerTools(input map[string]server.ServerTool) map[string]server.ServerTool {
-	result := make(map[string]server.ServerTool, len(input))
-	for name, tool := range input {
-		result[name] = tool
-	}
-	return result
-}
-
-func cloneListedServerTools(input map[string]*server.ServerTool) map[string]server.ServerTool {
-	result := make(map[string]server.ServerTool, len(input))
-	for name, tool := range input {
-		if tool != nil {
-			result[name] = *tool
-		}
-	}
-	return result
-}
-
-func serverToolsSlice(input map[string]server.ServerTool) []server.ServerTool {
-	names := make([]string, 0, len(input))
-	for name := range input {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	result := make([]server.ServerTool, 0, len(names))
-	for _, name := range names {
-		result = append(result, input[name])
-	}
 	return result
 }
 
@@ -1027,4 +1038,3 @@ func hostConflict() error { return errors.New("workflow tool name collision") }
 
 var _ WorkflowOperations = (*appworkflow.WorkflowOperator)(nil)
 var _ WorkflowReadOperations = (*appworkflow.WorkflowOperator)(nil)
-var _ WorkflowSignalOperations = (*appworkflow.WorkflowOperator)(nil)

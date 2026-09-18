@@ -4,19 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/go-mcp/budget"
+	gomcp "github.com/hollis-labs/go-mcp/server"
+	gomcphttp "github.com/hollis-labs/go-mcp/transport/http"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
-	"github.com/mark3labs/mcp-go/server/servertest"
+	"net/http/httptest"
 )
 
 // ── Fakes ──────────────────────────────────────────────────────────────────────
@@ -140,46 +142,52 @@ stages:
 	return path
 }
 
-// callTool invokes a registered tool and returns the text result.
+// callTool invokes a registered tool expected to succeed and returns its
+// structured result, JSON-round-tripped to match what a real MCP client
+// actually receives over the wire (Adapter.CallTool itself returns the raw
+// Go value a handler produced, e.g. a []hadronSkillDoc rather than []any --
+// intentional, see its doc comment -- but assertions here should reason
+// about wire shape, not Hadron's internal Go types). For a call expected to
+// fail, call adapter.CallTool directly and inspect the returned error.
 func callTool(t *testing.T, adapter *mcpadapter.Adapter, toolName string, args map[string]any) map[string]any {
 	t.Helper()
-	result := adapter.CallTool(context.Background(), toolName, args)
-	if result == nil {
-		t.Fatalf("tool %s returned nil", toolName)
+	result, err := adapter.CallTool(context.Background(), toolName, args)
+	if err != nil {
+		t.Fatalf("tool %s returned error: %v", toolName, err)
 	}
-	if len(result.Content) == 0 {
-		t.Fatalf("tool %s returned empty content", toolName)
-	}
-	text, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		t.Fatalf("tool %s returned non-text content", toolName)
+	encoded, marshalErr := json.Marshal(result)
+	if marshalErr != nil {
+		t.Fatalf("tool %s: marshal result: %v", toolName, marshalErr)
 	}
 	var out map[string]any
-	if err := json.Unmarshal([]byte(text.Text), &out); err != nil {
-		t.Fatalf("tool %s: unmarshal result: %v (raw: %s)", toolName, err, text.Text)
+	if err := json.Unmarshal(encoded, &out); err != nil {
+		t.Fatalf("tool %s: unmarshal result: %v (raw: %s)", toolName, err, encoded)
 	}
 	return out
+}
+
+// callToolError invokes a tool expected to fail with a *budget.ToolError
+// (the shape every mcpadapter handler uses for its own validation/scope/
+// not-found failures) and returns it, failing the test if the call
+// unexpectedly succeeded or failed with a different error shape.
+func callToolError(t *testing.T, adapter *mcpadapter.Adapter, toolName string, args map[string]any) *budget.ToolError {
+	t.Helper()
+	result, err := adapter.CallTool(context.Background(), toolName, args)
+	if err == nil {
+		t.Fatalf("tool %s unexpectedly succeeded: %#v", toolName, result)
+	}
+	var toolErr *budget.ToolError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("tool %s error is not *budget.ToolError: %v (%T)", toolName, err, err)
+	}
+	return toolErr
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 func TestMCP_Health(t *testing.T) {
 	adapter := newTestAdapter(t)
-	result := adapter.CallTool(context.Background(), "hadron_health", nil)
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if len(result.Content) == 0 {
-		t.Fatal("expected content in result")
-	}
-	text, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		t.Fatal("expected text content")
-	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(text.Text), &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	out := callTool(t, adapter, "hadron_health", nil)
 	if out["status"] != "ok" {
 		t.Fatalf("expected status=ok, got %v", out["status"])
 	}
@@ -218,16 +226,16 @@ func TestMCP_HadronSkills_IndexAndBody(t *testing.T) {
 		t.Fatalf("expected skill index items, got %#v", index)
 	}
 
-	result := adapter.CallTool(context.Background(), "hadron_skills", map[string]any{"name": "start-here"})
-	if result == nil || len(result.Content) == 0 {
-		t.Fatal("expected hadron_skills text response")
+	result, err := adapter.CallTool(context.Background(), "hadron_skills", map[string]any{"name": "start-here"})
+	if err != nil {
+		t.Fatalf("hadron_skills returned error: %v", err)
 	}
-	text, ok := result.Content[0].(mcp.TextContent)
+	text, ok := result.(string)
 	if !ok {
 		t.Fatal("expected text content from hadron_skills")
 	}
-	if !strings.Contains(text.Text, "hadron_workflow_catalog_search") {
-		t.Fatalf("expected orientation body, got %q", text.Text)
+	if !strings.Contains(text, "hadron_workflow_catalog_search") {
+		t.Fatalf("expected orientation body, got %q", text)
 	}
 }
 
@@ -302,9 +310,9 @@ func TestMCP_BlueprintBroker_FiltersLowSignalPromptWords(t *testing.T) {
 
 func TestMCP_BlueprintSearch_RequiresQuery(t *testing.T) {
 	adapter := newTestAdapter(t)
-	out := callTool(t, adapter, "hadron_blueprint_search", map[string]any{})
-	if out["code"] != "validation_error" {
-		t.Fatalf("expected validation_error, got %#v", out)
+	toolErr := callToolError(t, adapter, "hadron_blueprint_search", map[string]any{})
+	if toolErr.Code != "validation_error" {
+		t.Fatalf("expected validation_error, got %#v", toolErr)
 	}
 }
 
@@ -331,9 +339,9 @@ steps:
 	}
 
 	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "", nil, mcpadapter.WithBlueprintDir(blueprintDir))
-	out := callTool(t, adapter, "hadron_blueprint_get", map[string]any{"blueprint_path": linkPath})
-	if out["code"] != "validation_error" {
-		t.Fatalf("expected validation_error for symlink escape, got %#v", out)
+	toolErr := callToolError(t, adapter, "hadron_blueprint_get", map[string]any{"blueprint_path": linkPath})
+	if toolErr.Code != "validation_error" {
+		t.Fatalf("expected validation_error for symlink escape, got %#v", toolErr)
 	}
 }
 
@@ -534,9 +542,9 @@ func TestMCP_MutatingToolsEnforceExactScopesBeforeSideEffects(t *testing.T) {
 				tt.configure(runner)
 			}
 			adapter := mcpadapter.New(store, runner, &fakeScheduler{}, pipeline, "", nil)
-			out := callTool(t, adapter, tt.tool, tt.args)
-			if out["code"] != "auth_required" {
-				t.Fatalf("expected auth_required, got %#v", out)
+			toolErr := callToolError(t, adapter, tt.tool, tt.args)
+			if toolErr.Code != "auth_required" {
+				t.Fatalf("expected auth_required, got %#v", toolErr)
 			}
 			tt.assertNoSideFx(t, store, runner, pipeline)
 		})
@@ -549,9 +557,9 @@ func TestMCP_MutatingToolsEnforceExactScopesBeforeSideEffects(t *testing.T) {
 				tt.configure(runner)
 			}
 			adapter := mcpadapter.New(store, runner, &fakeScheduler{}, pipeline, "token", []string{tt.wrongScope})
-			out := callTool(t, adapter, tt.tool, tt.args)
-			if out["code"] != "insufficient_scope" {
-				t.Fatalf("expected insufficient_scope, got %#v", out)
+			toolErr := callToolError(t, adapter, tt.tool, tt.args)
+			if toolErr.Code != "insufficient_scope" {
+				t.Fatalf("expected insufficient_scope, got %#v", toolErr)
 			}
 			tt.assertNoSideFx(t, store, runner, pipeline)
 		})
@@ -679,13 +687,13 @@ func TestMCP_HumanGateSubmitRejectsInvalidDecision(t *testing.T) {
 	}
 
 	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "token", []string{mcpadapter.ScopeHumanGateWrite})
-	out := callTool(t, adapter, "hadron_human_gate_submit", map[string]any{
+	toolErr := callToolError(t, adapter, "hadron_human_gate_submit", map[string]any{
 		"gate_id":  "gate-3",
 		"decision": "deny",
 	})
 
-	if out["code"] != "validation_error" {
-		t.Fatalf("expected validation_error, got %v", out)
+	if toolErr.Code != "validation_error" {
+		t.Fatalf("expected validation_error, got %v", toolErr)
 	}
 
 	rec, err := store.GetHumanGate(context.Background(), "gate-3")
@@ -715,12 +723,12 @@ func TestMCP_HumanGateSubmitRequiresScope(t *testing.T) {
 	}
 
 	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "token", []string{mcpadapter.ScopeRunWrite})
-	out := callTool(t, adapter, "hadron_human_gate_submit", map[string]any{
+	toolErr := callToolError(t, adapter, "hadron_human_gate_submit", map[string]any{
 		"gate_id":  "gate-4",
 		"decision": "approve",
 	})
-	if out["code"] != "insufficient_scope" {
-		t.Fatalf("expected insufficient_scope, got %v", out)
+	if toolErr.Code != "insufficient_scope" {
+		t.Fatalf("expected insufficient_scope, got %v", toolErr)
 	}
 
 	rec, err := store.GetHumanGate(context.Background(), "gate-4")
@@ -734,9 +742,9 @@ func TestMCP_HumanGateSubmitRequiresScope(t *testing.T) {
 
 func TestMCP_HumanGateGetNotFound(t *testing.T) {
 	adapter := newTestAdapter(t)
-	out := callTool(t, adapter, "hadron_human_gate_get", map[string]any{"gate_id": "missing"})
-	if out["code"] != "not_found" {
-		t.Fatalf("expected not_found, got %v", out)
+	toolErr := callToolError(t, adapter, "hadron_human_gate_get", map[string]any{"gate_id": "missing"})
+	if toolErr.Code != "not_found" {
+		t.Fatalf("expected not_found, got %v", toolErr)
 	}
 }
 
@@ -759,12 +767,12 @@ func TestMCP_HumanGateSubmitAlreadyDecided(t *testing.T) {
 	}
 
 	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "token", []string{mcpadapter.ScopeHumanGateWrite})
-	out := callTool(t, adapter, "hadron_human_gate_submit", map[string]any{
+	toolErr := callToolError(t, adapter, "hadron_human_gate_submit", map[string]any{
 		"gate_id":  "gate-5",
 		"decision": "approve",
 	})
-	if out["code"] != "conflict" {
-		t.Fatalf("expected conflict, got %v", out)
+	if toolErr.Code != "conflict" {
+		t.Fatalf("expected conflict, got %v", toolErr)
 	}
 }
 
@@ -860,17 +868,18 @@ func TestInternalCaller_ExternalStreamableHTTPServer(t *testing.T) {
 	store := newTestStore(t)
 	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "internal", mcpadapter.AllScopes())
 
-	mcpServer := server.NewMCPServer("http-helper", "1.0.0", server.WithToolCapabilities(true))
-	mcpServer.AddTool(mcp.NewTool("echo_json",
-		mcp.WithString("name", mcp.Required()),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload, _ := json.Marshal(map[string]any{
-			"echo":   req.GetString("name", ""),
-			"server": "http-helper",
-		})
-		return mcp.NewToolResultText(string(payload)), nil
+	mcpServer := gomcp.NewServer("http-helper", "1.0.0")
+	mcpServer.RegisterTool(gomcp.Tool{
+		Name:         "echo_json",
+		Description:  "echo_json",
+		InputSchema:  gomcp.ObjectSchema(map[string]any{"name": map[string]any{"type": "string"}}, "name"),
+		ReadOnlyHint: true,
+		Handler: func(_ context.Context, args map[string]any) (any, error) {
+			name, _ := args["name"].(string)
+			return map[string]any{"echo": name, "server": "http-helper"}, nil
+		},
 	})
-	testServer := servertest.NewTestStreamableHTTPServer(mcpServer, server.WithStateLess(true))
+	testServer := httptest.NewServer(gomcphttp.NewHandler(mcpServer, gomcphttp.HandlerOptions{}))
 	defer testServer.Close()
 
 	caller := mcpadapter.NewInternalCaller(adapter, mcpadapter.WithExternalServers(map[string]mcpadapter.ExternalServerConfig{
@@ -901,50 +910,17 @@ func TestInternalCaller_ExternalStreamableHTTPServer(t *testing.T) {
 	}
 }
 
-func TestInternalCaller_ExternalSSEServer(t *testing.T) {
-	store := newTestStore(t)
-	adapter := mcpadapter.New(store, &fakeRunner{}, &fakeScheduler{}, &fakePipelineRunner{}, "internal", mcpadapter.AllScopes())
-
-	mcpServer := server.NewMCPServer("sse-helper", "1.0.0", server.WithToolCapabilities(true))
-	mcpServer.AddTool(mcp.NewTool("echo_json",
-		mcp.WithString("name", mcp.Required()),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload, _ := json.Marshal(map[string]any{
-			"echo":   req.GetString("name", ""),
-			"server": "sse-helper",
-		})
-		return mcp.NewToolResultText(string(payload)), nil
-	})
-	testServer := servertest.NewTestServer(mcpServer)
-	defer testServer.Close()
-
-	caller := mcpadapter.NewInternalCaller(adapter, mcpadapter.WithExternalServers(map[string]mcpadapter.ExternalServerConfig{
-		"fake-sse": {
-			Transport: "sse",
-			URL:       testServer.URL + "/sse",
-		},
-	}))
-	defer func() { _ = caller.Close() }()
-
-	result, err := caller.CallTool(context.Background(), "fake-sse", "echo_json", map[string]any{"name": "hadron"})
-	if err != nil {
-		t.Fatalf("call external sse tool: %v", err)
-	}
-	wrapped, ok := result.(execution.MCPToolResult)
-	if !ok {
-		t.Fatalf("expected MCPToolResult, got %T", result)
-	}
-	payload, ok := wrapped.Result.(map[string]any)
-	if !ok {
-		t.Fatalf("expected map result, got %T", wrapped.Result)
-	}
-	if wrapped.Metadata.Transport != "sse" {
-		t.Fatalf("unexpected metadata: %#v", wrapped.Metadata)
-	}
-	if payload["echo"] != "hadron" || payload["server"] != "sse-helper" {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-}
+// TestInternalCaller_ExternalSSEServer no longer has a fixture: go-mcp has
+// no SSE *server* capability by design (SSE stays client-side only, per the
+// ADR -- 2026-07-28 deprecated the SSE server transport), so there is no
+// way to stand up a fake SSE peer without reintroducing mark3labs/mcp-go
+// just for this one test. The "sse" ExternalServerConfig transport itself
+// (internal_caller.go, via go-mcp's compat.NewSSEClientTransport) is still
+// implemented, but untested end-to-end here as a result -- and it has a
+// known, separately tracked bug (go-mcp CHANGELOG v0.3.0's compat note,
+// Torque CW-20260917-0032): the endpoint-rewrite/keepalive path can stall
+// Read against a real gateway-shaped stream. No current Hadron deployment
+// configures "sse" for an external server.
 
 func TestMCP_RunMCPCalls(t *testing.T) {
 	store := newTestStore(t)
@@ -1106,17 +1082,18 @@ func TestHelperProcessMCPServer(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS_MCP") != "1" {
 		return
 	}
-	s := server.NewMCPServer("fake-helper", "1.0.0", server.WithToolCapabilities(true))
-	s.AddTool(mcp.NewTool("echo_json",
-		mcp.WithString("name", mcp.Required()),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload, _ := json.Marshal(map[string]any{
-			"echo":   req.GetString("name", ""),
-			"server": "fake-helper",
-		})
-		return mcp.NewToolResultText(string(payload)), nil
+	s := gomcp.NewServer("fake-helper", "1.0.0")
+	s.RegisterTool(gomcp.Tool{
+		Name:         "echo_json",
+		Description:  "echo_json",
+		InputSchema:  gomcp.ObjectSchema(map[string]any{"name": map[string]any{"type": "string"}}, "name"),
+		ReadOnlyHint: true,
+		Handler: func(_ context.Context, args map[string]any) (any, error) {
+			name, _ := args["name"].(string)
+			return map[string]any{"echo": name, "server": "fake-helper"}, nil
+		},
 	})
-	if err := server.ServeStdio(s); err != nil {
+	if err := s.Run(context.Background()); err != nil {
 		os.Exit(1)
 	}
 	os.Exit(0)

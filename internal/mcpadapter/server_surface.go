@@ -1,11 +1,10 @@
 package mcpadapter
 
 import (
-	"sort"
+	"context"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	gomcp "github.com/hollis-labs/go-mcp/server"
 )
 
 const serverInstructions = "Hadron by Hollis Labs is an agent-first blueprint automation runner. Prefer hadron_skills for orientation, hadron_blueprint_broker or hadron_blueprint_discover to choose workflows, hadron_blueprint_schema before hadron_run_enqueue, and hadron_run_operations before scraping raw run events. This server is in active public beta."
@@ -19,28 +18,16 @@ type toolBehavior struct {
 	openWorld   bool
 }
 
-func (a *Adapter) newServer() *server.MCPServer {
+func (a *Adapter) newServer() *gomcp.Server {
 	instructions := serverInstructions
 	if a.workflow != nil || a.workflowOnly {
 		instructions = workflowServerInstructions
 	}
-	options := []server.ServerOption{
-		server.WithToolCapabilities(true),
-		server.WithPromptCompletionProvider(a),
-		server.WithResourceCompletionProvider(a),
-		server.WithCompletions(),
-		server.WithInstructions(instructions),
-	}
-	if a.workflow != nil {
-		hooks := &server.Hooks{}
-		hooks.AddOnRegisterSession(a.workflow.onRegisterSession)
-		hooks.AddOnUnregisterSession(a.workflow.onUnregisterSession)
-		options = append(options, server.WithHooks(hooks))
-	}
-	s := server.NewMCPServer(
+	s := gomcp.NewServer(
 		"Hadron by Hollis Labs",
 		a.serverVersion,
-		options...,
+		gomcp.WithInstructions(instructions),
+		gomcp.WithCompletionHandler(a.handleCompletion),
 	)
 	a.registerTools(s)
 	if a.workflow != nil {
@@ -52,33 +39,35 @@ func (a *Adapter) newServer() *server.MCPServer {
 	}
 	if a.workflow != nil {
 		a.workflow.registerResources(s)
-	}
-	a.finalizeToolSurface(s)
-	if a.workflow != nil {
 		a.workflow.bindServer(s)
+		// Compute the initial mount synchronously, here, rather than
+		// deferring it to whatever eventually serves this *gomcp.Server
+		// (Adapter.Run's stdio, an HTTP handler wrapping it directly in a
+		// test, or anything else): newServer must return a fully-mounted
+		// server on its own, since it has no way to know how its result
+		// will be exposed. See workflowSurface's doc comment for why
+		// there is exactly one mount to compute, not one per caller.
+		_, _, _ = a.workflow.current(context.Background(), a.token)
 	}
 	return s
 }
 
-func (a *Adapter) finalizeToolSurface(s *server.MCPServer) {
-	registered := s.ListTools()
-	names := make([]string, 0, len(registered))
-	for name := range registered {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	tools := make([]server.ServerTool, 0, len(names))
-	for _, name := range names {
-		entry := registered[name]
-		tool := entry.Tool
-		tool = applyToolBehavior(tool, hadronToolBehavior(name))
-		tools = append(tools, server.ServerTool{
-			Tool:    tool,
-			Handler: entry.Handler,
-		})
-	}
-	s.SetTools(tools...)
+// registerTool registers a Hadron-owned tool with its behavior annotations
+// looked up by name, so every tools.go-family file states a name/description
+// /schema/handler and nothing else -- the required annotation contract is
+// centralized here rather than repeated per call site.
+func registerTool(s *gomcp.Server, name, description string, inputSchema any, handler gomcp.ToolHandler) {
+	b := hadronToolBehavior(name)
+	s.RegisterTool(gomcp.Tool{
+		Name:            name,
+		Description:     description,
+		InputSchema:     inputSchema,
+		Handler:         handler,
+		ReadOnlyHint:    b.readOnly,
+		DestructiveHint: b.destructive,
+		IdempotentHint:  b.idempotent,
+		OpenWorldHint:   b.openWorld,
+	})
 }
 
 func hadronToolBehavior(name string) toolBehavior {
@@ -139,12 +128,4 @@ func hadronToolBehavior(name string) toolBehavior {
 		}
 		return toolBehavior{readOnly: false, destructive: false, idempotent: false, openWorld: false}
 	}
-}
-
-func applyToolBehavior(tool mcp.Tool, behavior toolBehavior) mcp.Tool {
-	mcp.WithReadOnlyHintAnnotation(behavior.readOnly)(&tool)
-	mcp.WithDestructiveHintAnnotation(behavior.destructive)(&tool)
-	mcp.WithIdempotentHintAnnotation(behavior.idempotent)(&tool)
-	mcp.WithOpenWorldHintAnnotation(behavior.openWorld)(&tool)
-	return tool
 }

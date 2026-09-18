@@ -10,15 +10,14 @@ import (
 	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-func (a *Adapter) handleSchedulesList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
-	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
+func (a *Adapter) handleSchedulesList(ctx context.Context, args map[string]any) (any, error) {
+	workspaceID := workspaceDefault(argString(args, "workspace_id", "default"))
+	limit := budget.ExtractLimit(args, budget.DefaultLimit)
 	items, err := a.store.ListSchedulesByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, sc := range items {
@@ -35,36 +34,35 @@ func (a *Adapter) handleSchedulesList(ctx context.Context, req mcp.CallToolReque
 			"next_run_at":    nullString(sc.NextRunAt),
 		})
 	}
-	env := budget.Apply(out, budget.Config{Limit: limit},
-		"%d schedules found. Use schedule IDs to manage individual schedules.")
-	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
+	return budget.Apply(out, budget.Config{Limit: limit},
+		"%d schedules found. Use schedule IDs to manage individual schedules."), nil
 }
 
-func (a *Adapter) handleScheduleCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeScheduleWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handleScheduleCreate(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeScheduleWrite); err != nil {
+		return nil, err
 	}
-	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
-	blueprintPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	workspaceID := workspaceDefault(argString(args, "workspace_id", "default"))
+	blueprintPath := strings.TrimSpace(argString(args, "blueprint_path", ""))
 	if blueprintPath == "" {
-		return toolError("validation_error", "blueprint_path is required"), nil
+		return nil, budget.NewToolError("validation_error", "blueprint_path is required").WithField("blueprint_path")
 	}
-	cronExpr := strings.TrimSpace(req.GetString("cron_expr", ""))
+	cronExpr := strings.TrimSpace(argString(args, "cron_expr", ""))
 	if cronExpr == "" {
-		return toolError("validation_error", "cron_expr is required"), nil
+		return nil, budget.NewToolError("validation_error", "cron_expr is required").WithField("cron_expr")
 	}
 	if err := scheduler.ValidateCron(cronExpr); err != nil {
-		return toolError("validation_error", err.Error()), nil
+		return nil, budget.NewToolError("validation_error", err.Error()).WithField("cron_expr")
 	}
-	name := strings.TrimSpace(req.GetString("name", ""))
+	name := strings.TrimSpace(argString(args, "name", ""))
 	if name == "" {
 		name = blueprintPath
 	}
-	enabled := req.GetBool("enabled", true)
+	enabled := argBool(args, "enabled", true)
 
 	nextRun, err := scheduler.NextRun(cronExpr, time.Now())
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 
 	now := time.Now().UTC()
@@ -84,9 +82,9 @@ func (a *Adapter) handleScheduleCreate(ctx context.Context, req mcp.CallToolRequ
 		},
 	}
 	if err := a.store.CreateSchedule(ctx, rec); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"id":             rec.ID,
 		"workspace_id":   rec.WorkspaceID,
 		"name":           rec.Name,
@@ -94,33 +92,34 @@ func (a *Adapter) handleScheduleCreate(ctx context.Context, req mcp.CallToolRequ
 		"cron_expr":      rec.CronExpr,
 		"enabled":        rec.Enabled,
 		"created_at":     rec.CreatedAt.UTC().Format(time.RFC3339),
-	}), nil
+	}, nil
 }
 
-func (a *Adapter) handleScheduleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeScheduleWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handleScheduleUpdate(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeScheduleWrite); err != nil {
+		return nil, err
 	}
-	scheduleID := strings.TrimSpace(req.GetString("schedule_id", ""))
+	scheduleID := strings.TrimSpace(argString(args, "schedule_id", ""))
 	if scheduleID == "" {
-		return toolError("validation_error", "schedule_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "schedule_id is required").WithField("schedule_id")
 	}
-	enabled := req.GetBool("enabled", true)
+	enabled := argBool(args, "enabled", true)
 	if err := a.store.UpdateScheduleEnabledAndNext(ctx, scheduleID, enabled, nil); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{"schedule_id": scheduleID, "enabled": enabled}), nil
+	return map[string]any{"schedule_id": scheduleID, "enabled": enabled}, nil
 }
-func (a *Adapter) handleScheduleDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeScheduleWrite); deny != nil {
-		return deny, nil
+
+func (a *Adapter) handleScheduleDelete(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeScheduleWrite); err != nil {
+		return nil, err
 	}
-	scheduleID := strings.TrimSpace(req.GetString("schedule_id", ""))
+	scheduleID := strings.TrimSpace(argString(args, "schedule_id", ""))
 	if scheduleID == "" {
-		return toolError("validation_error", "schedule_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "schedule_id is required").WithField("schedule_id")
 	}
 	if err := a.store.DeleteSchedule(ctx, scheduleID); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{"schedule_id": scheduleID, "deleted": true}), nil
+	return map[string]any{"schedule_id": scheduleID, "deleted": true}, nil
 }

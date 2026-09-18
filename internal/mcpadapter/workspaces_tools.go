@@ -5,13 +5,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/hollis-labs/go-mcp/budget"
 )
 
-func (a *Adapter) handleWorkspacesList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (a *Adapter) handleWorkspacesList(ctx context.Context, _ map[string]any) (any, error) {
 	items, err := a.store.ListWorkspaces(ctx)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, w := range items {
@@ -22,52 +22,54 @@ func (a *Adapter) handleWorkspacesList(ctx context.Context, _ mcp.CallToolReques
 			"updated_at": w.UpdatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+	return map[string]any{"items": out, "count": len(out)}, nil
 }
 
-func (a *Adapter) handleWorkspaceGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id := strings.TrimSpace(req.GetString("workspace_id", ""))
+func (a *Adapter) handleWorkspaceGet(ctx context.Context, args map[string]any) (any, error) {
+	id := strings.TrimSpace(argString(args, "workspace_id", ""))
 	if id == "" {
-		return toolError("validation_error", "workspace_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "workspace_id is required").WithField("workspace_id")
 	}
 	w, err := a.store.GetWorkspace(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "workspace not found"), nil
+			return nil, budget.NewToolError("not_found", "workspace not found").
+				WithField("workspace_id").WithHelpTool("hadron_workspaces_list").
+				WithNextStep("call hadron_workspaces_list to find a valid workspace_id")
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"id":         w.ID,
 		"name":       w.Name,
 		"created_at": w.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at": w.UpdatedAt.UTC().Format(time.RFC3339),
-	}), nil
+	}, nil
 }
 
-func (a *Adapter) handleWorkspaceCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeWorkspaceWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handleWorkspaceCreate(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeWorkspaceWrite); err != nil {
+		return nil, err
 	}
-	id := strings.TrimSpace(req.GetString("workspace_id", ""))
+	id := strings.TrimSpace(argString(args, "workspace_id", ""))
 	if id == "" {
-		return toolError("validation_error", "workspace_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "workspace_id is required").WithField("workspace_id")
 	}
-	name := strings.TrimSpace(req.GetString("name", ""))
+	name := strings.TrimSpace(argString(args, "name", ""))
 	if name == "" {
 		name = id
 	}
 	if err := a.store.CreateWorkspace(ctx, id, name); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	rec, err := a.store.GetWorkspace(ctx, id)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"id":         rec.ID,
 		"name":       rec.Name,
 		"created_at": rec.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at": rec.UpdatedAt.UTC().Format(time.RFC3339),
-	}), nil
+	}, nil
 }

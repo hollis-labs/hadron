@@ -1,24 +1,34 @@
 package mcpadapter
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/go-mcp/budget"
+	"github.com/hollis-labs/go-mcp/compat"
 	"github.com/hollis-labs/go-otel/propagation"
-	"github.com/hollis-labs/hadron/internal/execution"
 	workflowmcp "github.com/hollis-labs/go-workflow/adapters/mcp"
-	mcpclient "github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/hollis-labs/hadron/internal/execution"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// InternalCaller's external-MCP-client role (connecting out to third-party
+// MCP servers over stdio/streamable_http/SSE, with reconnect and
+// health-probing) has no go-mcp equivalent: go-mcp is server-only by
+// current design. It is ported here directly against the official SDK's
+// Client/ClientSession, per Chrispian's direction -- a shared go-mcp client
+// package covering this same reconnect/health-probe shape (Tether has its
+// own ~475-line version of the identical problem) is tracked separately as
+// CW-20260918-0013, not built as a prerequisite for this port.
 
 const externalClientProbeInterval = 30 * time.Second
 
@@ -47,10 +57,12 @@ type ExternalServerConfig struct {
 
 type InternalCallerOption func(*InternalCaller)
 
+// externalClient is satisfied directly by *mcpsdk.ClientSession; declared
+// narrowly so tests can substitute a fake.
 type externalClient interface {
-	CallTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error)
-	ListTools(ctx context.Context, request mcp.ListToolsRequest) (*mcp.ListToolsResult, error)
-	Ping(ctx context.Context) error
+	CallTool(ctx context.Context, params *mcpsdk.CallToolParams) (*mcpsdk.CallToolResult, error)
+	ListTools(ctx context.Context, params *mcpsdk.ListToolsParams) (*mcpsdk.ListToolsResult, error)
+	Ping(ctx context.Context, params *mcpsdk.PingParams) error
 	Close() error
 }
 
@@ -127,75 +139,117 @@ func (c *InternalCaller) DescribeTool(ctx context.Context, serverName, toolName 
 		return workflowmcp.ToolDescriptor{}, fmt.Errorf("internal MCP caller is not configured")
 	}
 	name := normalizeServerName(serverName)
-	var tool mcp.Tool
 	if isLocalHadronServer(name) {
-		registered := c.hadron.newServer().ListTools()
-		entry := registered[toolName]
-		if entry == nil {
-			return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp tool %q is not registered on server %q", toolName, name)
-		}
-		tool = entry.Tool
-	} else {
-		entry, _, err := c.externalClient(ctx, name)
-		if err != nil {
-			return workflowmcp.ToolDescriptor{}, err
-		}
-		entry, _, _, err = c.ensureHealthy(ctx, name, entry)
-		if err != nil {
-			return workflowmcp.ToolDescriptor{}, err
-		}
-		listed, err := entry.client.ListTools(ctx, mcp.ListToolsRequest{})
-		if err != nil {
-			return workflowmcp.ToolDescriptor{}, err
-		}
-		if listed == nil {
-			return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp server %q returned no tool descriptor list", name)
-		}
-		for _, candidate := range listed.Tools {
-			if candidate.Name == toolName {
-				tool = candidate
-				break
+		for _, def := range c.hadron.newServer().ToolDefinitions() {
+			if def.Name != toolName {
+				continue
 			}
+			readOnly, destructive := def.Annotations.ReadOnlyHint, def.Annotations.DestructiveHint
+			idempotent, openWorld := def.Annotations.IdempotentHint, def.Annotations.OpenWorldHint
+			return workflowmcp.ToolDescriptor{
+				Server: serverName, Tool: def.Name, Trusted: false,
+				Annotations: workflowmcp.ToolAnnotations{
+					Title:           def.Title,
+					ReadOnlyHint:    &readOnly,
+					DestructiveHint: &destructive,
+					IdempotentHint:  &idempotent,
+					OpenWorldHint:   &openWorld,
+				},
+			}, nil
 		}
-		if tool.Name == "" {
-			return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp tool %q is not registered on server %q", toolName, name)
-		}
+		return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp tool %q is not registered on server %q", toolName, name)
 	}
-	return workflowmcp.ToolDescriptor{
-		Server: serverName, Tool: tool.Name, Trusted: false,
-		Annotations: workflowToolAnnotations(tool.Annotations),
-	}, nil
+	entry, _, err := c.externalClient(ctx, name)
+	if err != nil {
+		return workflowmcp.ToolDescriptor{}, err
+	}
+	entry, _, _, err = c.ensureHealthy(ctx, name, entry)
+	if err != nil {
+		return workflowmcp.ToolDescriptor{}, err
+	}
+	listed, err := entry.client.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	if err != nil {
+		return workflowmcp.ToolDescriptor{}, err
+	}
+	if listed == nil {
+		return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp server %q returned no tool descriptor list", name)
+	}
+	for _, candidate := range listed.Tools {
+		if candidate.Name != toolName {
+			continue
+		}
+		return workflowmcp.ToolDescriptor{
+			Server: serverName, Tool: candidate.Name, Trusted: false,
+			Annotations: workflowToolAnnotations(candidate.Title, candidate.Annotations),
+		}, nil
+	}
+	return workflowmcp.ToolDescriptor{}, fmt.Errorf("mcp tool %q is not registered on server %q", toolName, name)
 }
 
-func (c *InternalCaller) callToolResult(ctx context.Context, serverName, toolName string, arguments map[string]any, idempotencyKey string, allowRetry bool) (*mcp.CallToolResult, execution.MCPCallMetadata, error) {
+func (c *InternalCaller) callToolResult(ctx context.Context, serverName, toolName string, arguments map[string]any, idempotencyKey string, allowRetry bool) (*mcpsdk.CallToolResult, execution.MCPCallMetadata, error) {
 	if c == nil || c.hadron == nil {
 		return nil, execution.MCPCallMetadata{}, fmt.Errorf("internal MCP caller is not configured")
 	}
 	if !isLocalHadronServer(serverName) {
 		return c.callExternalToolResult(ctx, serverName, toolName, arguments, idempotencyKey, allowRetry)
 	}
-	request := mcp.CallToolRequest{}
-	request.Params.Name = toolName
-	request.Params.Arguments = cloneAnyMap(arguments)
-	if idempotencyKey != "" {
-		request.Params.Meta = &mcp.Meta{AdditionalFields: map[string]any{"hadron/idempotencyKey": idempotencyKey}}
-	}
-	handler := c.hadron.buildHandlerMap()[toolName]
-	if handler == nil {
-		return toolError("not_found", "unknown tool: "+toolName), execution.MCPCallMetadata{
-			Server: normalizeServerName(serverName), Transport: "in_process", AttemptCount: 1,
-		}, nil
-	}
-	result, err := handler(ctx, request)
-	if err != nil {
-		result = toolError("internal_error", err.Error())
-	}
-	if result == nil {
-		return nil, execution.MCPCallMetadata{}, fmt.Errorf("mcp tool %q returned no result", toolName)
-	}
-	return result, execution.MCPCallMetadata{
+	value, err := c.hadron.CallTool(ctx, toolName, cloneAnyMap(arguments))
+	metadata := execution.MCPCallMetadata{
 		Server: normalizeServerName(serverName), Transport: "in_process", AttemptCount: 1,
-	}, nil
+	}
+	if err != nil {
+		return toolErrorResult(err), metadata, nil
+	}
+	if text, ok := value.(string); ok {
+		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: text}}}, metadata, nil
+	}
+	data, marshalErr := json.Marshal(value)
+	if marshalErr != nil {
+		return nil, metadata, marshalErr
+	}
+	return &mcpsdk.CallToolResult{
+		Content:           []mcpsdk.Content{&mcpsdk.TextContent{Text: string(data)}},
+		StructuredContent: value,
+	}, metadata, nil
+}
+
+// toolErrorResult mirrors adaptHandler's own error-content shape (see
+// go-mcp/server's marshaledResult, unexported there) for the in-process
+// path, which bypasses adaptHandler entirely via Adapter.CallTool's direct
+// dispatch: a *budget.ToolError or budget.StructuredError keeps its full
+// structured shape, any other error falls back to its plain Error() string.
+func toolErrorResult(err error) *mcpsdk.CallToolResult {
+	var toolErr *budget.ToolError
+	if errors.As(err, &toolErr) {
+		return marshaledErrorResult(toolErr)
+	}
+	var structuredErr budget.StructuredError
+	if errors.As(err, &structuredErr) {
+		return marshaledErrorResult(structuredErr.ToolErrorContent())
+	}
+	data, marshalErr := json.Marshal(map[string]string{"message": err.Error()})
+	if marshalErr != nil {
+		data = []byte(`{"message":"internal error"}`)
+	}
+	return &mcpsdk.CallToolResult{
+		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: string(data)}},
+		IsError: true,
+	}
+}
+
+func marshaledErrorResult(v any) *mcpsdk.CallToolResult {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return &mcpsdk.CallToolResult{
+			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: `{"message":"internal error"}`}},
+			IsError: true,
+		}
+	}
+	return &mcpsdk.CallToolResult{
+		Content:           []mcpsdk.Content{&mcpsdk.TextContent{Text: string(data)}},
+		StructuredContent: v,
+		IsError:           true,
+	}
 }
 
 func isLocalHadronServer(name string) bool {
@@ -211,7 +265,7 @@ func normalizeServerName(name string) string {
 	return strings.TrimSpace(strings.ToLower(name))
 }
 
-func (c *InternalCaller) callExternalToolResult(ctx context.Context, serverName, toolName string, arguments map[string]any, idempotencyKey string, allowRetry bool) (*mcp.CallToolResult, execution.MCPCallMetadata, error) {
+func (c *InternalCaller) callExternalToolResult(ctx context.Context, serverName, toolName string, arguments map[string]any, idempotencyKey string, allowRetry bool) (*mcpsdk.CallToolResult, execution.MCPCallMetadata, error) {
 	name := normalizeServerName(serverName)
 	entry, reusedClient, err := c.externalClient(ctx, name)
 	if err != nil {
@@ -233,11 +287,11 @@ func (c *InternalCaller) callExternalToolResult(ctx context.Context, serverName,
 	for attempt := 0; attempt < 2; attempt++ {
 		callArguments := cloneAnyMap(arguments)
 		callArguments = propagation.InjectMCP(ctx, callArguments)
-		request := mcp.CallToolRequest{Params: mcp.CallToolParams{Name: toolName, Arguments: callArguments}}
+		params := &mcpsdk.CallToolParams{Name: toolName, Arguments: callArguments}
 		if idempotencyKey != "" {
-			request.Params.Meta = &mcp.Meta{AdditionalFields: map[string]any{"hadron/idempotencyKey": idempotencyKey}}
+			params.Meta = mcpsdk.Meta{"hadron/idempotencyKey": idempotencyKey}
 		}
-		result, err := entry.client.CallTool(ctx, request)
+		result, err := entry.client.CallTool(ctx, params)
 		if err == nil {
 			if result == nil {
 				return nil, metadata, fmt.Errorf("mcp tool %q returned no result", toolName)
@@ -292,77 +346,77 @@ func newExternalClient(ctx context.Context, cfg ExternalServerConfig) (externalC
 	if transportName == "" {
 		transportName = "stdio"
 	}
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "hadron", Version: "dev"}, nil)
 	switch transportName {
 	case "stdio":
 		if strings.TrimSpace(cfg.Command) == "" {
 			return nil, fmt.Errorf("mcp stdio server command is required")
 		}
-		client, err := mcpclient.NewStdioMCPClient(cfg.Command, flattenEnv(cfg.Env), cfg.Args...)
+		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...) // #nosec G204 -- operator-configured MCP server command.
+		if env := flattenEnv(cfg.Env); env != nil {
+			cmd.Env = append(cmd.Environ(), env...)
+		}
+		cs, err := client.Connect(ctx, &mcpsdk.CommandTransport{Command: cmd}, nil)
 		if err != nil {
 			return nil, fmt.Errorf("start mcp stdio server %q: %w", cfg.Command, err)
 		}
-		initReq := mcp.InitializeRequest{}
-		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "dev"}
-		if _, err := client.Initialize(ctx, initReq); err != nil {
-			_ = client.Close()
-			return nil, fmt.Errorf("initialize mcp server %q: %w", cfg.Command, err)
-		}
-		return client, nil
+		return cs, nil
 	case "streamable_http", "http":
 		if strings.TrimSpace(cfg.URL) == "" {
 			return nil, fmt.Errorf("mcp %s server url is required", transportName)
 		}
-		opts := make([]transport.StreamableHTTPCOption, 0, 2)
-		if len(cfg.Headers) > 0 {
-			opts = append(opts, transport.WithHTTPHeaders(cloneStringMap(cfg.Headers)))
-		}
-		if cfg.TimeoutSeconds > 0 {
-			opts = append(opts, transport.WithHTTPBasicClient(&http.Client{Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second}))
-		}
-		client, err := mcpclient.NewStreamableHttpClient(cfg.URL, opts...)
+		httpClient := headeredHTTPClient(cfg.Headers, cfg.TimeoutSeconds)
+		cs, err := client.Connect(ctx, &mcpsdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: httpClient}, nil)
 		if err != nil {
 			return nil, fmt.Errorf("start mcp streamable_http server %q: %w", cfg.URL, err)
 		}
-		if err := client.Start(ctx); err != nil {
-			_ = client.Close()
-			return nil, fmt.Errorf("start mcp streamable_http client %q: %w", cfg.URL, err)
-		}
-		initReq := mcp.InitializeRequest{}
-		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "dev"}
-		if _, err := client.Initialize(ctx, initReq); err != nil {
-			_ = client.Close()
-			return nil, fmt.Errorf("initialize mcp server %q: %w", cfg.URL, err)
-		}
-		return client, nil
+		return cs, nil
 	case "sse":
 		if strings.TrimSpace(cfg.URL) == "" {
 			return nil, fmt.Errorf("mcp sse server url is required")
 		}
-		opts := make([]transport.ClientOption, 0, 2)
-		if len(cfg.Headers) > 0 {
-			opts = append(opts, transport.WithHeaders(cloneStringMap(cfg.Headers)))
-		}
-		if cfg.TimeoutSeconds > 0 {
-			opts = append(opts, transport.WithHTTPClient(&http.Client{Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second}))
-		}
-		client, err := mcpclient.NewSSEMCPClient(cfg.URL, opts...)
+		httpClient := headeredHTTPClient(cfg.Headers, cfg.TimeoutSeconds)
+		// compat.NewSSEClientTransport rewrites the server's relative
+		// "endpoint" event to an absolute URL and sanitizes the stream; see
+		// go-mcp's compat package. Known issue tracked separately
+		// (CW-20260917-0032): its keepalive-skip path can stall Read in some
+		// gateway-shaped streams.
+		cs, err := client.Connect(ctx, compat.NewSSEClientTransport(cfg.URL, httpClient), nil)
 		if err != nil {
 			return nil, fmt.Errorf("start mcp sse server %q: %w", cfg.URL, err)
 		}
-		if err := client.Start(ctx); err != nil {
-			_ = client.Close()
-			return nil, fmt.Errorf("start mcp sse client %q: %w", cfg.URL, err)
-		}
-		initReq := mcp.InitializeRequest{}
-		initReq.Params.ClientInfo = mcp.Implementation{Name: "hadron", Version: "dev"}
-		if _, err := client.Initialize(ctx, initReq); err != nil {
-			_ = client.Close()
-			return nil, fmt.Errorf("initialize mcp server %q: %w", cfg.URL, err)
-		}
-		return client, nil
+		return cs, nil
 	default:
 		return nil, fmt.Errorf("mcp transport %q is not supported", cfg.Transport)
 	}
+}
+
+// headeredHTTPClient builds an *http.Client that injects static headers on
+// every request, for the streamable_http/sse transports' optional Headers
+// config -- mcpsdk's client transports take an *http.Client, not a headers
+// map, so this is the seam for it.
+func headeredHTTPClient(headers map[string]string, timeoutSeconds int) *http.Client {
+	client := &http.Client{}
+	if timeoutSeconds > 0 {
+		client.Timeout = time.Duration(timeoutSeconds) * time.Second
+	}
+	if len(headers) > 0 {
+		client.Transport = &staticHeaderRoundTripper{headers: cloneStringMap(headers), base: http.DefaultTransport}
+	}
+	return client
+}
+
+type staticHeaderRoundTripper struct {
+	headers map[string]string
+	base    http.RoundTripper
+}
+
+func (t *staticHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	cloned := req.Clone(req.Context())
+	for k, v := range t.headers {
+		cloned.Header.Set(k, v)
+	}
+	return t.base.RoundTrip(cloned)
 }
 
 func flattenEnv(env map[string]string) []string {
@@ -436,7 +490,7 @@ func (c *InternalCaller) ensureHealthy(ctx context.Context, name string, entry *
 	if time.Since(entry.lastProbe) < externalClientProbeInterval {
 		return entry, false, false, nil
 	}
-	if err := entry.client.Ping(ctx); err != nil {
+	if err := entry.client.Ping(ctx, &mcpsdk.PingParams{}); err != nil {
 		if isRecoverableExternalClientError(err) && ctx.Err() == nil {
 			c.invalidateExternalClient(name)
 			replacement, _, openErr := c.externalClient(ctx, name)
@@ -455,16 +509,18 @@ func isRecoverableExternalClientError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, transport.ErrTransportClosed) || errors.Is(err, transport.ErrSessionTerminated) {
+	if errors.Is(err, mcpsdk.ErrConnectionClosed) || errors.Is(err, mcpsdk.ErrSessionMissing) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "transport closed") ||
+		strings.Contains(msg, "connection closed") ||
 		strings.Contains(msg, "session terminated") ||
+		strings.Contains(msg, "session not found") ||
 		strings.Contains(msg, "connection lost")
 }
 
-func decodeToolResult(result *mcp.CallToolResult) (any, error) {
+func decodeToolResult(result *mcpsdk.CallToolResult) (any, error) {
 	if result.IsError {
 		msg := decodeToolErrorMessage(result)
 		if msg == "" {
@@ -498,7 +554,7 @@ func decodeToolResult(result *mcp.CallToolResult) (any, error) {
 	}
 }
 
-func decodeToolErrorMessage(result *mcp.CallToolResult) string {
+func decodeToolErrorMessage(result *mcpsdk.CallToolResult) string {
 	if result == nil {
 		return ""
 	}
@@ -517,10 +573,10 @@ func decodeToolErrorMessage(result *mcp.CallToolResult) string {
 	return ""
 }
 
-func extractTextContent(contents []mcp.Content) []string {
+func extractTextContent(contents []mcpsdk.Content) []string {
 	out := make([]string, 0, len(contents))
 	for _, content := range contents {
-		if text, ok := content.(mcp.TextContent); ok {
+		if text, ok := content.(*mcpsdk.TextContent); ok {
 			out = append(out, text.Text)
 		}
 	}
@@ -551,7 +607,7 @@ func payloadErrorMessage(payload any) (string, bool) {
 	return message, true
 }
 
-func workflowCallResult(result *mcp.CallToolResult, metadata execution.MCPCallMetadata) (workflowmcp.CallResult, error) {
+func workflowCallResult(result *mcpsdk.CallToolResult, metadata execution.MCPCallMetadata) (workflowmcp.CallResult, error) {
 	if result == nil {
 		return workflowmcp.CallResult{}, fmt.Errorf("MCP tool returned no result")
 	}
@@ -581,51 +637,33 @@ func workflowCallResult(result *mcp.CallToolResult, metadata execution.MCPCallMe
 	return converted, nil
 }
 
-func workflowContent(content mcp.Content) (workflowmcp.Content, error) {
+func workflowContent(content mcpsdk.Content) (workflowmcp.Content, error) {
 	switch current := content.(type) {
-	case mcp.TextContent:
-		return workflowmcp.Content{Kind: workflowmcp.ContentText, Text: current.Text}, nil
-	case *mcp.TextContent:
+	case *mcpsdk.TextContent:
 		if current == nil {
 			return workflowmcp.Content{}, fmt.Errorf("nil text content")
 		}
 		return workflowmcp.Content{Kind: workflowmcp.ContentText, Text: current.Text}, nil
-	case mcp.ImageContent:
-		data, err := base64.StdEncoding.DecodeString(current.Data)
-		if err != nil {
-			return workflowmcp.Content{}, fmt.Errorf("decode image data: %w", err)
-		}
-		return workflowmcp.Content{Kind: workflowmcp.ContentImage, Data: data, MediaType: current.MIMEType}, nil
-	case *mcp.ImageContent:
+	case *mcpsdk.ImageContent:
 		if current == nil {
 			return workflowmcp.Content{}, fmt.Errorf("nil image content")
 		}
-		return workflowContent(*current)
-	case mcp.AudioContent:
-		data, err := base64.StdEncoding.DecodeString(current.Data)
-		if err != nil {
-			return workflowmcp.Content{}, fmt.Errorf("decode audio data: %w", err)
-		}
-		return workflowmcp.Content{Kind: workflowmcp.ContentAudio, Data: data, MediaType: current.MIMEType}, nil
-	case *mcp.AudioContent:
+		return workflowmcp.Content{Kind: workflowmcp.ContentImage, Data: bytes.Clone(current.Data), MediaType: current.MIMEType}, nil
+	case *mcpsdk.AudioContent:
 		if current == nil {
 			return workflowmcp.Content{}, fmt.Errorf("nil audio content")
 		}
-		return workflowContent(*current)
-	case mcp.ResourceLink:
+		return workflowmcp.Content{Kind: workflowmcp.ContentAudio, Data: bytes.Clone(current.Data), MediaType: current.MIMEType}, nil
+	case *mcpsdk.ResourceLink:
+		if current == nil {
+			return workflowmcp.Content{}, fmt.Errorf("nil resource link")
+		}
 		return workflowmcp.Content{
 			Kind: workflowmcp.ContentResourceLink, URI: current.URI, Name: current.Name,
 			Description: current.Description, MediaType: current.MIMEType,
 		}, nil
-	case *mcp.ResourceLink:
-		if current == nil {
-			return workflowmcp.Content{}, fmt.Errorf("nil resource link")
-		}
-		return workflowContent(*current)
-	case mcp.EmbeddedResource:
-		return workflowResource(current.Resource)
-	case *mcp.EmbeddedResource:
-		if current == nil {
+	case *mcpsdk.EmbeddedResource:
+		if current == nil || current.Resource == nil {
 			return workflowmcp.Content{}, fmt.Errorf("nil embedded resource")
 		}
 		return workflowResource(current.Resource)
@@ -634,35 +672,20 @@ func workflowContent(content mcp.Content) (workflowmcp.Content, error) {
 	}
 }
 
-func workflowResource(resource mcp.ResourceContents) (workflowmcp.Content, error) {
-	switch current := resource.(type) {
-	case mcp.TextResourceContents:
-		return workflowmcp.Content{
-			Kind: workflowmcp.ContentResourceText, URI: current.URI,
-			Text: current.Text, MediaType: current.MIMEType,
-		}, nil
-	case *mcp.TextResourceContents:
-		if current == nil {
-			return workflowmcp.Content{}, fmt.Errorf("nil text resource")
-		}
-		return workflowResource(*current)
-	case mcp.BlobResourceContents:
-		data, err := base64.StdEncoding.DecodeString(current.Blob)
-		if err != nil {
-			return workflowmcp.Content{}, fmt.Errorf("decode resource blob: %w", err)
-		}
-		return workflowmcp.Content{
-			Kind: workflowmcp.ContentResourceBlob, URI: current.URI,
-			Data: data, MediaType: current.MIMEType,
-		}, nil
-	case *mcp.BlobResourceContents:
-		if current == nil {
-			return workflowmcp.Content{}, fmt.Errorf("nil blob resource")
-		}
-		return workflowResource(*current)
-	default:
-		return workflowmcp.Content{}, fmt.Errorf("unsupported resource type %T", resource)
+func workflowResource(resource *mcpsdk.ResourceContents) (workflowmcp.Content, error) {
+	if resource == nil {
+		return workflowmcp.Content{}, fmt.Errorf("nil resource contents")
 	}
+	if resource.Blob != nil {
+		return workflowmcp.Content{
+			Kind: workflowmcp.ContentResourceBlob, URI: resource.URI,
+			Data: bytes.Clone(resource.Blob), MediaType: resource.MIMEType,
+		}, nil
+	}
+	return workflowmcp.Content{
+		Kind: workflowmcp.ContentResourceText, URI: resource.URI,
+		Text: resource.Text, MediaType: resource.MIMEType,
+	}, nil
 }
 
 func workflowJSON(input any) (any, error) {
@@ -686,11 +709,16 @@ func workflowJSON(input any) (any, error) {
 	return output, nil
 }
 
-func workflowToolAnnotations(input mcp.ToolAnnotation) workflowmcp.ToolAnnotations {
+func workflowToolAnnotations(title string, input *mcpsdk.ToolAnnotations) workflowmcp.ToolAnnotations {
+	if input == nil {
+		return workflowmcp.ToolAnnotations{Title: title}
+	}
+	readOnly, idempotent := input.ReadOnlyHint, input.IdempotentHint
 	return workflowmcp.ToolAnnotations{
-		Title: input.Title, ReadOnlyHint: cloneBoolPointer(input.ReadOnlyHint),
+		Title:           title,
+		ReadOnlyHint:    &readOnly,
 		DestructiveHint: cloneBoolPointer(input.DestructiveHint),
-		IdempotentHint:  cloneBoolPointer(input.IdempotentHint),
+		IdempotentHint:  &idempotent,
 		OpenWorldHint:   cloneBoolPointer(input.OpenWorldHint),
 	}
 }

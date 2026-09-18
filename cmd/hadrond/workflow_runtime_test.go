@@ -37,7 +37,6 @@ import (
 	"github.com/hollis-labs/go-workflow/stepkind"
 	"github.com/hollis-labs/go-workflow/values"
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestProductionWorkflowRuntimeExecutesPinnedGraphAndStopsCleanly(t *testing.T) {
@@ -855,12 +854,12 @@ func TestProductionMCPAdapterUsesSharedWorkflowComposition(t *testing.T) {
 		mcpadapter.WithWorkflowServices(runtime.exposure, runtime.operations, runtime.operations, runtime.operations),
 		mcpadapter.WithWorkflowLifecycle(runtime.lifecycle),
 	)
-	result := adapter.CallTool(t.Context(), "hadron_workflows_search", map[string]any{"query": "", "limit": 1})
-	if result == nil || result.IsError {
-		t.Fatalf("production workflow MCP search = %#v", result)
+	result, err := adapter.CallTool(t.Context(), "hadron_workflows_search", map[string]any{"query": "", "limit": 1})
+	if err != nil {
+		t.Fatalf("production workflow MCP search = %#v, err=%v", result, err)
 	}
-	if health := adapter.CallTool(t.Context(), "hadron_health", nil); health == nil || len(health.Content) != 1 || !strings.Contains(health.Content[0].(mcp.TextContent).Text, `"code":"not_found"`) {
-		t.Fatalf("workflow-only MCP exposed independent health = %#v", health)
+	if _, healthErr := adapter.CallTool(t.Context(), "hadron_health", nil); healthErr == nil || !strings.Contains(healthErr.Error(), "not_found") {
+		t.Fatalf("workflow-only MCP exposed independent health = err=%v", healthErr)
 	}
 }
 

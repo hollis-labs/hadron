@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-messaging"
+	"github.com/hollis-labs/go-mcp/budget"
+	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 type Store interface {
@@ -265,15 +265,9 @@ func WithWorkflowOnly() Option {
 	return func(a *Adapter) { a.workflowOnly = true }
 }
 
-// CallTool invokes a registered tool by name and returns its result.
-// Primarily used in tests.
-func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string]any) *mcp.CallToolResult {
-	req := mcp.CallToolRequest{}
-	req.Params.Name = toolName
-	if args != nil {
-		req.Params.Arguments = args
-	}
-
+// CallTool invokes a registered tool by name and returns its raw result
+// value. Primarily used in tests and by InternalCaller for local dispatch.
+func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string]any) (any, error) {
 	handlers := a.buildHandlerMap()
 	if a.workflow != nil {
 		for name, handler := range a.workflow.handlerMap() {
@@ -282,43 +276,37 @@ func (a *Adapter) CallTool(ctx context.Context, toolName string, args map[string
 	}
 	handler, ok := handlers[toolName]
 	if !ok && a.workflow != nil {
-		sessionID := workflowSessionID(ctx, a.sessionID)
-		if _, _, err := a.workflow.current(ctx, sessionID, a.token); err == nil {
+		if _, _, err := a.workflow.current(ctx, a.token); err == nil {
 			a.workflow.mu.Lock()
-			mount := a.workflow.sessions[sessionID]
-			descriptor, mounted := mount.direct[toolName]
+			descriptor, mounted := a.workflow.mount.direct[toolName]
 			if !mounted {
-				descriptor, mounted = mount.lazy[toolName]
+				descriptor, mounted = a.workflow.mount.lazy[toolName]
 			}
 			a.workflow.mu.Unlock()
 			if mounted {
-				handler = func(callCtx context.Context, callRequest mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-					return a.workflow.handleDirect(callCtx, callRequest, descriptor)
+				handler = func(callCtx context.Context, callArgs map[string]any) (any, error) {
+					return a.workflow.handleDirect(callCtx, callArgs, descriptor)
 				}
 				ok = true
 			}
 		}
 	}
 	if !ok {
-		return toolError("not_found", "unknown tool: "+toolName)
+		return nil, budget.NewToolError("not_found", "unknown tool: "+toolName)
 	}
-	result, err := handler(ctx, req)
-	if err != nil {
-		return toolError("internal_error", err.Error())
-	}
-	return result
+	return handler(ctx, args)
 }
 
 // buildHandlerMap returns a map of tool name → handler function for direct invocation.
-func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	handlers := map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){
+func (a *Adapter) buildHandlerMap() map[string]gomcp.ToolHandler {
+	handlers := map[string]gomcp.ToolHandler{
 		"hadron_skills": a.handleHadronSkills,
 	}
 	if a.workflowOnly {
 		return handlers
 	}
 	handlers["hadron_health"] = a.handleHealth
-	for name, handler := range map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){
+	for name, handler := range map[string]gomcp.ToolHandler{
 		"hadron_workspaces_list":    a.handleWorkspacesList,
 		"hadron_workspace_get":      a.handleWorkspaceGet,
 		"hadron_workspace_create":   a.handleWorkspaceCreate,
@@ -362,28 +350,23 @@ func (a *Adapter) buildHandlerMap() map[string]func(context.Context, mcp.CallToo
 	return handlers
 }
 
+// Run serves the MCP protocol over stdio until ctx is done or the client
+// disconnects. newServer already returns a fully-mounted server (workflow
+// tools included, if any), so this is just go-mcp's own stdio convenience --
+// no session-lifecycle hook needed here.
 func (a *Adapter) Run(ctx context.Context) error {
-	s := a.newServer()
-	ctxFunc := func(_ context.Context) context.Context { return ctx }
-	return server.ServeStdio(s, server.WithStdioContextFunc(ctxFunc))
+	return a.newServer().Run(ctx)
 }
 
-func toolJSON(v any) *mcp.CallToolResult {
-	body, _ := json.Marshal(v)
-	return mcp.NewToolResultText(string(body))
-}
-
-func toolError(code, message string) *mcp.CallToolResult {
-	body, _ := json.Marshal(map[string]string{"code": code, "message": message})
-	return mcp.NewToolResultText(string(body))
-}
-
-func (a *Adapter) checkScope(scope string) *mcp.CallToolResult {
+func (a *Adapter) checkScope(scope string) error {
 	if strings.TrimSpace(a.token) == "" {
-		return toolError("auth_required", "no token configured for mutating tools")
+		return budget.NewToolError("auth_required", "no token configured for mutating tools").
+			WithNextStep("configure an MCP token with scope " + scope + " to use this tool")
 	}
 	if _, ok := a.scopes[scope]; !ok {
-		return toolError("insufficient_scope", "token missing scope: "+scope)
+		return budget.NewToolError("insufficient_scope", "token missing scope: "+scope).
+			WithField("scope").
+			WithNextStep("configure the MCP token with scope " + scope + " to use this tool")
 	}
 	return nil
 }

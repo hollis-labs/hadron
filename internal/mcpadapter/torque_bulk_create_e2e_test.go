@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	gomcp "github.com/hollis-labs/go-mcp/server"
+	gomcphttp "github.com/hollis-labs/go-mcp/transport/http"
 	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
 	workflowmcp "github.com/hollis-labs/go-workflow/adapters/mcp"
 	"github.com/hollis-labs/go-workflow/adapters/transform"
@@ -29,9 +31,8 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
-	"github.com/mark3labs/mcp-go/server/servertest"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"net/http/httptest"
 )
 
 // TestTorqueBulkCreateThroughPinnedWorkflowMCP is the Hadron-owned release
@@ -124,10 +125,10 @@ func TestTorqueBulkCreateThroughPinnedWorkflowMCP(t *testing.T) {
 	hadron := New(nil, nil, nil, nil, token, nil,
 		withWorkflowInstanceNonceForTest("torque-e2e"),
 		WithWorkflowServices(exposure, operator, operator, operator))
-	hadronServer := servertest.NewTestServer(hadron.newServer())
+	hadronServer := httptest.NewServer(gomcphttp.NewHandler(hadron.newServer(), gomcphttp.HandlerOptions{}))
 	t.Cleanup(hadronServer.Close)
 	transport := NewInternalCaller(&Adapter{}, WithExternalServers(map[string]ExternalServerConfig{
-		"hadron-e2e": {Transport: "sse", URL: hadronServer.URL + "/sse", Headers: map[string]string{"Authorization": "Bearer " + token}},
+		"hadron-e2e": {Transport: "streamable_http", URL: hadronServer.URL, Headers: map[string]string{"Authorization": "Bearer " + token}},
 	}))
 	t.Cleanup(func() { _ = transport.Close() })
 
@@ -201,10 +202,10 @@ func TestTorqueBulkCreateThroughPinnedWorkflowMCP(t *testing.T) {
 	reopenedHadron := New(nil, nil, nil, nil, token, nil,
 		withWorkflowInstanceNonceForTest("torque-e2e-reopened"),
 		WithWorkflowServices(reopenedExposure, reopenedOperator, reopenedOperator, reopenedOperator))
-	reopenedServer := servertest.NewTestServer(reopenedHadron.newServer())
+	reopenedServer := httptest.NewServer(gomcphttp.NewHandler(reopenedHadron.newServer(), gomcphttp.HandlerOptions{}))
 	t.Cleanup(reopenedServer.Close)
 	reopenedTransport := NewInternalCaller(&Adapter{}, WithExternalServers(map[string]ExternalServerConfig{
-		"hadron-e2e-reopened": {Transport: "sse", URL: reopenedServer.URL + "/sse", Headers: map[string]string{"Authorization": "Bearer " + token}},
+		"hadron-e2e-reopened": {Transport: "streamable_http", URL: reopenedServer.URL, Headers: map[string]string{"Authorization": "Bearer " + token}},
 	}))
 	t.Cleanup(func() { _ = reopenedTransport.Close() })
 
@@ -296,14 +297,14 @@ func assertTorqueMountedToolSchemas(ctx context.Context, t *testing.T, caller *I
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed, err := entry.client.ListTools(ctx, mcp.ListToolsRequest{})
+	listed, err := entry.client.ListTools(ctx, &mcpsdk.ListToolsParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var mounted *mcp.Tool
-	for index := range listed.Tools {
-		if listed.Tools[index].Name == descriptor.ToolName {
-			mounted = &listed.Tools[index]
+	var mounted *mcpsdk.Tool
+	for _, tool := range listed.Tools {
+		if tool.Name == descriptor.ToolName {
+			mounted = tool
 			break
 		}
 	}
@@ -311,20 +312,12 @@ func assertTorqueMountedToolSchemas(ctx context.Context, t *testing.T, caller *I
 		t.Fatalf("first-class MCP tool %q was not mounted: %#v", descriptor.ToolName, listed)
 	}
 	annotations := mounted.Annotations
-	if annotations.ReadOnlyHint == nil || *annotations.ReadOnlyHint || annotations.DestructiveHint == nil || !*annotations.DestructiveHint ||
-		annotations.IdempotentHint == nil || *annotations.IdempotentHint || annotations.OpenWorldHint == nil || *annotations.OpenWorldHint {
+	if annotations == nil || annotations.ReadOnlyHint || annotations.DestructiveHint == nil || !*annotations.DestructiveHint ||
+		annotations.IdempotentHint || annotations.OpenWorldHint == nil || *annotations.OpenWorldHint {
 		t.Fatalf("mounted MCP annotations = %#v", annotations)
 	}
-	var mountedInput any = mounted.InputSchema
-	if len(mounted.RawInputSchema) != 0 {
-		mountedInput = mounted.RawInputSchema
-	}
-	assertTorqueJSONEqual(t, "mounted MCP input schema", mountedInput, descriptor.InputSchema)
-	var mountedOutput any = mounted.OutputSchema
-	if len(mounted.RawOutputSchema) != 0 {
-		mountedOutput = mounted.RawOutputSchema
-	}
-	encodedOutput, err := json.Marshal(mountedOutput)
+	assertTorqueJSONEqual(t, "mounted MCP input schema", mounted.InputSchema, descriptor.InputSchema)
+	encodedOutput, err := json.Marshal(mounted.OutputSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,36 +509,36 @@ func newTorqueCreateFake(t *testing.T) *torqueCreateFake {
 		initialGate: make(chan struct{}), byKey: make(map[string]torqueCreateOutcome),
 		callByTitle: make(map[string]int), keysByTitle: make(map[string][]string),
 	}
-	readOnly, destructive, idempotent, openWorld := false, false, true, false
-	tool := mcp.NewTool("torque_task_create",
-		mcp.WithDescription("Create exactly one Torque task."),
-		mcp.WithString("project_id", mcp.Required()),
-		mcp.WithString("title", mcp.Required()),
-		mcp.WithString("description"),
-	)
-	tool.Annotations = mcp.ToolAnnotation{
-		Title: "Create Torque task", ReadOnlyHint: &readOnly, DestructiveHint: &destructive,
-		IdempotentHint: &idempotent, OpenWorldHint: &openWorld,
-	}
-	mcpServer := server.NewMCPServer("torque-e2e-fake", "1.0.0", server.WithToolCapabilities(true))
-	mcpServer.AddTool(tool, fake.create)
-	testServer := servertest.NewTestStreamableHTTPServer(mcpServer, server.WithStateLess(true))
+	mcpServer := gomcp.NewServer("torque-e2e-fake", "1.0.0")
+	mcpServer.RegisterTool(gomcp.Tool{
+		Name:        "torque_task_create",
+		Title:       "Create Torque task",
+		Description: "Create exactly one Torque task.",
+		InputSchema: gomcp.ObjectSchema(map[string]any{
+			"project_id":  map[string]any{"type": "string"},
+			"title":       map[string]any{"type": "string"},
+			"description": map[string]any{"type": "string"},
+		}, "project_id", "title"),
+		Handler:         fake.create,
+		ReadOnlyHint:    false,
+		DestructiveHint: false,
+		IdempotentHint:  true,
+		OpenWorldHint:   false,
+	})
+	testServer := httptest.NewServer(gomcphttp.NewHandler(mcpServer, gomcphttp.HandlerOptions{}))
 	fake.url = testServer.URL
 	t.Cleanup(testServer.Close)
 	return fake
 }
 
-func (f *torqueCreateFake) create(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	project := request.GetString("project_id", "")
-	title := request.GetString("title", "")
-	description := request.GetString("description", "")
+func (f *torqueCreateFake) create(ctx context.Context, args map[string]any) (any, error) {
+	project, _ := args["project_id"].(string)
+	title, _ := args["title"].(string)
+	description, _ := args["description"].(string)
 	if project == "" || title == "" {
-		return mcp.NewToolResultError("project_id and title are required"), nil
+		return nil, errors.New("project_id and title are required")
 	}
-	key := ""
-	if request.Params.Meta != nil {
-		key, _ = request.Params.Meta.AdditionalFields["hadron/idempotencyKey"].(string)
-	}
+	key, _ := gomcp.MetaFromContext(ctx)["hadron/idempotencyKey"].(string)
 	f.mu.Lock()
 	f.active++
 	f.started++
@@ -567,13 +560,13 @@ func (f *torqueCreateFake) create(ctx context.Context, request mcp.CallToolReque
 	if key == "" {
 		f.violation = errors.New("Torque create call omitted hadron/idempotencyKey")
 		f.mu.Unlock()
-		return mcp.NewToolResultError("idempotency key is required"), nil
+		return nil, errors.New("idempotency key is required")
 	}
 	outcome, exists := f.byKey[key]
 	if exists && (outcome.project != project || outcome.title != title) {
 		f.violation = fmt.Errorf("idempotency key %q was replayed for conflicting intent", key)
 		f.mu.Unlock()
-		return mcp.NewToolResultError("idempotency key intent conflict"), nil
+		return nil, errors.New("idempotency key intent conflict")
 	}
 	if !exists {
 		outcome = torqueCreateOutcome{project: project, title: title, description: description, failed: title == "terminal-failure"}
@@ -612,12 +605,9 @@ func (f *torqueCreateFake) create(ctx context.Context, request mcp.CallToolReque
 		}
 	}
 	if outcome.failed {
-		return mcp.NewToolResultError("fixture rejected one task"), nil
+		return nil, errors.New("fixture rejected one task")
 	}
-	return &mcp.CallToolResult{
-		StructuredContent: map[string]any{"id": outcome.id, "project_id": outcome.project, "title": outcome.title, "description": outcome.description},
-		Content:           []mcp.Content{mcp.TextContent{Type: mcp.ContentTypeText, Text: `{"created":true}`}},
-	}, nil
+	return map[string]any{"id": outcome.id, "project_id": outcome.project, "title": outcome.title, "description": outcome.description}, nil
 }
 
 func (f *torqueCreateFake) attempts(title string) int {

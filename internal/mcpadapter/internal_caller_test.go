@@ -2,70 +2,75 @@ package mcpadapter
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/hadron/internal/execution"
 	workflowmcp "github.com/hollis-labs/go-workflow/adapters/mcp"
-	"github.com/mark3labs/mcp-go/client/transport"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/hollis-labs/hadron/internal/execution"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type fakeExternalClient struct {
 	pingErr   error
 	callErr   error
-	result    *mcp.CallToolResult
-	tools     []mcp.Tool
+	result    *mcpsdk.CallToolResult
+	tools     []*mcpsdk.Tool
 	listErr   error
 	listNil   bool
 	pingCalls int
 	callCalls int
-	request   mcp.CallToolRequest
+	params    *mcpsdk.CallToolParams
 }
 
-func (f *fakeExternalClient) ListTools(_ context.Context, _ mcp.ListToolsRequest) (*mcp.ListToolsResult, error) {
+func (f *fakeExternalClient) ListTools(_ context.Context, _ *mcpsdk.ListToolsParams) (*mcpsdk.ListToolsResult, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	if f.listNil {
 		return nil, nil
 	}
-	return &mcp.ListToolsResult{Tools: append([]mcp.Tool(nil), f.tools...)}, nil
+	return &mcpsdk.ListToolsResult{Tools: append([]*mcpsdk.Tool(nil), f.tools...)}, nil
 }
 
-func (f *fakeExternalClient) CallTool(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (f *fakeExternalClient) CallTool(_ context.Context, params *mcpsdk.CallToolParams) (*mcpsdk.CallToolResult, error) {
 	f.callCalls++
-	f.request = request
+	f.params = params
 	if f.callErr != nil {
 		return nil, f.callErr
 	}
 	if f.result != nil {
 		return f.result, nil
 	}
-	return mcp.NewToolResultText(`{"ok":true}`), nil
+	return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: `{"ok":true}`}}}, nil
 }
 
+func (f *fakeExternalClient) Ping(_ context.Context, _ *mcpsdk.PingParams) error {
+	f.pingCalls++
+	return f.pingErr
+}
+
+func (f *fakeExternalClient) Close() error { return nil }
+
 func TestInternalCallerWorkflowBridgeConvertsContentAndDescriptor(t *testing.T) {
-	readOnly, destructive, idempotent := true, false, true
+	destructive := false
 	external := &fakeExternalClient{
-		tools: []mcp.Tool{{
-			Name: "inspect", Annotations: mcp.ToolAnnotation{
-				Title: "Inspect", ReadOnlyHint: &readOnly,
-				DestructiveHint: &destructive, IdempotentHint: &idempotent,
+		tools: []*mcpsdk.Tool{{
+			Name: "inspect", Title: "Inspect",
+			Annotations: &mcpsdk.ToolAnnotations{
+				ReadOnlyHint: true, DestructiveHint: &destructive, IdempotentHint: true,
 			},
 		}},
-		result: &mcp.CallToolResult{
+		result: &mcpsdk.CallToolResult{
 			StructuredContent: map[string]any{"large": json.Number("9007199254740993")},
-			Content: []mcp.Content{
-				mcp.TextContent{Type: mcp.ContentTypeText, Text: "hello"},
-				mcp.ImageContent{Type: mcp.ContentTypeImage, Data: base64.StdEncoding.EncodeToString([]byte("image")), MIMEType: "image/png"},
-				mcp.ResourceLink{Type: "resource_link", URI: "resource://fixture/item", Name: "item", MIMEType: "text/plain"},
-				mcp.EmbeddedResource{Type: mcp.ContentTypeResource, Resource: mcp.BlobResourceContents{
-					URI: "resource://fixture/blob", MIMEType: "application/octet-stream", Blob: base64.StdEncoding.EncodeToString([]byte("blob")),
+			Content: []mcpsdk.Content{
+				&mcpsdk.TextContent{Text: "hello"},
+				&mcpsdk.ImageContent{Data: []byte("image"), MIMEType: "image/png"},
+				&mcpsdk.ResourceLink{URI: "resource://fixture/item", Name: "item", MIMEType: "text/plain"},
+				&mcpsdk.EmbeddedResource{Resource: &mcpsdk.ResourceContents{
+					URI: "resource://fixture/blob", MIMEType: "application/octet-stream", Blob: []byte("blob"),
 				}},
 			},
 		},
@@ -94,18 +99,18 @@ func TestInternalCallerWorkflowBridgeConvertsContentAndDescriptor(t *testing.T) 
 	if string(result.Content[1].Data) != "image" || result.Content[2].Kind != workflowmcp.ContentResourceLink || string(result.Content[3].Data) != "blob" {
 		t.Fatalf("content = %#v", result.Content)
 	}
-	if external.request.Params.Meta == nil || external.request.Params.Meta.AdditionalFields["hadron/idempotencyKey"] != "call-key" {
-		t.Fatalf("call meta = %#v", external.request.Params.Meta)
+	if external.params.Meta == nil || external.params.Meta["hadron/idempotencyKey"] != "call-key" {
+		t.Fatalf("call meta = %#v", external.params.Meta)
 	}
 	result.Content[1].Data[0] = 'X'
-	if external.result.Content[1].(mcp.ImageContent).Data != base64.StdEncoding.EncodeToString([]byte("image")) {
+	if string(external.result.Content[1].(*mcpsdk.ImageContent).Data) != "image" {
 		t.Fatal("workflow result mutated SDK result")
 	}
 }
 
 func TestInternalCallerWorkflowBridgeClassifiesMalformedResult(t *testing.T) {
-	external := &fakeExternalClient{result: &mcp.CallToolResult{Content: []mcp.Content{
-		mcp.ImageContent{Type: mcp.ContentTypeImage, Data: "not-base64", MIMEType: "image/png"},
+	external := &fakeExternalClient{result: &mcpsdk.CallToolResult{Content: []mcpsdk.Content{
+		(*mcpsdk.EmbeddedResource)(nil),
 	}}}
 	caller := NewInternalCaller(&Adapter{})
 	caller.servers["fixture"] = ExternalServerConfig{Transport: "stdio", Command: "unused"}
@@ -148,8 +153,8 @@ func TestInternalCallerWorkflowRetryRequiresIdempotencyKey(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			first := &fakeExternalClient{callErr: transport.ErrTransportClosed}
-			second := &fakeExternalClient{result: mcp.NewToolResultText("ok")}
+			first := &fakeExternalClient{callErr: mcpsdk.ErrConnectionClosed}
+			second := &fakeExternalClient{result: &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "ok"}}}}
 			clients := []externalClient{first, second}
 			factoryCalls := 0
 			caller := NewInternalCaller(&Adapter{})
@@ -174,27 +179,20 @@ func TestInternalCallerWorkflowRetryRequiresIdempotencyKey(t *testing.T) {
 				t.Fatalf("factories/calls = %d/%v", factoryCalls, calls)
 			}
 			if test.idempotency == "" {
-				if first.request.Params.Meta != nil {
-					t.Fatalf("unkeyed request meta = %#v", first.request.Params.Meta)
+				if first.params.Meta != nil {
+					t.Fatalf("unkeyed request meta = %#v", first.params.Meta)
 				}
-			} else if first.request.Params.Meta == nil || first.request.Params.Meta.AdditionalFields["hadron/idempotencyKey"] != test.idempotency ||
-				second.request.Params.Meta == nil || second.request.Params.Meta.AdditionalFields["hadron/idempotencyKey"] != test.idempotency {
-				t.Fatalf("keyed retry did not retain key: %#v / %#v", first.request.Params.Meta, second.request.Params.Meta)
+			} else if first.params.Meta == nil || first.params.Meta["hadron/idempotencyKey"] != test.idempotency ||
+				second.params.Meta == nil || second.params.Meta["hadron/idempotencyKey"] != test.idempotency {
+				t.Fatalf("keyed retry did not retain key: %#v / %#v", first.params.Meta, second.params.Meta)
 			}
 		})
 	}
 }
 
-func (f *fakeExternalClient) Ping(_ context.Context) error {
-	f.pingCalls++
-	return f.pingErr
-}
-
-func (f *fakeExternalClient) Close() error { return nil }
-
 func TestInternalCallerRetriesRecoverableCallError(t *testing.T) {
-	first := &fakeExternalClient{callErr: transport.ErrTransportClosed}
-	second := &fakeExternalClient{result: mcp.NewToolResultText(`{"ok":true}`)}
+	first := &fakeExternalClient{callErr: mcpsdk.ErrConnectionClosed}
+	second := &fakeExternalClient{result: &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: `{"ok":true}`}}}}
 	clients := []externalClient{first, second}
 	factoryCalls := 0
 
@@ -239,8 +237,8 @@ func TestInternalCallerRetriesRecoverableCallError(t *testing.T) {
 }
 
 func TestInternalCallerReconnectsOnFailedHealthProbe(t *testing.T) {
-	stale := &fakeExternalClient{pingErr: transport.ErrTransportClosed}
-	fresh := &fakeExternalClient{result: mcp.NewToolResultText(`{"ok":true}`)}
+	stale := &fakeExternalClient{pingErr: mcpsdk.ErrConnectionClosed}
+	fresh := &fakeExternalClient{result: &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: `{"ok":true}`}}}}
 	factoryCalls := 0
 
 	caller := NewInternalCaller(&Adapter{})

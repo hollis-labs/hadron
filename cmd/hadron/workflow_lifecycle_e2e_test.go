@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
@@ -93,20 +94,20 @@ func TestWorkflowLifecycleCrossSurfaceFlywheel(t *testing.T) {
 		mcpadapter.WithWorkflowServices(exposure, operations, nil, nil),
 		mcpadapter.WithWorkflowLifecycle(mcpLifecycle),
 	)
-	mcpSearch := adapter.CallTool(t.Context(), "hadron_workflow_catalog_search", map[string]any{"namespace": "team", "query": "echo", "limit": 10})
-	searchResult, ok := mcpSearch.StructuredContent.(appworkflow.WorkflowCatalogSearchResult)
-	if mcpSearch.IsError || !ok || len(searchResult.Matches) != 1 || searchResult.Matches[0].Definition != ref {
-		t.Fatalf("MCP catalog search = %#v", mcpSearch.StructuredContent)
+	mcpSearch, mcpSearchErr := adapter.CallTool(t.Context(), "hadron_workflow_catalog_search", map[string]any{"namespace": "team", "query": "echo", "limit": 10})
+	searchResult, ok := mcpSearch.(appworkflow.WorkflowCatalogSearchResult)
+	if mcpSearchErr != nil || !ok || len(searchResult.Matches) != 1 || searchResult.Matches[0].Definition != ref {
+		t.Fatalf("MCP catalog search = %#v, err=%v", mcpSearch, mcpSearchErr)
 	}
-	load := adapter.CallTool(t.Context(), "hadron_workflows_load", map[string]any{"definitions": []string{ref.ID + "@" + ref.Version + "@" + ref.Digest}})
-	if load.IsError {
-		t.Fatalf("MCP lazy load = %#v", load.StructuredContent)
+	load, loadErr := adapter.CallTool(t.Context(), "hadron_workflows_load", map[string]any{"definitions": []string{ref.ID + "@" + ref.Version + "@" + ref.Digest}})
+	if loadErr != nil {
+		t.Fatalf("MCP lazy load = %#v, err=%v", load, loadErr)
 	}
-	invocation := adapter.CallTool(t.Context(), published.Descriptor.ToolName, map[string]any{"message": "hello"})
-	if invocation.IsError || invoked.Definition != ref || invoked.Inputs["message"] != "hello" {
-		t.Fatalf("MCP generated invocation = %#v request=%#v", invocation.StructuredContent, invoked)
+	invocation, invocationErr := adapter.CallTool(t.Context(), published.Descriptor.ToolName, map[string]any{"message": "hello"})
+	if invocationErr != nil || invoked.Definition != ref || invoked.Inputs["message"] != "hello" {
+		t.Fatalf("MCP generated invocation = %#v request=%#v err=%v", invocation, invoked, invocationErr)
 	}
-	invocationJSON, err := json.Marshal(invocation.StructuredContent)
+	invocationJSON, err := json.Marshal(invocation)
 	if err != nil || !bytes.Contains(invocationJSON, []byte(`"run_id"`)) || !bytes.Contains(invocationJSON, []byte(`"status"`)) {
 		t.Fatalf("MCP async output = %s, %v", invocationJSON, err)
 	}
@@ -116,10 +117,10 @@ func TestWorkflowLifecycleCrossSurfaceFlywheel(t *testing.T) {
 	if decodeErr := json.Unmarshal(invocationJSON, &handle); decodeErr != nil || handle.RunID == "" {
 		t.Fatalf("MCP run handle = %#v, %v", handle, decodeErr)
 	}
-	inspectedRun := adapter.CallTool(t.Context(), "hadron_workflow_run_inspect", map[string]any{"run_id": handle.RunID})
-	diagnostic, ok := inspectedRun.StructuredContent.(rundiagnostics.Result)
-	if inspectedRun.IsError || !ok || len(diagnostic.Values) != 1 || !diagnostic.Values[0].Values["result"].Masked || diagnostic.Values[0].Values["result"].Payload != values.RedactedMarker || diagnostic.Values[0].Roles[0] != "run.outputs" {
-		t.Fatalf("MCP typed redacted output = %#v", inspectedRun.StructuredContent)
+	inspectedRun, inspectErr := adapter.CallTool(t.Context(), "hadron_workflow_run_inspect", map[string]any{"run_id": handle.RunID})
+	diagnostic, ok := inspectedRun.(rundiagnostics.Result)
+	if inspectErr != nil || !ok || len(diagnostic.Values) != 1 || !diagnostic.Values[0].Values["result"].Masked || diagnostic.Values[0].Values["result"].Payload != values.RedactedMarker || diagnostic.Values[0].Roles[0] != "run.outputs" {
+		t.Fatalf("MCP typed redacted output = %#v, err=%v", inspectedRun, inspectErr)
 	}
 
 	cliDetail := workflowLifecycleE2ECLI(t, lifecycle, ref)
@@ -150,10 +151,19 @@ func TestWorkflowLifecycleCrossSurfaceFlywheel(t *testing.T) {
 	if err != nil || len(unpinned.Record.Pins) != 0 {
 		t.Fatalf("profile unpin = %#v, %v", unpinned, err)
 	}
-	removed := adapter.CallTool(t.Context(), published.Descriptor.ToolName, map[string]any{"message": "again"})
-	removedJSON, marshalErr := json.Marshal(removed.Content)
+	removed, removedErr := adapter.CallTool(t.Context(), published.Descriptor.ToolName, map[string]any{"message": "again"})
+	removedContent := removed
+	var toolErr *budget.ToolError
+	var structuredErr budget.StructuredError
+	switch {
+	case errors.As(removedErr, &toolErr):
+		removedContent = toolErr
+	case errors.As(removedErr, &structuredErr):
+		removedContent = structuredErr.ToolErrorContent()
+	}
+	removedJSON, marshalErr := json.Marshal(removedContent)
 	if marshalErr != nil || !bytes.Contains(removedJSON, []byte(`not_found`)) || runCalls != 1 {
-		t.Fatalf("unpin retained generated MCP tool: content=%s calls=%d error=%v", removedJSON, runCalls, marshalErr)
+		t.Fatalf("unpin retained generated MCP tool: content=%s calls=%d callErr=%v marshalErr=%v", removedJSON, runCalls, removedErr, marshalErr)
 	}
 }
 

@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/persistence"
-	"github.com/mark3labs/mcp-go/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestNewServer_ToolAnnotations(t *testing.T) {
@@ -20,33 +21,38 @@ func TestNewServer_ToolAnnotations(t *testing.T) {
 	adapter := New(store, nil, nil, nil, "", nil)
 	srv := adapter.newServer()
 
-	broker := srv.GetTool("hadron_blueprint_broker")
-	if broker == nil {
-		t.Fatal("expected hadron_blueprint_broker tool")
-	}
-	if broker.Tool.Annotations.ReadOnlyHint == nil || !*broker.Tool.Annotations.ReadOnlyHint {
-		t.Fatalf("expected hadron_blueprint_broker to be read-only: %#v", broker.Tool.Annotations)
-	}
-	if broker.Tool.Annotations.IdempotentHint == nil || !*broker.Tool.Annotations.IdempotentHint {
-		t.Fatalf("expected hadron_blueprint_broker to be idempotent: %#v", broker.Tool.Annotations)
+	defs := map[string]gomcp.ToolDefinition{}
+	for _, def := range srv.ToolDefinitions() {
+		defs[def.Name] = def
 	}
 
-	runEnqueue := srv.GetTool("hadron_run_enqueue")
-	if runEnqueue == nil {
+	broker, ok := defs["hadron_blueprint_broker"]
+	if !ok {
+		t.Fatal("expected hadron_blueprint_broker tool")
+	}
+	if !broker.Annotations.ReadOnlyHint {
+		t.Fatalf("expected hadron_blueprint_broker to be read-only: %#v", broker.Annotations)
+	}
+	if !broker.Annotations.IdempotentHint {
+		t.Fatalf("expected hadron_blueprint_broker to be idempotent: %#v", broker.Annotations)
+	}
+
+	runEnqueue, ok := defs["hadron_run_enqueue"]
+	if !ok {
 		t.Fatal("expected hadron_run_enqueue tool")
 	}
-	if runEnqueue.Tool.Annotations.ReadOnlyHint == nil || *runEnqueue.Tool.Annotations.ReadOnlyHint {
-		t.Fatalf("expected hadron_run_enqueue to be mutating: %#v", runEnqueue.Tool.Annotations)
+	if runEnqueue.Annotations.ReadOnlyHint {
+		t.Fatalf("expected hadron_run_enqueue to be mutating: %#v", runEnqueue.Annotations)
 	}
-	if runEnqueue.Tool.Annotations.DestructiveHint == nil || *runEnqueue.Tool.Annotations.DestructiveHint {
-		t.Fatalf("expected hadron_run_enqueue to be non-destructive: %#v", runEnqueue.Tool.Annotations)
+	if runEnqueue.Annotations.DestructiveHint {
+		t.Fatalf("expected hadron_run_enqueue to be non-destructive: %#v", runEnqueue.Annotations)
 	}
 }
 
 func TestHandlePromptPickBlueprint(t *testing.T) {
 	adapter := &Adapter{}
-	result, err := adapter.handlePromptPickBlueprint(context.Background(), mcp.GetPromptRequest{
-		Params: mcp.GetPromptParams{
+	result, err := adapter.handlePromptPickBlueprint(context.Background(), &mcpsdk.GetPromptRequest{
+		Params: &mcpsdk.GetPromptParams{
 			Arguments: map[string]string{"task": "prepare a beta release"},
 		},
 	})
@@ -56,7 +62,7 @@ func TestHandlePromptPickBlueprint(t *testing.T) {
 	if result == nil || len(result.Messages) != 2 {
 		t.Fatalf("unexpected prompt result: %#v", result)
 	}
-	if msg, ok := result.Messages[0].Content.(mcp.TextContent); !ok || !strings.Contains(msg.Text, "hadron_blueprint_broker") {
+	if msg, ok := result.Messages[0].Content.(*mcpsdk.TextContent); !ok || !strings.Contains(msg.Text, "hadron_blueprint_broker") {
 		t.Fatalf("unexpected first prompt message: %#v", result.Messages[0])
 	}
 }
@@ -91,18 +97,17 @@ steps:
 	}
 
 	adapter := New(store, nil, nil, nil, "", nil, WithBlueprintDir(dir))
-	items, err := adapter.handleBlueprintSchemaResource(context.Background(), mcp.ReadResourceRequest{
-		Params: mcp.ReadResourceParams{URI: "hadron://blueprints/release-docs/input-schema"},
+	result, err := adapter.handleBlueprintSchemaResource(context.Background(), &mcpsdk.ReadResourceRequest{
+		Params: &mcpsdk.ReadResourceParams{URI: "hadron://blueprints/release-docs/input-schema"},
 	})
 	if err != nil {
 		t.Fatalf("handleBlueprintSchemaResource: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("expected one resource content, got %#v", items)
+	if result == nil || len(result.Contents) != 1 {
+		t.Fatalf("expected one resource content, got %#v", result)
 	}
-	text, ok := items[0].(mcp.TextResourceContents)
-	if !ok || !strings.Contains(text.Text, "\"version\"") {
-		t.Fatalf("unexpected resource content: %#v", items[0])
+	if !strings.Contains(result.Contents[0].Text, "\"version\"") {
+		t.Fatalf("unexpected resource content: %#v", result.Contents[0])
 	}
 }
 
@@ -132,25 +137,29 @@ steps:
 
 	adapter := New(store, nil, nil, nil, "", nil, WithBlueprintDir(dir))
 
-	tagCompletion, err := adapter.CompletePromptArgument(context.Background(), "hadron_pick_blueprint", mcp.CompleteArgument{
-		Name:  "tag",
-		Value: "re",
-	}, mcp.CompleteContext{})
+	tagCompletion, err := adapter.handleCompletion(context.Background(), &mcpsdk.CompleteRequest{
+		Params: &mcpsdk.CompleteParams{
+			Ref:      &mcpsdk.CompleteReference{Type: "ref/prompt", Name: "hadron_pick_blueprint"},
+			Argument: mcpsdk.CompleteParamsArgument{Name: "tag", Value: "re"},
+		},
+	})
 	if err != nil {
-		t.Fatalf("CompletePromptArgument: %v", err)
+		t.Fatalf("handleCompletion (prompt): %v", err)
 	}
-	if len(tagCompletion.Values) != 1 || tagCompletion.Values[0] != "release" {
-		t.Fatalf("unexpected tag completions: %#v", tagCompletion)
+	if len(tagCompletion.Completion.Values) != 1 || tagCompletion.Completion.Values[0] != "release" {
+		t.Fatalf("unexpected tag completions: %#v", tagCompletion.Completion)
 	}
 
-	refCompletion, err := adapter.CompleteResourceArgument(context.Background(), "hadron://blueprints/{blueprint_ref}/input-schema", mcp.CompleteArgument{
-		Name:  "blueprint_ref",
-		Value: "rel",
-	}, mcp.CompleteContext{})
+	refCompletion, err := adapter.handleCompletion(context.Background(), &mcpsdk.CompleteRequest{
+		Params: &mcpsdk.CompleteParams{
+			Ref:      &mcpsdk.CompleteReference{Type: "ref/resource", URI: "hadron://blueprints/{blueprint_ref}/input-schema"},
+			Argument: mcpsdk.CompleteParamsArgument{Name: "blueprint_ref", Value: "rel"},
+		},
+	})
 	if err != nil {
-		t.Fatalf("CompleteResourceArgument: %v", err)
+		t.Fatalf("handleCompletion (resource): %v", err)
 	}
-	if len(refCompletion.Values) == 0 || refCompletion.Values[0] != "release-docs" {
-		t.Fatalf("unexpected blueprint ref completions: %#v", refCompletion)
+	if len(refCompletion.Completion.Values) == 0 || refCompletion.Completion.Values[0] != "release-docs" {
+		t.Fatalf("unexpected blueprint ref completions: %#v", refCompletion.Completion)
 	}
 }

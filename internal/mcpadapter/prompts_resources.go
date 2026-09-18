@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"strings"
 
+	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// Prompts, resources, and resource templates are not wrapped by go-mcp (see
+// its README): they carry none of the required-annotation contract Tool
+// does, so registering them directly against the official SDK via
+// SDKServer() is the documented pattern, not a workaround.
 
 const (
 	resourceMCPStartHere        = "hadron://docs/mcp/start-here"
@@ -35,69 +40,80 @@ Preferred sequence:
 3. provide normalized inputs
 4. enqueue the run`
 
-func (a *Adapter) registerPrompts(s *server.MCPServer) {
-	s.AddPrompt(mcp.NewPrompt("hadron_pick_blueprint",
-		mcp.WithPromptDescription("Guide an agent through selecting a Hadron blueprint for a task, then inspecting its input schema before enqueueing."),
-		mcp.WithArgument("task",
-			mcp.ArgumentDescription("Task or workflow the agent needs to accomplish"),
-			mcp.RequiredArgument(),
-		),
-		mcp.WithArgument("tag",
-			mcp.ArgumentDescription("Optional exact blueprint tag filter"),
-		),
-	), a.handlePromptPickBlueprint)
+func (a *Adapter) registerPrompts(s *gomcp.Server) {
+	sdk := s.SDKServer()
 
-	s.AddPrompt(mcp.NewPrompt("hadron_debug_run",
-		mcp.WithPromptDescription("Guide an agent through debugging a Hadron run using structured diagnostics first, then raw events if needed."),
-		mcp.WithArgument("run_id",
-			mcp.ArgumentDescription("Hadron run id to inspect"),
-			mcp.RequiredArgument(),
-		),
-		mcp.WithArgument("workspace_id",
-			mcp.ArgumentDescription("Optional workspace id for scope checks"),
-		),
-	), a.handlePromptDebugRun)
-}
-
-func (a *Adapter) registerResources(s *server.MCPServer) {
-	resources := []server.ServerResource{
-		staticTextResource(resourceMCPStartHere, "Hadron MCP Start Here", hadronSkillBodies["start-here"]),
-		staticTextResource(resourceMCPBlueprints, "Hadron Blueprint Discovery", hadronSkillBodies["blueprint-discovery"]),
-		staticTextResource(resourceMCPRunInspection, "Hadron Run Inspection", hadronSkillBodies["run-inspection"]),
-		staticTextResource(resourceMCPMessageWorkflows, "Hadron Message Workflows", hadronSkillBodies["message-workflows"]),
-		staticTextResource(resourceMCPInputSchemaGuide, "Hadron Input Schema Guide", inputSchemaGuide),
-	}
-	s.AddResources(resources...)
-
-	s.AddResourceTemplate(mcp.NewResourceTemplate(
-		"hadron://blueprints/{blueprint_ref}/input-schema",
-		"Hadron Blueprint Input Schema",
-		mcp.WithTemplateDescription("Return the agent-facing JSON input schema for a blueprint identified by slug, name, file basename, or registry entry."),
-		mcp.WithTemplateMIMEType("application/json"),
-	), a.handleBlueprintSchemaResource)
-}
-
-func staticTextResource(uri, name, body string) server.ServerResource {
-	return server.ServerResource{
-		Resource: mcp.NewResource(
-			uri,
-			name,
-			mcp.WithResourceDescription(name),
-			mcp.WithMIMEType("text/markdown"),
-		),
-		Handler: func(_ context.Context, _ mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			return []mcp.ResourceContents{
-				mcp.TextResourceContents{
-					URI:      uri,
-					MIMEType: "text/markdown",
-					Text:     body,
-				},
-			}, nil
+	sdk.AddPrompt(&mcpsdk.Prompt{
+		Name:        "hadron_pick_blueprint",
+		Description: "Guide an agent through selecting a Hadron blueprint for a task, then inspecting its input schema before enqueueing.",
+		Arguments: []*mcpsdk.PromptArgument{
+			{Name: "task", Description: "Task or workflow the agent needs to accomplish", Required: true},
+			{Name: "tag", Description: "Optional exact blueprint tag filter"},
 		},
+	}, a.handlePromptPickBlueprint)
+
+	sdk.AddPrompt(&mcpsdk.Prompt{
+		Name:        "hadron_debug_run",
+		Description: "Guide an agent through debugging a Hadron run using structured diagnostics first, then raw events if needed.",
+		Arguments: []*mcpsdk.PromptArgument{
+			{Name: "run_id", Description: "Hadron run id to inspect", Required: true},
+			{Name: "workspace_id", Description: "Optional workspace id for scope checks"},
+		},
+	}, a.handlePromptDebugRun)
+}
+
+func (a *Adapter) registerResources(s *gomcp.Server) {
+	sdk := s.SDKServer()
+
+	for uri, body := range map[string]string{
+		resourceMCPStartHere:        hadronSkillBodies["start-here"],
+		resourceMCPBlueprints:       hadronSkillBodies["blueprint-discovery"],
+		resourceMCPRunInspection:    hadronSkillBodies["run-inspection"],
+		resourceMCPMessageWorkflows: hadronSkillBodies["message-workflows"],
+		resourceMCPInputSchemaGuide: inputSchemaGuide,
+	} {
+		staticTextResource(sdk, uri, resourceDisplayName(uri), body)
+	}
+
+	sdk.AddResourceTemplate(&mcpsdk.ResourceTemplate{
+		URITemplate: "hadron://blueprints/{blueprint_ref}/input-schema",
+		Name:        "Hadron Blueprint Input Schema",
+		Description: "Return the agent-facing JSON input schema for a blueprint identified by slug, name, file basename, or registry entry.",
+		MIMEType:    "application/json",
+	}, a.handleBlueprintSchemaResource)
+}
+
+func resourceDisplayName(uri string) string {
+	switch uri {
+	case resourceMCPStartHere:
+		return "Hadron MCP Start Here"
+	case resourceMCPBlueprints:
+		return "Hadron Blueprint Discovery"
+	case resourceMCPRunInspection:
+		return "Hadron Run Inspection"
+	case resourceMCPMessageWorkflows:
+		return "Hadron Message Workflows"
+	case resourceMCPInputSchemaGuide:
+		return "Hadron Input Schema Guide"
+	default:
+		return uri
 	}
 }
 
-func (a *Adapter) handlePromptPickBlueprint(_ context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+func staticTextResource(sdk *mcpsdk.Server, uri, name, body string) {
+	sdk.AddResource(&mcpsdk.Resource{
+		URI:         uri,
+		Name:        name,
+		Description: name,
+		MIMEType:    "text/markdown",
+	}, func(_ context.Context, _ *mcpsdk.ReadResourceRequest) (*mcpsdk.ReadResourceResult, error) {
+		return &mcpsdk.ReadResourceResult{
+			Contents: []*mcpsdk.ResourceContents{{URI: uri, MIMEType: "text/markdown", Text: body}},
+		}, nil
+	})
+}
+
+func (a *Adapter) handlePromptPickBlueprint(_ context.Context, req *mcpsdk.GetPromptRequest) (*mcpsdk.GetPromptResult, error) {
 	task := strings.TrimSpace(req.Params.Arguments["task"])
 	if task == "" {
 		return nil, fmt.Errorf("task is required")
@@ -112,20 +128,20 @@ func (a *Adapter) handlePromptPickBlueprint(_ context.Context, req mcp.GetPrompt
 	if tag != "" {
 		lines = append(lines, "Tag filter: "+tag)
 	}
-	return mcp.NewGetPromptResult(
-		"Select and prepare a Hadron blueprint",
-		[]mcp.PromptMessage{
-			mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(strings.Join(lines, "\n"))),
-			mcp.NewPromptMessage(mcp.RoleAssistant, mcp.NewEmbeddedResource(mcp.TextResourceContents{
+	return &mcpsdk.GetPromptResult{
+		Description: "Select and prepare a Hadron blueprint",
+		Messages: []*mcpsdk.PromptMessage{
+			{Role: "user", Content: &mcpsdk.TextContent{Text: strings.Join(lines, "\n")}},
+			{Role: "assistant", Content: &mcpsdk.EmbeddedResource{Resource: &mcpsdk.ResourceContents{
 				URI:      resourceMCPBlueprints,
 				MIMEType: "text/markdown",
 				Text:     hadronSkillBodies["blueprint-discovery"],
-			})),
+			}}},
 		},
-	), nil
+	}, nil
 }
 
-func (a *Adapter) handlePromptDebugRun(_ context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+func (a *Adapter) handlePromptDebugRun(_ context.Context, req *mcpsdk.GetPromptRequest) (*mcpsdk.GetPromptResult, error) {
 	runID := strings.TrimSpace(req.Params.Arguments["run_id"])
 	if runID == "" {
 		return nil, fmt.Errorf("run_id is required")
@@ -139,20 +155,20 @@ func (a *Adapter) handlePromptDebugRun(_ context.Context, req mcp.GetPromptReque
 	if workspaceID != "" {
 		lines = append(lines, "Workspace scope: "+workspaceID)
 	}
-	return mcp.NewGetPromptResult(
-		"Debug a Hadron run",
-		[]mcp.PromptMessage{
-			mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(strings.Join(lines, "\n"))),
-			mcp.NewPromptMessage(mcp.RoleAssistant, mcp.NewEmbeddedResource(mcp.TextResourceContents{
+	return &mcpsdk.GetPromptResult{
+		Description: "Debug a Hadron run",
+		Messages: []*mcpsdk.PromptMessage{
+			{Role: "user", Content: &mcpsdk.TextContent{Text: strings.Join(lines, "\n")}},
+			{Role: "assistant", Content: &mcpsdk.EmbeddedResource{Resource: &mcpsdk.ResourceContents{
 				URI:      resourceMCPRunInspection,
 				MIMEType: "text/markdown",
 				Text:     hadronSkillBodies["run-inspection"],
-			})),
+			}}},
 		},
-	), nil
+	}, nil
 }
 
-func (a *Adapter) handleBlueprintSchemaResource(_ context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+func (a *Adapter) handleBlueprintSchemaResource(_ context.Context, req *mcpsdk.ReadResourceRequest) (*mcpsdk.ReadResourceResult, error) {
 	const prefix = "hadron://blueprints/"
 	const suffix = "/input-schema"
 	uri := req.Params.URI
@@ -185,11 +201,7 @@ func (a *Adapter) handleBlueprintSchemaResource(_ context.Context, req mcp.ReadR
 	if err != nil {
 		return nil, err
 	}
-	return []mcp.ResourceContents{
-		mcp.TextResourceContents{
-			URI:      uri,
-			MIMEType: "application/json",
-			Text:     string(body),
-		},
+	return &mcpsdk.ReadResourceResult{
+		Contents: []*mcpsdk.ResourceContents{{URI: uri, MIMEType: "application/json", Text: string(body)}},
 	}, nil
 }

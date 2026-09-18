@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/hollis-labs/go-mcp/budget"
+	gomcp "github.com/hollis-labs/go-mcp/server"
 )
 
 type hadronSkillDoc struct {
@@ -78,44 +78,41 @@ func workflowSkillIndex() []hadronSkillDoc {
 	}
 }
 
-func (a *Adapter) registerSkillsTool(s *server.MCPServer) {
-	s.AddTool(mcp.NewTool("hadron_skills",
-		mcp.WithDescription("Hadron MCP orientation and skill index. Call with no args for the catalog; call with `name` to read one skill in full."),
-		mcp.WithString("name", mcp.Description("Skill name to read in full. Omit to list available skills.")),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(false),
-	), a.handleHadronSkills)
+func (a *Adapter) registerSkillsTool(s *gomcp.Server) {
+	registerTool(s, "hadron_skills", "Hadron MCP orientation and skill index. Call with no args for the catalog; call with `name` to read one skill in full.",
+		gomcp.ObjectSchema(map[string]any{
+			"name": strProp("Skill name to read in full. Omit to list available skills."),
+		}), a.handleHadronSkills)
 }
 
-func (a *Adapter) handleHadronSkills(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	name := req.GetString("name", "")
+func (a *Adapter) handleHadronSkills(_ context.Context, args map[string]any) (any, error) {
+	name := argString(args, "name", "")
 	if name == "" {
 		items := hadronSkillIndex()
 		if a.workflowOnly {
 			items = workflowSkillIndex()
 		}
-		return toolJSON(map[string]any{
+		return map[string]any{
 			"items": items,
 			"meta": map[string]any{
 				"count":                 len(items),
 				"progressive_discovery": true,
 				"next":                  "hadron_skills",
 			},
-		}), nil
+		}, nil
 	}
 	if a.workflowOnly && name != "start-here" && name != "workflow-lifecycle" && name != "run-inspection" {
-		return toolError("skill_not_found", errHadronSkillNotFound.Error()), nil
+		return nil, budget.NewToolError("skill_not_found", errHadronSkillNotFound.Error()).WithField("name")
 	}
 	body, err := getHadronSkill(name)
 	if err != nil {
 		if errors.Is(err, errHadronSkillNotFound) {
-			return toolError("skill_not_found", err.Error()), nil
+			return nil, budget.NewToolError("skill_not_found", err.Error()).WithField("name").
+				WithHelpTool("hadron_skills").WithNextStep("call hadron_skills with no arguments to list available skill names")
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return mcp.NewToolResultText(body), nil
+	return body, nil
 }
 
 func getHadronSkill(name string) (string, error) {

@@ -9,15 +9,14 @@ import (
 
 	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/pipeline"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-func (a *Adapter) handlePipelinesList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
-	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
+func (a *Adapter) handlePipelinesList(ctx context.Context, args map[string]any) (any, error) {
+	workspaceID := workspaceDefault(argString(args, "workspace_id", "default"))
+	limit := budget.ExtractLimit(args, budget.DefaultLimit)
 	items, err := a.store.ListPipelineRunsByWorkspace(ctx, workspaceID, limit)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, p := range items {
@@ -28,57 +27,58 @@ func (a *Adapter) handlePipelinesList(ctx context.Context, req mcp.CallToolReque
 			"created_at":    p.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	env := budget.Apply(out, budget.Config{Limit: limit},
-		"%d pipeline runs found. Use hadron_pipeline_stages with a specific pipeline_run_id for full details.")
-	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
+	return budget.Apply(out, budget.Config{Limit: limit},
+		"%d pipeline runs found. Use hadron_pipeline_stages with a specific pipeline_run_id for full details."), nil
 }
 
-func (a *Adapter) handlePipelineEnqueue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopePipelineWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handlePipelineEnqueue(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopePipelineWrite); err != nil {
+		return nil, err
 	}
 	if a.pipeline == nil {
-		return toolError("unavailable", "pipeline runner unavailable"), nil
+		return nil, budget.NewToolError("unavailable", "pipeline runner unavailable").WithRetryable(true)
 	}
-	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
+	workspaceID := workspaceDefault(argString(args, "workspace_id", "default"))
 	if _, err := a.store.GetWorkspace(ctx, workspaceID); err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "workspace not found"), nil
+			return nil, budget.NewToolError("not_found", "workspace not found").
+				WithField("workspace_id").WithHelpTool("hadron_workspaces_list").
+				WithNextStep("call hadron_workspaces_list to find a valid workspace_id")
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	pipelinePath := strings.TrimSpace(req.GetString("pipeline_path", ""))
+	pipelinePath := strings.TrimSpace(argString(args, "pipeline_path", ""))
 	if pipelinePath == "" {
-		return toolError("validation_error", "pipeline_path is required"), nil
+		return nil, budget.NewToolError("validation_error", "pipeline_path is required").WithField("pipeline_path")
 	}
 	if _, err := pipeline.ParseFile(pipelinePath); err != nil {
-		return toolError("validation_error", err.Error()), nil
+		return nil, budget.NewToolError("validation_error", err.Error()).WithField("pipeline_path")
 	}
 	id := fmt.Sprintf("mcp-pl-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&pipelineSeq, 1))
 	if err := a.pipeline.Start(ctx, id, pipelinePath, workspaceID); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{"pipeline_run_id": id, "status": "queued", "workspace_id": workspaceID}), nil
+	return map[string]any{"pipeline_run_id": id, "status": "queued", "workspace_id": workspaceID}, nil
 }
 
-func (a *Adapter) handlePipelineStages(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id := strings.TrimSpace(req.GetString("pipeline_run_id", ""))
+func (a *Adapter) handlePipelineStages(ctx context.Context, args map[string]any) (any, error) {
+	id := strings.TrimSpace(argString(args, "pipeline_run_id", ""))
 	if id == "" {
-		return toolError("validation_error", "pipeline_run_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "pipeline_run_id is required").WithField("pipeline_run_id")
 	}
 	runRec, err := a.store.GetPipelineRun(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "pipeline run not found"), nil
+			return nil, notFoundPipelineRun()
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
-		return toolError("not_found", "pipeline run not found in workspace"), nil
+	if ws := strings.TrimSpace(argString(args, "workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
+		return nil, notFoundPipelineRun()
 	}
 	items, err := a.store.ListPipelineStageRuns(ctx, id)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 
 	// Try to load pipeline spec for DAG metadata enrichment.
@@ -112,29 +112,29 @@ func (a *Adapter) handlePipelineStages(ctx context.Context, req mcp.CallToolRequ
 		}
 		out = append(out, entry)
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+	return map[string]any{"items": out, "count": len(out)}, nil
 }
 
-func (a *Adapter) handlePipelineGraph(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id := strings.TrimSpace(req.GetString("pipeline_run_id", ""))
+func (a *Adapter) handlePipelineGraph(ctx context.Context, args map[string]any) (any, error) {
+	id := strings.TrimSpace(argString(args, "pipeline_run_id", ""))
 	if id == "" {
-		return toolError("validation_error", "pipeline_run_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "pipeline_run_id is required").WithField("pipeline_run_id")
 	}
 	runRec, err := a.store.GetPipelineRun(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "pipeline run not found"), nil
+			return nil, notFoundPipelineRun()
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
-		return toolError("not_found", "pipeline run not found in workspace"), nil
+	if ws := strings.TrimSpace(argString(args, "workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
+		return nil, notFoundPipelineRun()
 	}
 
 	// Load stage run records for status.
 	stageRuns, err := a.store.ListPipelineStageRuns(ctx, id)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	statusMap := make(map[string]string, len(stageRuns))
 	for _, sr := range stageRuns {
@@ -144,7 +144,7 @@ func (a *Adapter) handlePipelineGraph(ctx context.Context, req mcp.CallToolReque
 	// Parse pipeline spec for DAG structure.
 	spec, parseErr := pipeline.ParseFile(runRec.PipelinePath)
 	if parseErr != nil {
-		return toolError("internal_error", "cannot parse pipeline spec: "+parseErr.Error()), nil //nolint:nilerr
+		return nil, budget.NewToolError("internal_error", "cannot parse pipeline spec: "+parseErr.Error())
 	}
 
 	nodes := make([]map[string]any, 0, len(spec.Stages))
@@ -184,10 +184,16 @@ func (a *Adapter) handlePipelineGraph(ctx context.Context, req mcp.CallToolReque
 		}
 	}
 
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"nodes": nodes,
 		"edges": edges,
-	}), nil
+	}, nil
+}
+
+func notFoundPipelineRun() *budget.ToolError {
+	return budget.NewToolError("not_found", "pipeline run not found").
+		WithField("pipeline_run_id").WithHelpTool("hadron_pipelines_list").
+		WithNextStep("call hadron_pipelines_list to find a valid pipeline_run_id")
 }
 
 // parsePipelineSpecStages attempts to parse a pipeline spec file and returns

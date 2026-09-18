@@ -6,32 +6,38 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (a *Adapter) CompletePromptArgument(_ context.Context, promptName string, argument mcp.CompleteArgument, _ mcp.CompleteContext) (*mcp.Completion, error) {
-	switch promptName {
-	case "hadron_pick_blueprint":
-		if argument.Name == "tag" {
-			values, err := a.completeBlueprintTags(argument.Value)
+// handleCompletion is installed as go-mcp's single CompletionHandler
+// (gomcp.WithCompletionHandler). It replaces mark3labs' two-interface
+// PromptCompletionProvider/ResourceCompletionProvider pattern: the official
+// SDK serves completion/complete for both prompts and resource templates
+// through one handler, dispatched by req.Params.Ref.
+func (a *Adapter) handleCompletion(_ context.Context, req *mcpsdk.CompleteRequest) (*mcpsdk.CompleteResult, error) {
+	empty := &mcpsdk.CompleteResult{Completion: mcpsdk.CompletionResultDetails{Values: []string{}}}
+	if req.Params == nil || req.Params.Ref == nil {
+		return empty, nil
+	}
+	switch req.Params.Ref.Type {
+	case "ref/prompt":
+		if req.Params.Ref.Name == "hadron_pick_blueprint" && req.Params.Argument.Name == "tag" {
+			values, err := a.completeBlueprintTags(req.Params.Argument.Value)
 			if err != nil {
 				return nil, err
 			}
-			return &mcp.Completion{Values: values, Total: len(values)}, nil
+			return &mcpsdk.CompleteResult{Completion: mcpsdk.CompletionResultDetails{Values: values, Total: len(values)}}, nil
+		}
+	case "ref/resource":
+		if req.Params.Ref.URI == "hadron://blueprints/{blueprint_ref}/input-schema" && req.Params.Argument.Name == "blueprint_ref" {
+			values, err := a.completeBlueprintRefs(req.Params.Argument.Value)
+			if err != nil {
+				return nil, err
+			}
+			return &mcpsdk.CompleteResult{Completion: mcpsdk.CompletionResultDetails{Values: values, Total: len(values)}}, nil
 		}
 	}
-	return &mcp.Completion{Values: []string{}}, nil
-}
-
-func (a *Adapter) CompleteResourceArgument(_ context.Context, uri string, argument mcp.CompleteArgument, _ mcp.CompleteContext) (*mcp.Completion, error) {
-	if uri == "hadron://blueprints/{blueprint_ref}/input-schema" && argument.Name == "blueprint_ref" {
-		values, err := a.completeBlueprintRefs(argument.Value)
-		if err != nil {
-			return nil, err
-		}
-		return &mcp.Completion{Values: values, Total: len(values)}, nil
-	}
-	return &mcp.Completion{Values: []string{}}, nil
+	return empty, nil
 }
 
 func (a *Adapter) completeBlueprintTags(prefix string) ([]string, error) {

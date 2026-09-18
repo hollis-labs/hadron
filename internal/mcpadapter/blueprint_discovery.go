@@ -9,10 +9,9 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/go-mcp/budget"
+	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 type blueprintCatalogEntry struct {
@@ -46,60 +45,44 @@ var discoveryGenericIntentWords = map[string]struct{}{
 	"working": {},
 }
 
-func (a *Adapter) registerBlueprintDiscoveryTools(s *server.MCPServer) {
-	s.AddTool(mcp.NewTool("hadron_blueprint_discover",
-		mcp.WithDescription("Discover blueprints from the configured blueprint directory. Use this first when you need a likely-fit workflow and do not know the exact file path yet."),
-		mcp.WithString("query", mcp.Description("Optional free-text task or intent to rank likely blueprints")),
-		mcp.WithString("tag", mcp.Description("Optional exact blueprint tag filter")),
-		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(false),
-	), a.handleBlueprintDiscover)
+func (a *Adapter) registerBlueprintDiscoveryTools(s *gomcp.Server) {
+	registerTool(s, "hadron_blueprint_discover", "Discover blueprints from the configured blueprint directory. Use this first when you need a likely-fit workflow and do not know the exact file path yet.",
+		gomcp.ObjectSchema(map[string]any{
+			"query": strProp("Optional free-text task or intent to rank likely blueprints"),
+			"tag":   strProp("Optional exact blueprint tag filter"),
+			"limit": numProp("Max items to return (default 10, max 25)"),
+		}), a.handleBlueprintDiscover)
 
-	s.AddTool(mcp.NewTool("hadron_blueprint_broker",
-		mcp.WithDescription("Return ranked blueprint recommendations for a task. This is the progressive-discovery companion to blueprint listing: it returns reasons and next steps, then the caller follows with hadron_blueprint_schema or hadron_blueprint_get."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Task or workflow intent to match against available blueprints")),
-		mcp.WithString("tag", mcp.Description("Optional exact blueprint tag filter")),
-		mcp.WithNumber("limit", mcp.Description("Max items to return (default 5, max 20)")),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(false),
-	), a.handleBlueprintBroker)
+	registerTool(s, "hadron_blueprint_broker", "Return ranked blueprint recommendations for a task. This is the progressive-discovery companion to blueprint listing: it returns reasons and next steps, then the caller follows with hadron_blueprint_schema or hadron_blueprint_get.",
+		gomcp.ObjectSchema(map[string]any{
+			"query": strProp("Task or workflow intent to match against available blueprints"),
+			"tag":   strProp("Optional exact blueprint tag filter"),
+			"limit": numProp("Max items to return (default 5, max 20)"),
+		}, "query"), a.handleBlueprintBroker)
 
-	s.AddTool(mcp.NewTool("hadron_blueprint_search",
-		mcp.WithDescription("Search blueprints by task keywords across name, slug, title, description, tags, and input names."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Task description or keywords to search for")),
-		mcp.WithString("tag", mcp.Description("Optional exact blueprint tag filter")),
-		mcp.WithNumber("limit", mcp.Description("Max items to return (default 10, max 25)")),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(false),
-	), a.handleBlueprintSearch)
+	registerTool(s, "hadron_blueprint_search", "Search blueprints by task keywords across name, slug, title, description, tags, and input names.",
+		gomcp.ObjectSchema(map[string]any{
+			"query": strProp("Task description or keywords to search for"),
+			"tag":   strProp("Optional exact blueprint tag filter"),
+			"limit": numProp("Max items to return (default 10, max 25)"),
+		}, "query"), a.handleBlueprintSearch)
 
-	s.AddTool(mcp.NewTool("hadron_blueprint_schema",
-		mcp.WithDescription("Read the agent-facing input schema for a blueprint. Use after discovery to prepare inputs for hadron_run_enqueue."),
-		mcp.WithString("blueprint_path", mcp.Required(), mcp.Description("Path to the blueprint file")),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(false),
-	), a.handleBlueprintSchema)
+	registerTool(s, "hadron_blueprint_schema", "Read the agent-facing input schema for a blueprint. Use after discovery to prepare inputs for hadron_run_enqueue.",
+		gomcp.ObjectSchema(map[string]any{
+			"blueprint_path": strProp("Path to the blueprint file"),
+		}, "blueprint_path"), a.handleBlueprintSchema)
 }
 
-func (a *Adapter) handleBlueprintDiscover(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	query := strings.TrimSpace(req.GetString("query", ""))
-	tagFilter := strings.TrimSpace(req.GetString("tag", ""))
-	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
+func (a *Adapter) handleBlueprintDiscover(_ context.Context, args map[string]any) (any, error) {
+	query := strings.TrimSpace(argString(args, "query", ""))
+	tagFilter := strings.TrimSpace(argString(args, "tag", ""))
+	limit := budget.ExtractLimit(args, budget.DefaultLimit)
 
 	entries, total, err := a.discoverBlueprints(query, tagFilter, limit, false)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"items": entries,
 		"meta": map[string]any{
 			"query":                 query,
@@ -110,16 +93,16 @@ func (a *Adapter) handleBlueprintDiscover(_ context.Context, req mcp.CallToolReq
 			"progressive_discovery": true,
 			"next":                  []string{"hadron_blueprint_schema", "hadron_blueprint_get", "hadron_run_enqueue"},
 		},
-	}), nil
+	}, nil
 }
 
-func (a *Adapter) handleBlueprintBroker(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	query := strings.TrimSpace(req.GetString("query", ""))
+func (a *Adapter) handleBlueprintBroker(_ context.Context, args map[string]any) (any, error) {
+	query := strings.TrimSpace(argString(args, "query", ""))
 	if query == "" {
-		return toolError("validation_error", "query is required"), nil
+		return nil, budget.NewToolError("validation_error", "query is required").WithField("query")
 	}
-	tagFilter := strings.TrimSpace(req.GetString("tag", ""))
-	limit := req.GetInt("limit", 5)
+	tagFilter := strings.TrimSpace(argString(args, "tag", ""))
+	limit := argInt(args, "limit", 5)
 	if limit <= 0 {
 		limit = 5
 	}
@@ -129,9 +112,9 @@ func (a *Adapter) handleBlueprintBroker(_ context.Context, req mcp.CallToolReque
 
 	items, total, err := a.discoverBlueprints(query, tagFilter, limit, true)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"items": items,
 		"meta": map[string]any{
 			"query":                 query,
@@ -141,22 +124,22 @@ func (a *Adapter) handleBlueprintBroker(_ context.Context, req mcp.CallToolReque
 			"progressive_discovery": true,
 			"next":                  []string{"hadron_blueprint_schema", "hadron_blueprint_get", "hadron_run_enqueue"},
 		},
-	}), nil
+	}, nil
 }
 
-func (a *Adapter) handleBlueprintSearch(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	query := strings.TrimSpace(req.GetString("query", ""))
+func (a *Adapter) handleBlueprintSearch(_ context.Context, args map[string]any) (any, error) {
+	query := strings.TrimSpace(argString(args, "query", ""))
 	if query == "" {
-		return toolError("validation_error", "query is required"), nil
+		return nil, budget.NewToolError("validation_error", "query is required").WithField("query")
 	}
-	tagFilter := strings.TrimSpace(req.GetString("tag", ""))
-	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
+	tagFilter := strings.TrimSpace(argString(args, "tag", ""))
+	limit := budget.ExtractLimit(args, budget.DefaultLimit)
 
 	entries, total, err := a.discoverBlueprints(query, tagFilter, limit, true)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"items": entries,
 		"meta": map[string]any{
 			"query":         query,
@@ -165,30 +148,30 @@ func (a *Adapter) handleBlueprintSearch(_ context.Context, req mcp.CallToolReque
 			"total_matches": total,
 			"next":          []string{"hadron_blueprint_schema", "hadron_blueprint_get"},
 		},
-	}), nil
+	}, nil
 }
 
-func (a *Adapter) handleBlueprintSchema(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	bpPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+func (a *Adapter) handleBlueprintSchema(_ context.Context, args map[string]any) (any, error) {
+	bpPath := strings.TrimSpace(argString(args, "blueprint_path", ""))
 	if bpPath == "" {
-		return toolError("validation_error", "blueprint_path is required"), nil
+		return nil, budget.NewToolError("validation_error", "blueprint_path is required").WithField("blueprint_path")
 	}
 	absPath, err := a.resolveBlueprintReference(bpPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return toolError("not_found", "blueprint file not found"), nil
+			return nil, notFoundBlueprint()
 		}
 		if strings.Contains(err.Error(), "outside") {
-			return toolError("validation_error", err.Error()), nil
+			return nil, budget.NewToolError("validation_error", err.Error()).WithField("blueprint_path")
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	bp, err := blueprint.ParseFile(absPath)
 	if err != nil {
-		return toolError("validation_error", err.Error()), nil
+		return nil, budget.NewToolError("validation_error", err.Error()).WithField("blueprint_path")
 	}
 	skill := agentcard.SkillFromBlueprint(bp, absPath)
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"path":         absPath,
 		"id":           skill.ID,
 		"name":         skill.Name,
@@ -196,7 +179,7 @@ func (a *Adapter) handleBlueprintSchema(_ context.Context, req mcp.CallToolReque
 		"tags":         skill.Tags,
 		"input_schema": skill.InputSchema,
 		"next":         []string{"hadron_run_enqueue", "hadron_blueprint_get"},
-	}), nil
+	}, nil
 }
 
 func (a *Adapter) discoverBlueprints(query, tagFilter string, limit int, requireQuery bool) ([]map[string]any, int, error) {

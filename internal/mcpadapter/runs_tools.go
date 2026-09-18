@@ -12,15 +12,14 @@ import (
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-func (a *Adapter) handleRunsList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
-	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
+func (a *Adapter) handleRunsList(ctx context.Context, args map[string]any) (any, error) {
+	workspaceID := workspaceDefault(argString(args, "workspace_id", "default"))
+	limit := budget.ExtractLimit(args, budget.DefaultLimit)
 	items, err := a.store.ListRunsByWorkspace(ctx, workspaceID, limit)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, r := range items {
@@ -31,31 +30,30 @@ func (a *Adapter) handleRunsList(ctx context.Context, req mcp.CallToolRequest) (
 			"created_at": r.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	env := budget.Apply(out, budget.Config{Limit: limit},
-		"%d runs found. Use hadron_run_get with a specific run_id for full details including error messages.")
-	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
+	return budget.Apply(out, budget.Config{Limit: limit},
+		"%d runs found. Use hadron_run_get with a specific run_id for full details including error messages."), nil
 }
 
-func (a *Adapter) handleRunGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	runID := strings.TrimSpace(req.GetString("run_id", ""))
+func (a *Adapter) handleRunGet(ctx context.Context, args map[string]any) (any, error) {
+	runID := strings.TrimSpace(argString(args, "run_id", ""))
 	if runID == "" {
-		return toolError("validation_error", "run_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "run_id is required").WithField("run_id")
 	}
 	rec, err := a.store.GetRun(ctx, runID)
 	if err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "run not found"), nil
+			return nil, notFoundRun()
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && rec.WorkspaceID != ws {
-		return toolError("not_found", "run not found in workspace"), nil
+	if ws := strings.TrimSpace(argString(args, "workspace_id", "")); ws != "" && rec.WorkspaceID != ws {
+		return nil, notFoundRun()
 	}
 	var inputs map[string]any
 	if rec.InputJSON != "" {
 		_ = json.Unmarshal([]byte(rec.InputJSON), &inputs)
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"id":             rec.ID,
 		"workspace_id":   rec.WorkspaceID,
 		"blueprint_path": rec.BlueprintPath,
@@ -65,41 +63,44 @@ func (a *Adapter) handleRunGet(ctx context.Context, req mcp.CallToolRequest) (*m
 		"started_at":     nullString(rec.StartedAt),
 		"ended_at":       nullString(rec.EndedAt),
 		"error_message":  nullString(rec.ErrorMessage),
-	}), nil
+	}, nil
 }
 
-func (a *Adapter) handleRunEnqueue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeRunWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handleRunEnqueue(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeRunWrite); err != nil {
+		return nil, err
 	}
 	if a.runner == nil {
-		return toolError("unavailable", "runner unavailable"), nil
+		return nil, budget.NewToolError("unavailable", "runner unavailable").WithRetryable(true)
 	}
-	workspaceID := workspaceDefault(req.GetString("workspace_id", "default"))
+	workspaceID := workspaceDefault(argString(args, "workspace_id", "default"))
 	if _, err := a.store.GetWorkspace(ctx, workspaceID); err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "workspace not found"), nil
+			return nil, budget.NewToolError("not_found", "workspace not found").
+				WithField("workspace_id").WithHelpTool("hadron_workspaces_list").
+				WithNextStep("call hadron_workspaces_list to find a valid workspace_id")
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	blueprintPath := strings.TrimSpace(req.GetString("blueprint_path", ""))
+	blueprintPath := strings.TrimSpace(argString(args, "blueprint_path", ""))
 	if blueprintPath == "" {
-		return toolError("validation_error", "blueprint_path is required"), nil
+		return nil, budget.NewToolError("validation_error", "blueprint_path is required").WithField("blueprint_path")
 	}
 	bp, err := blueprint.ParseFile(blueprintPath)
 	if err != nil {
-		return toolError("validation_error", err.Error()), nil
+		return nil, budget.NewToolError("validation_error", err.Error()).WithField("blueprint_path")
 	}
-	inputsRaw := strings.TrimSpace(req.GetString("inputs_json", ""))
+	inputsRaw := strings.TrimSpace(argString(args, "inputs_json", ""))
 	inputs := map[string]any{}
 	if inputsRaw != "" {
 		if unmarshalErr := json.Unmarshal([]byte(inputsRaw), &inputs); unmarshalErr != nil {
-			return toolError("validation_error", "inputs_json must be a JSON object"), nil //nolint:nilerr
+			return nil, budget.NewToolError("validation_error", "inputs_json must be a JSON object").WithField("inputs_json")
 		}
 	}
 	normalized, err := blueprint.NormalizeInputs(bp, inputs)
 	if err != nil {
-		return toolError("validation_error", err.Error()), nil
+		return nil, budget.NewToolError("validation_error", err.Error()).WithField("inputs_json").
+			WithHelpTool("hadron_blueprint_schema").WithNextStep("call hadron_blueprint_schema to inspect the required inputs")
 	}
 	runID := fmt.Sprintf("mcp-run-%s-%04d", time.Now().UTC().Format("20060102-150405"), atomic.AddUint64(&runSeq, 1))
 	if err := a.runner.Enqueue(ctx, execution.Request{
@@ -108,47 +109,47 @@ func (a *Adapter) handleRunEnqueue(ctx context.Context, req mcp.CallToolRequest)
 		BlueprintPath: blueprintPath,
 		Inputs:        normalized,
 	}); err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(map[string]any{"run_id": runID, "status": "queued", "workspace_id": workspaceID}), nil
+	return map[string]any{"run_id": runID, "status": "queued", "workspace_id": workspaceID}, nil
 }
 
-func (a *Adapter) handleRunCancel(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeRunCancel); deny != nil {
-		return deny, nil
+func (a *Adapter) handleRunCancel(_ context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeRunCancel); err != nil {
+		return nil, err
 	}
 	if a.runner == nil {
-		return toolError("unavailable", "runner unavailable"), nil
+		return nil, budget.NewToolError("unavailable", "runner unavailable").WithRetryable(true)
 	}
-	runID := strings.TrimSpace(req.GetString("run_id", ""))
+	runID := strings.TrimSpace(argString(args, "run_id", ""))
 	if runID == "" {
-		return toolError("validation_error", "run_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "run_id is required").WithField("run_id")
 	}
 	if ok := a.runner.Cancel(runID); !ok {
-		return toolError("not_found", "run not running"), nil
+		return nil, budget.NewToolError("not_found", "run not running").WithField("run_id")
 	}
-	return toolJSON(map[string]any{"run_id": runID, "status": "cancellation_requested"}), nil
+	return map[string]any{"run_id": runID, "status": "cancellation_requested"}, nil
 }
 
-func (a *Adapter) handleRunEvents(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	runID := strings.TrimSpace(req.GetString("run_id", ""))
+func (a *Adapter) handleRunEvents(ctx context.Context, args map[string]any) (any, error) {
+	runID := strings.TrimSpace(argString(args, "run_id", ""))
 	if runID == "" {
-		return toolError("validation_error", "run_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "run_id is required").WithField("run_id")
 	}
 	runRec, getRunErr := a.store.GetRun(ctx, runID)
 	if getRunErr != nil {
 		if isNotFound(getRunErr) {
-			return toolError("not_found", "run not found"), nil
+			return nil, notFoundRun()
 		}
-		return toolError("internal_error", getRunErr.Error()), nil
+		return nil, budget.NewToolError("internal_error", getRunErr.Error())
 	}
-	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
-		return toolError("not_found", "run not found in workspace"), nil
+	if ws := strings.TrimSpace(argString(args, "workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
+		return nil, notFoundRun()
 	}
-	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
+	limit := budget.ExtractLimit(args, budget.DefaultLimit)
 	items, err := a.store.ListRunEvents(ctx, runID, limit)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, ev := range items {
@@ -161,29 +162,28 @@ func (a *Adapter) handleRunEvents(ctx context.Context, req mcp.CallToolRequest) 
 			"created_at": ev.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
-	env := budget.Apply(out, budget.Config{Limit: limit},
-		"%d events found. Increase limit parameter for more events.")
-	return mcp.NewToolResultText(budget.ToolJSON(env)), nil
+	return budget.Apply(out, budget.Config{Limit: limit},
+		"%d events found. Increase limit parameter for more events."), nil
 }
 
-func (a *Adapter) handleRunMCPCalls(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	runID := strings.TrimSpace(req.GetString("run_id", ""))
+func (a *Adapter) handleRunMCPCalls(ctx context.Context, args map[string]any) (any, error) {
+	runID := strings.TrimSpace(argString(args, "run_id", ""))
 	if runID == "" {
-		return toolError("validation_error", "run_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "run_id is required").WithField("run_id")
 	}
 	runRec, err := a.store.GetRun(ctx, runID)
 	if err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "run not found"), nil
+			return nil, notFoundRun()
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
-		return toolError("not_found", "run not found in workspace"), nil
+	if ws := strings.TrimSpace(argString(args, "workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
+		return nil, notFoundRun()
 	}
 	events, listEventsErr := a.store.ListRunEvents(ctx, runID, 1000)
 	if listEventsErr != nil {
-		return toolError("internal_error", listEventsErr.Error()), nil
+		return nil, budget.NewToolError("internal_error", listEventsErr.Error())
 	}
 	items := rundiagnostics.SummarizeMCPCalls(events)
 	out := make([]map[string]any, 0, len(items))
@@ -207,35 +207,35 @@ func (a *Adapter) handleRunMCPCalls(ctx context.Context, req mcp.CallToolRequest
 			"finished_at":   item.FinishedAt,
 		})
 	}
-	return toolJSON(map[string]any{"items": out, "count": len(out)}), nil
+	return map[string]any{"items": out, "count": len(out)}, nil
 }
 
-func (a *Adapter) handleRunOperations(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	runID := strings.TrimSpace(req.GetString("run_id", ""))
+func (a *Adapter) handleRunOperations(ctx context.Context, args map[string]any) (any, error) {
+	runID := strings.TrimSpace(argString(args, "run_id", ""))
 	if runID == "" {
-		return toolError("validation_error", "run_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "run_id is required").WithField("run_id")
 	}
 	runRec, err := a.store.GetRun(ctx, runID)
 	if err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "run not found"), nil
+			return nil, notFoundRun()
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
-		return toolError("not_found", "run not found in workspace"), nil
+	if ws := strings.TrimSpace(argString(args, "workspace_id", "")); ws != "" && runRec.WorkspaceID != ws {
+		return nil, notFoundRun()
 	}
 	events, err := a.store.ListRunEvents(ctx, runID, 1000)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	items := rundiagnostics.SummarizeOperations(events)
-	limit := budget.ExtractLimit(req.GetArguments(), budget.DefaultLimit)
-	kind := strings.TrimSpace(req.GetString("kind", ""))
-	cursor := strings.TrimSpace(req.GetString("cursor", ""))
+	limit := budget.ExtractLimit(args, budget.DefaultLimit)
+	kind := strings.TrimSpace(argString(args, "kind", ""))
+	cursor := strings.TrimSpace(argString(args, "cursor", ""))
 	page, nextCursor, totalCount, ok := filterPagedOperations(items, kind, limit, cursor)
 	if !ok {
-		return toolError("validation_error", "invalid cursor"), nil
+		return nil, budget.NewToolError("validation_error", "invalid cursor").WithField("cursor")
 	}
 	out := make([]map[string]any, 0, len(page))
 	for _, item := range page {
@@ -278,12 +278,18 @@ func (a *Adapter) handleRunOperations(ctx context.Context, req mcp.CallToolReque
 	if nextCursor != "" {
 		next = nextCursor
 	}
-	return toolJSON(map[string]any{
+	return map[string]any{
 		"items":       out,
 		"count":       len(out),
 		"total_count": totalCount,
 		"next_cursor": next,
-	}), nil
+	}, nil
+}
+
+func notFoundRun() *budget.ToolError {
+	return budget.NewToolError("not_found", "run not found").
+		WithField("run_id").WithHelpTool("hadron_runs_list").
+		WithNextStep("call hadron_runs_list to find a valid run_id")
 }
 
 func filterPagedOperations(items []rundiagnostics.OperationDiagnostic, kind string, limit int, cursor string) ([]rundiagnostics.OperationDiagnostic, string, int, bool) {

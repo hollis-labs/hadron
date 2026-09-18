@@ -7,75 +7,75 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/persistence"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-func (a *Adapter) handleHumanGateGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	gateID := strings.TrimSpace(req.GetString("gate_id", ""))
+func (a *Adapter) handleHumanGateGet(ctx context.Context, args map[string]any) (any, error) {
+	gateID := strings.TrimSpace(argString(args, "gate_id", ""))
 	if gateID == "" {
-		return toolError("validation_error", "gate_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "gate_id is required").WithField("gate_id")
 	}
 	rec, err := a.store.GetHumanGate(ctx, gateID)
 	if err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "human gate not found"), nil
+			return nil, budget.NewToolError("not_found", "human gate not found").WithField("gate_id")
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && rec.WorkspaceID != ws {
-		return toolError("not_found", "human gate not found in workspace"), nil
+	if ws := strings.TrimSpace(argString(args, "workspace_id", "")); ws != "" && rec.WorkspaceID != ws {
+		return nil, budget.NewToolError("not_found", "human gate not found in workspace").WithField("gate_id")
 	}
 	options, err := parseHumanGateOptions(rec.OptionsJSON)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(humanGateEnvelope(rec, options)), nil
+	return humanGateEnvelope(rec, options), nil
 }
 
-func (a *Adapter) handleHumanGateSubmit(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if deny := a.checkScope(ScopeHumanGateWrite); deny != nil {
-		return deny, nil
+func (a *Adapter) handleHumanGateSubmit(ctx context.Context, args map[string]any) (any, error) {
+	if err := a.checkScope(ScopeHumanGateWrite); err != nil {
+		return nil, err
 	}
-	gateID := strings.TrimSpace(req.GetString("gate_id", ""))
+	gateID := strings.TrimSpace(argString(args, "gate_id", ""))
 	if gateID == "" {
-		return toolError("validation_error", "gate_id is required"), nil
+		return nil, budget.NewToolError("validation_error", "gate_id is required").WithField("gate_id")
 	}
-	decision := strings.TrimSpace(req.GetString("decision", ""))
+	decision := strings.TrimSpace(argString(args, "decision", ""))
 	if decision == "" {
-		return toolError("validation_error", "decision is required"), nil
+		return nil, budget.NewToolError("validation_error", "decision is required").WithField("decision")
 	}
 	rec, err := a.store.GetHumanGate(ctx, gateID)
 	if err != nil {
 		if isNotFound(err) {
-			return toolError("not_found", "human gate not found"), nil
+			return nil, budget.NewToolError("not_found", "human gate not found").WithField("gate_id")
 		}
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	if ws := strings.TrimSpace(req.GetString("workspace_id", "")); ws != "" && rec.WorkspaceID != ws {
-		return toolError("not_found", "human gate not found in workspace"), nil
+	if ws := strings.TrimSpace(argString(args, "workspace_id", "")); ws != "" && rec.WorkspaceID != ws {
+		return nil, budget.NewToolError("not_found", "human gate not found in workspace").WithField("gate_id")
 	}
 	if rec.Status != "waiting" {
-		return toolError("conflict", "human gate is not waiting"), nil
+		return nil, budget.NewToolError("conflict", "human gate is not waiting").WithField("gate_id")
 	}
 	options, err := parseHumanGateOptions(rec.OptionsJSON)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
 	if !humanGateDecisionAllowed(decision, options) {
-		return toolError("validation_error", "decision is not an allowed option"), nil
+		return nil, budget.NewToolError("validation_error", "decision is not an allowed option").WithField("decision")
 	}
 	if submitErr := a.store.SubmitHumanGateDecision(ctx, gateID, decision, time.Now().UTC()); submitErr != nil {
 		if isNotFound(submitErr) {
-			return toolError("conflict", "human gate is not waiting or was not found"), nil
+			return nil, budget.NewToolError("conflict", "human gate is not waiting or was not found").WithField("gate_id")
 		}
-		return toolError("internal_error", submitErr.Error()), nil
+		return nil, budget.NewToolError("internal_error", submitErr.Error())
 	}
 	rec, err = a.store.GetHumanGate(ctx, gateID)
 	if err != nil {
-		return toolError("internal_error", err.Error()), nil
+		return nil, budget.NewToolError("internal_error", err.Error())
 	}
-	return toolJSON(humanGateEnvelope(rec, options)), nil
+	return humanGateEnvelope(rec, options), nil
 }
 
 type humanGateOption struct {
