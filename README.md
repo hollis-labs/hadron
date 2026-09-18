@@ -1,9 +1,84 @@
-# Hadron by Hollis Labs
+# Hadron
 
-Hadron is a local-first, agent-first runtime for typed, durable workflow
+Hadron is a local-first, agent-first daemon for typed, durable workflow
 graphs. One graph-native application host owns validation, policy admission,
-execution, waits, values, diagnostics, registry state, and exposure across the
-CLI, HTTP API, browser UI, MCP, A2A, schedules, and external activations.
+execution, waits, values, diagnostics, and registry state, and projects that
+same host identically over the CLI, HTTP API, browser UI, MCP, A2A,
+schedules, and external activations — there is no second runtime per
+transport.
+
+> **Pre-release.** Hadron ships real beta releases (Homebrew tap, GitHub
+> releases) and is in active use, but the public contract is still settling —
+> authoring ergonomics, packaging, and the adapter surface can change without
+> notice. Built in the open: this README describes what's implemented today,
+> not a pitch for what's planned.
+
+## What it is today
+
+- **One host, every surface.** CLI, HTTP API, browser UI, MCP, A2A,
+  schedules, and external activations all call the same authenticated
+  application path (`internal/appworkflow`) — none of them embed a second
+  workflow runtime.
+- **Six frozen production primitives.** `transform@v1`, `script@v1`,
+  `sleep@v1`, `wait_for@v1`, `message_wait@v1`, and `human_gate@v1` — the last
+  one a first-class human-approval step, not automation bolted onto a
+  workaround.
+- **Durable by default.** SQLite-backed execution with recovery,
+  resource-aware scheduling, fan-out occupancy, lease renewal, and graceful
+  worker/timer shutdown.
+- **MCP and A2A as native transports.** Session-isolated MCP discovery, lazy
+  mounts and direct tools, plus native A2A task/run correlation — agents
+  reach Hadron the same way they'd reach any other tool, not through a
+  bespoke integration.
+
+## Where it sits in the stack
+
+```
+  agents / clients     Nanite sessions, hadron CLI, browser UI, any MCP/A2A client
+        │  MCP · A2A · HTTP · CLI
+   ┌──────────┐
+   │  Hadron  │   durable graph host: validate → admit → run → wait → recover
+   └──────────┘
+        │  built on
+   go-workflow         the engine module Hadron originated and now ships standalone
+```
+
+Hadron isn't the workflow engine itself — graph IR, compilation, runtime,
+waits, and values live in the pinned `go-workflow` module. Hadron is the
+daemon and transports around it. Nanite's own Agent Workflows consume
+`go-workflow` directly, as a separate durable host; Hadron and Nanite are
+siblings on that engine, not layered on each other.
+
+## Examples
+
+**Daily use.** Chrispian runs graph-native workflows through `hadrond` for
+durable, resumable automation — steps that need to survive a restart, wait
+on an external signal, or pause for an explicit `human_gate@v1` approval
+before continuing.
+
+**Composition.** Any MCP or A2A client — a Nanite session, another agent
+runtime — discovers Hadron's workflow tools, starts a run, and gets notified
+when a `human_gate` or `wait_for` step needs input. Hadron never assumes who
+the caller is; it only sees authenticated tool calls.
+
+**Embedding.** The repository's adapter catalog is broader than the six kinds
+the stock daemon exposes — the rest are embeddable contracts for building a
+bespoke workflow host on the same engine without shipping inside Hadron
+itself.
+
+## Roadmap
+
+- **Standalone `go-workflow` module.** The public `workflow/*` boundary was
+  already published so Nanite could qualify it as a real non-Hadron durable
+  host; next is extracting the proven packages into their own versioned
+  module without weakening schemas, conformance, or Hadron compatibility.
+- **Contract stabilization.** Public contracts and authoring ergonomics are
+  still evolving, packaging/install UX is still being refined, and
+  browser/agent-client interoperability keeps getting hardened — see
+  [Beta status](docs/beta-status.md) for the current line between
+  implemented and in-progress.
+
+## License
 
 Hadron is MIT licensed and in active beta development.
 
@@ -102,7 +177,7 @@ them and they carry no public compatibility promise.
 
 ## Development
 
-```sh
+```bash
 make build
 make test
 make test-ui
