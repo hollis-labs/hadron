@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Settings struct {
@@ -45,6 +46,87 @@ type AgentSubstrateSettings struct {
 	Headers                map[string]string `json:"headers,omitempty"`
 	TimeoutSeconds         int               `json:"timeout_seconds,omitempty"`
 	Boot                   AgentBootSettings `json:"boot,omitempty"`
+	// Tether configures a Kind "tether_session" substrate: agent_session@v1
+	// steps launched as Tether daemon (muxd) sessions.
+	Tether *TetherSubstrateSettings `json:"tether,omitempty"`
+}
+
+// AgentSubstrateKindTetherSession selects the Tether-backed agent session host.
+const AgentSubstrateKindTetherSession = "tether_session"
+
+// Defaults applied to an unset TetherSubstrateSettings field.
+const (
+	DefaultTetherEndpoint           = "~/.tether/run/muxd.sock"
+	DefaultTetherUnreachableTimeout = "10m"
+)
+
+// TetherSubstrateSettings configures one tether_session agent substrate.
+type TetherSubstrateSettings struct {
+	// Endpoint is the muxd socket path. Empty means DefaultTetherEndpoint.
+	Endpoint string `json:"endpoint,omitempty"`
+	// Launch is the Tether launch_id used when Launches has no entry for the
+	// step's logical_agent_id.
+	Launch string `json:"launch,omitempty"`
+	// Launches maps a logical_agent_id to a Tether launch_id.
+	Launches map[string]string `json:"launches,omitempty"`
+	// ResultOptional lets a session that completes without a result reply
+	// succeed with a JSON null result instead of failing agent_no_result.
+	ResultOptional bool `json:"result_optional,omitempty"`
+	// StopOnResult stops the session once its result reply is accepted.
+	// Nil means true.
+	StopOnResult *bool `json:"stop_on_result,omitempty"`
+	// UnreachableTimeout is how long muxd may stay unreachable while a step
+	// observes its session before the step fails agent_host_unreachable.
+	// Empty means DefaultTetherUnreachableTimeout.
+	UnreachableTimeout string `json:"unreachable_timeout,omitempty"`
+}
+
+// EffectiveEndpoint returns Endpoint or its default.
+func (t TetherSubstrateSettings) EffectiveEndpoint() string {
+	if strings.TrimSpace(t.Endpoint) == "" {
+		return DefaultTetherEndpoint
+	}
+	return t.Endpoint
+}
+
+// EffectiveStopOnResult returns StopOnResult or its default (true).
+func (t TetherSubstrateSettings) EffectiveStopOnResult() bool {
+	return t.StopOnResult == nil || *t.StopOnResult
+}
+
+// EffectiveUnreachableTimeout parses UnreachableTimeout or its default.
+func (t TetherSubstrateSettings) EffectiveUnreachableTimeout() (time.Duration, error) {
+	raw := strings.TrimSpace(t.UnreachableTimeout)
+	if raw == "" {
+		raw = DefaultTetherUnreachableTimeout
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, err
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("must be positive")
+	}
+	return parsed, nil
+}
+
+// Clone returns a deep copy.
+func (t *TetherSubstrateSettings) Clone() *TetherSubstrateSettings {
+	if t == nil {
+		return nil
+	}
+	cloned := *t
+	if t.Launches != nil {
+		cloned.Launches = make(map[string]string, len(t.Launches))
+		for key, value := range t.Launches {
+			cloned.Launches[key] = value
+		}
+	}
+	if t.StopOnResult != nil {
+		stop := *t.StopOnResult
+		cloned.StopOnResult = &stop
+	}
+	return &cloned
 }
 
 type AgentBootSettings struct {
@@ -244,6 +326,15 @@ func (s *Settings) GetDefaultTimeout() int {
 
 func (s *Settings) Validate() error {
 	for name, cfg := range s.AgentSubstrates {
+		if strings.TrimSpace(cfg.Kind) == AgentSubstrateKindTetherSession {
+			if err := validateTetherSubstrate(name, cfg.Tether); err != nil {
+				return err
+			}
+			continue
+		}
+		if cfg.Tether != nil {
+			return fmt.Errorf("agent_substrates.%s.tether: only valid for kind %q", name, AgentSubstrateKindTetherSession)
+		}
 		if strings.TrimSpace(cfg.Kind) != "go_agent_runtime" {
 			return fmt.Errorf("agent_substrates.%s.kind: unsupported kind %q", name, cfg.Kind)
 		}
@@ -278,6 +369,27 @@ func (s *Settings) Validate() error {
 		if cfg.TimeoutSeconds < 0 {
 			return fmt.Errorf("message_substrates.%s.timeout_seconds: must be >= 0", name)
 		}
+	}
+	return nil
+}
+
+func validateTetherSubstrate(name string, cfg *TetherSubstrateSettings) error {
+	if cfg == nil {
+		return fmt.Errorf("agent_substrates.%s.tether: required for kind %q", name, AgentSubstrateKindTetherSession)
+	}
+	if strings.TrimSpace(cfg.Launch) == "" && len(cfg.Launches) == 0 {
+		return fmt.Errorf("agent_substrates.%s.tether: launch or launches is required", name)
+	}
+	if cfg.Launch != strings.TrimSpace(cfg.Launch) {
+		return fmt.Errorf("agent_substrates.%s.tether.launch: must not have surrounding whitespace", name)
+	}
+	for agent, launch := range cfg.Launches {
+		if strings.TrimSpace(agent) == "" || strings.TrimSpace(launch) == "" || launch != strings.TrimSpace(launch) {
+			return fmt.Errorf("agent_substrates.%s.tether.launches: logical agent %q needs a non-empty launch id", name, agent)
+		}
+	}
+	if _, err := cfg.EffectiveUnreachableTimeout(); err != nil {
+		return fmt.Errorf("agent_substrates.%s.tether.unreachable_timeout: %w", name, err)
 	}
 	return nil
 }

@@ -747,7 +747,7 @@ func TestProductionWorkflowKindBoundaryIsExactAndUnavailableKindsFailClosed(t *t
 	for _, spec := range runtime.host.Registry().List() {
 		got = append(got, appworkflow.KindRef{Name: spec.Name, Version: spec.Version})
 	}
-	want := productionWorkflowKindBoundary()
+	want := productionWorkflowKindBoundary(false)
 	sort.Slice(got, func(i, j int) bool {
 		if got[i].Name == got[j].Name {
 			return got[i].Version < got[j].Version
@@ -1066,6 +1066,11 @@ func newTestProductionWorkflowRuntime(t *testing.T) (*productionWorkflowRuntime,
 
 func newTestProductionWorkflowRuntimeWithSettings(t *testing.T, sett *settings.Settings) (*productionWorkflowRuntime, *config.Config, *persistence.Store) {
 	t.Helper()
+	return newTestProductionWorkflowRuntimeWithOptions(t, sett)
+}
+
+func newTestProductionWorkflowRuntimeWithOptions(t *testing.T, sett *settings.Settings, options ...productionWorkflowOption) (*productionWorkflowRuntime, *config.Config, *persistence.Store) {
+	t.Helper()
 	root := t.TempDir()
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -1110,7 +1115,7 @@ outputs:
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	runtime, err := newProductionWorkflowRuntime(store, cfg, sett)
+	runtime, err := newProductionWorkflowRuntime(store, cfg, sett, options...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	agentadapter "github.com/hollis-labs/go-workflow/adapters/agent"
 	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
 	gateadapter "github.com/hollis-labs/go-workflow/adapters/gate"
 	scriptadapter "github.com/hollis-labs/go-workflow/adapters/script"
@@ -45,6 +46,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
+	"github.com/hollis-labs/hadron/internal/tetherhost"
 	"github.com/hollis-labs/hadron/internal/trigger"
 	"github.com/hollis-labs/hadron/internal/unattended"
 )
@@ -59,16 +61,21 @@ const (
 // productionWorkflowKindBoundary is the daemon host capability profile, not
 // an engine limitation. Other public adapters remain available to embedded
 // hosts, but hadrond accepts only this fully composed exact set.
-func productionWorkflowKindBoundary() []appworkflow.KindRef {
-	return []appworkflow.KindRef{
-		{Name: calladapter.KindName, Version: calladapter.KindVersion},
-		{Name: gateadapter.Name, Version: "v1"},
-		{Name: waitadapter.MessageWaitName, Version: "v1"},
-		{Name: scriptadapter.Name, Version: "v1"},
-		{Name: waitadapter.SleepName, Version: "v1"},
-		{Name: transform.Name, Version: "v1"},
-		{Name: waitadapter.WaitForName, Version: "v1"},
+// agent_session@v1 joins it only when a durable session host is composed.
+func productionWorkflowKindBoundary(agentSessions bool) []appworkflow.KindRef {
+	kinds := []appworkflow.KindRef{}
+	if agentSessions {
+		kinds = append(kinds, appworkflow.KindRef{Name: agentadapter.KindName, Version: agentadapter.KindVersion})
 	}
+	return append(kinds,
+		appworkflow.KindRef{Name: calladapter.KindName, Version: calladapter.KindVersion},
+		appworkflow.KindRef{Name: gateadapter.Name, Version: "v1"},
+		appworkflow.KindRef{Name: waitadapter.MessageWaitName, Version: "v1"},
+		appworkflow.KindRef{Name: scriptadapter.Name, Version: "v1"},
+		appworkflow.KindRef{Name: waitadapter.SleepName, Version: "v1"},
+		appworkflow.KindRef{Name: transform.Name, Version: "v1"},
+		appworkflow.KindRef{Name: waitadapter.WaitForName, Version: "v1"},
+	)
 }
 
 // productionWorkflowRuntime owns every graph-native process collaborator.
@@ -88,11 +95,14 @@ type productionWorkflowRuntime struct {
 	external            *workflowExternalReconciler
 	activation          *workflowActivationBridge
 	externalActivations trigger.ActivationManager
-	// substrates is the operator configuration later graph kinds consume
-	// (agent sessions, MCP servers, message substrates). It is a private copy
-	// taken at composition time; nothing reads agent substrates yet because
-	// agent_session@v1 is gated off.
+	// substrates is the operator configuration graph kinds consume (agent
+	// sessions, MCP servers, message substrates). It is a private copy taken
+	// at composition time; the Tether session host reads the tether_session
+	// agent substrates when agent_session@v1 is enabled.
 	substrates workflowSubstrateSettings
+	// agentSessions is the Tether-backed session host, nil while
+	// agent_session@v1 is gated.
+	agentSessions *tetherhost.Host
 }
 
 // workflowSubstrateSettings is the slice of hadrond settings the graph
@@ -113,6 +123,7 @@ func cloneWorkflowSubstrateSettings(sett *settings.Settings) workflowSubstrateSe
 		value.Args = append([]string(nil), value.Args...)
 		value.Env = cloneSettingsStrings(value.Env)
 		value.Headers = cloneSettingsStrings(value.Headers)
+		value.Tether = value.Tether.Clone()
 		result.AgentSubstrates[name] = value
 	}
 	for name, value := range sett.MCPServers {
@@ -144,10 +155,15 @@ func cloneSettingsStrings(input map[string]string) map[string]string {
 // defaultWorkflowWorkers applies when settings leave execution.workers unset.
 const defaultWorkflowWorkers = 3
 
-func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, sett *settings.Settings) (*productionWorkflowRuntime, error) {
+func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, sett *settings.Settings, options ...productionWorkflowOption) (*productionWorkflowRuntime, error) {
 	if store == nil || cfg == nil || sett == nil {
 		return nil, errors.New("workflow runtime requires store, config, and settings")
 	}
+	var composed productionWorkflowOptions
+	for _, option := range options {
+		option(&composed)
+	}
+	substrates := cloneWorkflowSubstrateSettings(sett)
 	workerCount := sett.Execution.Workers
 	if workerCount < 1 {
 		workerCount = defaultWorkflowWorkers
@@ -233,22 +249,42 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 		return nil, err
 	}
 	kinds := []stepkind.StepKind{transform.New(), scriptadapter.New(), waitadapter.NewSleep(nil), waitFor, messageWait, gate, call}
+	policyHooks := []workflowcompile.PolicyHook{productionCallPolicy}
+	var agentLaunch workflowcompile.NodeExpander = newGatedAgentLaunchExpander()
+	agentSessions, err := newTetherSessionHost(cfg.DataDir, substrates.AgentSubstrates, composed)
+	if err != nil {
+		return nil, err
+	}
+	if agentSessions != nil {
+		// A durable session host is composed: agent_session@v1 is a real,
+		// dispatchable kind and agent_launch expands normally, except that
+		// typed inputs on tether_session substrates are refused at validation.
+		agentSession, agentErr := agentadapter.New(agentadapter.Options{Host: agentSessions})
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		kinds = append(kinds, agentSession)
+		agentLaunch = tetherAgentLaunchExpander{substrates: substrates.AgentSubstrates}
+		policyHooks = append(policyHooks, tetherAgentInputsPolicy(substrates.AgentSubstrates))
+	}
 	compileKinds := stepkind.NewRegistry()
 	for _, kind := range kinds {
 		if registerErr := compileKinds.Register(kind); registerErr != nil {
 			return nil, fmt.Errorf("register production workflow kind: %w", registerErr)
 		}
 	}
-	// agent_session@v1 is compile-visible only so it refuses with a clear
-	// gate message; Host never registers it.
-	gatedAgentSession, err := newGatedAgentSessionKind()
-	if err != nil {
-		return nil, err
+	if agentSessions == nil {
+		// agent_session@v1 is compile-visible only so it refuses with a clear
+		// gate message; Host never registers it.
+		gatedAgentSession, gateErr := newGatedAgentSessionKind()
+		if gateErr != nil {
+			return nil, gateErr
+		}
+		if registerErr := compileKinds.Register(gatedAgentSession); registerErr != nil {
+			return nil, fmt.Errorf("register gated agent session kind: %w", registerErr)
+		}
 	}
-	if registerErr := compileKinds.Register(gatedAgentSession); registerErr != nil {
-		return nil, fmt.Errorf("register gated agent session kind: %w", registerErr)
-	}
-	required := productionWorkflowKindBoundary()
+	required := productionWorkflowKindBoundary(agentSessions != nil)
 	stager := appworkflow.NewAuthoringSourceStager()
 	resolver, err := appworkflow.NewDefinitionResolver(appworkflow.DefinitionResolverOptions{
 		Roots: []string{workflowRoot}, FileAuthority: "local", FileTrustClass: "local",
@@ -256,8 +292,8 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 		Authorizer: appworkflow.DefinitionAuthorizerFunc(func(context.Context, appworkflow.DefinitionAuthorization) error { return nil }),
 		Compile: appworkflow.DefinitionCompileOptions{
 			StepKinds: compileKinds, SemanticRevision: "hadrond-production-v2",
-			PolicyHooks:   []workflowcompile.PolicyHook{productionCallPolicy},
-			NodeExpanders: []workflowcompile.NodeExpander{newGatedAgentLaunchExpander()},
+			PolicyHooks:   policyHooks,
+			NodeExpanders: []workflowcompile.NodeExpander{agentLaunch},
 		},
 	})
 	if err != nil {
@@ -379,7 +415,8 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 		auth: auth, catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
 		sourceActivations:   sourceActivationLifecycle,
 		externalActivations: trigger.ActivationManager{Service: activationService},
-		substrates:          cloneWorkflowSubstrateSettings(sett),
+		substrates:          substrates,
+		agentSessions:       agentSessions,
 	}, nil
 }
 

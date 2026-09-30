@@ -33,6 +33,19 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
   instead of reporting cancellation as unsupported.
 - `agent_launch` is recognized but refused with a stable "agent_session@v1 is
   not enabled in this hadrond yet" message until a durable session host lands.
+- Graph workflows: a Tether-backed `agent_session@v1` session host
+  (`internal/tetherhost`). Each agent step is one keyed Tether session; the
+  agent returns its result as a nonce-bearing reply that Hadron reads back on
+  observe, so launch, observe, and cancel survive `hadrond` and muxd restarts.
+  New `tether_session` agent substrate settings (`endpoint`, `launch`,
+  `launches`, `result_optional`, `stop_on_result`, `unreachable_timeout`).
+  Configuring one lifts the `agent_launch` gate; `hadrond` reaches muxd
+  through go-tether-client v0.6.0 and still starts when muxd is down. Typed
+  agent inputs are refused at validation.
+- Dependencies: `github.com/hollis-labs/go-tether-client` v0.6.0 (new);
+  `github.com/hollis-labs/go-messaging` v0.5.1 → v0.5.2 (required by it).
+- Root node bindings now resolve `run.id`, which `agent_launch` expansion
+  uses for its parent correlation.
 - The local `operator:local` execution target now carries `workflow.call` and
   `agent.session.*`. The MCP principal deliberately keeps its previous
   capability set, so MCP tokens bootstrapped before this change keep working

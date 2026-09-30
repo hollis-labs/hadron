@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultSettingsIncludesInitializedMaps(t *testing.T) {
@@ -147,5 +148,81 @@ func TestValidateRejectsInvalidSubstrateConfig(t *testing.T) {
 	err = s.Validate()
 	if err == nil || !strings.Contains(err.Error(), "message_substrates.bad_remote.base_url") {
 		t.Fatalf("expected base_url validation error, got %v", err)
+	}
+}
+
+func TestTetherSessionSubstrateRoundTripsAndDefaults(t *testing.T) {
+	dir := t.TempDir()
+	want := DefaultSettings()
+	stop := false
+	want.AgentSubstrates["tether"] = AgentSubstrateSettings{
+		Kind: AgentSubstrateKindTetherSession,
+		Tether: &TetherSubstrateSettings{
+			Launch: "claude-default", Launches: map[string]string{"reviewer": "claude-review"},
+			ResultOptional: true, StopOnResult: &stop, UnreachableTimeout: "90s",
+		},
+	}
+	if err := want.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	if !reflect.DeepEqual(got.AgentSubstrates, want.AgentSubstrates) {
+		t.Fatalf("agent substrates mismatch:\n got: %#v\nwant: %#v", got.AgentSubstrates, want.AgentSubstrates)
+	}
+	tether := got.AgentSubstrates["tether"].Tether
+	if tether.EffectiveStopOnResult() || tether.EffectiveEndpoint() != DefaultTetherEndpoint {
+		t.Fatalf("effective tether settings = %#v", tether)
+	}
+	if timeout, err := tether.EffectiveUnreachableTimeout(); err != nil || timeout != 90*time.Second {
+		t.Fatalf("unreachable timeout = %v, %v", timeout, err)
+	}
+
+	defaults := TetherSubstrateSettings{Launch: "x"}
+	if !defaults.EffectiveStopOnResult() {
+		t.Fatal("stop_on_result must default to true")
+	}
+	if timeout, err := defaults.EffectiveUnreachableTimeout(); err != nil || timeout != 10*time.Minute {
+		t.Fatalf("default unreachable timeout = %v, %v", timeout, err)
+	}
+
+	cloned := tether.Clone()
+	cloned.Launches["reviewer"] = "mutated"
+	*cloned.StopOnResult = true
+	if tether.Launches["reviewer"] != "claude-review" || *tether.StopOnResult {
+		t.Fatal("Clone shares mutable state")
+	}
+}
+
+func TestValidateTetherSessionSubstrate(t *testing.T) {
+	for name, tc := range map[string]struct {
+		substrate AgentSubstrateSettings
+		want      string
+	}{
+		"missing tether block":    {AgentSubstrateSettings{Kind: AgentSubstrateKindTetherSession}, "tether: required"},
+		"no launch":               {AgentSubstrateSettings{Kind: AgentSubstrateKindTetherSession, Tether: &TetherSubstrateSettings{}}, "launch or launches is required"},
+		"bad timeout":             {AgentSubstrateSettings{Kind: AgentSubstrateKindTetherSession, Tether: &TetherSubstrateSettings{Launch: "l", UnreachableTimeout: "soon"}}, "unreachable_timeout"},
+		"non-positive timeout":    {AgentSubstrateSettings{Kind: AgentSubstrateKindTetherSession, Tether: &TetherSubstrateSettings{Launch: "l", UnreachableTimeout: "0s"}}, "unreachable_timeout"},
+		"empty mapped launch":     {AgentSubstrateSettings{Kind: AgentSubstrateKindTetherSession, Tether: &TetherSubstrateSettings{Launches: map[string]string{"a": " "}}}, "tether.launches"},
+		"tether on other kind":    {AgentSubstrateSettings{Kind: "go_agent_runtime", Provider: "p", Runtime: "r", Tether: &TetherSubstrateSettings{Launch: "l"}}, "only valid for kind"},
+		"launches only is enough": {AgentSubstrateSettings{Kind: AgentSubstrateKindTetherSession, Tether: &TetherSubstrateSettings{Launches: map[string]string{"a": "b"}}}, ""},
+		"launch only is enough":   {AgentSubstrateSettings{Kind: AgentSubstrateKindTetherSession, Tether: &TetherSubstrateSettings{Launch: "l", UnreachableTimeout: "30s"}}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := DefaultSettings()
+			s.AgentSubstrates["tether"] = tc.substrate
+			err := s.Validate()
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Validate = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate = %v, want mention of %q", err, tc.want)
+			}
+		})
 	}
 }
