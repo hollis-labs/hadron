@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/go-workflow/graph"
 	"github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/go-workflow/stepkind"
 	"github.com/hollis-labs/go-workflow/values"
 	"github.com/hollis-labs/go-workflow/verification"
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
 
 const defaultRecoveryInterval = 5 * time.Second
@@ -60,6 +60,7 @@ type Host struct {
 	registry           *stepkind.MemoryRegistry
 	verifiers          *verification.MemoryRegistry
 	dispatcher         *runtime.StepDispatcher
+	external           *runtime.ExternalOperationCoordinator
 	plans              runtime.RecoveryPlanSource
 	pins               *runtime.PinCoordinator
 	interval           time.Duration
@@ -144,6 +145,17 @@ func New(options Options) (*Host, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: construct dispatcher: %w", ErrInvalidHost, err)
 	}
+	// External reconciles adapter-owned (suspended) external operations. It is
+	// bound to the exact frozen registry, verifier catalog, and state the
+	// dispatcher uses so observation, verification, and cancellation agree on
+	// one kind contract. Host does not drive it: the embedding process owns the
+	// poll loop over RecoverExternalOperations (see ExternalOperations).
+	external, err := runtime.NewExternalOperationCoordinator(runtime.ExternalOperationOptions{
+		Store: options.State, Registry: registry, Now: clock.Now, Verifiers: verifiers,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: construct external operation coordinator: %w", ErrInvalidHost, err)
+	}
 	cancellation := options.Cancellation
 	if cancellation == nil {
 		cancellation = &runtime.CancellationCoordinator{Store: options.State, Registry: registry, Now: clock.Now}
@@ -151,6 +163,11 @@ func New(options Options) (*Host, error) {
 		copyCoordinator := *cancellation
 		copyCoordinator.Store, copyCoordinator.Registry = options.State, registry
 		cancellation = &copyCoordinator
+	}
+	if cancellation.External == nil {
+		// Without External, explicit cancellation of a suspended external step
+		// fails with runtime.ErrCancellationUnsupported.
+		cancellation.External = external
 	}
 	recoveryStore, recoveryOK := options.State.(runtime.RecoveryStore)
 	inputStore, inputOK := options.State.(runtime.NodeInputStore)
@@ -185,7 +202,7 @@ func New(options Options) (*Host, error) {
 		activations: options.Activations, reactorActivations: options.ActivationStore, waits: waits, cancellation: cancellation, coreRecovery: coreRecovery,
 		hooks: append([]RecoveryHook(nil), options.RecoveryHooks...), telemetry: options.Telemetry,
 		childSource: childSource, childDefs: childDefs, childRuns: options.ChildRuns,
-		artifacts: options.Artifacts, clock: clock, registry: registry, verifiers: verifiers, dispatcher: dispatcher, pins: pinCoordinator,
+		artifacts: options.Artifacts, clock: clock, registry: registry, verifiers: verifiers, dispatcher: dispatcher, external: external, pins: pinCoordinator,
 		plans:    planSource,
 		interval: interval, batchLimit: options.RecoveryBatchLimit,
 	}
@@ -285,15 +302,25 @@ func (h *Host) Registry() stepkind.Registry {
 	return h.registry
 }
 
-// Verifiers returns the frozen read-only catalog used by start validation and
-// dispatch. Worker composition can pass this exact catalog to
-// runtime.ExternalOperationOptions without constructing an unused coordinator
-// inside Host.
+// Verifiers returns the frozen read-only catalog used by start validation,
+// dispatch, and the Host-owned external-operation coordinator
+// (ExternalOperations).
 func (h *Host) Verifiers() verification.Registry {
 	if h == nil {
 		return nil
 	}
 	return h.verifiers
+}
+
+// ExternalOperations exposes the external-operation coordinator bound to the
+// host registry, verifier catalog, and state adapter. Host wires it into its
+// cancellation coordinator but never polls it; the embedding process owns the
+// reconcile loop (hadrond runs one beside its dispatch workers).
+func (h *Host) ExternalOperations() *runtime.ExternalOperationCoordinator {
+	if h == nil {
+		return nil
+	}
+	return h.external
 }
 
 // Dispatcher exposes the core dispatcher already bound to the host registry

@@ -22,6 +22,18 @@ import (
 	"syscall"
 	"time"
 
+	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
+	gateadapter "github.com/hollis-labs/go-workflow/adapters/gate"
+	scriptadapter "github.com/hollis-labs/go-workflow/adapters/script"
+	"github.com/hollis-labs/go-workflow/adapters/transform"
+	waitadapter "github.com/hollis-labs/go-workflow/adapters/wait"
+	workflowcompile "github.com/hollis-labs/go-workflow/compile"
+	workflowgate "github.com/hollis-labs/go-workflow/gate"
+	"github.com/hollis-labs/go-workflow/graph"
+	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/go-workflow/stepkind"
+	"github.com/hollis-labs/go-workflow/values"
+	workflowwait "github.com/hollis-labs/go-workflow/wait"
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/api"
@@ -32,17 +44,8 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/hadron/internal/scheduler"
+	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/trigger"
-	gateadapter "github.com/hollis-labs/go-workflow/adapters/gate"
-	scriptadapter "github.com/hollis-labs/go-workflow/adapters/script"
-	"github.com/hollis-labs/go-workflow/adapters/transform"
-	waitadapter "github.com/hollis-labs/go-workflow/adapters/wait"
-	workflowgate "github.com/hollis-labs/go-workflow/gate"
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
 )
 
 const (
@@ -57,6 +60,7 @@ const (
 // hosts, but hadrond accepts only this fully composed exact set.
 func productionWorkflowKindBoundary() []appworkflow.KindRef {
 	return []appworkflow.KindRef{
+		{Name: calladapter.KindName, Version: calladapter.KindVersion},
 		{Name: gateadapter.Name, Version: "v1"},
 		{Name: waitadapter.MessageWaitName, Version: "v1"},
 		{Name: scriptadapter.Name, Version: "v1"},
@@ -80,16 +84,72 @@ type productionWorkflowRuntime struct {
 	activationStore     hoststate.ActivationStore
 	sourceActivations   *appworkflow.SourceActivationLifecycle
 	workers             *workflowWorkers
+	external            *workflowExternalReconciler
 	activation          *workflowActivationBridge
 	externalActivations trigger.ActivationManager
+	// substrates is the operator configuration later graph kinds consume
+	// (agent sessions, MCP servers, message substrates). It is a private copy
+	// taken at composition time; nothing reads agent substrates yet because
+	// agent_session@v1 is gated off.
+	substrates workflowSubstrateSettings
 }
 
-func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, workerCount int) (*productionWorkflowRuntime, error) {
-	if store == nil || cfg == nil {
-		return nil, errors.New("workflow runtime requires store and config")
+// workflowSubstrateSettings is the slice of hadrond settings the graph
+// workflow runtime owns.
+type workflowSubstrateSettings struct {
+	AgentSubstrates   map[string]settings.AgentSubstrateSettings
+	MCPServers        map[string]settings.MCPServerSettings
+	MessageSubstrates map[string]settings.MessageSubstrateSetting
+}
+
+func cloneWorkflowSubstrateSettings(sett *settings.Settings) workflowSubstrateSettings {
+	result := workflowSubstrateSettings{
+		AgentSubstrates:   make(map[string]settings.AgentSubstrateSettings, len(sett.AgentSubstrates)),
+		MCPServers:        make(map[string]settings.MCPServerSettings, len(sett.MCPServers)),
+		MessageSubstrates: make(map[string]settings.MessageSubstrateSetting, len(sett.MessageSubstrates)),
 	}
+	for name, value := range sett.AgentSubstrates {
+		value.Args = append([]string(nil), value.Args...)
+		value.Env = cloneSettingsStrings(value.Env)
+		value.Headers = cloneSettingsStrings(value.Headers)
+		result.AgentSubstrates[name] = value
+	}
+	for name, value := range sett.MCPServers {
+		value.Args = append([]string(nil), value.Args...)
+		value.Env = cloneSettingsStrings(value.Env)
+		value.Headers = cloneSettingsStrings(value.Headers)
+		result.MCPServers[name] = value
+	}
+	for name, value := range sett.MessageSubstrates {
+		value.Args = append([]string(nil), value.Args...)
+		value.Env = cloneSettingsStrings(value.Env)
+		value.Headers = cloneSettingsStrings(value.Headers)
+		result.MessageSubstrates[name] = value
+	}
+	return result
+}
+
+func cloneSettingsStrings(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]string, len(input))
+	for key, value := range input {
+		result[key] = value
+	}
+	return result
+}
+
+// defaultWorkflowWorkers applies when settings leave execution.workers unset.
+const defaultWorkflowWorkers = 3
+
+func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, sett *settings.Settings) (*productionWorkflowRuntime, error) {
+	if store == nil || cfg == nil || sett == nil {
+		return nil, errors.New("workflow runtime requires store, config, and settings")
+	}
+	workerCount := sett.Execution.Workers
 	if workerCount < 1 {
-		workerCount = 1
+		workerCount = defaultWorkflowWorkers
 	}
 	workflowRoot := workflowSourceRoot(cfg)
 	if err := os.MkdirAll(workflowRoot, 0o750); err != nil {
@@ -131,6 +191,11 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	}
 
 	waitAuthority := waitadapter.AuthorityResolverFunc(func(ctx context.Context, request waitadapter.AuthorityRequest) (workflowwait.ResponderAuthority, error) {
+		if request.Source.Kind == waitadapter.SourceChildRun {
+			// Host resumes child-run waits as responder child_run:<child id>
+			// (appworkflow child terminal recovery); only that child may wake it.
+			return workflowwait.ResponderAuthority{Kind: "child_run", Reference: request.Source.Reference}, nil
+		}
 		return workflowRunAuthority(ctx, journal, workflowruntime.RunID(request.Identity.RunID))
 	})
 	waitFor, err := waitadapter.NewWaitFor(waitadapter.Options{Authority: waitAuthority})
@@ -152,24 +217,61 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	if err != nil {
 		return nil, err
 	}
-	kinds := []stepkind.StepKind{transform.New(), scriptadapter.New(), waitadapter.NewSleep(nil), waitFor, messageWait, gate}
+	// call@v1 resolves children through the definition resolver, which in
+	// turn freezes a compile registry containing call@v1, and creates child
+	// runs through Host's policy gate, while Host receives call@v1. The
+	// deferred resolver, context provider, and child-run executor are bound as
+	// soon as their targets exist, before the runtime starts.
+	callResolver := &productionCallResolver{}
+	callContext := &workflowCallContext{}
+	callChildRuns := &productionChildRuns{}
+	call, err := calladapter.New(calladapter.Options{
+		Resolver: callResolver, State: journal, Context: callContext, Inline: refusingInlineCalls{}, Runs: callChildRuns,
+	})
+	if err != nil {
+		return nil, err
+	}
+	kinds := []stepkind.StepKind{transform.New(), scriptadapter.New(), waitadapter.NewSleep(nil), waitFor, messageWait, gate, call}
 	compileKinds := stepkind.NewRegistry()
 	for _, kind := range kinds {
 		if registerErr := compileKinds.Register(kind); registerErr != nil {
 			return nil, fmt.Errorf("register production workflow kind: %w", registerErr)
 		}
 	}
+	// agent_session@v1 is compile-visible only so it refuses with a clear
+	// gate message; Host never registers it.
+	gatedAgentSession, err := newGatedAgentSessionKind()
+	if err != nil {
+		return nil, err
+	}
+	if registerErr := compileKinds.Register(gatedAgentSession); registerErr != nil {
+		return nil, fmt.Errorf("register gated agent session kind: %w", registerErr)
+	}
 	required := productionWorkflowKindBoundary()
 	stager := appworkflow.NewAuthoringSourceStager()
 	resolver, err := appworkflow.NewDefinitionResolver(appworkflow.DefinitionResolverOptions{
 		Roots: []string{workflowRoot}, FileAuthority: "local", FileTrustClass: "local",
-		Registry: catalog, Authoring: stager,
+		Registry: catalog, Authoring: stager, BundledDefinitions: journal,
 		Authorizer: appworkflow.DefinitionAuthorizerFunc(func(context.Context, appworkflow.DefinitionAuthorization) error { return nil }),
-		Compile:    appworkflow.DefinitionCompileOptions{StepKinds: compileKinds, SemanticRevision: "hadrond-production-v1"},
+		Compile: appworkflow.DefinitionCompileOptions{
+			StepKinds: compileKinds, SemanticRevision: "hadrond-production-v2",
+			PolicyHooks:   []workflowcompile.PolicyHook{productionCallPolicy},
+			NodeExpanders: []workflowcompile.NodeExpander{newGatedAgentLaunchExpander()},
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
+	callResolver.bind(resolver)
+	plans := appworkflow.PinnedRecoveryPlanSource{
+		Roots: journal, Children: journal, State: state, Replays: state,
+		DependencyOptions: resolver.RecoveryDependencyOptions(),
+	}
+	callContextProvider, err := appworkflow.NewCallExpressionContextProvider(state, state, plans)
+	if err != nil {
+		return nil, err
+	}
+	callContext.bind(callContextProvider)
 
 	identity := appworkflow.ContextIdentityProvider{}
 	activation := newWorkflowActivationBridge()
@@ -193,6 +295,7 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	if err != nil {
 		return nil, err
 	}
+	callChildRuns.bind(host)
 	activation.bindWaits(waits)
 	activationService := appworkflow.ActivationService{Host: host, Store: activationStore, CurrentRegistry: catalog, RequireCurrentFence: true}
 	scheduleEngine, err := scheduler.NewWorkflowWithService(activationService)
@@ -201,10 +304,6 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	}
 	activation.bindSourceScheduler(scheduleEngine)
 
-	plans := appworkflow.PinnedRecoveryPlanSource{
-		Roots: journal, Children: journal, State: state, Replays: state,
-		DependencyOptions: resolver.RecoveryDependencyOptions(),
-	}
 	diagnostics := rundiagnostics.Service{
 		State: state, Plans: plans, Control: state, Replay: state, Pins: state,
 		Resources: state, Starts: journal,
@@ -265,12 +364,17 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 		return nil, err
 	}
 	workers := newWorkflowWorkers(state, plans, journal, journal, state, host.Registry(), host.Dispatcher(), workerCount, nonce)
+	external, err := newWorkflowExternalReconciler(host.ExternalOperations(), workflowExternalReconcileInterval, workflowExternalReconcileBatch)
+	if err != nil {
+		return nil, err
+	}
 	auth := &workflowHTTPAuthenticator{exposure: exposure, local: localWorkflowIdentity()}
 	return &productionWorkflowRuntime{
 		host: host, operations: operations, exposure: exposure, lifecycle: lifecycle, a2a: a2aHandler, card: card,
-		auth: auth, catalog: catalog, activationStore: activationStore, workers: workers, activation: activation,
+		auth: auth, catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
 		sourceActivations:   sourceActivationLifecycle,
 		externalActivations: trigger.ActivationManager{Service: activationService},
+		substrates:          cloneWorkflowSubstrateSettings(sett),
 	}, nil
 }
 
@@ -334,7 +438,26 @@ func workflowMCPPrincipal() hoststate.MCPPrincipalRecord {
 	binding.Principal = workflowMCPPrincipalID
 	binding.SourceAuthority = "mcp"
 	binding.Extension = map[string]string{"workflow_exposure_profile": workflowMCPProfileID}
+	// The MCP principal keeps the pre-CW-0227 capability set. BootstrapMCP
+	// compares a token's stored principal exactly, so widening this record
+	// would refuse every token bootstrapped before call@v1 existed, and
+	// rewriting the stored record would widen a grant silently. MCP-started
+	// runs therefore cannot use call or agent-session nodes (the start is
+	// refused on the missing capability) until that grant is extended
+	// deliberately.
+	if binding.ExecutionTarget != nil {
+		target := *binding.ExecutionTarget
+		target.Capabilities = workflowMCPCapabilities()
+		binding.ExecutionTarget = &target
+	}
 	return hoststate.MCPPrincipalRecord{ID: workflowMCPPrincipalID, ProfileID: workflowMCPProfileID, Identity: binding}
+}
+
+// workflowMCPCapabilities is the MCP principal's frozen capability set.
+func workflowMCPCapabilities() []string {
+	capabilities := []string{gateadapter.CapabilityGate, waitadapter.CapabilityMessage, waitadapter.CapabilityWait}
+	sort.Strings(capabilities)
+	return capabilities
 }
 
 func (r *productionWorkflowRuntime) Start(ctx context.Context) error {
@@ -348,6 +471,7 @@ func (r *productionWorkflowRuntime) Start(ctx context.Context) error {
 	}
 	r.activation.Start()
 	r.workers.Start()
+	r.external.Start()
 	return nil
 }
 
@@ -361,15 +485,24 @@ func (r *productionWorkflowRuntime) Shutdown(ctx context.Context) error {
 		// no live dispatch can retain a claim while Host or its store closes.
 		_ = r.workers.Stop(context.Background())
 	}
+	externalErr := r.external.Stop(ctx)
+	if externalErr != nil {
+		// Same drain rule: no adapter observation may outlive the store.
+		_ = r.external.Stop(context.Background())
+	}
 	r.activation.Stop()
 	hostCtx := ctx
 	if ctx == nil || ctx.Err() != nil {
 		hostCtx = context.Background()
 	}
 	hostErr := r.host.Shutdown(hostCtx)
-	return errors.Join(workerErr, hostErr)
+	return errors.Join(workerErr, externalErr, hostErr)
 }
 
+// productionDryRunSupport lists kinds whose effects hadrond can preview.
+// call@v1 is deliberately absent: a dry run cannot create the child run whose
+// behavior it would need to preview, so any plan containing a call node
+// reports dry run as unavailable.
 type productionDryRunSupport struct{}
 
 func (productionDryRunSupport) SupportsDryRun(_ context.Context, spec stepkind.StepKindSpec) (bool, error) {
@@ -380,6 +513,10 @@ func productionWorkflowPolicy(_ context.Context, facts hoststate.PolicyFacts) (h
 	if err := facts.Validate(); err != nil {
 		return invalidWorkflowPolicyFactsDecision()
 	}
+	// ConfirmationAdvised is set for mutating/destructive effects and for every
+	// call@v1 node (its child definition is unresolved at start), so call and
+	// agent_launch plans require explicit confirmation. Whether trusted child
+	// definitions may skip confirmation is an open product decision.
 	if facts.ConfirmationAdvised {
 		return hoststate.PolicyDecision{Outcome: hoststate.PolicyConfirm, Reason: "workflow effects require explicit confirmation"}, nil
 	}
@@ -438,7 +575,10 @@ func storeWorkflowGatePayload(ctx context.Context, state workflowruntime.StateSt
 
 func localWorkflowIdentity() hoststate.IdentityBinding {
 	checkedAt := time.Unix(1, 0).UTC()
-	capabilities := []string{gateadapter.CapabilityGate, waitadapter.CapabilityMessage, waitadapter.CapabilityWait}
+	capabilities := []string{
+		gateadapter.CapabilityGate, waitadapter.CapabilityMessage, waitadapter.CapabilityWait, capabilityWorkflowCall,
+		capabilityAgentSessionLaunch, capabilityAgentSessionObserve, capabilityAgentSessionCancel,
+	}
 	sort.Strings(capabilities)
 	target := hoststate.ExecutionTarget{
 		Version: hoststate.ScopeTargetVersionV1, ID: "local", Kind: hoststate.ExecutionTargetLocal,
@@ -1020,12 +1160,20 @@ func (w *workflowWorkers) dispatch(parent context.Context, claim workflowruntime
 	if identity.ExecutionTarget != nil {
 		target = identity.ExecutionTarget.ID
 	}
+	var lineage []graph.DefinitionRef
+	if definition.Call != nil {
+		lineage, err = w.loadCallLineage(parent, run.ID, make(map[workflowruntime.RunID]struct{}), 0)
+		if err != nil {
+			w.release(claim)
+			return
+		}
+	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	renewDone := make(chan error, 1)
 	go w.renew(ctx, cancel, claim, renewDone)
 	dispatchKey := workflowDispatchIdempotencyKey(claim.Candidate.InvocationID)
-	_, dispatchErr := w.dispatcher.Dispatch(ctx, workflowruntime.DispatchRequest{Claim: claim, Node: *definition, IdempotencyKey: dispatchKey, Target: target})
+	_, dispatchErr := w.dispatcher.Dispatch(ctx, workflowruntime.DispatchRequest{Claim: claim, Node: *definition, CallLineage: lineage, IdempotencyKey: dispatchKey, Target: target})
 	cancel()
 	renewErr := <-renewDone
 	if dispatchErr != nil || renewErr != nil {

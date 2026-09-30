@@ -9,9 +9,13 @@ import (
 	"github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/go-workflow/values"
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
 
 func (h *Host) recoverChildTerminalWaits(ctx context.Context) error {
+	if source, ok := h.state.(hoststate.ChildRunWaitStore); ok && !nilInterface(source) && h.waits != nil {
+		return h.recoverChildRunWaits(ctx, source)
+	}
 	source, ok := h.state.(runtime.ChildTerminalWaitStore)
 	if !ok || nilInterface(source) || h.waits == nil {
 		return nil
@@ -42,6 +46,49 @@ func (h *Host) recoverChildTerminalWaits(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// recoverChildRunWaits wakes open child_run waits on any node of the parent
+// run (a call node completes with the child handle, so the collecting
+// wait_for is normally a separate node). Each wait is resumed at most once;
+// see childRunWaitResumeKey for its idempotency identity.
+func (h *Host) recoverChildRunWaits(ctx context.Context, source hoststate.ChildRunWaitStore) error {
+	for {
+		candidates, err := source.RecoverChildRunWaits(ctx, h.batchLimit)
+		if err != nil {
+			return err
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+		for _, candidate := range candidates {
+			payload, payloadErr := h.childTerminalPayload(ctx, runtime.ChildTerminalWait{Link: candidate.Link, Child: candidate.Child, Wait: candidate.Wait})
+			if payloadErr != nil {
+				return payloadErr
+			}
+			at := maxTime(h.now(), candidate.Child.UpdatedAt)
+			at = maxTime(at, candidate.Wait.UpdatedAt)
+			_, resumeErr := h.waits.Resume(context.WithoutCancel(ctx), runtime.ResumeCommand{
+				WaitID: candidate.Wait.Ref.ID, Correlation: candidate.Wait.Correlation, WakeSource: workflowwait.WakeChildRun,
+				Responder: workflowwait.Responder{Kind: "child_run", Reference: string(candidate.Child.ID)}, Payload: payload,
+				IdempotencyKey: childRunWaitResumeKey(candidate), ReceivedAt: at,
+			})
+			var postCommit *runtime.PostCommitError
+			if resumeErr != nil && !errors.Is(resumeErr, runtime.ErrWaitClosed) && !errors.As(resumeErr, &postCommit) {
+				return fmt.Errorf("resume child run wait %s: %w", candidate.Wait.Ref.ID, resumeErr)
+			}
+		}
+	}
+}
+
+// childRunWaitResumeKey keeps the established key for a wait on the call
+// node itself and binds the wait ID for a wait on any other parent node, so
+// several nodes may each collect the same child.
+func childRunWaitResumeKey(candidate hoststate.ChildRunWait) string {
+	if candidate.Wait.Invocation == candidate.Link.Invocation {
+		return childTerminalResumeKey(candidate.Child.ID)
+	}
+	return childTerminalResumeKey(candidate.Child.ID) + ":" + string(candidate.Wait.Ref.ID)
 }
 
 func (h *Host) childTerminalPayload(ctx context.Context, candidate runtime.ChildTerminalWait) (values.Value, error) {
