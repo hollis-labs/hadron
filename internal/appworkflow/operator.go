@@ -120,6 +120,10 @@ type ValidateWorkflowResult struct {
 	Definition  graph.DefinitionRef      `json:"definition"`
 	Plan        *workflowruntime.PlanRef `json:"plan,omitempty"`
 	Diagnostics []diagnostic.Diagnostic  `json:"diagnostics"`
+
+	// GraphDigest is the digest an unattended allow-list entry pins; it is
+	// the same for top-level and call-started child runs.
+	GraphDigest string `json:"graph_digest,omitempty"`
 }
 
 type ExplainWorkflowRequest struct {
@@ -421,6 +425,7 @@ func (s *WorkflowOperator) ValidateWorkflow(ctx context.Context, request Validat
 	if len(findings) == 0 {
 		ref := workflowruntime.PlanRef{ID: validated.ID, Version: validated.Graph.Version, Digest: validated.Digest, SchemaVersion: validated.SchemaVersion}
 		result.Plan = &ref
+		result.GraphDigest = validated.Graph.Digest
 	}
 	return result, nil
 }

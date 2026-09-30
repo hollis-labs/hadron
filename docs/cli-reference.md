@@ -151,7 +151,7 @@ and failed preflight do not partially mutate state.
 ## Unattended allow-list
 
 ```sh
-hadron workflow unattended allow --plan <plan-id> --digest sha256:<hex> --reason <text> \
+hadron workflow unattended allow --plan <plan-id> --digest <graph-digest> --reason <text> \
   [--activation <registration-id>] [--principal <principal>] [--expires <duration|RFC3339>] [--id <entry-id>]
 hadron workflow unattended list [--json]
 hadron workflow unattended revoke <entry-id>
@@ -159,7 +159,8 @@ hadron workflow unattended revoke <entry-id>
 
 All three take `--data-dir` (default `~/.hadron`) and edit
 `workflow-unattended.json` directly; they never call the daemon. An entry lets
-that exact plan start without confirmation, which is what schedules, triggers
+that exact workflow (plan id plus the `graph` digest `workflow validate`
+prints) start without confirmation, which is what schedules, triggers
 and reactors need. The file's trust boundary is filesystem ownership, and
 agents running as your uid can write it: see
 [Confirmation and unattended starts](workflows.md#confirmation-and-unattended-starts).

@@ -26,7 +26,7 @@ func Apply(store *Store, facts hoststate.PolicyFacts, decision hoststate.PolicyD
 	}
 	snapshot := store.Snapshot()
 	entry, ok := Match(snapshot.Entries, StartFacts{
-		PlanID: facts.Plan.ID, Digest: facts.Plan.Digest,
+		PlanID: facts.Plan.ID, Digest: facts.GraphDigest,
 		ActivationID: facts.ActivationID, Principal: facts.Identity.Principal,
 	}, now)
 	if !ok {

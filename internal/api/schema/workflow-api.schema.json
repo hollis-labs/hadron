@@ -1061,6 +1061,9 @@
           },
           "type": "array"
         },
+        "graph_digest": {
+          "type": "string"
+        },
         "plan": {
           "$ref": "#/$defs/RuntimePlanRef"
         }
@@ -2069,6 +2072,9 @@
         },
         "execution_target": {
           "$ref": "#/$defs/HoststateExecutionTarget"
+        },
+        "graph_digest": {
+          "type": "string"
         },
         "identity": {
           "$ref": "#/$defs/HoststateIdentityBinding"

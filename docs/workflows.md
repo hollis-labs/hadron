@@ -150,16 +150,27 @@ A start with nobody to confirm it (a schedule, timer, trigger, reactor or run
 failure handler) is refused unless the operator allow-list covers it:
 
 ```sh
-hadron workflow validate <file|registry-selector> --json   # prints plan id and digest
-hadron workflow unattended allow --plan <plan-id> --digest sha256:<hex> \
+hadron workflow validate <file|registry-selector>   # prints the plan id and a "graph sha256:..." line
+hadron workflow unattended allow --plan <plan-id> --digest <graph-digest> \
   --reason "nightly report" [--activation <registration-id>] \
   [--principal <principal>] [--expires 720h]
 hadron workflow unattended list [--json]
 hadron workflow unattended revoke <entry-id>
 ```
 
-- An entry pins one plan id and one exact plan digest. Editing the workflow
-  changes the digest, so the edited plan needs a new entry.
+- An entry pins one plan id and one exact **graph digest** (the `graph` line
+  of `workflow validate`, or `graph_digest` in its JSON). It is the same
+  whether the workflow starts at top level or as a child. Editing the workflow
+  changes it, so the edited workflow needs a new entry.
+- **Child runs need their own entries.** A `call` step's child run is
+  evaluated against the list on its own plan id and graph digest; the root's
+  entry never covers it. Children resolve at call time and are not pinned by
+  the root's digest, so otherwise an edited child could run unattended under
+  the root's entry. Under an allow-listed root, a child that needs
+  confirmation and has no entry of its own is refused
+  (`child_run_policy_denied`). A root a human confirmed still covers its
+  children. A child inherits its root's activation, so an entry scoped with
+  `--activation` matches a child only when that activation started the run.
 - `--activation` and `--principal` narrow the entry; `--expires` ends it.
   Expired entries stay in the file and show as `expired` in `list`, but never
   match.

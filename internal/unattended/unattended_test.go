@@ -234,7 +234,7 @@ func TestStoreFailsClosedOnLoosenedFile(t *testing.T) {
 
 func testFacts(plan, digest string) hoststate.PolicyFacts {
 	facts := hoststate.PolicyFacts{ActivationID: "act-1"}
-	facts.Plan.ID, facts.Plan.Digest = plan, digest
+	facts.Plan.ID, facts.GraphDigest = plan, digest
 	facts.Identity.Principal = "service:cron"
 	return facts
 }

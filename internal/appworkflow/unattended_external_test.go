@@ -162,7 +162,7 @@ func TestUnattendedAllowListLetsActivationStartAdvisedWorkflow(t *testing.T) {
 
 	addedAt := fixture.now.Add(-time.Hour)
 	entry := unattended.Entry{
-		ID: "ua-nightly", PlanID: fixture.plan.ID, Digest: fixture.plan.Digest,
+		ID: "ua-nightly", PlanID: fixture.plan.ID, Digest: fixture.plan.Graph.Digest,
 		Scope:  unattended.Scope{ActivationID: listed.ID},
 		Reason: "nightly report runs unattended", AddedBy: "local:operator", AddedAt: addedAt,
 	}
@@ -223,11 +223,13 @@ func TestUnattendedAllowListMatchesExactDigestScopeAndExpiry(t *testing.T) {
 	t.Cleanup(func() { _ = fixture.host.Shutdown(context.Background()) })
 	addedAt := fixture.now.Add(-2 * time.Hour)
 	expired := fixture.now.Add(-time.Hour)
-	otherDigest := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	// The compiled plan's digest is not what entries pin; an entry holding it
+	// (an easy operator mistake) must not match.
+	otherDigest := fixture.plan.Digest
 	store, _ := writeAllowList(t,
 		unattended.Entry{ID: "ua-a-other-digest", PlanID: fixture.plan.ID, Digest: otherDigest, Reason: "stale", AddedBy: "local:op", AddedAt: addedAt},
-		unattended.Entry{ID: "ua-b-expired", PlanID: fixture.plan.ID, Digest: fixture.plan.Digest, ExpiresAt: &expired, Reason: "old", AddedBy: "local:op", AddedAt: addedAt},
-		unattended.Entry{ID: "ua-c-carol", PlanID: fixture.plan.ID, Digest: fixture.plan.Digest, Scope: unattended.Scope{Principal: "user:carol"}, Reason: "carol's batch", AddedBy: "local:op", AddedAt: addedAt},
+		unattended.Entry{ID: "ua-b-expired", PlanID: fixture.plan.ID, Digest: fixture.plan.Graph.Digest, ExpiresAt: &expired, Reason: "old", AddedBy: "local:op", AddedAt: addedAt},
+		unattended.Entry{ID: "ua-c-carol", PlanID: fixture.plan.ID, Digest: fixture.plan.Graph.Digest, Scope: unattended.Scope{Principal: "user:carol"}, Reason: "carol's batch", AddedBy: "local:op", AddedAt: addedAt},
 	)
 	fixture.setPolicy(allowListPolicy(store, func() time.Time { return fixture.now }))
 

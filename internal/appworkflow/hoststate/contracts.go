@@ -128,9 +128,14 @@ type PolicyFacts struct {
 	DryRunAvailable      bool                                         `json:"dry_run_available"`
 	ConfirmationAdvised  bool                                         `json:"confirmation_advised"`
 	// ActivationID names the schedule or trigger registration that started
-	// the run, when one did. The unattended allow-list can scope an entry
-	// to it.
+	// the run (for a child run, its root's), when one did. The unattended
+	// allow-list can scope an entry to it.
 	ActivationID string `json:"activation_id,omitempty"`
+	// GraphDigest is the compiled graph's digest. Unlike Plan.Digest it is
+	// the same whether the workflow starts at top level or as a call-started
+	// child (whose PlanRef carries the graph digest), so the unattended
+	// allow-list pins it.
+	GraphDigest string `json:"graph_digest,omitempty"`
 }
 
 func (f PolicyFacts) Validate() error {

@@ -30,8 +30,10 @@ func buildWorkflowUnattendedCmd(dependencies workflowCommandDependencies) *cobra
 
 Hadron asks for confirmation before starting a workflow whose effects advise
 it, and refuses the start when nobody is there to confirm (schedules,
-reactors, failure handlers). An entry pins one plan id and one exact plan
-digest; a matching start is allowed and its policy decision names the entry.
+reactors, failure handlers). An entry pins one plan id and one exact graph
+digest (the "graph" line of `+"`hadron workflow validate`"+`); a matching start is
+allowed and its policy decision names the entry. A call-started child needs
+its own entry.
 
 This command edits ` + unattended.FileName + ` in the data dir directly and
 never calls the daemon. The daemon re-reads the file when it changes and
@@ -98,7 +100,7 @@ func buildUnattendedAllowCmd(dependencies workflowCommandDependencies, path func
 		},
 	}
 	command.Flags().StringVar(&planID, "plan", "", "plan id (as printed by `hadron workflow validate`)")
-	command.Flags().StringVar(&digest, "digest", "", "exact plan digest, sha256:<hex> (as printed by `hadron workflow validate`)")
+	command.Flags().StringVar(&digest, "digest", "", "exact graph digest, sha256:<hex> (the \"graph\" line printed by `hadron workflow validate`)")
 	command.Flags().StringVar(&reason, "reason", "", "why this workflow may run unattended (required)")
 	command.Flags().StringVar(&activationID, "activation", "", "limit to starts from this activation registration")
 	command.Flags().StringVar(&principal, "principal", "", "limit to starts bound to this principal")

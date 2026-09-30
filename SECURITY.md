@@ -52,8 +52,8 @@ profile records; unknown credentials fail closed.
   [`docs/safety.md`](docs/safety.md).
 - Schedules, triggers and reactors have nobody to confirm, so such starts are
   refused unless the operator allow-list (`workflow-unattended.json` in the
-  data dir, edited only by `hadron workflow unattended`) pins that exact plan
-  digest. No network surface can read or write the list; the daemon refuses it
+  data dir, edited only by `hadron workflow unattended`) pins that exact
+  workflow digest. Call-started child runs need their own entries. No network surface can read or write the list; the daemon refuses it
   if it is group- or world-writable or owned by another uid. **Its boundary is
   filesystem ownership, and agents Hadron, Tether or Torque launch run as your
   uid**: such an agent can add an entry for its own workflow, including a

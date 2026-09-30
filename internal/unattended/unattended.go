@@ -5,8 +5,11 @@
 // workflow's effects advise it (mutate, destructive, or unresolved call
 // nodes). A start with nobody present to confirm (a schedule, a reactor, the
 // failure handler) is refused. An entry here, pinned to one plan id and one
-// exact plan digest, turns that Confirm into an Allow and names itself in the
-// persisted policy decision.
+// exact graph digest, turns that Confirm into an Allow and names itself in the
+// persisted policy decision. Call-started child runs are evaluated against
+// the list on their own plan and digest: an entry for a root never covers
+// its children, which resolve at call time and are not pinned by the root's
+// digest.
 //
 // The list lives in a file the daemon only reads. There is no HTTP, MCP or
 // A2A write path: `hadron workflow unattended` edits the file directly. The
@@ -47,8 +50,11 @@ type File struct {
 type Entry struct {
 	// ID names the entry in decisions, logs and `revoke`.
 	ID string `json:"id"`
-	// PlanID and Digest pin one exact compiled plan. Editing the workflow
-	// changes the digest, so the edited plan needs a new entry.
+	// PlanID and Digest pin one exact workflow. Digest is the compiled
+	// graph digest (`hadron workflow validate` prints it as "graph"), which
+	// is the same whether the workflow starts at top level or as a
+	// call-started child. Editing the workflow changes it, so the edited
+	// workflow needs a new entry.
 	PlanID string `json:"plan_id"`
 	Digest string `json:"digest"`
 	// Scope optionally narrows which starts the entry covers.
@@ -155,7 +161,8 @@ func Encode(file File) ([]byte, error) {
 	return append(out, '\n'), nil
 }
 
-// StartFacts is what an entry is matched against.
+// StartFacts is what an entry is matched against. Digest is the graph
+// digest (PolicyFacts.GraphDigest).
 type StartFacts struct {
 	PlanID       string
 	Digest       string

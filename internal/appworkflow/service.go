@@ -1063,7 +1063,7 @@ func (h *Host) policyFacts(ctx context.Context, runID runtime.RunID, plan *compi
 	if err := hoststate.ValidateExecutionTargetBinding(target, capabilityList, targets); err != nil {
 		return hoststate.PolicyFacts{}, fmt.Errorf("%w: %w", ErrExecutionTarget, err)
 	}
-	facts := hoststate.PolicyFacts{Operation: "start", RunID: runID, Plan: ref, Identity: identity, RunScope: scope, ExecutionTarget: target, Effects: effectList, RequiredCapabilities: capabilityList, TargetRequirements: targets, UnresolvedCallNodes: unresolvedCalls, NodeCount: len(plan.Graph.Nodes), BlastRadius: blast, DryRunAvailable: dryAvailable, ConfirmationAdvised: mutate || destructive || len(unresolvedCalls) != 0}
+	facts := hoststate.PolicyFacts{Operation: "start", RunID: runID, Plan: ref, Identity: identity, RunScope: scope, ExecutionTarget: target, Effects: effectList, RequiredCapabilities: capabilityList, TargetRequirements: targets, UnresolvedCallNodes: unresolvedCalls, NodeCount: len(plan.Graph.Nodes), BlastRadius: blast, DryRunAvailable: dryAvailable, ConfirmationAdvised: mutate || destructive || len(unresolvedCalls) != 0, GraphDigest: plan.Graph.Digest}
 	return facts, facts.Validate()
 }
 
