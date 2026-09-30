@@ -25,6 +25,9 @@ type NonDurableStartRecord struct {
 	Outputs       values.ValueSet     `json:"outputs,omitempty"`
 	Failure       *runtime.Failure    `json:"failure,omitempty"`
 	CompletedAt   time.Time           `json:"completed_at"`
+
+	// Confirmation matches StartRecord.Confirmation.
+	Confirmation *StartConfirmation `json:"confirmation,omitempty"`
 }
 
 func (r NonDurableStartRecord) Validate() error {

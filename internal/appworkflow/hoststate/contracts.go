@@ -97,6 +97,20 @@ func (b IdentityBinding) Clone() IdentityBinding {
 	return b
 }
 
+// StartConfirmation records how a start whose policy decision needed a human
+// got through: a caller confirmed it (Confirmed, ConfirmedBy), or an
+// unattended allow-list entry waived it (AllowlistEntry). It is absent when
+// the policy never asked for confirmation. It lives on the immutable start
+// record, deliberately outside the request digest: the policy evaluation is
+// persisted per start key before the confirm check, so digesting Confirmed
+// would turn the standard 409-then-confirmed retry on the same key into an
+// idempotency conflict.
+type StartConfirmation struct {
+	Confirmed      bool   `json:"confirmed"`
+	ConfirmedBy    string `json:"confirmed_by,omitempty"`
+	AllowlistEntry string `json:"allowlist_entry,omitempty"`
+}
+
 // PolicyFacts is the normalized pre-execution policy input.
 type PolicyFacts struct {
 	Operation            string                                       `json:"operation"`
@@ -113,6 +127,15 @@ type PolicyFacts struct {
 	BlastRadius          map[string]int                               `json:"blast_radius"`
 	DryRunAvailable      bool                                         `json:"dry_run_available"`
 	ConfirmationAdvised  bool                                         `json:"confirmation_advised"`
+	// ActivationID names the schedule or trigger registration that started
+	// the run (for a child run, its root's), when one did. The unattended
+	// allow-list can scope an entry to it.
+	ActivationID string `json:"activation_id,omitempty"`
+	// GraphDigest is the compiled graph's digest. Unlike Plan.Digest it is
+	// the same whether the workflow starts at top level or as a call-started
+	// child (whose PlanRef carries the graph digest), so the unattended
+	// allow-list pins it.
+	GraphDigest string `json:"graph_digest,omitempty"`
 }
 
 func (f PolicyFacts) Validate() error {
@@ -253,6 +276,9 @@ type StartRecord struct {
 	// table and per-start link, not duplicated in the immutable start JSON or
 	// exposed through ordinary application transports.
 	Snapshot *PlanSnapshot `json:"-"`
+
+	// Confirmation records how an effect-advised start was let through.
+	Confirmation *StartConfirmation `json:"confirmation,omitempty"`
 }
 
 // BundledDefinitionCandidate associates one exact serialized child definition

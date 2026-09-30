@@ -64,6 +64,7 @@ func buildWorkflowCmdWithDependencies(dependencies workflowCommandDependencies) 
 		buildWorkflowRerunCmd(dependencies),
 		buildWorkflowCatalogCmd(dependencies), buildWorkflowAuthorCmd(dependencies),
 		buildWorkflowRegistryLifecycleCmd(dependencies), buildWorkflowExposureCmd(dependencies),
+		buildWorkflowUnattendedCmd(dependencies),
 	)
 	return command
 }
@@ -173,7 +174,13 @@ func buildWorkflowValidateCmd(dependencies workflowCommandDependencies) *cobra.C
 			if result.Plan == nil {
 				return errors.New("workflow validation returned no plan")
 			}
-			_, err := fmt.Fprintf(command.OutOrStdout(), "valid %s@%s (%s)\n", result.Plan.ID, result.Plan.Version, result.Plan.Digest)
+			if _, err := fmt.Fprintf(command.OutOrStdout(), "valid %s@%s (%s)\n", result.Plan.ID, result.Plan.Version, result.Plan.Digest); err != nil {
+				return err
+			}
+			if result.GraphDigest == "" {
+				return nil
+			}
+			_, err := fmt.Fprintf(command.OutOrStdout(), "graph %s\n", result.GraphDigest)
 			return err
 		}
 		if err := writeWorkflowDiagnostics(command.OutOrStdout(), result.Diagnostics); err != nil {

@@ -46,6 +46,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/trigger"
+	"github.com/hollis-labs/hadron/internal/unattended"
 )
 
 const (
@@ -283,9 +284,13 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	if err != nil {
 		return nil, err
 	}
+	// The unattended allow-list is read, never written, by the daemon; the
+	// first Snapshot logs what it holds at startup.
+	allowList := unattended.NewStore(filepath.Join(cfg.DataDir, unattended.FileName), os.Geteuid(), nil, nil)
+	allowList.Snapshot()
 	host, err := appworkflow.New(appworkflow.Options{
 		State: state, Journal: journal, Definitions: resolver, Identity: identity,
-		Policy: appworkflow.PolicyEvaluatorFunc(productionWorkflowPolicy),
+		Policy: allowListedWorkflowPolicy(allowList),
 		Kinds:  kinds, RequiredKinds: required, DryRun: productionDryRunSupport{},
 		Activations: activation, ActivationStore: activationStore, Waits: waits,
 		ReuseAuthorizer: workflowruntime.ReuseAuthorizerFunc(productionReusePolicy),
@@ -507,6 +512,21 @@ type productionDryRunSupport struct{}
 
 func (productionDryRunSupport) SupportsDryRun(_ context.Context, spec stepkind.StepKindSpec) (bool, error) {
 	return spec.Name == transform.Name || spec.Name == scriptadapter.Name || spec.Name == waitadapter.SleepName || spec.Name == waitadapter.WaitForName || spec.Name == waitadapter.MessageWaitName || spec.Name == gateadapter.Name, nil
+}
+
+// allowListedWorkflowPolicy is the Host's policy evaluator: the production
+// policy, with the unattended allow-list able to waive a Confirm. The Host
+// uses one evaluator for top-level starts and call-started child runs, so a
+// child is matched against the list by its own plan id and digest; an entry
+// for the root never covers its children.
+func allowListedWorkflowPolicy(allowList *unattended.Store) appworkflow.PolicyEvaluator {
+	return appworkflow.PolicyEvaluatorFunc(func(ctx context.Context, facts hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+		decision, err := productionWorkflowPolicy(ctx, facts)
+		if err != nil {
+			return decision, err
+		}
+		return unattended.Apply(allowList, facts, decision, time.Now()), nil
+	})
 }
 
 func productionWorkflowPolicy(_ context.Context, facts hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {

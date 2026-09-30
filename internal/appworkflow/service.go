@@ -164,6 +164,9 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 		if err != nil {
 			return StartRunResult{}, err
 		}
+		if request.Activation != nil {
+			facts.ActivationID = request.Activation.ActivationID
+		}
 		policyInput, cloneErr := clonePolicyFacts(facts)
 		if cloneErr != nil {
 			return StartRunResult{}, fmt.Errorf("clone workflow policy facts: %w", cloneErr)
@@ -195,11 +198,13 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 	if decision.Outcome == hoststate.PolicyDeny {
 		return StartRunResult{Decision: decision, Facts: facts}, ErrPolicyDenied
 	}
-	if decision.Outcome == hoststate.PolicyConfirm && !request.Confirmed {
-		return StartRunResult{Decision: decision, Facts: facts}, ErrConfirmationRequired
-	}
+	// A dry run has no effects, so it never needs confirmation; it still
+	// needs every step to support dry-run, and a denial still stops it.
 	if request.DryRun && !facts.DryRunAvailable {
 		return StartRunResult{Decision: decision, Facts: facts}, ErrDryRunUnsupported
+	}
+	if decision.Outcome == hoststate.PolicyConfirm && !request.Confirmed && !request.DryRun {
+		return StartRunResult{Decision: decision, Facts: facts}, ErrConfirmationRequired
 	}
 	if runtime.EffectiveDurability(plan.Graph) == graph.DurabilityNone && !request.DryRun {
 		return h.executeNonDurable(ctx, request, requestDigest, plan, facts, decision)
@@ -219,7 +224,8 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 		Run: *boundResult.Run, Plan: *plan, Requested: request.Definition,
 		StartKey: request.IdempotencyKey, RequestDigest: requestDigest, CallerInputHash: inputHash,
 		Identity: facts.Identity, Facts: facts, Decision: decision,
-		Activation: request.Activation, Pins: request.Pins, DryRun: request.DryRun, RecordedAt: h.now(),
+		Activation: request.Activation, Pins: request.Pins, DryRun: request.DryRun,
+		Confirmation: startConfirmation(request, facts, decision), RecordedAt: h.now(),
 		Snapshot: planSnapshot,
 	}
 	snapshot, outcome, err := h.journal.RecordStart(context.WithoutCancel(ctx), record)
@@ -959,6 +965,18 @@ func maxTime(candidate, floor time.Time) time.Time {
 	return candidate
 }
 
+// startConfirmation says how an accepted start cleared its policy's request
+// for confirmation, or nil when there was none to clear.
+func startConfirmation(request StartRunRequest, facts hoststate.PolicyFacts, decision hoststate.PolicyDecision) *hoststate.StartConfirmation {
+	if entry := decision.Attributes[AllowlistEntryAttribute]; entry != "" && decision.Outcome == hoststate.PolicyAllow {
+		return &hoststate.StartConfirmation{AllowlistEntry: entry}
+	}
+	if decision.Outcome == hoststate.PolicyConfirm && request.Confirmed && !request.DryRun {
+		return &hoststate.StartConfirmation{Confirmed: true, ConfirmedBy: facts.Identity.Principal}
+	}
+	return nil
+}
+
 func normalizeDecision(decision hoststate.PolicyDecision, runID runtime.RunID, at time.Time) hoststate.PolicyDecision {
 	decision.Attributes = cloneStringMap(decision.Attributes)
 	if decision.RunID == "" {
@@ -1045,7 +1063,7 @@ func (h *Host) policyFacts(ctx context.Context, runID runtime.RunID, plan *compi
 	if err := hoststate.ValidateExecutionTargetBinding(target, capabilityList, targets); err != nil {
 		return hoststate.PolicyFacts{}, fmt.Errorf("%w: %w", ErrExecutionTarget, err)
 	}
-	facts := hoststate.PolicyFacts{Operation: "start", RunID: runID, Plan: ref, Identity: identity, RunScope: scope, ExecutionTarget: target, Effects: effectList, RequiredCapabilities: capabilityList, TargetRequirements: targets, UnresolvedCallNodes: unresolvedCalls, NodeCount: len(plan.Graph.Nodes), BlastRadius: blast, DryRunAvailable: dryAvailable, ConfirmationAdvised: mutate || destructive || len(unresolvedCalls) != 0}
+	facts := hoststate.PolicyFacts{Operation: "start", RunID: runID, Plan: ref, Identity: identity, RunScope: scope, ExecutionTarget: target, Effects: effectList, RequiredCapabilities: capabilityList, TargetRequirements: targets, UnresolvedCallNodes: unresolvedCalls, NodeCount: len(plan.Graph.Nodes), BlastRadius: blast, DryRunAvailable: dryAvailable, ConfirmationAdvised: mutate || destructive || len(unresolvedCalls) != 0, GraphDigest: plan.Graph.Digest}
 	return facts, facts.Validate()
 }
 

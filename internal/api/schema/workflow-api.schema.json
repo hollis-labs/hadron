@@ -1061,6 +1061,9 @@
           },
           "type": "array"
         },
+        "graph_digest": {
+          "type": "string"
+        },
         "plan": {
           "$ref": "#/$defs/RuntimePlanRef"
         }
@@ -2049,6 +2052,9 @@
     "HoststatePolicyFacts": {
       "additionalProperties": false,
       "properties": {
+        "activation_id": {
+          "type": "string"
+        },
         "blast_radius": {
           "additionalProperties": {
             "type": "integer"
@@ -2066,6 +2072,9 @@
         },
         "execution_target": {
           "$ref": "#/$defs/HoststateExecutionTarget"
+        },
+        "graph_digest": {
+          "type": "string"
         },
         "identity": {
           "$ref": "#/$defs/HoststateIdentityBinding"

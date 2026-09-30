@@ -53,6 +53,7 @@ func (h *Host) executeNonDurable(ctx context.Context, request StartRunRequest, r
 		RunID: request.RunID, StartKey: request.IdempotencyKey, RequestDigest: requestDigest,
 		Plan: facts.Plan, Identity: facts.Identity.Clone(), Facts: facts, Decision: decision,
 		Run: run, Outputs: executed.Outputs, Failure: failure, CompletedAt: h.now(),
+		Confirmation: startConfirmation(request, facts, decision),
 	}
 	persisted, outcome, err := audit.RecordNonDurableStart(context.WithoutCancel(ctx), record)
 	if err != nil {

@@ -93,6 +93,12 @@ func (h *Host) authorizeChildRun(ctx context.Context, request calladapter.ChildR
 		if err != nil {
 			return childPolicyRefusal("child workflow run was refused by workflow policy: "+err.Error(), err)
 		}
+		// A child inherits the activation that started its lineage, so an
+		// activation-scoped allow-list entry for the child matches only runs
+		// that activation started.
+		if root.Record.Activation != nil {
+			facts.ActivationID = root.Record.Activation.ActivationID
+		}
 		policyInput, cloneErr := clonePolicyFacts(facts)
 		if cloneErr != nil {
 			return fmt.Errorf("clone child workflow policy facts: %w", cloneErr)
