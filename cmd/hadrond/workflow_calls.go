@@ -134,7 +134,9 @@ var productionCallPolicy = workflowcompile.PolicyHookFunc(func(_ context.Context
 // name but refuses any expansion whose generated child definitions contain
 // agent_session@v1. Bundled child graphs are not kind-validated when the root
 // plan compiles, so the refusal must happen here to fail before a run starts.
-// Lifting the gate means registering agentadapter.SourceExpander{} directly.
+// When a Tether session host is composed, newProductionWorkflowRuntime
+// registers tetherAgentLaunchExpander (SourceExpander plus the typed-input
+// refusal) instead.
 type gatedAgentLaunchExpander struct {
 	inner workflowcompile.NodeExpander
 }

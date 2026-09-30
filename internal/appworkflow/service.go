@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/go-workflow/compile"
 	"github.com/hollis-labs/go-workflow/graph"
 	"github.com/hollis-labs/go-workflow/runtime"
 	"github.com/hollis-labs/go-workflow/stepkind"
 	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
 
 const cancellationCASLimit = 8
@@ -699,8 +699,13 @@ func bindNodeInputs(node graph.Node, inputs values.ValueSet, runID runtime.RunID
 	}
 	sort.Strings(names)
 	result := make(values.ValueSet, len(names))
+	// run.id is the durable run identity. agent_launch expansion binds its
+	// parent correlation as "agent:{{ run.id }}:<node>", and go-workflow's
+	// own expression contexts do not carry the run root, so the host supplies
+	// it here for root nodes.
+	expression := values.ExpressionContext{Inputs: inputs, Run: map[string]any{"id": string(runID)}}
 	for _, name := range names {
-		value, err := engine.EvaluateBinding(node.InputBindings[name], values.ExpressionContext{Inputs: inputs}, values.ExpressionOptions{}, values.Metadata{
+		value, err := engine.EvaluateBinding(node.InputBindings[name], expression, values.ExpressionOptions{}, values.Metadata{
 			Producer:  values.Producer{Kind: "hadron_host_binding", Reference: string(runID) + "/" + node.ID, Output: name},
 			MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
 		})

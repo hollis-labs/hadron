@@ -89,19 +89,152 @@ steps:
 - The child terminal status wakes the collecting `wait_for`; only that child
   run may resume it.
 
-### `agent_launch` is not enabled yet
+### Agent steps (`agent_launch`, Tether-backed)
 
-The compiler recognizes `agent_launch` (it lowers to `call@v1` plus a bundled
-child running `agent_session@v1`), but this `hadrond` refuses it at
-validation with:
+The compiler recognizes `agent_launch`: it lowers to `call@v1` plus a bundled
+child running `agent_session@v1`. `agent_session@v1` needs a durable session
+host, and the only one `hadrond` has is the Tether daemon (muxd). Without a
+configured `tether_session` agent substrate, validation refuses the step with:
 
 > agent_session@v1 is not enabled in this hadrond yet: agent launch needs a
 > durable session host (CW-20260930-0227)
 
 A directly authored `agent_session` node is refused with the same message.
-The local execution target already grants `agent.session.launch`,
-`agent.session.observe`, and `agent.session.cancel` so enabling the session
-host only lifts this gate.
+Configuring a `tether_session` substrate lifts the gate: `hadrond` talks to
+muxd through go-tether-client at the substrate's `endpoint`, and
+`agent_session@v1` joins the production kind set above. The client connects on
+demand, so `hadrond` starts even when muxd is down; agent steps then see muxd
+as unreachable (below). All `tether_session` substrates must name the same
+endpoint, or `hadrond` refuses to start. The local execution
+target already grants `agent.session.launch`, `agent.session.observe`, and
+`agent.session.cancel`; MCP-started runs still cannot use agent steps.
+
+#### Settings
+
+```json
+{
+  "agent_substrates": {
+    "tether": {
+      "kind": "tether_session",
+      "tether": {
+        "endpoint": "~/.tether/run/muxd.sock",
+        "launch": "claude-default",
+        "launches": {"reviewer": "claude-review"},
+        "result_optional": false,
+        "stop_on_result": true,
+        "unreachable_timeout": "10m"
+      }
+    }
+  }
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `launch` | — | Tether `launch_id` for any logical agent not in `launches` |
+| `launches` | — | `logical_agent_id` → Tether `launch_id` |
+| `endpoint` | `~/.tether/run/muxd.sock` | muxd socket path (`~/` expanded), or `unix:`, `tcp:host:port`, `http(s)://` address |
+| `result_optional` | `false` | A session that completes without a result reply succeeds with a JSON `null` result instead of failing `agent_no_result` |
+| `stop_on_result` | `true` | Stop the session once its result reply is accepted |
+| `unreachable_timeout` | `10m` | How long muxd may stay unreachable before the step fails `agent_host_unreachable` |
+
+Settings validation requires `launch` or `launches` and a positive
+`unreachable_timeout`. A step whose `logical_agent_id` has no launch fails
+permanently (`agent_unknown_logical_agent`, carried under the step's
+`agent_launch_failed` failure).
+
+```yaml
+steps:
+  - id: review
+    agent_launch:
+      substrate: tether
+      logical_agent_id: reviewer
+      prompt_append: Review the change on this branch.
+      wait: {timeout: 1h}
+outputs:
+  verdict:
+    type: object
+    value: steps.review.outputs.payload.result
+```
+
+#### Launch and the result contract
+
+Each agent step creates one keyed Tether session. The Tether idempotency key is
+`hadron/<run>/<node>/<iteration or ->/<k>`, where `k` is the first 16 hex
+characters of sha256 of the step's idempotency key (capped at 512 bytes by
+shortening the run/node/iteration parts). A retry, a lost response, or a
+`hadrond` restart replays the same session instead of starting another.
+
+Hadron appends a result contract to the step's prompt:
+
+```text
+----- BEGIN HADRON RESULT CONTRACT -----
+When your task is complete, send exactly one message with the mux_message_send tool:
+  kind: response
+  to: msg://agent/hadron/results
+  thread_id: <correlation>
+  payload: {"nonce": "<nonce>", "result": <your result as a JSON value>}
+Do not send the nonce anywhere else. Hadron treats the first valid reply on this thread as your step result.
+----- END HADRON RESULT CONTRACT -----
+```
+
+The thread is the step's correlation (`agent:<parent run>:<node>`). The nonce
+is `hex(HMAC-SHA256(secret, "hadron-agent-result-nonce/v1|" + request digest +
+"|" + correlation))`, keyed by a per-Hadron 32-byte secret in
+`<data dir>/agent-result-secret.key` (mode 0600, created on first use). The
+request digest and correlation are both in the durable session reference, so
+observation recomputes the nonce after a restart. Everything sent to Tether is
+a pure function of the step's launch request and that secret, because Tether's
+idempotency digest covers the prompt: any nondeterminism would turn a replay
+into a 409 conflict.
+
+Hadron reads the thread as `msg://agent/hadron/results` (`?as=`), so it sees
+only turns to or from that mailbox, and the read has no delivery side effects.
+A reply is the step's result only if its kind is `response`, it is addressed to
+`msg://agent/hadron/results`, its payload is a JSON object with a string
+`nonce` and a `result` key, and the nonce matches (constant-time compare).
+Anything else is ignored and logged once, and the step keeps waiting.
+
+**Limitation:** Tether's reply `from` is asserted by the sender and not
+authenticated (same-host trust, ADR 0045; tracked with CW-20260918-0037).
+Hadron logs it as `from_unverified` and never uses it. The nonce is the only
+proof a reply came from the launched session, so a process that can read the
+session's prompt can answer for it.
+
+#### How a session maps to the step
+
+Hadron reads the reply thread first, so a result reply wins over any later
+session state, including a stop or a muxd restart sweep. Without a valid reply:
+
+| Tether session | Step |
+|---|---|
+| `created`, `ready`, `launching`, `running` | pending (progress shows `state`, `alive`) |
+| `completed` | failed `agent_no_result`, or succeeds with `null` when `result_optional` |
+| `killed` | canceled `agent_session_canceled` — Hadron's own cancel, or a human stopping the session in Tether |
+| `failed`, exit code -1 | failed `agent_session_lost` (muxd's restart sweep lost the process) |
+| `failed`, other exit | failed `agent_session_failed` |
+| not found | failed `agent_session_missing` |
+
+These failures are not retryable. Cancelling the run stops the session.
+
+While muxd is unreachable (connection refused, missing socket, or the client's
+5-second request timeout) the step stays pending (progress
+`state: unreachable`). If it stays unreachable for `unreachable_timeout`, the
+step fails `agent_host_unreachable` (retryable). The timer is held in memory
+and restarts from zero when `hadrond` restarts.
+
+#### Not supported yet
+
+- Typed inputs: an `agent_launch` with `with:` bindings, or an `agent_session`
+  node binding anything other than the reserved `parent-correlation`, is
+  refused at validation on a `tether_session` substrate ("agent_session typed
+  inputs are not supported by the Tether session host yet"). Put the task in
+  `prompt_append`.
+- `agent_launch` nodes with `needs:`: go-workflow does not expose `run.id` to
+  dependent-node bindings, so the generated correlation cannot bind. Use
+  `agent_launch` as a root step.
+- Authored `retry:` is not honored by `hadrond`. The session host replays the
+  keyed create itself (3 attempts) when muxd is briefly unreachable.
 
 ### External operations
 
