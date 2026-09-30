@@ -30,11 +30,13 @@ type MCPServerSettings struct {
 }
 
 type AgentSubstrateSettings struct {
-	Kind                   string            `json:"kind"`
-	Provider               string            `json:"provider,omitempty"`
-	Runtime                string            `json:"runtime,omitempty"`
-	Authority              string            `json:"authority,omitempty"`
-	WorkingDirMode         string            `json:"working_dir_mode,omitempty"`
+	Kind           string `json:"kind"`
+	Provider       string `json:"provider,omitempty"`
+	Runtime        string `json:"runtime,omitempty"`
+	Authority      string `json:"authority,omitempty"`
+	WorkingDirMode string `json:"working_dir_mode,omitempty"`
+	// AllowGenericSubprocess is ignored: the launcher refuses providers it
+	// has no adapter for instead of launching them with argv [prompt].
 	AllowGenericSubprocess bool              `json:"allow_generic_subprocess,omitempty"`
 	Command                string            `json:"command,omitempty"`
 	Args                   []string          `json:"args,omitempty"`

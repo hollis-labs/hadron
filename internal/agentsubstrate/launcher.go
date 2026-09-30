@@ -48,6 +48,7 @@ const (
 type Launcher struct {
 	dataDir    string
 	substrates map[string]settings.AgentSubstrateSettings
+	mcpServers map[string]settings.MCPServerSettings
 	sessions   *agentsessions.Manager
 	codexTurns turn.CodexAppServerCache
 	replies    replyMessenger
@@ -78,6 +79,16 @@ func NewLauncher(dataDir string, substrates map[string]settings.AgentSubstrateSe
 		closeCtx:   closeCtx,
 		cancel:     cancel,
 	}
+}
+
+// SetMCPServers records the settings' MCP servers for every launch's plan.
+// See mcpSpecFromSettings: the spec is inert until the libs plant it.
+func (l *Launcher) SetMCPServers(servers map[string]settings.MCPServerSettings) {
+	cloned := make(map[string]settings.MCPServerSettings, len(servers))
+	for name, srv := range servers {
+		cloned[name] = srv
+	}
+	l.mcpServers = cloned
 }
 
 func (l *Launcher) SetReplyMessenger(m replyMessenger) {
@@ -172,13 +183,18 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 		return execution.AgentLaunchResult{}, fmt.Errorf("resolve workdir %q: %w", workdir, err)
 	}
 
+	// AllowGenericSubprocess is not passed on: the generic subprocess path
+	// launched argv [prompt] and parsed no output, so an unknown provider is
+	// refused below rather than launched blind.
 	binding, err := runtimebind.Resolve(runtimebind.Request{
-		Provider:               cfg.Provider,
-		RequestedRuntime:       agentlaunch.RuntimeKind(cfg.Runtime),
-		AllowPTY:               true,
-		AllowGenericSubprocess: cfg.AllowGenericSubprocess,
+		Provider:         cfg.Provider,
+		RequestedRuntime: agentlaunch.RuntimeKind(cfg.Runtime),
+		AllowPTY:         true,
 	})
 	if err != nil {
+		if errors.Is(err, runtimebind.ErrUnsupportedBinding) {
+			return execution.AgentLaunchResult{}, &UnsupportedRuntimeError{Provider: cfg.Provider, Runtime: cfg.Runtime, Cause: err}
+		}
 		return execution.AgentLaunchResult{}, fmt.Errorf("resolve provider/runtime: %w", err)
 	}
 
@@ -201,7 +217,7 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 
 	sessionID := l.nextSessionID(req)
 	mailbox := mailboxURN(cfg.Authority, req.LogicalAgentID)
-	sessionLaunch, bootDir, workspaceDir, err := buildSessionLaunch(ctx, l.dataDir, cfg, req, sessionID, mailbox, projectDir, binding, adapter)
+	sessionLaunch, bootDir, workspaceDir, err := buildSessionLaunch(ctx, l.dataDir, cfg, req, sessionID, mailbox, projectDir, binding, adapter, mcpSpecFromSettings(l.mcpServers))
 	if err != nil {
 		return execution.AgentLaunchResult{}, err
 	}
@@ -255,10 +271,10 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 	return result, nil
 }
 
-func buildSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir string, binding runtimebind.Binding, adapter provider.CLIAdapter) (sessionshim.SessionLaunch, string, string, error) {
+func buildSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir string, binding runtimebind.Binding, adapter provider.CLIAdapter, mcp agentlaunch.MCPSpec) (sessionshim.SessionLaunch, string, string, error) {
 	workspaceDir := filepath.Join(dataDir, "agents", "sessions", sessionID)
 	if supportsAgentkitLaunch(binding) {
-		return buildAgentkitSessionLaunch(ctx, dataDir, cfg, req, sessionID, mailbox, projectDir, workspaceDir, adapter)
+		return buildAgentkitSessionLaunch(ctx, dataDir, cfg, req, sessionID, mailbox, projectDir, workspaceDir, adapter, mcp)
 	}
 	bootDir := filepath.Join(workspaceDir, "boot")
 	bootPrompt, bootContent, extraFiles, err := renderBootArtifacts(dataDir, cfg, bootRenderContext{
@@ -280,7 +296,7 @@ func buildSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentS
 	return buildFallbackSessionLaunch(cfg, req, workspaceDir, projectDir, bootPrompt, bootContent, extraFiles, adapter)
 }
 
-func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir, workspaceDir string, adapter provider.CLIAdapter) (sessionshim.SessionLaunch, string, string, error) {
+func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir, workspaceDir string, adapter provider.CLIAdapter, mcp agentlaunch.MCPSpec) (sessionshim.SessionLaunch, string, string, error) {
 	bootPrompt, bootContent, _, err := renderBootArtifacts(dataDir, cfg, bootRenderContext{
 		SessionID:      sessionID,
 		SessionURN:     sessionURN(cfg.Authority, sessionID),
@@ -296,7 +312,7 @@ func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg setting
 	if err != nil {
 		return sessionshim.SessionLaunch{}, "", "", err
 	}
-	plan, err := buildLaunchPlan(cfg, req, projectDir, workspaceDir, bootPrompt, bootContent, nil)
+	plan, err := buildLaunchPlan(cfg, req, projectDir, workspaceDir, bootPrompt, bootContent, nil, mcp)
 	if err != nil {
 		return sessionshim.SessionLaunch{}, "", "", err
 	}
@@ -728,11 +744,8 @@ func newAdapter(binding runtimebind.Binding, cfg settings.AgentSubstrateSettings
 		a.Dir = projectDir
 		adapter = a
 		caps = agentsessions.Capabilities{ServeHTTP: true, BinaryRequired: true}
-	case cfg.AllowGenericSubprocess && binding.Runtime == agentlaunch.RuntimeSubprocess:
-		adapter = &genericCLIAdapter{name: normalizedProviderName(cfg.Provider)}
-		caps = agentsessions.Capabilities{BinaryRequired: true}
 	default:
-		return nil, agentsessions.Capabilities{}, fmt.Errorf("unsupported provider/runtime binding %q/%q", binding.Provider, binding.Runtime)
+		return nil, agentsessions.Capabilities{}, &UnsupportedRuntimeError{Provider: binding.Provider, Runtime: string(binding.Runtime)}
 	}
 
 	return &scopedCLIAdapter{
@@ -741,6 +754,31 @@ func newAdapter(binding runtimebind.Binding, cfg settings.AgentSubstrateSettings
 		baseArgs: append([]string(nil), cfg.Args...),
 	}, caps, nil
 }
+
+// ErrRuntimeNotSupported is matched (errors.Is) by every
+// *UnsupportedRuntimeError.
+var ErrRuntimeNotSupported = errors.New("runtime not supported by Hadron launcher yet")
+
+// UnsupportedRuntimeError refuses a provider/runtime pair the launcher has no
+// adapter for. It replaces the generic subprocess fallback, which started the
+// binary with argv [prompt] and parsed none of its output.
+type UnsupportedRuntimeError struct {
+	Provider string
+	Runtime  string
+	Cause    error
+}
+
+func (e *UnsupportedRuntimeError) Error() string {
+	msg := fmt.Sprintf("runtime %s/%s not supported by Hadron launcher yet", e.Provider, e.Runtime)
+	if e.Cause != nil {
+		msg += ": " + e.Cause.Error()
+	}
+	return msg
+}
+
+func (e *UnsupportedRuntimeError) Is(target error) bool { return target == ErrRuntimeNotSupported }
+
+func (e *UnsupportedRuntimeError) Unwrap() error { return e.Cause }
 
 func supportsAgentkitLaunch(binding runtimebind.Binding) bool {
 	switch binding.Provider {
@@ -751,7 +789,7 @@ func supportsAgentkitLaunch(binding runtimebind.Binding) bool {
 	}
 }
 
-func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, projectDir, workspaceDir, bootPrompt, bootContent string, extraFiles []runtimebootdir.File) (agentlaunch.LaunchPlan, error) {
+func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, projectDir, workspaceDir, bootPrompt, bootContent string, extraFiles []runtimebootdir.File, mcp agentlaunch.MCPSpec) (agentlaunch.LaunchPlan, error) {
 	overlay := make(map[string]string, len(extraFiles))
 	for _, file := range extraFiles {
 		if err := agentlaunch.ValidateBootDirRelPath(file.RelPath); err != nil {
@@ -797,6 +835,7 @@ func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLau
 			Env:    mapsClone(cfg.Env),
 		},
 		Runtime: agentlaunch.RuntimeKind(cfg.Runtime),
+		MCP:     mcp,
 		Workspace: agentlaunch.WorkspaceSpec{
 			Mode:         agentlaunch.WorkspaceFresh,
 			WorkspaceDir: workspaceDir,
@@ -825,6 +864,35 @@ func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLau
 			},
 		},
 	}, nil
+}
+
+// mcpSpecFromSettings carries the settings' stdio MCP servers into the launch
+// plan, sorted by name. INERT TODAY: agentkit's providerplant never copies
+// LaunchPlan.MCP.Servers into go-providers' PlantContext.MCPServers, and only
+// the codex renderer reads that field; claude and opencode ignore it. The
+// libs are to plant it (CW-20260930-0136, W4a-c). agentlaunch.MCPServerSpec
+// has no URL field, so URL servers are skipped with a warning (W4c).
+func mcpSpecFromSettings(servers map[string]settings.MCPServerSettings) agentlaunch.MCPSpec {
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var spec agentlaunch.MCPSpec
+	for _, name := range names {
+		srv := servers[name]
+		if srv.Command == "" {
+			log.Printf("agentsubstrate: mcp server %q skipped: only stdio servers can be planted (transport=%q)", name, srv.Transport)
+			continue
+		}
+		spec.Servers = append(spec.Servers, agentlaunch.MCPServerSpec{
+			Name:    name,
+			Command: srv.Command,
+			Args:    append([]string(nil), srv.Args...),
+			Env:     mapsClone(srv.Env),
+		})
+	}
+	return spec
 }
 
 func mapsClone(in map[string]string) map[string]string {
@@ -869,10 +937,6 @@ func (a *scopedCLIAdapter) BootDirSpec() provider.BootDirSpec {
 	return provider.BootDirSpec{}
 }
 
-type genericCLIAdapter struct {
-	name string
-}
-
 type launcherInputSender struct {
 	manager   *agentsessions.Manager
 	sessionID string
@@ -889,23 +953,6 @@ type launcherJSONRPCSender struct {
 
 func (s launcherJSONRPCSender) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	return s.manager.JsonRpcCall(ctx, s.sessionID, method, params)
-}
-
-func (a *genericCLIAdapter) Name() string { return a.name }
-
-func (a *genericCLIAdapter) BuildArgs(prompt, _ string, _ string) []string {
-	if prompt == "" {
-		return nil
-	}
-	return []string{prompt}
-}
-
-func (a *genericCLIAdapter) ParseLine(_ []byte) ([]llmtypes.StreamEvent, error) {
-	return nil, nil
-}
-
-func (a *genericCLIAdapter) Detect() (string, bool) {
-	return "", false
 }
 
 func normalizedProviderName(name string) string {
