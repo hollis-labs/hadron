@@ -13,10 +13,20 @@ resources:
     config:
       build_strategy:
         kind: make_standard
+        rules:
+          target: build
+          output: bin/hadrond
       command:
         - ./bin/hadrond
         - serve
       dir: /Users/chrispian/dev/hollis-labs/apps/hadron
+      env:
+        # Cerberus's artifact install step always runs `make install` when a
+        # Makefile is present. This Makefile's install target honors
+        # PREFIX/BINDIR/DESTDIR per BSD/GNU convention, whose default
+        # /usr/local needs root. Point it at Cerberus's own install_root
+        # instead (same fix as tether-daemon-service).
+        PREFIX: /Users/chrispian/.cerberus/apps/hadron/hadron-daemon-service
       mode: os_service
       port: 8095
       run_from: artifact
@@ -34,9 +44,10 @@ resources:
     connector: local
     config:
       command:
-        - wails
+        - npm
+        - run
         - dev
-      dir: /Users/chrispian/dev/hollis-labs/apps/hadron/cmd/hadron-app
+      dir: /Users/chrispian/dev/hollis-labs/apps/hadron/cmd/hadron-app/frontend
       env:
         HADRON_DAEMON_EXTERNAL: "true"
         CLAUDE_CODE_OAUTH_TOKEN: keychain://anthropic/claude-code-oauth
@@ -45,7 +56,7 @@ resources:
       run_from: workspace
     tags:
       - gui
-      - desktop
-      - wails
+      - frontend
+      - vite
       - v2
 registry_urn: msg://agent/agent-mux/prj_46qak5fkx1
