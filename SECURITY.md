@@ -50,6 +50,17 @@ profile records; unknown credentials fail closed.
   destructive or unresolved-call effects. Still treat who may submit or approve
   workflows as a sensitive permission. The full model is in
   [`docs/safety.md`](docs/safety.md).
+- Schedules, triggers and reactors have nobody to confirm, so such starts are
+  refused unless the operator allow-list (`workflow-unattended.json` in the
+  data dir, edited only by `hadron workflow unattended`) pins that exact plan
+  digest. No network surface can read or write the list; the daemon refuses it
+  if it is group- or world-writable or owned by another uid. **Its boundary is
+  filesystem ownership, and agents Hadron, Tether or Torque launch run as your
+  uid**: such an agent can add an entry for its own workflow, including a
+  digest it just edited, and the digest pin does not prevent that. Only
+  sandboxing agent launches away from the data dir does (tracked as Torque
+  task CW-20260930-0237). Details in
+  [`docs/workflows.md`](docs/workflows.md#confirmation-and-unattended-starts).
 
 ## Data at rest
 
@@ -70,5 +81,7 @@ data to whatever they are configured to reach.
 - no built-in TLS
 - no at-rest encryption
 - the script sandbox is in-process; it is not an OS-level isolation boundary
+- agents Hadron launches run as the operator's uid and can write Hadron's
+  data dir, including the unattended allow-list
 - bearer-token authorization rather than an external identity provider
 - pre-1.0 contracts; beta releases have no compatibility promise

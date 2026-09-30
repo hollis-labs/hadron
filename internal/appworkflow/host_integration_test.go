@@ -2289,6 +2289,18 @@ type hostFixture struct {
 	artifacts         values.ArtifactStore
 	policyMu          sync.Mutex
 	observedFacts     hoststate.PolicyFacts
+	// policyOverride, when set (under policyMu), replaces the fixture's
+	// fixed policy outcome in every host the fixture builds.
+	policyOverride func(hoststate.PolicyFacts) hoststate.PolicyDecision
+	// dryRunSupported makes every kind claim dry-run support when set.
+	dryRunSupported atomic.Bool
+}
+
+// setPolicy installs a policy override for hosts built from this fixture.
+func (f *hostFixture) setPolicy(policy func(hoststate.PolicyFacts) hoststate.PolicyDecision) {
+	f.policyMu.Lock()
+	defer f.policyMu.Unlock()
+	f.policyOverride = policy
 }
 
 func newHostFixture(t *testing.T, outcome hoststate.PolicyOutcome, interval time.Duration, hook appworkflow.RecoveryHook) *hostFixture {
@@ -2328,7 +2340,11 @@ func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, inter
 		fixture.policyCalls.Add(1)
 		fixture.policyMu.Lock()
 		fixture.observedFacts = facts
+		override := fixture.policyOverride
 		fixture.policyMu.Unlock()
+		if override != nil {
+			return override(facts), nil
+		}
 		if fixture.mutatePolicyInput.Load() {
 			facts.Identity.RunScope.Attributes["cost_center"] = "mutated-in-policy"
 			facts.RunScope.Attributes["cost_center"] = "mutated-in-policy"
@@ -2353,7 +2369,8 @@ func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, inter
 		_, err = fixture.state.TransitionRun(ctx, workflowruntime.RunTransitionRequest{RunID: child.ID, ExpectedGeneration: child.Generation, To: workflowruntime.RunRunning, At: child.UpdatedAt.Add(time.Nanosecond)})
 		return err
 	})
-	host, hostErr := appworkflow.New(appworkflow.Options{State: state, Journal: &snapshotRequiredJournal{WorkflowHostStore: journal}, Definitions: definitionProvider{plan: plan, calls: &fixture.definitionCalls}, Identity: identity, Policy: policy, Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: scheduler, Artifacts: artifactStore, Clock: appworkflow.ClockFunc(func() time.Time { return now }), RecoveryInterval: interval, RecoveryBatchLimit: 1, RecoveryHooks: hooks, ChildRuns: childMaterializer})
+	host, hostErr := appworkflow.New(appworkflow.Options{State: state, Journal: &snapshotRequiredJournal{WorkflowHostStore: journal}, Definitions: definitionProvider{plan: plan, calls: &fixture.definitionCalls}, Identity: identity, Policy: policy, Kinds: []stepkind.StepKind{transform.New()}, RequiredKinds: []appworkflow.KindRef{{Name: transform.Name, Version: transform.Version}}, Activations: scheduler, Artifacts: artifactStore, Clock: appworkflow.ClockFunc(func() time.Time { return now }), RecoveryInterval: interval, RecoveryBatchLimit: 1, RecoveryHooks: hooks, ChildRuns: childMaterializer,
+		DryRun: dryRunSupportFunc(func(context.Context, stepkind.StepKindSpec) (bool, error) { return fixture.dryRunSupported.Load(), nil })})
 	if hostErr != nil {
 		t.Fatal(hostErr)
 	}
@@ -2398,7 +2415,11 @@ func hostWithFixedIdentityClock(t *testing.T, fixture *hostFixture, binding host
 		fixture.policyCalls.Add(1)
 		fixture.policyMu.Lock()
 		fixture.observedFacts = facts
+		override := fixture.policyOverride
 		fixture.policyMu.Unlock()
+		if override != nil {
+			return override(facts), nil
+		}
 		return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "fixture policy"}, nil
 	})
 	var waits *workflowruntime.WaitCoordinator

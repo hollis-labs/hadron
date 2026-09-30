@@ -52,6 +52,11 @@ type IdentityProvider interface {
 	BindIdentity(context.Context, IdentityRequest) (hoststate.IdentityBinding, error)
 }
 
+// AllowlistEntryAttribute is the decision attribute naming the unattended
+// allow-list entry that turned a Confirm into an Allow (package unattended
+// sets it; the start record's confirmation copies it).
+const AllowlistEntryAttribute = "allowlist_entry"
+
 type PolicyEvaluator interface {
 	EvaluatePolicy(context.Context, hoststate.PolicyFacts) (hoststate.PolicyDecision, error)
 }

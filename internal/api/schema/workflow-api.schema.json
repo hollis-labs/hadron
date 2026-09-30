@@ -2049,6 +2049,9 @@
     "HoststatePolicyFacts": {
       "additionalProperties": false,
       "properties": {
+        "activation_id": {
+          "type": "string"
+        },
         "blast_radius": {
           "additionalProperties": {
             "type": "integer"

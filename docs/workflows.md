@@ -136,6 +136,61 @@ Catalog inspection and registry/exposure mutations require
 `namespace/name@version#sha256:<digest>` so version and digest are bound
 together; current aliases are not accepted for exact mutations.
 
+## Confirmation and unattended starts
+
+The production start policy asks for confirmation when a workflow's effects
+advise it: any `mutate` or `destructive` effect, or an unresolved `call` node.
+An interactive caller confirms with `--confirm` (CLI), `confirmed: true`
+(HTTP, MCP, A2A) or the UI checkbox; the start record keeps who confirmed.
+Retrying with the same idempotency key after `confirmation_required` is safe:
+the stored decision is reused, and confirming is not part of the request
+digest.
+
+A start with nobody to confirm it (a schedule, timer, trigger, reactor or run
+failure handler) is refused unless the operator allow-list covers it:
+
+```sh
+hadron workflow validate <file|registry-selector> --json   # prints plan id and digest
+hadron workflow unattended allow --plan <plan-id> --digest sha256:<hex> \
+  --reason "nightly report" [--activation <registration-id>] \
+  [--principal <principal>] [--expires 720h]
+hadron workflow unattended list [--json]
+hadron workflow unattended revoke <entry-id>
+```
+
+- An entry pins one plan id and one exact plan digest. Editing the workflow
+  changes the digest, so the edited plan needs a new entry.
+- `--activation` and `--principal` narrow the entry; `--expires` ends it.
+  Expired entries stay in the file and show as `expired` in `list`, but never
+  match.
+- The allow-list can only waive a confirmation. It never overrides a denial.
+- A matching start is allowed, and its persisted policy decision carries
+  `allowlist_entry`, `allowlist_reason`, `allowlist_added_by`,
+  `allowlist_added_at` and `allowlist_file_mtime`. The start record's
+  `confirmation.allowlist_entry` names the entry too.
+- A dry run has no effects, so it never asks for confirmation. It still needs
+  every step to support dry-run and still honors a denial.
+
+**Where the list lives and who can change it.** The list is
+`~/.hadron/workflow-unattended.json` (under `--data-dir`). The CLI edits that
+file directly; there is no HTTP, MCP or A2A route that reads or writes it, so
+nothing on the loopback surface can change it. The daemon re-reads the file
+when it changes and logs every entry added, changed, removed or expired, with
+`added_by`, `added_at`, the reason and the file's mtime. It refuses the whole
+file (allowing nothing, and logging why) if the file is a symlink, group- or
+world-writable, owned by another uid, or malformed.
+
+**The boundary is filesystem ownership, and the realistic threat is same-uid
+agents, not other users.** Every agent session Hadron, Tether or Torque
+launches runs as the operator's uid. Such an agent can write this file and
+allow-list its own workflow, including an entry for a digest it just edited;
+the digest pin does not stop that, and `added_by` is only a label. The
+mitigation is sandboxing agent launches so they cannot write Hadron's data dir
+(or the Tether and Torque state dirs), tracked as Torque task
+CW-20260930-0237. Until that sandbox exists, treat the
+allow-list as protection against mistakes and accidental unattended runs, not
+against an agent acting on your account.
+
 ## Durable waits and signals
 
 Wait-capable executors persist a `WaitRecord` and yield the worker. Runtime
@@ -207,7 +262,9 @@ For a fuller graph-native operator walkthrough, see
 - **unknown step kind:** compare the plan with the six production kinds above.
   A conformance example using HTTP/cmd/MCP is not daemon-runnable.
 - **policy confirmation required:** inspect `workflow explain`, then repeat with
-  `--confirm` only after reviewing the exact effects and target.
+  `--confirm` only after reviewing the exact effects and target. For a
+  schedule or trigger, see
+  [Confirmation and unattended starts](#confirmation-and-unattended-starts).
 - **hidden record looks missing:** intentional. Hidden and nonexistent records
   use the same safe not-found response.
 - **run is waiting:** inspect the safe wait descriptor and resume using its

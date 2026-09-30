@@ -64,6 +64,7 @@ func buildWorkflowCmdWithDependencies(dependencies workflowCommandDependencies) 
 		buildWorkflowRerunCmd(dependencies),
 		buildWorkflowCatalogCmd(dependencies), buildWorkflowAuthorCmd(dependencies),
 		buildWorkflowRegistryLifecycleCmd(dependencies), buildWorkflowExposureCmd(dependencies),
+		buildWorkflowUnattendedCmd(dependencies),
 	)
 	return command
 }
