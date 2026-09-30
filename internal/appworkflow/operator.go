@@ -225,6 +225,10 @@ const (
 	WorkflowErrorCodeInternal             = "internal_error"
 )
 
+// WorkflowErrorCodeConfirmationNotPermitted is returned when the caller set
+// confirmed but lacks the workflow.confirm grant.
+const WorkflowErrorCodeConfirmationNotPermitted = "confirmation_not_permitted"
+
 type CancelWorkflowRunResult struct {
 	Cancellation workflowruntime.RequestRunCancellationResult `json:"cancellation"`
 	Failures     []OperationIssue                             `json:"failures,omitempty"`

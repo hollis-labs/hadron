@@ -29,9 +29,12 @@ hadrond serve
 ```
 
 The defaults are `http://127.0.0.1:8095`, SQLite state under `~/.hadron`, and
-file workflow definitions under `~/.hadron/workflows`. A no-token request is
-accepted only through the loopback local-operator boundary; unknown remote
-credentials fail closed. Check host recovery and readiness with:
+file workflow definitions under `~/.hadron/workflows`. On first start `hadrond`
+creates the operator credential `~/.hadron/operator.token`; the `hadron` CLI
+reads it automatically (`--token-file` to point elsewhere). Open the browser UI
+with `hadron ui`, which signs you in with a one-time link. Requests without a
+credential get only health and the UI shell. Check host recovery and readiness
+with:
 
 ```sh
 hadron daemon

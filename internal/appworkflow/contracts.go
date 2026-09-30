@@ -52,6 +52,26 @@ type IdentityProvider interface {
 	BindIdentity(context.Context, IdentityRequest) (hoststate.IdentityBinding, error)
 }
 
+// ErrConfirmationNotPermitted is returned when a caller sets confirmed
+// without holding GrantWorkflowConfirm: an agent's or exposure token's
+// "confirmed" is not a human's confirmation.
+var ErrConfirmationNotPermitted = errors.New("caller may not confirm workflow operations: the workflow.confirm grant is required")
+
+// GrantWorkflowConfirm lets an authenticated identity satisfy a Confirm
+// policy decision by setting confirmed. The local operator holds it;
+// exposure and MCP principals do not unless granted deliberately.
+const GrantWorkflowConfirm = "workflow.confirm"
+
+// canConfirm reports whether identity may satisfy a Confirm decision.
+func canConfirm(identity hoststate.IdentityBinding) bool {
+	for _, grant := range identity.Grants {
+		if grant == GrantWorkflowConfirm {
+			return true
+		}
+	}
+	return false
+}
+
 // AllowlistEntryAttribute is the decision attribute naming the unattended
 // allow-list entry that turned a Confirm into an Allow (package unattended
 // sets it; the start record's confirmation copies it).

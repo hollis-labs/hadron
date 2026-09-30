@@ -34,9 +34,12 @@ activation scheduler before Host readiness and drains workers/timer callbacks
 before closing stores. `/v1/health` reflects Host startup/recovery/readiness and
 the injected build version.
 
-The default no-token HTTP identity is restricted to loopback remote addresses,
-loopback/localhost Host, and safe same-origin behavior. Durable bearer tokens
-resolve to local principal/profile records. Transported principal/source fields
+There is no no-token HTTP identity. The local operator authenticates with
+`<data dir>/operator.token` (Bearer) or a browser session opened by a
+single-use sign-in link (`internal/localauth`, `cmd/hadrond/local_auth.go`);
+credential-less loopback gets only health and the static shell unless the
+transition flag `--allow-unauthenticated-loopback` is set. Durable bearer
+tokens resolve to local principal/profile records. Transported principal/source fields
 cannot override the authenticated binding.
 
 ### `hadrond mcp`

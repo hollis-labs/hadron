@@ -103,6 +103,16 @@ func (f WorkflowRequestAuthenticatorFunc) AuthenticateWorkflowRequest(request *h
 	return f(request, intent)
 }
 
+// OperatorAuthenticator authenticates the local operator (hadrond's operator
+// token or a browser session opened with it) and serves the sign-in routes
+// under /v1/auth/ and /auth/.
+type OperatorAuthenticator interface {
+	http.Handler
+	// AuthorizeOperator returns nil when the request carries the operator's
+	// credential, and an error naming what is missing otherwise.
+	AuthorizeOperator(*http.Request) error
+}
+
 type A2ATaskService interface {
 	SubmitTask(context.Context, a2a.TaskRequest) (*a2a.TaskResponse, error)
 	GetTask(context.Context, string) (*a2a.TaskResponse, error)
@@ -148,6 +158,7 @@ type Dependencies struct {
 	WorkflowReads       appworkflow.WorkflowRunReadOperations
 	WorkflowLifecycle   appworkflow.WorkflowLifecycleOperations
 	WorkflowAuth        WorkflowRequestAuthenticator
+
 	A2ATasks            A2ATaskService
 	AgentCard           AgentCardProvider
 	WorkflowHealth      WorkflowHealthProvider
@@ -158,6 +169,11 @@ type Dependencies struct {
 	// delivery; the handler owns only static browser assets and never workflow
 	// semantics.
 	WebUI http.Handler
+
+	// OperatorAuth, when set, gates every /v1 route except health, the
+	// workflow routes (which authenticate through WorkflowAuth) and the
+	// sign-in routes it serves itself. Loopback is not a credential.
+	OperatorAuth OperatorAuthenticator
 }
 
 type Server struct {

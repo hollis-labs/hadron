@@ -33,6 +33,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/config"
+	"github.com/hollis-labs/hadron/internal/localauth"
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
@@ -51,6 +52,7 @@ func TestProductionWorkflowRuntimeExecutesPinnedGraphAndStopsCleanly(t *testing.
 	}
 	request.RemoteAddr = "127.0.0.1:43123"
 	request.Host = "127.0.0.1:8095"
+	request.Header.Set("Authorization", operatorBearer(t, cfg))
 	ctx, err := runtime.auth.AuthenticateWorkflowRequest(request, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessRun})
 	if err != nil {
 		t.Fatal(err)
@@ -442,6 +444,8 @@ func registerProductionActivationDraft(ctx context.Context, t *testing.T, lifecy
 	return *registered.Detail
 }
 
+// Loopback alone is not a credential. Only the transition flag restores the
+// old behavior, and even then cross-origin and DNS-rebinding requests fail.
 func TestWorkflowHTTPLocalIdentityRejectsCrossOriginAndDNSRebinding(t *testing.T) {
 	runtime, _, _ := newTestProductionWorkflowRuntime(t)
 	base, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost:8095/v1/workflows/validate", nil)
@@ -450,8 +454,12 @@ func TestWorkflowHTTPLocalIdentityRejectsCrossOriginAndDNSRebinding(t *testing.T
 	}
 	base.RemoteAddr = "127.0.0.1:40000"
 	base.Host = "localhost:8095"
+	if _, err := runtime.auth.AuthenticateWorkflowRequest(base, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessValidate}); !errors.Is(err, appworkflow.ErrWorkflowUnauthenticated) {
+		t.Fatalf("credential-less loopback auth = %v, want ErrWorkflowUnauthenticated", err)
+	}
+	runtime.operator.allowUnauthenticatedLoopback = true
 	if _, err := runtime.auth.AuthenticateWorkflowRequest(base, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessValidate}); err != nil {
-		t.Fatalf("loopback CLI auth = %v", err)
+		t.Fatalf("loopback auth under the transition flag = %v", err)
 	}
 	crossOrigin := base.Clone(t.Context())
 	crossOrigin.Header.Set("Origin", "http://evil.example")
@@ -1120,4 +1128,15 @@ outputs:
 		t.Fatal(err)
 	}
 	return runtime, cfg, store
+}
+
+// operatorBearer is the Authorization header for the test runtime's
+// operator token.
+func operatorBearer(t *testing.T, cfg *config.Config) string {
+	t.Helper()
+	token, err := localauth.ReadToken(localauth.TokenPath(cfg.DataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "Bearer " + token
 }

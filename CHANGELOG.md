@@ -8,6 +8,32 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ## [Unreleased]
 
+### Security
+
+- **Loopback is no longer trusted (CW-20260930-0234).** Any process on the
+  machine, agents included, could previously call `127.0.0.1:8095`, act as the
+  operator and confirm its own runs. `hadrond` now creates
+  `~/.hadron/operator.token` (0600) on first start and requires it, or a
+  browser session, for every workflow operation and workspace change.
+  Credential-less loopback gets only `/v1/health` and the UI shell.
+  - The `hadron` CLI sends the token automatically (`--token-file`, or
+    `HADRON_TOKEN`; prefer the file, since an exported variable is inherited
+    by every process started from that shell). New: `hadron ui` opens the
+    browser UI through a single-use, 60-second sign-in link (HttpOnly,
+    SameSite=Strict session cookie); `hadron auth rotate` replaces the token
+    and ends every session. The desktop app signs the browser in the same way.
+  - Confirming needs the new `workflow.confirm` grant, held only by the
+    operator. MCP and exposure tokens that send `confirmed: true` get
+    `confirmation_not_permitted` (HTTP 403); an explicit grant path for them
+    follows separately.
+  - Hadron removes `HADRON_TOKEN` from the environment of everything it
+    launches.
+  - **Limit:** an agent that can read `operator.token` can still act as the
+    operator. Closing that needs agent sandboxing (CW-20260930-0237).
+  - Transition: `hadrond serve --allow-unauthenticated-loopback` restores the
+    old behavior, off by default, with a warning on every use; it will be
+    removed. An older `hadron` CLI gets 401 against this daemon.
+
 ### Changed
 
 - The MCP adapter dropped `mark3labs/mcp-go` in favor of the official-SDK

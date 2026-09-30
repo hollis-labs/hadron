@@ -403,7 +403,7 @@ func workflowHTTPStatus(code string) int {
 	switch code {
 	case appworkflow.WorkflowErrorCodeUnauthenticated:
 		return http.StatusUnauthorized
-	case appworkflow.WorkflowErrorCodePolicyDenied:
+	case appworkflow.WorkflowErrorCodePolicyDenied, appworkflow.WorkflowErrorCodeConfirmationNotPermitted:
 		return http.StatusForbidden
 	case appworkflow.WorkflowErrorCodeNotFound:
 		return http.StatusNotFound

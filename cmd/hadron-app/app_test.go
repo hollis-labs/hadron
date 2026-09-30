@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/hollis-labs/hadron/internal/localauth"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -94,11 +95,45 @@ func TestDesktopAppAdoptsHealthyDaemonWithoutOpeningBrowser(t *testing.T) {
 	}))
 	defer server.Close()
 
-	app, err := newDesktopApp(strings.TrimPrefix(server.URL, "http://"))
+	app, err := newDesktopApp(strings.TrimPrefix(server.URL, "http://"), filepath.Join(t.TempDir(), "no-token"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := app.run(context.Background(), false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The desktop app opens the UI through a single-use sign-in link it requests
+// with the operator token; the token itself never goes into the URL.
+func TestDesktopAppRequestsSignInLinkWithOperatorToken(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), localauth.TokenFileName)
+	token, err := localauth.EnsureToken(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/code" || r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":"one-time","login_path":"/auth/login?code=one-time"}`))
+	}))
+	defer server.Close()
+	app, err := newDesktopApp(strings.TrimPrefix(server.URL, "http://"), tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webURL, _ := daemonWebURL(app.address)
+	link, err := app.signInURL(context.Background(), webURL)
+	if err != nil || link != server.URL+"/auth/login?code=one-time" {
+		t.Fatalf("signInURL = %q, %v", link, err)
+	}
+	if strings.Contains(link, token) {
+		t.Fatal("sign-in link carries the operator token")
+	}
+	missing, _ := newDesktopApp(strings.TrimPrefix(server.URL, "http://"), filepath.Join(t.TempDir(), "absent"))
+	if _, err := missing.signInURL(context.Background(), webURL); err == nil {
+		t.Fatal("sign-in without a token file succeeded")
 	}
 }

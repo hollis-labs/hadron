@@ -72,6 +72,11 @@ func NewServer(addr string, deps Dependencies) *Server {
 		mux.HandleFunc("/v1/blueprints/validate", s.handleBlueprintValidate)
 	}
 
+	if deps.OperatorAuth != nil {
+		mux.Handle("/v1/auth/", deps.OperatorAuth)
+		mux.Handle("/auth/", deps.OperatorAuth)
+	}
+
 	// Browser operator UI. API-looking paths remain structured API 404s so a
 	// mistyped workflow route can never be hidden by the SPA fallback.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -82,13 +87,40 @@ func NewServer(addr string, deps Dependencies) *Server {
 		writeError(w, http.StatusNotFound, "not found")
 	})
 
-	s.handler = corsMiddleware(propagation.HTTPMiddleware(rejectPathTraversal(mux)))
+	var routed http.Handler = mux
+	if deps.OperatorAuth != nil {
+		routed = operatorGate(deps.OperatorAuth, mux)
+	}
+	s.handler = corsMiddleware(propagation.HTTPMiddleware(rejectPathTraversal(routed)))
 	s.httpServer = &http.Server{
 		Addr:              addr,
 		Handler:           s.handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
+}
+
+// operatorGate requires the operator credential on the /v1 routes that do
+// not authenticate themselves (workspaces, and the archived legacy routes
+// when mounted). Health stays open for probes; workflow and A2A routes
+// authenticate through WorkflowAuth, which also accepts exposure tokens.
+func operatorGate(auth OperatorAuthenticator, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if operatorGated(r.URL.Path) {
+			if err := auth.AuthorizeOperator(r); err != nil {
+				writeError(w, http.StatusUnauthorized, err.Error())
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func operatorGated(requestPath string) bool {
+	if requestPath == "/v1/health" || strings.HasPrefix(requestPath, "/v1/workflows/") || strings.HasPrefix(requestPath, "/v1/auth/") {
+		return false
+	}
+	return requestPath == "/v1" || strings.HasPrefix(requestPath, "/v1/") || strings.HasPrefix(requestPath, "/hooks/")
 }
 
 func rejectPathTraversal(next http.Handler) http.Handler {

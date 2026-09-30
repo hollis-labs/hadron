@@ -203,8 +203,13 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 	if request.DryRun && !facts.DryRunAvailable {
 		return StartRunResult{Decision: decision, Facts: facts}, ErrDryRunUnsupported
 	}
-	if decision.Outcome == hoststate.PolicyConfirm && !request.Confirmed && !request.DryRun {
-		return StartRunResult{Decision: decision, Facts: facts}, ErrConfirmationRequired
+	if decision.Outcome == hoststate.PolicyConfirm && !request.DryRun {
+		if !request.Confirmed {
+			return StartRunResult{Decision: decision, Facts: facts}, ErrConfirmationRequired
+		}
+		if !canConfirm(facts.Identity) {
+			return StartRunResult{Decision: decision, Facts: facts}, ErrConfirmationNotPermitted
+		}
 	}
 	if runtime.EffectiveDurability(plan.Graph) == graph.DurabilityNone && !request.DryRun {
 		return h.executeNonDurable(ctx, request, requestDigest, plan, facts, decision)

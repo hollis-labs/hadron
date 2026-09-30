@@ -6,6 +6,9 @@ import { defineConfig, devices } from '@playwright/test';
 const repositoryRoot = path.resolve(import.meta.dirname, '../../..');
 const runtimeRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hadron-playwright-')));
 process.on('exit', () => fs.rmSync(runtimeRoot, { force: true, recursive: true }));
+// Specs read the daemon's operator token from here to sign in the way the
+// CLI and desktop app do (e2e/signIn.ts).
+process.env.HADRON_PLAYWRIGHT_RUNTIME ??= runtimeRoot;
 
 export default defineConfig({
   testDir: './e2e',

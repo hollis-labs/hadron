@@ -16,7 +16,7 @@ import (
 
 var (
 	globalAddr string
-	httpClient = &http.Client{Timeout: 30 * time.Second}
+	httpClient = &http.Client{Timeout: 30 * time.Second, Transport: operatorTransport{addr: func() string { return globalAddr }}}
 	version    = "dev"
 	commit     = "unknown"
 	buildDate  = "unknown"
@@ -38,7 +38,8 @@ func buildRootCommand() *cobra.Command {
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	}
 	root.PersistentFlags().StringVar(&globalAddr, "addr", "http://"+config.DefaultAddr, "daemon base URL")
-	root.AddCommand(buildOfflineCmd(), buildWorkflowCmd(), buildWorkspaceCmd(), buildDaemonCmd(), buildVersionCmd())
+	root.PersistentFlags().StringVar(&globalTokenFile, "token-file", "", "operator token file (default $HADRON_TOKEN, then ~/.hadron/operator.token)")
+	root.AddCommand(buildOfflineCmd(), buildWorkflowCmd(), buildWorkspaceCmd(), buildDaemonCmd(), buildVersionCmd(), buildUICmd(), buildAuthCmd())
 	return root
 }
 
@@ -139,6 +140,9 @@ func httpGet(url string, out any) error {
 }
 
 func printAPIError(resp *http.Response) error {
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("API error (401): %s", unauthenticatedHint())
+	}
 	body, _ := io.ReadAll(resp.Body)
 	var errorResponse map[string]string
 	if json.Unmarshal(body, &errorResponse) == nil {

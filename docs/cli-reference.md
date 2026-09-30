@@ -3,8 +3,10 @@
 The active root command set is deliberately small:
 
 ```text
+hadron auth        manage the operator credential
 hadron build       build an offline workflow plan bundle
 hadron daemon      report daemon and workflow-host health
+hadron ui          sign in to the browser UI with a one-time link
 hadron version     print build information
 hadron workflow    operate graph-native workflows
 hadron workspace   manage workspace metadata
@@ -14,9 +16,27 @@ The retired root commands `run`, `validate`, `lint`, `schedule`, `pipeline`,
 and `blueprint` are unavailable. Use `hadron workflow ...` for execution and
 source-declared `on:` activations for scheduling or external ingress.
 
-All daemon commands accept `--addr` (default `http://127.0.0.1:8095`). The
-daemon authenticates the caller; `--principal` is only an identity hint and
+All daemon commands accept `--addr` (default `http://127.0.0.1:8095`) and
+`--token-file` (default `~/.hadron/operator.token`). The daemon authenticates
+the caller; `--principal` is only an identity hint and
 cannot override authenticated context.
+
+## Operator credential and browser sign-in
+
+```sh
+hadron ui [--no-open]    # open the browser UI through a single-use sign-in link
+hadron auth rotate       # replace the operator token; ends every browser session
+```
+
+Every command that talks to the daemon sends the operator token as a Bearer
+token. It comes from `--token-file`, else `$HADRON_TOKEN`, else
+`~/.hadron/operator.token`, which `hadrond` creates on first start. Prefer the
+file: an exported `HADRON_TOKEN` is inherited by every process started from
+that shell, agents included. A 401 names the token file the CLI looked for.
+
+`hadron ui` asks the daemon for a sign-in link that works once and expires
+after 60 seconds, then opens it; the browser gets an HttpOnly session cookie,
+never the token.
 
 ## Definition references
 

@@ -42,6 +42,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/artifacts"
 	"github.com/hollis-labs/hadron/internal/config"
+	"github.com/hollis-labs/hadron/internal/localauth"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
 	"github.com/hollis-labs/hadron/internal/scheduler"
@@ -88,6 +89,7 @@ type productionWorkflowRuntime struct {
 	a2a                 *a2a.Handler
 	card                *agentcard.Builder
 	auth                api.WorkflowRequestAuthenticator
+	operator            *operatorAuth
 	catalog             *productionWorkflowCatalog
 	activationStore     hoststate.ActivationStore
 	sourceActivations   *appworkflow.SourceActivationLifecycle
@@ -409,10 +411,14 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	if err != nil {
 		return nil, err
 	}
-	auth := &workflowHTTPAuthenticator{exposure: exposure, local: localWorkflowIdentity()}
+	operator, err := newOperatorAuth(localauth.TokenPath(cfg.DataDir), nil)
+	if err != nil {
+		return nil, fmt.Errorf("operator credential: %w", err)
+	}
+	auth := &workflowHTTPAuthenticator{exposure: exposure, local: localWorkflowIdentity(), operator: operator}
 	return &productionWorkflowRuntime{
 		host: host, operations: operations, exposure: exposure, lifecycle: lifecycle, a2a: a2aHandler, card: card,
-		auth: auth, catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
+		auth: auth, operator: operator, catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
 		sourceActivations:   sourceActivationLifecycle,
 		externalActivations: trigger.ActivationManager{Service: activationService},
 		substrates:          substrates,
@@ -492,6 +498,10 @@ func workflowMCPPrincipal() hoststate.MCPPrincipalRecord {
 		target.Capabilities = workflowMCPCapabilities()
 		binding.ExecutionTarget = &target
 	}
+	// Grants are frozen for the same reason. In particular the MCP principal
+	// does not hold workflow.confirm: an agent-driven MCP session's
+	// "confirmed" is not the operator's confirmation (CW-20260930-0234).
+	binding.Grants = []string{"workflow.manage", "workflow.run"}
 	return hoststate.MCPPrincipalRecord{ID: workflowMCPPrincipalID, ProfileID: workflowMCPProfileID, Identity: binding}
 }
 
@@ -645,7 +655,7 @@ func localWorkflowIdentity() hoststate.IdentityBinding {
 	}
 	return hoststate.IdentityBinding{
 		Principal: "operator:local", SourceAuthority: "http", Trust: "local",
-		Grants:          []string{"workflow.manage", "workflow.run"},
+		Grants:          []string{"workflow.confirm", "workflow.manage", "workflow.run"},
 		RunScope:        hoststate.RunScope{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "local"},
 		ExecutionTarget: &target,
 	}
@@ -683,6 +693,10 @@ func (a workflowExposureManagement) AuthorizeExposureManagement(ctx context.Cont
 type workflowHTTPAuthenticator struct {
 	exposure *appworkflow.WorkflowExposureService
 	local    hoststate.IdentityBinding
+	// operator decides whether a request is the local operator's: the
+	// operator token, a browser session, or (transition flag only) a
+	// credential-less loopback request.
+	operator *operatorAuth
 }
 
 func (a *workflowHTTPAuthenticator) AuthenticateWorkflowRequest(request *http.Request, intent appworkflow.WorkflowAccessIntent) (context.Context, error) {
@@ -692,12 +706,18 @@ func (a *workflowHTTPAuthenticator) AuthenticateWorkflowRequest(request *http.Re
 	if !sameOriginRequest(request) {
 		return nil, appworkflow.ErrPolicyDenied
 	}
+	isOperator, err := a.operator.operatorRequest(request)
+	if err != nil {
+		// A session cookie used cross-origin, without a same-origin source,
+		// or after it ended authenticates nothing.
+		return nil, appworkflow.ErrWorkflowUnauthenticated
+	}
+	if isOperator {
+		return appworkflow.WithAuthenticatedIdentity(request.Context(), a.local)
+	}
 	authorization := request.Header.Get("Authorization")
 	if authorization == "" {
-		if !loopbackRemote(request.RemoteAddr) || !loopbackHost(request.Host) {
-			return nil, appworkflow.ErrWorkflowUnauthenticated
-		}
-		return appworkflow.WithAuthenticatedIdentity(request.Context(), a.local)
+		return nil, appworkflow.ErrWorkflowUnauthenticated
 	}
 	if strings.Count(authorization, " ") != 1 || !strings.HasPrefix(authorization, "Bearer ") {
 		return nil, appworkflow.ErrWorkflowUnauthenticated
