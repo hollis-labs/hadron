@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/hadron/internal/localauth"
 	"log"
 	"os"
 	"path/filepath"
@@ -964,7 +965,8 @@ func normalizedProviderName(name string) string {
 }
 
 func mergeEnv(extra map[string]string, appended []string) []string {
-	env := append([]string(nil), os.Environ()...)
+	// Never hand a launched agent the operator's credential.
+	env := localauth.ScrubEnv(os.Environ())
 	for k, v := range extra {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}

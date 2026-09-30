@@ -16,7 +16,7 @@ func TestPublicRootCommandsAreGraphNativeOrProcessOperations(t *testing.T) {
 		got = append(got, command.Name())
 	}
 	sort.Strings(got)
-	want := []string{"build", "daemon", "version", "workflow", "workspace"}
+	want := []string{"auth", "build", "daemon", "ui", "version", "workflow", "workspace"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("public root commands = %#v, want %#v", got, want)
 	}

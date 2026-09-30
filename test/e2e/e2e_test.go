@@ -32,6 +32,8 @@ var (
 	invalidWorkflowPath string
 	productionExamples  map[string]string
 	workspaceSequence   atomic.Uint64
+	// operatorTokenFile is the credential hadrond creates in its data dir.
+	operatorTokenFile string
 )
 
 const invalidWorkflowSource = `workflow:
@@ -83,6 +85,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	dataDir := filepath.Join(tmpDir, "data")
+	operatorTokenFile = filepath.Join(dataDir, "operator.token")
 	workflowDir := filepath.Join(dataDir, "workflows")
 	if err := os.MkdirAll(workflowDir, 0o750); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e: create workflow dir:", err)
@@ -187,7 +190,7 @@ func hadron(args ...string) (string, int) {
 }
 
 func hadronStreams(args ...string) (string, string, int) {
-	allArgs := append([]string{"--addr", "http://" + daemonAddr}, args...)
+	allArgs := append([]string{"--addr", "http://" + daemonAddr, "--token-file", operatorTokenFile}, args...)
 	command := exec.Command(hadronBin, allArgs...)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -406,5 +409,20 @@ func TestRetiredLegacyRootsAreUnavailable(t *testing.T) {
 				t.Fatalf("retired legacy root %q returned unexpected error: %s", root, output)
 			}
 		})
+	}
+}
+
+// Loopback is not a credential: the CLI without the operator token is
+// refused, and the error names the token file it looked for.
+func TestCLIWithoutOperatorTokenIsRefused(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent.token")
+	command := exec.Command(hadronBin, "--addr", "http://"+daemonAddr, "--token-file", missing, "workspace", "list")
+	command.Env = append(os.Environ(), "HADRON_TOKEN=")
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("credential-less CLI succeeded:\n%s", output)
+	}
+	if !strings.Contains(string(output), "absent.token") {
+		t.Fatalf("401 output should name the token file:\n%s", output)
 	}
 }

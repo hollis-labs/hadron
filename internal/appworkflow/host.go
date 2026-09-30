@@ -42,6 +42,7 @@ type Host struct {
 	identity           IdentityProvider
 	policy             PolicyEvaluator
 	dryRun             DryRunSupport
+	confirm            ConfirmAuthorizer
 	activations        workflowwait.ActivationScheduler
 	reactorActivations hoststate.ActivationStore
 	reactors           runtime.ReactorStore
@@ -198,7 +199,7 @@ func New(options Options) (*Host, error) {
 	}, Limit: options.RecoveryBatchLimit}
 	host := &Host{
 		state: options.State, journal: options.Journal, definitions: options.Definitions,
-		identity: options.Identity, policy: options.Policy, dryRun: options.DryRun,
+		identity: options.Identity, policy: options.Policy, dryRun: options.DryRun, confirm: options.Confirm,
 		activations: options.Activations, reactorActivations: options.ActivationStore, waits: waits, cancellation: cancellation, coreRecovery: coreRecovery,
 		hooks: append([]RecoveryHook(nil), options.RecoveryHooks...), telemetry: options.Telemetry,
 		childSource: childSource, childDefs: childDefs, childRuns: options.ChildRuns,

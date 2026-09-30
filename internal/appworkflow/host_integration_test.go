@@ -2952,7 +2952,7 @@ func testIdentityBinding(principal, authority string) hoststate.IdentityBinding 
 		Provenance: hoststate.TargetProvenance{Authority: "hadron", Reference: "local-default", Attributes: map[string]string{"pool": "default"}},
 	}
 	return hoststate.IdentityBinding{
-		Principal: principal, SourceAuthority: authority, Trust: "trusted", Grants: []string{"workflow.run"},
+		Principal: principal, SourceAuthority: authority, Trust: "trusted", Grants: []string{"workflow.confirm", "workflow.run"},
 		RunScope:        hoststate.RunScope{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "test", Attributes: map[string]string{"cost_center": "research"}},
 		ExecutionTarget: &target,
 	}

@@ -82,6 +82,8 @@ func runServe(args []string) error {
 	dbFlag := fs.String("db", "", "SQLite database path")
 	logsFlag := fs.String("logs", "", "run logs directory")
 	dataFlag := fs.String("data", "", "data directory")
+	allowUnauthenticatedLoopback := fs.Bool("allow-unauthenticated-loopback", false,
+		"TRANSITION ONLY, INSECURE: treat any credential-less loopback request as the operator, as before operator.token existed. Any local process, including agents, gets full operator access.")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -154,9 +156,17 @@ func runServe(args []string) error {
 		}
 	}()
 
+	workflowRuntime.operator.allowUnauthenticatedLoopback = *allowUnauthenticatedLoopback
+	if *allowUnauthenticatedLoopback {
+		slog.Warn("--allow-unauthenticated-loopback is set: any process on this machine that can reach " + cfg.Addr +
+			", including agents, is treated as the operator without a credential. This flag is for the transition to operator.token and will be removed.")
+	}
+	slog.Info("operator credential", "token_file", workflowRuntime.operator.verifier.Path(),
+		"hint", "the hadron CLI reads this file; run `hadron ui` to sign in to the browser UI")
+
 	srv := api.NewServer(cfg.Addr, api.Dependencies{
 		Workspaces: store, Workflows: workflowRuntime.operations, WorkflowReads: workflowRuntime.operations,
-		WorkflowLifecycle: workflowRuntime.lifecycle, WorkflowAuth: workflowRuntime.auth,
+		WorkflowLifecycle: workflowRuntime.lifecycle, WorkflowAuth: workflowRuntime.auth, OperatorAuth: workflowRuntime.operator,
 		WorkflowActivations: workflowRuntime.externalActivations,
 		A2ATasks:            workflowRuntime.a2a, AgentCard: workflowRuntime.card,
 		WorkflowHealth: workflowRuntime.host, BuildVersion: version, WebUI: webui.Handler(),

@@ -86,15 +86,15 @@ Use `--reveal-private` only when the caller is authorized and the private value
 is necessary. Secret material remains masked.
 
 For HTTP clients, use Bash for the examples below and set the daemon address,
-run ID, and authentication headers explicitly. The first example is for a local operator on the daemon's loopback
-interface, where Hadron binds unauthenticated loopback requests to the local
-operator identity. Do not copy that as remote authentication; remote clients
-must send an authorized bearer token created for their workflow profile.
+run ID, and authentication headers explicitly. The first example is for the
+local operator, who sends the token from `~/.hadron/operator.token` (read it
+from the file rather than exporting it). Remote clients must send an authorized
+bearer token created for their workflow profile.
 
 ```sh
 HADRON_ADDR="http://127.0.0.1:8095"
 RUN_ID="<run-id>"
-AUTH_HEADER=()
+AUTH_HEADER=(-H "Authorization: Bearer $(cat ~/.hadron/operator.token)")
 ```
 
 For a remote or non-loopback caller, set:

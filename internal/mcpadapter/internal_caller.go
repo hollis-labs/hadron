@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/hadron/internal/localauth"
 	"io"
 	"net/http"
 	"os/exec"
@@ -353,9 +354,8 @@ func newExternalClient(ctx context.Context, cfg ExternalServerConfig) (externalC
 			return nil, fmt.Errorf("mcp stdio server command is required")
 		}
 		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...) // #nosec G204 -- operator-configured MCP server command.
-		if env := flattenEnv(cfg.Env); env != nil {
-			cmd.Env = append(cmd.Environ(), env...)
-		}
+		// MCP servers never inherit the operator's credential.
+		cmd.Env = localauth.ScrubEnv(append(cmd.Environ(), flattenEnv(cfg.Env)...))
 		cs, err := client.Connect(ctx, &mcpsdk.CommandTransport{Command: cmd}, nil)
 		if err != nil {
 			return nil, fmt.Errorf("start mcp stdio server %q: %w", cfg.Command, err)

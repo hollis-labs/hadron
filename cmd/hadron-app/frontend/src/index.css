@@ -621,3 +621,16 @@ body {
     @apply font-sans;
   }
 }
+
+.sign-in-banner {
+  margin: 12px 24px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--color-warning, #d4a017);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-warning, #d4a017) 12%, transparent);
+  font-size: 13px;
+}
+
+.sign-in-banner code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}

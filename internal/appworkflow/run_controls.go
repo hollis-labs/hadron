@@ -300,6 +300,9 @@ func (h *Host) authorizeRunControl(ctx context.Context, runID runtime.RunID, ope
 	if decision.Outcome == hoststate.PolicyConfirm && !confirmed {
 		return hoststate.IdentityBinding{}, ErrConfirmationRequired
 	}
+	if decision.Outcome == hoststate.PolicyConfirm && !h.canConfirm(ctx, identity) {
+		return hoststate.IdentityBinding{}, ErrConfirmationNotPermitted
+	}
 	return identity, nil
 }
 

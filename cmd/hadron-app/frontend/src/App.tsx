@@ -3,6 +3,7 @@ import { Toaster } from 'sonner';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { NavigationProvider, useNavigation } from './contexts/NavigationContext';
 import { AppHeader } from './components/layout/AppHeader';
+import { SignInBanner } from './components/layout/SignInBanner';
 import { AppNav, type NavPage } from './components/layout/AppNav';
 import { AppFooter } from './components/layout/AppFooter';
 import { Spinner } from './components/ui/Spinner';
@@ -58,6 +59,7 @@ function AppShell() {
 
       <div className="main">
         <AppHeader page={PAGE_TITLES[nav.page]} phase={nav.page} />
+        <SignInBanner />
 
         <main className="content">
           <Suspense fallback={<PageFallback />}>

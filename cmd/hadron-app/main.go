@@ -13,9 +13,10 @@ import (
 func main() {
 	address := flag.String("addr", defaultDaemonAddress, "hadrond listen address")
 	noBrowser := flag.Bool("no-browser", false, "print the operator UI URL without opening it")
+	tokenFile := flag.String("token-file", "", "operator token file (default ~/.hadron/operator.token)")
 	flag.Parse()
 
-	app, err := newDesktopApp(*address)
+	app, err := newDesktopApp(*address, *tokenFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

@@ -1,6 +1,11 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 
 import { getDemoWorkflowDiagnostic } from '../src/demo/workflowData';
+import { signIn } from './signIn';
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page);
+});
 
 async function openKnownRun(page: Page, runID: string) {
   await page.getByRole('button', { name: 'Runs' }).click();

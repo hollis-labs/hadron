@@ -902,6 +902,12 @@ type workflowDaemonRejectedError struct {
 }
 
 func (e *workflowDaemonRejectedError) Error() string {
+	if e.code == appworkflow.WorkflowErrorCodeUnauthenticated {
+		return fmt.Sprintf("workflow daemon rejected request (status %d, code %s): %s", e.status, e.code, unauthenticatedHint())
+	}
+	if e.code == appworkflow.WorkflowErrorCodeConfirmationNotPermitted {
+		return fmt.Sprintf("workflow daemon rejected request (status %d, code %s): this credential may not confirm; only the operator can", e.status, e.code)
+	}
 	return fmt.Sprintf("workflow daemon rejected request (status %d, code %s)", e.status, e.code)
 }
 
@@ -913,6 +919,8 @@ func (e *workflowDaemonRejectedError) Unwrap() error {
 		return appworkflow.ErrPolicyDenied
 	case appworkflow.WorkflowErrorCodeConfirmationRequired:
 		return appworkflow.ErrConfirmationRequired
+	case appworkflow.WorkflowErrorCodeConfirmationNotPermitted:
+		return appworkflow.ErrConfirmationNotPermitted
 	default:
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/hadron/internal/localauth"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -326,7 +327,7 @@ func (r *runExecution) execCmd(ctx context.Context, section string, step bluepri
 	if step.Dir != "" {
 		c.Dir = step.Dir
 	}
-	c.Env = os.Environ()
+	c.Env = localauth.ScrubEnv(os.Environ())
 	for k, v := range step.Env {
 		c.Env = append(c.Env, fmt.Sprintf("%s=%s", k, v))
 	}
@@ -364,6 +365,7 @@ func (r *runExecution) runBlueprintHooks(ctx context.Context, hooks []blueprint.
 		}
 		// #nosec G204 -- blueprint lifecycle hooks are explicit user-authored commands.
 		c := exec.CommandContext(ctx, "sh", "-c", h.Cmd)
+		c.Env = localauth.ScrubEnv(os.Environ())
 		out, err := c.CombinedOutput()
 		if err != nil {
 			msg := strings.TrimSpace(string(out))
@@ -385,6 +387,7 @@ func (r *runExecution) executeActionHooks(ctx context.Context, basePath string, 
 			r.emit(section, step.Name, "hook_cmd", fmt.Sprintf("[hook] %s", h.Value))
 			// #nosec G204 -- action hooks are explicit user-authored commands.
 			c := exec.CommandContext(ctx, "bash", "-lc", h.Value)
+			c.Env = localauth.ScrubEnv(os.Environ())
 			if out, err := c.CombinedOutput(); err == nil {
 				r.emit(section, step.Name, "hook_output", strings.TrimSpace(string(out)))
 			}

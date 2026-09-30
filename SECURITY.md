@@ -29,10 +29,45 @@ disclosure; response times are best effort during the beta.
 ## Deployment boundary
 
 The safe default is a single-user machine with `hadrond` listening on
-`127.0.0.1:8095`. In that mode a request with no token is accepted only through
-the loopback local-operator boundary, and cross-origin or DNS-rebinding-shaped
-requests are rejected. Durable bearer credentials resolve to principal and
-profile records; unknown credentials fail closed.
+`127.0.0.1:8095`. **Loopback is not a credential**: every process running as
+your user can reach 127.0.0.1, including every agent Hadron, Tether or Torque
+launches.
+
+- **The operator credential is a file.** `hadrond` creates
+  `~/.hadron/operator.token` (mode 0600, under `--data`) on first start. It
+  refuses a token file that is group- or world-accessible, owned by another
+  user, or a symlink, and keeps only the token's digest in memory. The `hadron`
+  CLI sends it as a Bearer token; `hadron auth rotate` replaces it and ends
+  every browser session.
+- **The browser never sees the token.** `hadron ui` (or the desktop app) asks
+  the daemon for a sign-in link that works once and expires after 60 seconds;
+  redeeming it sets an HttpOnly, SameSite=Strict session cookie. Code requests
+  and redemptions are rate-limited. A cookie-authenticated state change must
+  also carry a same-origin `Origin` or `Referer`, and sessions only answer
+  loopback Hosts.
+- **Without a credential, loopback gets only** `/v1/health` (status and
+  version) and the static UI shell. Every workflow operation, workspace
+  change and read of run data needs the token or a session.
+- **Only the operator can confirm.** A `confirmed: true` sent with an MCP or
+  exposure token is refused (`confirmation_not_permitted`), so an agent
+  cannot confirm its own effect-advised run. The start record keeps who
+  confirmed.
+- **Prefer the token file to `HADRON_TOKEN`.** The CLI also reads that
+  variable, but an exported variable is inherited by every process started
+  from that shell, agents included. Hadron removes it from the environment of
+  everything it launches, but it cannot protect a shell you exported it in.
+- **Agents that can read `operator.token` still get through.** The file's
+  boundary is filesystem permissions, and agents run as your uid. Until agent
+  sandboxes deny reads of Hadron's data dir (Torque task CW-20260930-0237),
+  this removes the zero-effort path (any local process or web page calling
+  loopback) but not an agent that deliberately reads the file.
+- `hadrond serve --allow-unauthenticated-loopback` restores the old
+  behavior (any loopback request is the operator) for the transition only. It
+  is off by default, logs a warning on every use, and will be removed.
+
+Durable bearer credentials resolve to principal and profile records; unknown
+credentials fail closed. Cross-origin and DNS-rebinding-shaped requests are
+rejected.
 
 - Hadron does not provide TLS. A bearer token sent over plaintext HTTP can be
   stolen by anyone who can observe the connection. If you expose the listener
@@ -81,7 +116,8 @@ data to whatever they are configured to reach.
 - no built-in TLS
 - no at-rest encryption
 - the script sandbox is in-process; it is not an OS-level isolation boundary
-- agents Hadron launches run as the operator's uid and can write Hadron's
-  data dir, including the unattended allow-list
+- agents Hadron launches run as the operator's uid and can read or write
+  Hadron's data dir, including `operator.token` and the unattended allow-list,
+  until agent sandboxing lands (CW-20260930-0237)
 - bearer-token authorization rather than an external identity provider
 - pre-1.0 contracts; beta releases have no compatibility promise

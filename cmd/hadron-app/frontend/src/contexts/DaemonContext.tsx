@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from '
 import { toast } from 'sonner';
 import { createWorkspace as apiCreateWorkspace, getHealth, getPreference, listWorkspaces, setPreference } from '../api/client';
 import { setDemoMode, isDemoMode } from '../demo/demoMode';
+import { onUnauthorized } from '../api/http';
 import type { Workspace } from '../api/types';
 
 interface DaemonContextValue {
@@ -15,6 +16,8 @@ interface DaemonContextValue {
   activeRunStartedAt: string | null;
   demoMode: boolean;
   toggleDemo: () => void;
+  /** The daemon asked for a credential: the browser has no live session. */
+  signInRequired: boolean;
 }
 
 const DaemonContext = createContext<DaemonContextValue | null>(null);
@@ -33,6 +36,9 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeRunStartedAt, setActiveRunStartedAt] = useState<string | null>(null);
   const [demoMode, setDemoEnabled] = useState(isDemoMode());
+  const [signInRequired, setSignInRequired] = useState(false);
+
+  useEffect(() => onUnauthorized(() => setSignInRequired(true)), []);
 
   const toggleDemo = () => {
     const next = !demoMode;
@@ -56,7 +62,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   // When daemon comes up: fetch workspaces and restore last workspace
   useEffect(() => {
     if (status !== 'running') return;
-    listWorkspaces().then(res => setWorkspaces(res.items ?? [])).catch(() => {});
+    listWorkspaces().then(res => { setSignInRequired(false); setWorkspaces(res.items ?? []); }).catch(() => {});
     getPreference('lastWorkspaceId').then(id => { if (id) setWorkspaceId(id); }).catch(() => {});
   }, [status]);
 
@@ -89,6 +95,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       activeRunStartedAt,
       demoMode,
       toggleDemo,
+      signInRequired,
     }}>
       {children}
     </DaemonContext.Provider>

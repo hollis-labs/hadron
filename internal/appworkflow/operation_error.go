@@ -44,6 +44,9 @@ func SafeWorkflowOperationError(err error, result *StartRunResult) WorkflowOpera
 	if errors.Is(err, ErrPolicyDenied) || errors.Is(err, ErrNamespaceUnauthorized) {
 		return WorkflowOperationError{Code: WorkflowErrorCodePolicyDenied}
 	}
+	if errors.Is(err, ErrConfirmationNotPermitted) {
+		return WorkflowOperationError{Code: WorkflowErrorCodeConfirmationNotPermitted}
+	}
 	if errors.Is(err, ErrConfirmationRequired) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeConfirmationRequired, Diagnostics: resultDiagnostics(result), Result: result}
 	}

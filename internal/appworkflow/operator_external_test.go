@@ -380,7 +380,7 @@ func TestHostPinnedStartCrashReplayConvergesBeforeAdmission(t *testing.T) {
 	if loadPinErr != nil || bound.Outputs != outputRef || bound.Authority.Principal != "user:developer" {
 		t.Fatalf("partial pin=%#v error=%v", bound, loadPinErr)
 	}
-	if observedAuthority.Attributes["trust"] != "trusted" || observedAuthority.Attributes["target_id"] != "local-default" || observedAuthority.Attributes["target_kind"] != "local" || observedAuthority.Attributes["identity.extension.exposure_ref"] != "operator-cli" || observedAuthority.Attributes["grants"] != `["workflow.run"]` || observedAuthority.Attributes["identity_digest"] == "" || observedAuthority.Attributes["target_digest"] == "" {
+	if observedAuthority.Attributes["trust"] != "trusted" || observedAuthority.Attributes["target_id"] != "local-default" || observedAuthority.Attributes["target_kind"] != "local" || observedAuthority.Attributes["identity.extension.exposure_ref"] != "operator-cli" || observedAuthority.Attributes["grants"] != `["workflow.confirm","workflow.run"]` || observedAuthority.Attributes["identity_digest"] == "" || observedAuthority.Attributes["target_digest"] == "" {
 		t.Fatalf("pin authority omitted immutable policy facts: %#v", observedAuthority)
 	}
 	if err := host.Shutdown(context.Background()); err != nil {
