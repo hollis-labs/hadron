@@ -65,5 +65,4 @@ fails the release checks.
 
 `internal/agentsubstrate` reads a target project's `AGENTS.md` and
 `.agent-ops/project.yaml` by walking up from the launched agent's project
-directory. This repository no longer carries a `.agent-ops/project.yaml`; that
-is a removed input here, not a dead reader.
+directory. This repository does not itself ship a `.agent-ops/project.yaml`.
