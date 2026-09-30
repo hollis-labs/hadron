@@ -139,12 +139,7 @@ func runServe(args []string) error {
 		return fmt.Errorf("load settings: %w", err)
 	}
 
-	workers := sett.Execution.Workers
-	if workers <= 0 {
-		workers = 3
-	}
-
-	workflowRuntime, err := newProductionWorkflowRuntime(store, cfg, workers)
+	workflowRuntime, err := newProductionWorkflowRuntime(store, cfg, sett)
 	if err != nil {
 		return fmt.Errorf("compose graph workflow runtime: %w", err)
 	}
@@ -241,12 +236,7 @@ func runMCP(args []string) error {
 		return fmt.Errorf("load settings: %w", err)
 	}
 
-	workers := sett.Execution.Workers
-	if workers <= 0 {
-		workers = 3
-	}
-
-	workflowRuntime, err := newProductionWorkflowRuntime(store, cfg, workers)
+	workflowRuntime, err := newProductionWorkflowRuntime(store, cfg, sett)
 	if err != nil {
 		return fmt.Errorf("compose graph workflow runtime: %w", err)
 	}

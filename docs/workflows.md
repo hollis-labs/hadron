@@ -32,11 +32,83 @@ The stock `hadrond` capability profile registers exactly:
 | `wait_for@v1` | `read` | Suspend for a typed authorized callback/continuation |
 | `message_wait@v1` | `read` | Suspend for a correlated typed message |
 | `human_gate@v1` | `read` | Suspend for an authorized human decision |
+| `call@v1` | conservative (`read` through `destructive`) | Start a child workflow as a separately identified run (`mode: run`) |
 
 The executor registry freezes name/version/schema/effects/capabilities before a
 plan is admitted. A source cannot narrow those facts. Other repository adapters
 are public embeddable contracts, but are unavailable in the stock production
 host and therefore fail validation instead of being advertised.
+
+### Child workflows (`call@v1`)
+
+A `call` node resolves its child definition through the same resolver as a
+top-level start and completes immediately with the child handle (`run-id`,
+`status`, `events-ref`, `cancellation`, `outputs-ref`). Collect the child's
+outputs with a separate `wait_for` node:
+
+```yaml
+steps:
+  - id: launch
+    kind: call
+    kind_version: v1
+    call:
+      definition: {kind: file, id: child, locator: child.workflow.yaml, version: v1}
+      mode: run
+    with:
+      message: inputs.message
+    idempotency: {mode: keyed, scope: workflow}
+    outputs:
+      run-id: {type: string}
+      status: {type: string}
+      events-ref: {type: string}
+      cancellation: {type: object}
+      outputs-ref: {schema: {type: [object, "null"]}}
+  - id: collect
+    kind_version: v1
+    needs: [launch]
+    wait_for:
+      child_run: {input: child, fail_on_unsuccessful: true}
+      timeout: 1h
+      payload_schema: {type: object}
+    with:
+      child: steps.launch.outputs["run-id"]
+```
+
+- Only `mode: run` is supported. `mode: inline` is refused when the
+  definition is validated ("inline calls are not supported by hadrond"), so an
+  inline call never starts a run.
+- Every call-started child passes the same gate as a top-level start before it
+  is created: the child plan is validated against the production kinds, policy
+  facts are computed under the root run's identity (including execution-target
+  capabilities), and the decision is recorded in the policy journal under
+  `child-run:<child run id>`. A child the root caller could not start directly
+  fails the call step. A child whose policy asks for confirmation runs only
+  when the root start was itself confirmed.
+- Plans containing a call node always require confirmation to start (the
+  child is unresolved at start) and report dry run as unavailable.
+- The child terminal status wakes the collecting `wait_for`; only that child
+  run may resume it.
+
+### `agent_launch` is not enabled yet
+
+The compiler recognizes `agent_launch` (it lowers to `call@v1` plus a bundled
+child running `agent_session@v1`), but this `hadrond` refuses it at
+validation with:
+
+> agent_session@v1 is not enabled in this hadrond yet: agent launch needs a
+> durable session host (CW-20260930-0227)
+
+A directly authored `agent_session` node is refused with the same message.
+The local execution target already grants `agent.session.launch`,
+`agent.session.observe`, and `agent.session.cancel` so enabling the session
+host only lifts this gate.
+
+### External operations
+
+Kinds that hand work to an external system suspend it as a durable external
+operation. `hadrond` reconciles pending operations every 2 seconds (batches of
+100) and stops the loop with the other workflow workers on shutdown. Explicit
+run cancellation cancels a suspended external step through its adapter.
 
 Runnable examples are under [`examples/workflow/production`](../examples/workflow/production/).
 The HTTP/cmd/MCP files one directory above are explicitly broader compiler or

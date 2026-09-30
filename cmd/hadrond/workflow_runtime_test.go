@@ -19,14 +19,6 @@ import (
 	"time"
 
 	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/hadron/internal/api"
-	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/hadron/internal/config"
-	"github.com/hollis-labs/hadron/internal/mcpadapter"
-	"github.com/hollis-labs/hadron/internal/persistence"
-	"github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/hadron/internal/trigger"
 	"github.com/hollis-labs/go-workflow/adapters/transform"
 	"github.com/hollis-labs/go-workflow/authoring"
 	workflowcompile "github.com/hollis-labs/go-workflow/compile"
@@ -37,6 +29,15 @@ import (
 	"github.com/hollis-labs/go-workflow/stepkind"
 	"github.com/hollis-labs/go-workflow/values"
 	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/hadron/internal/api"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/config"
+	"github.com/hollis-labs/hadron/internal/mcpadapter"
+	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/registry"
+	"github.com/hollis-labs/hadron/internal/settings"
+	"github.com/hollis-labs/hadron/internal/trigger"
 )
 
 func TestProductionWorkflowRuntimeExecutesPinnedGraphAndStopsCleanly(t *testing.T) {
@@ -252,7 +253,7 @@ func TestProductionLifecycleActivationsUseStableRegistryIdentityAcrossRestartAnd
 	// A fresh composition has no AuthoringSourceStager entry. Both ingress
 	// paths therefore prove the persisted exact registry definition is the
 	// executable source of truth after restart.
-	restarted, runtimeErr := newProductionWorkflowRuntime(store, cfg, 1)
+	restarted, runtimeErr := newProductionWorkflowRuntime(store, cfg, testWorkflowSettings())
 	if runtimeErr != nil {
 		t.Fatal(runtimeErr)
 	}
@@ -827,7 +828,7 @@ func TestProductionMCPBootstrapPreservesMutableProfileAcrossRestart(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := newProductionWorkflowRuntime(store, cfg, 1)
+	restarted, err := newProductionWorkflowRuntime(store, cfg, testWorkflowSettings())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1052,7 +1053,18 @@ func qualifiedProductionRecord(name, namespace, version, source string) registry
 	}
 }
 
+func testWorkflowSettings() *settings.Settings {
+	sett := settings.DefaultSettings()
+	sett.Execution.Workers = 1
+	return sett
+}
+
 func newTestProductionWorkflowRuntime(t *testing.T) (*productionWorkflowRuntime, *config.Config, *persistence.Store) {
+	t.Helper()
+	return newTestProductionWorkflowRuntimeWithSettings(t, testWorkflowSettings())
+}
+
+func newTestProductionWorkflowRuntimeWithSettings(t *testing.T, sett *settings.Settings) (*productionWorkflowRuntime, *config.Config, *persistence.Store) {
 	t.Helper()
 	root := t.TempDir()
 	root, err := filepath.EvalSymlinks(root)
@@ -1098,7 +1110,7 @@ outputs:
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	runtime, err := newProductionWorkflowRuntime(store, cfg, 1)
+	runtime, err := newProductionWorkflowRuntime(store, cfg, sett)
 	if err != nil {
 		t.Fatal(err)
 	}

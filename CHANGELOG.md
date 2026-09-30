@@ -23,6 +23,21 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ### Added
 
+- Graph workflows: `call@v1` child runs (`mode: run`) in the production
+  `hadrond` kind set. Call-started children pass the top-level start policy
+  gate (plan validation, execution-target capabilities, persisted decision)
+  before they are created; `mode: inline` is refused at validation. A
+  `wait_for` child_run node on any parent node now wakes when the child ends.
+- Graph workflows: `hadrond` reconciles suspended external operations in a
+  background loop, and run cancellation cancels explicit-cancel external steps
+  instead of reporting cancellation as unsupported.
+- `agent_launch` is recognized but refused with a stable "agent_session@v1 is
+  not enabled in this hadrond yet" message until a durable session host lands.
+- The local `operator:local` execution target now carries `workflow.call` and
+  `agent.session.*`. The MCP principal deliberately keeps its previous
+  capability set, so MCP tokens bootstrapped before this change keep working
+  and no stored grant is widened silently; MCP-started runs cannot use `call`
+  or agent nodes until that grant is extended explicitly.
 - Open-source project documents: `CHANGELOG.md`, `CONTRIBUTING.md`,
   `SECURITY.md`, `TRADEMARK.md`.
 
