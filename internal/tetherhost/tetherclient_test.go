@@ -62,6 +62,9 @@ func (m *fakeMuxd) handler(t *testing.T) http.HandlerFunc {
 			write(http.StatusOK, map[string]any{"id": "s-fresh", "state": "failed", "exit_code": -1})
 		case r.Method == http.MethodGet && r.URL.Path == "/sessions/s-fresh/health":
 			write(http.StatusOK, map[string]any{"session_id": "s-fresh", "alive": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/sessions/s-exited/health":
+			// muxd: the session exists but is not running, so it has no live health.
+			apiError(http.StatusConflict, "conflict")
 		case r.Method == http.MethodPost && r.URL.Path == "/sessions/s-fresh/stop":
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == "/sessions/s-exited/stop":
@@ -153,6 +156,10 @@ func TestTetherClientReadsSessionAndHealth(t *testing.T) {
 	}
 	if health, err := client.SessionHealth(t.Context(), "s-fresh"); err != nil || !health.Alive {
 		t.Fatalf("SessionHealth = %#v, %v", health, err)
+	}
+	// An exited session is not alive; it is not a health error.
+	if health, err := client.SessionHealth(t.Context(), "s-exited"); err != nil || health.Alive {
+		t.Fatalf("SessionHealth of an exited session = %#v, %v", health, err)
 	}
 }
 

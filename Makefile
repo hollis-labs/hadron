@@ -1,4 +1,4 @@
-.PHONY: build install go-install uninstall test test-race test-ui test-ui-e2e lint lint-go lint-ui typecheck run-daemon e2e frontend-build generate app app-dev package-release
+.PHONY: build install go-install uninstall test test-race test-tether-integration test-ui test-ui-e2e lint lint-go lint-ui typecheck run-daemon e2e frontend-build generate app app-dev package-release
 
 GO_PACKAGES := ./cmd/hadron ./cmd/hadron-app ./cmd/hadrond ./internal/... ./schemas/...
 GO_LINT_CACHE_DIR := /tmp/hadron-go-build
@@ -34,6 +34,13 @@ test:
 
 test-race:
 	go test -race $(GO_PACKAGES)
+
+# Real-Tether proof for the agent session host: builds mux from the Tether
+# version pinned in test/tetherint/go.mod plus hadrond/hadron from this tree,
+# and runs every scenario against isolated temp daemons. A separate module, so
+# `make test` and ./... never build or start a daemon. See docs/workflows.md.
+test-tether-integration:
+	cd test/tetherint && HADRON_TETHER_INTEGRATION=1 go test -tags tether_integration -count=1 -timeout 20m -v ./...
 
 generate:
 	go generate ./internal/api

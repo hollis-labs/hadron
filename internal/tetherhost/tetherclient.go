@@ -99,10 +99,18 @@ func (c *TetherClient) GetSession(ctx context.Context, id string) (SessionState,
 	return state, nil
 }
 
-// SessionHealth probes the live runtime.
+// SessionHealth probes the live runtime. muxd answers 409 conflict for a
+// session that exists but is no longer running (it has no live health); that
+// is a dead session, not an error. Surfacing it as an error would fail every
+// heartbeat, and go-workflow skips observation while heartbeats fail, so a
+// session that exited or was swept without a reply would pend forever.
 func (c *TetherClient) SessionHealth(ctx context.Context, id string) (Health, error) {
 	health, err := c.client.SessionHealth(ctx, id)
 	if err != nil {
+		var apiErr *tether.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && apiErr.Code != tether.CodeIdempotencyConflict {
+			return Health{Alive: false}, nil
+		}
 		return Health{}, mapTetherError(ctx, err)
 	}
 	return Health{Alive: health.Alive}, nil
