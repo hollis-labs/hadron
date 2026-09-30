@@ -57,13 +57,33 @@ type IdentityProvider interface {
 // "confirmed" is not a human's confirmation.
 var ErrConfirmationNotPermitted = errors.New("caller may not confirm workflow operations: the workflow.confirm grant is required")
 
-// GrantWorkflowConfirm lets an authenticated identity satisfy a Confirm
-// policy decision by setting confirmed. The local operator holds it;
-// exposure and MCP principals do not unless granted deliberately.
+// GrantWorkflowConfirm lets an identity satisfy a Confirm policy decision by
+// setting confirmed, when the Host has no ConfirmAuthorizer.
 const GrantWorkflowConfirm = "workflow.confirm"
 
-// canConfirm reports whether identity may satisfy a Confirm decision.
-func canConfirm(identity hoststate.IdentityBinding) bool {
+// ConfirmAuthorizer decides whether an authenticated identity may satisfy a
+// Confirm policy decision by setting confirmed. It is consulted at the moment
+// of confirmation instead of being carried in the identity binding: run
+// ownership compares whole bindings, so a confirm right stored in the binding
+// would change every principal's identity when granted and lock it out of its
+// own earlier runs.
+type ConfirmAuthorizer interface {
+	AuthorizeConfirm(context.Context, hoststate.IdentityBinding) bool
+}
+
+// ConfirmAuthorizerFunc adapts a function to ConfirmAuthorizer.
+type ConfirmAuthorizerFunc func(context.Context, hoststate.IdentityBinding) bool
+
+func (f ConfirmAuthorizerFunc) AuthorizeConfirm(ctx context.Context, identity hoststate.IdentityBinding) bool {
+	return f(ctx, identity)
+}
+
+// canConfirm reports whether identity may satisfy a Confirm decision: the
+// Host's ConfirmAuthorizer when set, else the GrantWorkflowConfirm grant.
+func (h *Host) canConfirm(ctx context.Context, identity hoststate.IdentityBinding) bool {
+	if h.confirm != nil {
+		return h.confirm.AuthorizeConfirm(ctx, identity)
+	}
 	for _, grant := range identity.Grants {
 		if grant == GrantWorkflowConfirm {
 			return true
@@ -237,6 +257,8 @@ type Options struct {
 	// Construction freezes implementations and specs for the Host lifetime.
 	Verifiers   verification.Registry
 	DryRun      DryRunSupport
+	// Confirm, when set, decides who may confirm (see ConfirmAuthorizer).
+	Confirm ConfirmAuthorizer
 	Activations workflowwait.ActivationScheduler
 	// ActivationStore enables restart-durable reactor recovery from exact
 	// source-owned message/event registrations.

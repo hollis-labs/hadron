@@ -207,7 +207,7 @@ func (h *Host) startRunInternal(ctx context.Context, request StartRunRequest, ex
 		if !request.Confirmed {
 			return StartRunResult{Decision: decision, Facts: facts}, ErrConfirmationRequired
 		}
-		if !canConfirm(facts.Identity) {
+		if !h.canConfirm(ctx, facts.Identity) {
 			return StartRunResult{Decision: decision, Facts: facts}, ErrConfirmationNotPermitted
 		}
 	}

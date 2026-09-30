@@ -8,7 +8,7 @@ activation registration ID is never accepted as proof of authority.
 
 - Loopback is not a credential. The local operator authenticates with
   `operator.token` (Bearer) or a browser session from a single-use sign-in
-  link; only the operator holds `workflow.confirm`. Cross-origin and
+  link; only the operator can confirm. Cross-origin and
   DNS-rebinding-shaped requests are rejected. An agent that can read the token
   file can still act as the operator until agent sandboxing lands
   (CW-20260930-0237). Durable bearer credentials

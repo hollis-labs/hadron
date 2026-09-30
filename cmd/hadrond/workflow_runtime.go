@@ -328,8 +328,8 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	allowList.Snapshot()
 	host, err := appworkflow.New(appworkflow.Options{
 		State: state, Journal: journal, Definitions: resolver, Identity: identity,
-		Policy: allowListedWorkflowPolicy(allowList),
-		Kinds:  kinds, RequiredKinds: required, DryRun: productionDryRunSupport{},
+		Policy: allowListedWorkflowPolicy(allowList), Confirm: appworkflow.ConfirmAuthorizerFunc(operatorConfirmAuthorizer),
+		Kinds: kinds, RequiredKinds: required, DryRun: productionDryRunSupport{},
 		Activations: activation, ActivationStore: activationStore, Waits: waits,
 		ReuseAuthorizer: workflowruntime.ReuseAuthorizerFunc(productionReusePolicy),
 		ChildRuns:       childRuns, Artifacts: artifactStore,
@@ -498,9 +498,7 @@ func workflowMCPPrincipal() hoststate.MCPPrincipalRecord {
 		target.Capabilities = workflowMCPCapabilities()
 		binding.ExecutionTarget = &target
 	}
-	// Grants are frozen for the same reason. In particular the MCP principal
-	// does not hold workflow.confirm: an agent-driven MCP session's
-	// "confirmed" is not the operator's confirmation (CW-20260930-0234).
+	// Grants are frozen for the same reason.
 	binding.Grants = []string{"workflow.manage", "workflow.run"}
 	return hoststate.MCPPrincipalRecord{ID: workflowMCPPrincipalID, ProfileID: workflowMCPProfileID, Identity: binding}
 }
@@ -655,10 +653,24 @@ func localWorkflowIdentity() hoststate.IdentityBinding {
 	}
 	return hoststate.IdentityBinding{
 		Principal: "operator:local", SourceAuthority: "http", Trust: "local",
-		Grants:          []string{"workflow.confirm", "workflow.manage", "workflow.run"},
+		Grants:          []string{"workflow.manage", "workflow.run"},
 		RunScope:        hoststate.RunScope{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "local"},
 		ExecutionTarget: &target,
 	}
+}
+
+// localOperatorPrincipal is the principal the operator credential (token or
+// browser session) authenticates as.
+const localOperatorPrincipal = "operator:local"
+
+// operatorConfirmAuthorizer lets only the local operator satisfy a Confirm
+// decision. An MCP session or exposure token that sets confirmed is refused
+// (confirmation_not_permitted): an agent's "confirmed" is not the operator's
+// confirmation (CW-20260930-0234). The right is decided here, not carried in
+// the identity binding, so granting it never changes a principal's identity
+// or its ownership of earlier runs.
+func operatorConfirmAuthorizer(_ context.Context, identity hoststate.IdentityBinding) bool {
+	return identity.Principal == localOperatorPrincipal && identity.Trust == "local"
 }
 
 func hasWorkflowGrant(binding hoststate.IdentityBinding, grant string) bool {

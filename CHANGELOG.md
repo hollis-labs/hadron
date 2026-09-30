@@ -22,10 +22,11 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
     browser UI through a single-use, 60-second sign-in link (HttpOnly,
     SameSite=Strict session cookie); `hadron auth rotate` replaces the token
     and ends every session. The desktop app signs the browser in the same way.
-  - Confirming needs the new `workflow.confirm` grant, held only by the
-    operator. MCP and exposure tokens that send `confirmed: true` get
-    `confirmation_not_permitted` (HTTP 403); an explicit grant path for them
-    follows separately.
+  - Only the operator can confirm. MCP and exposure tokens that send
+    `confirmed: true` get `confirmation_not_permitted` (HTTP 403); an
+    explicit grant path for them follows separately. The right is checked at
+    confirmation time, not stored in identity bindings, so runs keep their
+    owner.
   - Hadron removes `HADRON_TOKEN` from the environment of everything it
     launches.
   - **Limit:** an agent that can read `operator.token` can still act as the

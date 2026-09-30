@@ -48,10 +48,10 @@ launches.
 - **Without a credential, loopback gets only** `/v1/health` (status and
   version) and the static UI shell. Every workflow operation, workspace
   change and read of run data needs the token or a session.
-- **Confirming needs the `workflow.confirm` grant.** Only the operator holds
-  it. A `confirmed: true` sent with an MCP or exposure token is refused
-  (`confirmation_not_permitted`), so an agent cannot confirm its own
-  effect-advised run. The start record keeps who confirmed.
+- **Only the operator can confirm.** A `confirmed: true` sent with an MCP or
+  exposure token is refused (`confirmation_not_permitted`), so an agent
+  cannot confirm its own effect-advised run. The start record keeps who
+  confirmed.
 - **Prefer the token file to `HADRON_TOKEN`.** The CLI also reads that
   variable, but an exported variable is inherited by every process started
   from that shell, agents included. Hadron removes it from the environment of
