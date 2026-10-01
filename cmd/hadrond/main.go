@@ -211,13 +211,17 @@ func runMCP(args []string) error {
 	dbFlag := fs.String("db", "", "SQLite database path")
 	logsFlag := fs.String("logs", "", "run logs directory")
 	dataFlag := fs.String("data", "", "data directory")
-	tokenFlag := fs.String("token", "", "durable workflow principal bearer token")
+	tokenFlag := fs.String("token", "", "durable workflow principal token (legacy; prefer HADRON_MCP_TOKEN or --token-file)")
+	tokenFileFlag := fs.String("token-file", "", "file containing the principal token; overrides HADRON_MCP_TOKEN and --token")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *tokenFlag == "" {
-		return errors.New("mcp requires --token for a durable workflow principal")
+	token, tokenErr := resolveMCPToken(*tokenFileFlag, *tokenFlag)
+	// Child processes must not inherit the MCP principal credential.
+	_ = os.Unsetenv("HADRON_MCP_TOKEN")
+	if tokenErr != nil {
+		return tokenErr
 	}
 
 	cfg := config.Default()
@@ -260,10 +264,10 @@ func runMCP(args []string) error {
 			log.Printf("workflow runtime shutdown error: %v", shutdownErr)
 		}
 	}()
-	if err := workflowRuntime.BootstrapMCP(context.Background(), *tokenFlag); err != nil {
+	if err := workflowRuntime.BootstrapMCP(context.Background(), token); err != nil {
 		return fmt.Errorf("bootstrap MCP workflow principal: %w", err)
 	}
-	adapter := mcpadapter.New(nil, nil, nil, nil, *tokenFlag, nil,
+	adapter := mcpadapter.New(nil, nil, nil, nil, token, nil,
 		mcpadapter.WithServerVersion(version),
 		mcpadapter.WithWorkflowOnly(),
 		mcpadapter.WithWorkflowServices(workflowRuntime.exposure, workflowRuntime.operations, workflowRuntime.operations, workflowRuntime.operations),
@@ -273,6 +277,28 @@ func runMCP(args []string) error {
 	defer stop()
 
 	return adapter.Run(ctx)
+}
+
+// resolveMCPToken prefers credential inputs that keep the token off argv.
+func resolveMCPToken(tokenFile, legacyToken string) (string, error) {
+	if tokenFile != "" {
+		data, err := os.ReadFile(tokenFile) // #nosec G304 -- explicit operator-supplied credential file path.
+		if err != nil {
+			return "", fmt.Errorf("read MCP token file: %w", err)
+		}
+		value := strings.TrimSpace(string(data))
+		if value == "" {
+			return "", errors.New("MCP token file is empty")
+		}
+		return value, nil
+	}
+	if value := strings.TrimSpace(os.Getenv("HADRON_MCP_TOKEN")); value != "" {
+		return value, nil
+	}
+	if value := strings.TrimSpace(legacyToken); value != "" {
+		return value, nil
+	}
+	return "", errors.New("mcp requires --token-file, HADRON_MCP_TOKEN, or --token for a durable workflow principal")
 }
 
 func workflowSourceRoot(cfg *config.Config) string {

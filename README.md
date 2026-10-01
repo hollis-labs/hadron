@@ -145,8 +145,13 @@ not capabilities advertised by the stock daemon.
 Start the production MCP adapter over stdio with a durable bearer credential:
 
 ```sh
-hadrond mcp -token '<secret>'
+hadrond mcp --token-file /path/to/protected/principal-token
 ```
+
+`--token-file` takes precedence over nonblank `HADRON_MCP_TOKEN`, then
+legacy `--token`. An unreadable or empty token file fails startup. Keep the
+file private (`0600`); environment input keeps the token off argv but remains
+readable by same-user processes on Linux.
 
 The first start creates a digest-only local principal and a bounded default
 exposure profile. The same token reopens that identity; the raw token is not

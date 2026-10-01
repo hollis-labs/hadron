@@ -11,15 +11,24 @@ hadrond mcp \
   -data "$HOME/.hadron" \
   -db "$HOME/.hadron/state/hadron.db" \
   -logs "$HOME/.hadron/logs/runs" \
-  -token '<secret>'
+  --token-file /path/to/protected/principal-token
 ```
 
-`-token` is required. On first use Hadron persists only its digest, creates a
-local MCP principal, and creates the bounded `profile:local-operator` exposure
+A principal token is required. The server reads it once at startup, preferring
+`--token-file`, then nonblank `HADRON_MCP_TOKEN`, then legacy `--token` (also
+spelled `-token`). An unreadable or empty explicit file fails without falling
+back. File contents and token inputs are trimmed; control characters within the
+token are rejected. Protect token files with mode `0600` and keep them out of
+source control. `HADRON_MCP_TOKEN` is unset before runtime startup so children do
+not inherit it; Linux same-user process environment access remains a limitation.
+This is a workflow principal credential, separate from the CLI's `HADRON_TOKEN`
+operator credential.
+
+On first use Hadron persists only its digest, creates a local MCP principal, and creates the bounded `profile:local-operator` exposure
 profile with search-all discovery, lazy loading, and no direct pins yet.
 Restarting with the same token reuses that principal and preserves profile
-changes such as exact pins. Surrounding whitespace and control-bearing tokens
-are rejected rather than silently normalized.
+changes such as exact pins. The resolved token still goes through durable
+principal validation.
 
 Example client configuration:
 
@@ -33,7 +42,7 @@ Example client configuration:
         "-data", "/absolute/path/to/.hadron",
         "-db", "/absolute/path/to/.hadron/state/hadron.db",
         "-logs", "/absolute/path/to/.hadron/logs/runs",
-        "-token", "replace-with-a-secret"
+        "--token-file", "/path/to/protected/principal-token"
       ]
     }
   }
@@ -103,7 +112,8 @@ safe. Exact version and digest are preserved from descriptor through invocation.
 
 ## Troubleshooting
 
-- **Server exits at startup:** supply a nonempty valid `-token` and writable,
+- **Server exits at startup:** supply a nonempty valid token through `--token-file`,
+  `HADRON_MCP_TOKEN`, or legacy `--token` and writable,
   private data/database/log paths.
 - **Only meta tools appear:** inspect the profile, search its authorized scope,
   then lazy-load a record or add an exact exposure pin through authorized
