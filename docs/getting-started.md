@@ -132,7 +132,7 @@ The browser UI at `http://127.0.0.1:8095/` exposes Registry, Workflow Graph,
 and Runs over the generated HTTP client. For an MCP client:
 
 ```sh
-hadrond mcp -token '<secret>'
+hadrond mcp --token-file /path/to/protected/principal-token
 ```
 
 Continue with [MCP setup](mcp-setup.md), [CLI reference](cli-reference.md), and
