@@ -19,14 +19,14 @@ resources:
       command:
         - ./bin/hadrond
         - serve
-      dir: /Users/chrispian/dev/hollis-labs/apps/hadron
+      dir: ~/dev/hollis-labs/apps/hadron
       env:
         # Cerberus's artifact install step always runs `make install` when a
         # Makefile is present. This Makefile's install target honors
         # PREFIX/BINDIR/DESTDIR per BSD/GNU convention, whose default
         # /usr/local needs root. Point it at Cerberus's own install_root
         # instead (same fix as tether-daemon-service).
-        PREFIX: /Users/chrispian/.cerberus/apps/hadron/hadron-daemon-service
+        PREFIX: ~/.cerberus/apps/hadron/hadron-daemon-service
       mode: os_service
       port: 8095
       run_from: artifact
@@ -47,7 +47,7 @@ resources:
         - npm
         - run
         - dev
-      dir: /Users/chrispian/dev/hollis-labs/apps/hadron/cmd/hadron-app/frontend
+      dir: ~/dev/hollis-labs/apps/hadron/cmd/hadron-app/frontend
       env:
         HADRON_DAEMON_EXTERNAL: "true"
         CLAUDE_CODE_OAUTH_TOKEN: keychain://anthropic/claude-code-oauth
@@ -60,3 +60,16 @@ resources:
       - vite
       - v2
 registry_urn: msg://agent/agent-mux/prj_46qak5fkx1
+  - name: Hadron DB Backup
+    type: process
+    project: hadron
+    connector: local
+    config:
+      command:
+        - sqlite-backup
+        - --db=./main.db
+        - --dest=~/dev/backups/hadron
+        - --interval=1h
+        - --keep-hourly=48
+        - --keep-daily=14
+      dir: .
