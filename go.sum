@@ -66,6 +66,8 @@ github.com/hollis-labs/go-scheduler v0.2.0 h1:WkvePh4+7Y+xtjy0WH2HX27oaFIWAloC14
 github.com/hollis-labs/go-scheduler v0.2.0/go.mod h1:1LXp3YFPE5CPh0hwHgoBRDLoUUR6jieS+Pzg2bzXyIE=
 github.com/hollis-labs/go-tether-client v0.6.0 h1:U8DUiQkWP+0GnSxj2blebTItHFG1M8s+/YVcoIagOb0=
 github.com/hollis-labs/go-tether-client v0.6.0/go.mod h1:xg8sxCZefI592F6m/0rO0w+td3Sz32PCycnolki9Qxk=
+github.com/hollis-labs/go-tether-client v0.8.0 h1:20axAfaqixLnWs7n+DY0JqrUnOfHMyt4KxRRzWau5e0=
+github.com/hollis-labs/go-tether-client v0.8.0/go.mod h1:xg8sxCZefI592F6m/0rO0w+td3Sz32PCycnolki9Qxk=
 github.com/hollis-labs/go-workflow v0.1.0 h1:Rose0BcdHySd3RT2+HTuAzD/dELPsEREKmosg+3SySg=
 github.com/hollis-labs/go-workflow v0.1.0/go.mod h1:LfBd90u0l4/CBtIaxJPl7RLRm9JYS3XcOyYju8aNfBg=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=

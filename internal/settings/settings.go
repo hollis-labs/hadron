@@ -56,7 +56,7 @@ const AgentSubstrateKindTetherSession = "tether_session"
 
 // Defaults applied to an unset TetherSubstrateSettings field.
 const (
-	DefaultTetherEndpoint           = "~/.tether/run/muxd.sock"
+	DefaultTetherEndpoint           = "~/.tether/run/tetherd.sock"
 	DefaultTetherUnreachableTimeout = "10m"
 )
 

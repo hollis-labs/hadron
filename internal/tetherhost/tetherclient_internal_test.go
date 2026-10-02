@@ -12,7 +12,7 @@ func TestListenAddressExpandsSocketPaths(t *testing.T) {
 		t.Skip("no home directory")
 	}
 	for endpoint, want := range map[string]string{
-		"":                        "unix:~/.tether/run/muxd.sock",
+		"":                        "unix:~/.tether/run/tetherd.sock",
 		"~/.tether/run/muxd.sock": "unix:" + filepath.Join(home, ".tether/run/muxd.sock"),
 		"/var/run/muxd.sock":      "unix:/var/run/muxd.sock",
 		"unix:/var/run/muxd.sock": "unix:/var/run/muxd.sock",
