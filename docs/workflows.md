@@ -117,7 +117,7 @@ target already grants `agent.session.launch`, `agent.session.observe`, and
     "tether": {
       "kind": "tether_session",
       "tether": {
-        "endpoint": "~/.tether/run/muxd.sock",
+        "endpoint": "~/.tether/run/tetherd.sock",
         "launch": "claude-default",
         "launches": {"reviewer": "claude-review"},
         "result_optional": false,
@@ -133,7 +133,7 @@ target already grants `agent.session.launch`, `agent.session.observe`, and
 |---|---|---|
 | `launch` | — | Tether `launch_id` for any logical agent not in `launches` |
 | `launches` | — | `logical_agent_id` → Tether `launch_id` |
-| `endpoint` | `~/.tether/run/muxd.sock` | muxd socket path (`~/` expanded), or `unix:`, `tcp:host:port`, `http(s)://` address |
+| `endpoint` | `~/.tether/run/tetherd.sock` | muxd socket path (`~/` expanded), or `unix:`, `tcp:host:port`, `http(s)://` address |
 | `result_optional` | `false` | A session that completes without a result reply succeeds with a JSON `null` result instead of failing `agent_no_result` |
 | `stop_on_result` | `true` | Stop the session once its result reply is accepted |
 | `unreachable_timeout` | `10m` | How long muxd may stay unreachable before the step fails `agent_host_unreachable` |

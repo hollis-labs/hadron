@@ -37,6 +37,9 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ### Changed
 
+- Bump go-tether-client to v0.8.0 and use `tetherd.sock` for the default
+  Tether substrate endpoint (CW-20261001-0673).
+
 - The MCP adapter dropped `mark3labs/mcp-go` in favor of the official-SDK
   `go-mcp` wrapper.
 - API and MCP tool handlers were split into smaller files; obsolete

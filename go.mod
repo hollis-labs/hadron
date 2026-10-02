@@ -14,7 +14,7 @@ require (
 	github.com/hollis-labs/go-otel v0.6.1
 	github.com/hollis-labs/go-providers v0.26.0
 	github.com/hollis-labs/go-scheduler v0.2.0
-	github.com/hollis-labs/go-tether-client v0.6.0
+	github.com/hollis-labs/go-tether-client v0.8.0
 	github.com/hollis-labs/go-workflow v0.1.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
