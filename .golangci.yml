@@ -1,5 +1,5 @@
 # Fragments Engine — Shared golangci-lint Configuration (v2 format)
-# Reference copy lives in mentat repo; copied to all 11 Go projects.
+# Reference copy lives in nanite repo; copied to all 11 Go projects.
 #
 # Philosophy:
 #   - Catch real bugs, not style nits
