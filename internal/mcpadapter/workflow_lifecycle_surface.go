@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/libs/workflow/graph"
 )
 
 func (w *workflowSurface) lifecycleSession(ctx context.Context, args map[string]any) (context.Context, appworkflow.WorkflowExposureSession, error) {

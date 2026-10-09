@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	runtimebootdir "github.com/hollis-labs/agentkit/agentruntime/bootdir"
-
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/settings"
 )
@@ -25,6 +23,11 @@ const (
 	replyOutboxRelDir       = "memories/hadron-replies"
 	defaultBootSystemPrompt = "You are a task-scoped automation agent launched by Hadron. Work within the provided project context, boot files, and callback contract."
 )
+
+type bootFile struct {
+	RelPath, Content string
+	Mode             os.FileMode
+}
 
 type bootRenderContext struct {
 	DataDir          string
@@ -45,7 +48,7 @@ type bootRenderContext struct {
 	ProjectSpecText  string
 }
 
-func renderBootArtifacts(dataDir string, cfg settings.AgentSubstrateSettings, ctx bootRenderContext) (string, string, []runtimebootdir.File, error) {
+func renderBootArtifacts(dataDir string, cfg settings.AgentSubstrateSettings, ctx bootRenderContext) (string, string, []bootFile, error) {
 	ctx.DataDir = dataDir
 	projectAgentFile, projectAgentText := findProjectAgentInstructions(ctx.ProjectDir)
 	projectSpecPath, projectSpecText := findProjectSpec(ctx.ProjectDir)
@@ -134,7 +137,7 @@ func renderBootProfile(dataDir, projectDir, profile string, ctx bootRenderContex
 	return renderProfileTemplate(content, ctx), nil
 }
 
-func renderCallbacksProfile(dataDir, projectDir, profile string, ctx bootRenderContext) (string, []runtimebootdir.File, error) {
+func renderCallbacksProfile(dataDir, projectDir, profile string, ctx bootRenderContext) (string, []bootFile, error) {
 	profile = strings.TrimSpace(profile)
 	if profile == "" {
 		return "", nil, nil
@@ -158,7 +161,7 @@ func renderCallbacksProfile(dataDir, projectDir, profile string, ctx bootRenderC
 			"correlation_id":   correlationID,
 		}
 		body, _ := json.MarshalIndent(details, "", "  ")
-		files := []runtimebootdir.File{
+		files := []bootFile{
 			{RelPath: callbackDetailsRelPath, Content: string(body) + "\n", Mode: 0o644},
 			{RelPath: callbackGuideRelPath, Content: renderSharedCallbacksText(ctx) + "\n", Mode: 0o644},
 			{RelPath: callbackEnvRelPath, Content: renderSharedCallbackEnv(ctx, replySubstrate, correlationID) + "\n", Mode: 0o644},

@@ -1,7 +1,7 @@
 # Embed the workflow engine in a Go host
 
 Hadron consumes the reusable engine boundary from the complete public
-`github.com/hollis-labs/go-workflow/...` module. It contains graph and source
+`github.com/hollis-labs/libs/workflow/...` module. It contains graph and source
 contracts, compiler phases, typed values, runtime state machines, waits,
 verification, step-kind SDKs and adapters, offline embedding, and conformance
 fixtures. Version `v0.1.0` is Hadron's first extracted dependency; the module
@@ -14,7 +14,7 @@ composition. They are deliberately not engine dependencies.
 ## Minimal path
 
 The executable external-package example is
-[go-workflow's offline adoption test](https://github.com/hollis-labs/go-workflow/blob/v0.1.0/offline/adoption_external_test.go).
+[go-workflow's offline adoption test](https://github.com/hollis-labs/libs/blob/workflow/v0.1.0/workflow/offline/adoption_external_test.go).
 It performs the complete portable sequence:
 
 1. load one bounded graph-native source with `compile.LoadBytes`;
@@ -72,9 +72,9 @@ lifecycle hooks. `stepkind.Resolve` never selects a latest version when more
 than one version exists. Register all implementations, verify the advertised
 specs, then treat the registry as frozen for a plan's lifetime.
 
-`github.com/hollis-labs/go-workflow/stepkind/stepkindtest` provides public
+`github.com/hollis-labs/libs/workflow/stepkind/stepkindtest` provides public
 application-neutral fake kinds for downstream tests. Concrete packages under
-`github.com/hollis-labs/go-workflow/adapters` are optional
+`github.com/hollis-labs/libs/workflow/adapters` are optional
 embeddable capabilities; importing an adapter does not enable it. The stock
 Hadron daemon's six-kind profile is a product-host choice, not an engine limit.
 
@@ -83,7 +83,7 @@ Hadron daemon's six-kind profile is a product-host choice, not an engine limit.
 The public formats are versioned independently and matched exactly:
 
 - graph source uses the generated schema at
-  [`graph/schema/workflow.schema.json`](https://github.com/hollis-labs/go-workflow/blob/v0.1.0/graph/schema/workflow.schema.json);
+  [`graph/schema/workflow.schema.json`](https://github.com/hollis-labs/libs/blob/workflow/v0.1.0/workflow/graph/schema/workflow.schema.json);
 - compiled plans carry `compile.ExecutionPlanSchemaVersion` and immutable content
   digests;
 - offline artifacts carry `offline.ManifestSchemaVersion`; and
@@ -97,7 +97,7 @@ meaning, enum, required field, or exact-version behavior requires an explicit
 versioned contract decision, updated conformance fixtures, and migration or
 compatibility evidence appropriate to that boundary.
 
-[go-workflow's `public-api.txt`](https://github.com/hollis-labs/go-workflow/blob/v0.1.0/public-api.txt)
+[go-workflow's `public-api.txt`](https://github.com/hollis-labs/libs/blob/workflow/v0.1.0/workflow/public-api.txt)
 snapshots exported declarations for every public package, including adapters.
 The shared module's import/API guard fails on unreviewed drift, Hadron-internal
 dependencies, or unapproved core dependencies. Hadron pins a reviewed release

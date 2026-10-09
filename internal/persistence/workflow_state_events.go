@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 )
 
 // AppendEvent implements runtime.StateStore with an atomic per-run sequence.

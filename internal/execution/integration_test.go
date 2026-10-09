@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-messaging"
+	"github.com/hollis-labs/substrate/mesh/messaging"
 	gomcpserver "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/agentsubstrate"
 	"github.com/hollis-labs/hadron/internal/execution"

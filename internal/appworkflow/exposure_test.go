@@ -6,9 +6,9 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 func TestWorkflowToolNameIsBoundedASCIIAndCollisionsRemainVisible(t *testing.T) {

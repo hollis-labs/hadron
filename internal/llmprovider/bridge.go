@@ -12,12 +12,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	providers "github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	providers "github.com/hollis-labs/substrate/harness/adapters/provider"
 
-	workflowllm "github.com/hollis-labs/go-workflow/adapters/llm"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowllm "github.com/hollis-labs/libs/workflow/adapters/llm"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 var (

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/go-otel"
-	gosched "github.com/hollis-labs/go-scheduler"
+	feotel "github.com/hollis-labs/libs/util/otel"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"go.opentelemetry.io/otel/attribute"

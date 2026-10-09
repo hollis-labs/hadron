@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 func TestWorkflowActivationExposureRefRoundTripsDelimiterBearingIdentity(t *testing.T) {

@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 )

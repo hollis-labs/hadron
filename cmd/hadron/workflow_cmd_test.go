@@ -19,10 +19,10 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
-	"github.com/hollis-labs/go-workflow/diagnostic"
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/libs/workflow/diagnostic"
+	"github.com/hollis-labs/libs/workflow/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 type workflowServiceSpy struct {

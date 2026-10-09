@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	sharedModule  = "github.com/hollis-labs/go-workflow"
+	sharedModule  = "github.com/hollis-labs/libs/workflow"
 	formerModule  = "github.com/hollis-labs/hadron/" + "workflow"
 	pinnedVersion = "v0.1.0"
 )

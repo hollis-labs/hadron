@@ -11,7 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/libs/workflow/graph"
 )
 
 const (

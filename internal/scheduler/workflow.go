@@ -4,7 +4,7 @@ import (
 	"errors"
 	"reflect"
 
-	gosched "github.com/hollis-labs/go-scheduler"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )

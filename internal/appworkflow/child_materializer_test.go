@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
-	"github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/runtime/inmemory"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
+	calladapter "github.com/hollis-labs/libs/workflow/adapters/call"
+	"github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/runtime/inmemory"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 func TestPinnedChildRunMaterializerCreatesAndReplaysRunnableGraphState(t *testing.T) {

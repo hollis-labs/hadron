@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	agentadapter "github.com/hollis-labs/go-workflow/adapters/agent"
-	"github.com/hollis-labs/go-workflow/values"
+	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
+	"github.com/hollis-labs/libs/workflow/values"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 type fakeWorkflowBackend struct {

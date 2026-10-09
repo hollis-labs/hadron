@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	agentadapter "github.com/hollis-labs/go-workflow/adapters/agent"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
+	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/tetherhost"
 	"github.com/hollis-labs/hadron/internal/tetherhost/tethertest"

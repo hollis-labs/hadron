@@ -37,6 +37,21 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ### Changed
 
+- Adopt published `libs/workflow` v0.1.0, `libs/util` v0.2.0 and substrate
+  `harness` v0.3.0, `llm-core` and `mesh` v0.1.0. The compatibility agent
+  launcher uses canonical native rendering and an accepted, process-local
+  artifact operation over a fresh private inactive boot directory. It does
+  not issue credential grants or claim durable launch admission. Codex keeps
+  its existing headless `never`/`workspace-write` settings; credential files
+  are excluded from managed artifacts. Claude binds the restrictive `default`
+  posture explicitly for headless launches; required approvals are denied.
+  Project access remains in provider launch arguments.
+  MCP trace context now uses protocol `_meta` instead of tool arguments, while
+  idempotency metadata remains intact. Legacy runtime setting
+  names (`subprocess`, `serve-http`, `pty-debug`) remain accepted at the app
+  boundary while harness modes use canonical names. Pin Go toolchain 1.26.9
+  and `golang.org/x/net` v0.60.0 to address the vulnerability scan findings.
+
 - Bump go-tether-client to v0.8.0 and use `tetherd.sock` for the default
   Tether substrate endpoint (CW-20261001-0673).
 
@@ -72,8 +87,8 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
   Configuring one lifts the `agent_launch` gate; `hadrond` reaches muxd
   through go-tether-client v0.6.0 and still starts when muxd is down. Typed
   agent inputs are refused at validation.
-- Dependencies: `github.com/hollis-labs/go-tether-client` v0.6.0 (new);
-  `github.com/hollis-labs/go-messaging` v0.5.1 → v0.5.2 (required by it).
+- Dependencies: `github.com/hollis-labs/substrate/mesh/tetherclient` v0.6.0 (new);
+  `github.com/hollis-labs/substrate/mesh/messaging` v0.5.1 → v0.5.2 (required by it).
 - Root node bindings now resolve `run.id`, which `agent_launch` expansion
   uses for its parent correlation.
 - The local `operator:local` execution target now carries `workflow.call` and

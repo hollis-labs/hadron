@@ -13,10 +13,10 @@ import (
 	"sort"
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
+	"github.com/hollis-labs/libs/workflow/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
 

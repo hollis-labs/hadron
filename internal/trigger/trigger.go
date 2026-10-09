@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	feotel "github.com/hollis-labs/go-otel"
+	feotel "github.com/hollis-labs/libs/util/otel"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"go.opentelemetry.io/otel/attribute"

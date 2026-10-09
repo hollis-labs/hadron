@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
-	"github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
+	calladapter "github.com/hollis-labs/libs/workflow/adapters/call"
+	"github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 // ErrCallContextUnavailable reports that the parent-run expression context for

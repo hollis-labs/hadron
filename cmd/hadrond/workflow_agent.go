@@ -6,10 +6,10 @@ import (
 	"sort"
 	"time"
 
-	agentadapter "github.com/hollis-labs/go-workflow/adapters/agent"
-	workflowcompile "github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/diagnostic"
-	"github.com/hollis-labs/go-workflow/graph"
+	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
+	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/diagnostic"
+	"github.com/hollis-labs/libs/workflow/graph"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/tetherhost"
 )

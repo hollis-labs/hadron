@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/libs/workflow/graph"
 )
 
 func TestWorkflowCatalogPersistsQualificationPinsAndPublication(t *testing.T) {

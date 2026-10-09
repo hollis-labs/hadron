@@ -18,7 +18,7 @@ the desired future state into architecture docs.
 
 **Decision:** start inside Hadron if that is the practical first step, but keep
 the engine boundary extraction-ready for a shared module such as
-`github.com/hollis-labs/go-workflow`. The core must not import Hadron
+`github.com/hollis-labs/libs/workflow`. The core must not import Hadron
 `internal/*`.
 
 **Impacts:** [01](01-package-boundaries.md),

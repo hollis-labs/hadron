@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/hollis-labs/go-workflow/runtime"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/libs/workflow/runtime"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 )
 
 // ChildRunWait pairs a terminal child run with an open child_run wait that

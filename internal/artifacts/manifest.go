@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 const manifestVersion = 1

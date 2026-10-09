@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 // SaveValues implements runtime.StateStore with an immutable, digest-bound

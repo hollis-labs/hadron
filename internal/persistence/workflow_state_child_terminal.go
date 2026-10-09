@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 )
 
 var _ workflowruntime.ChildTerminalWaitStore = (*WorkflowStateStore)(nil)

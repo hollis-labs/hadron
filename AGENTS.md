@@ -4,7 +4,7 @@ Hadron is a local-first daemon that validates, admits, executes and inspects
 typed durable workflow graphs, and projects that one host over the CLI, HTTP
 API, browser UI, MCP, A2A, schedules and external activations. It is not the
 workflow engine: graph IR, compilation, runtime, waits and values live in the
-pinned `github.com/hollis-labs/go-workflow` module. It is not a second runtime
+pinned `github.com/hollis-labs/libs/workflow` module. It is not a second runtime
 per surface either — the CLI and UI are transports over the daemon.
 
 ## Start Here

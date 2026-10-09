@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"

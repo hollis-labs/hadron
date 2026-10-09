@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-mcp/budget"
-	"github.com/hollis-labs/go-messaging"
+	"github.com/hollis-labs/substrate/mesh/messaging"
 	"github.com/hollis-labs/hadron/internal/persistence"
 )
 

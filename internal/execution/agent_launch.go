@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	feotel "github.com/hollis-labs/go-otel"
+	feotel "github.com/hollis-labs/libs/util/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/hadron/internal/blueprint"

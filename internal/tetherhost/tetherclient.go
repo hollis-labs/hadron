@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	messaging "github.com/hollis-labs/go-messaging"
-	tether "github.com/hollis-labs/go-tether-client"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging"
+	tether "github.com/hollis-labs/substrate/mesh/tetherclient"
 )
 
 // TetherClient adapts go-tether-client to Client. Constructing it never

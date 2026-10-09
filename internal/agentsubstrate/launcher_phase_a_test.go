@@ -3,12 +3,13 @@ package agentsubstrate
 import (
 	"context"
 	"errors"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 	"reflect"
 	"strings"
 	"testing"
 
-	agentlaunch "github.com/hollis-labs/agentkit/agentlaunch"
-	"github.com/hollis-labs/agentkit/agentruntime/runtimebind"
+	"github.com/hollis-labs/substrate/harness/adapters/runtimebind"
+	agentlaunch "github.com/hollis-labs/substrate/harness/agentlaunch"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/settings"
@@ -46,7 +47,7 @@ func TestLaunchAgent_RefusesUnsupportedRuntime(t *testing.T) {
 // A known provider on a runtime the launcher has no case for is refused the
 // same way.
 func TestNewAdapter_RefusesUnsupportedBinding(t *testing.T) {
-	_, _, err := newAdapter(runtimebind.Binding{Provider: "codex", Runtime: agentlaunch.RuntimeServeHTTP}, settings.AgentSubstrateSettings{}, t.TempDir())
+	_, _, err := newAdapter(runtimebind.Binding{Provider: "codex", Runtime: runtimes.ModeHTTPSSE}, settings.AgentSubstrateSettings{}, t.TempDir())
 	if !errors.Is(err, ErrRuntimeNotSupported) {
 		t.Fatalf("err = %v; want ErrRuntimeNotSupported", err)
 	}
@@ -73,7 +74,7 @@ func TestMCPSpecFromSettings(t *testing.T) {
 // The launch plan carries the settings' MCP servers.
 func TestBuildLaunchPlan_CarriesMCPSpec(t *testing.T) {
 	mcp := mcpSpecFromSettings(map[string]settings.MCPServerSettings{"tools": {Transport: "stdio", Command: "tools-mcp"}})
-	plan, err := buildLaunchPlan(settings.AgentSubstrateSettings{Provider: "claude"}, execution.AgentLaunchRequest{LogicalAgentID: "a"}, t.TempDir(), t.TempDir(), "", "", nil, mcp)
+	plan, err := buildLaunchPlan(settings.AgentSubstrateSettings{Provider: "claude"}, execution.AgentLaunchRequest{LogicalAgentID: "a"}, t.TempDir(), t.TempDir(), "", "", mcp)
 	if err != nil {
 		t.Fatal(err)
 	}

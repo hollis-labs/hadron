@@ -2,8 +2,8 @@ package mcpadapter
 
 import (
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/go-workflow/authoring"
-	graphschema "github.com/hollis-labs/go-workflow/graph/schema"
+	"github.com/hollis-labs/libs/workflow/authoring"
+	graphschema "github.com/hollis-labs/libs/workflow/graph/schema"
 )
 
 // workflowDraftProperty returns the "draft" input-schema property shared by

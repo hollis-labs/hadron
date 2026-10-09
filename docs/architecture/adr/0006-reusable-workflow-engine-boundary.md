@@ -20,7 +20,7 @@ but the workflow semantics must be consumable as a library.
 Design the workflow engine as an extraction-ready reusable package boundary.
 The first implementation may live inside Hadron while semantics settle, but the
 core must be structured so it can move to a shared module such as
-`github.com/hollis-labs/go-workflow`.
+`github.com/hollis-labs/libs/workflow`.
 
 Engine core may depend on the Go standard library and selected schema,
 expression, and test dependencies. It must not import:

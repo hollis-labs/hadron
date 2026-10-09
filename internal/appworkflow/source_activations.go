@@ -12,9 +12,9 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	workflowcompile "github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 // SourceActivationRequest binds compiler-owned activation templates to the
