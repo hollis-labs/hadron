@@ -15,14 +15,14 @@ HTTP or TLS; redirects are refused.
 Read the current generation and predecessor credential ID:
 
 ```sh
-hadron --addr http://127.0.0.1:8787 --token-file /private/operator.token \
+hadron --addr http://127.0.0.1:8095 --token-file /private/operator.token \
   auth credential list --principal-id operator:mcp-local
 ```
 
 Use the returned generation and a retained credential ID in the issue request:
 
 ```sh
-hadron --addr http://127.0.0.1:8787 --token-file /private/operator.token \
+hadron --addr http://127.0.0.1:8095 --token-file /private/operator.token \
   auth credential issue --principal-id operator:mcp-local \
   --credential-id cred_REPLACE_WITH_LISTED_ID --expected-generation 1 \
   --idempotency-key operator-cutover-001 --overlap 15m --ttl 720h \
@@ -63,7 +63,7 @@ After the authorized cutover and bounded consumer check, list again for the
 current generation and revoke the exact old ID:
 
 ```sh
-hadron --addr http://127.0.0.1:8787 --token-file /private/operator.token \
+hadron --addr http://127.0.0.1:8095 --token-file /private/operator.token \
   auth credential revoke --principal-id operator:mcp-local \
   --credential-id cred_REPLACE_WITH_OLD_ID --expected-generation 2 \
   --idempotency-key operator-revoke-001

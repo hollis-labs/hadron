@@ -183,6 +183,28 @@ func TestCredentialBoundsFamilyMismatchAndLegacyCredentialBypassRefuse(t *testin
 
 func credentialInt(v int64) *int64 { return &v }
 
+func TestCredentialClockRegressionCannotInvalidatePrincipalAuthority(t *testing.T) {
+	r := newCredentialTestRig(t)
+	before, err := r.exposure.GetMCPPrincipal(t.Context(), r.principal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.now = r.now.Add(-time.Hour)
+	issued := r.issue(t, "backwards-clock", 1, nil, nil)
+	after, err := r.exposure.GetMCPPrincipal(t.Context(), r.principal.ID)
+	if err != nil || after.Validate() != nil || !after.UpdatedAt.Equal(before.UpdatedAt) || !reflect.DeepEqual(after.Record, before.Record) {
+		t.Fatal("wall clock regression invalidated retained principal")
+	}
+	r.authenticates(t, issued.Secret, true)
+	if _, revokeErr := r.exposure.RevokeMCPCredential(t.Context(), hoststate.RevokeCredentialRequest{PrincipalID: r.principal.ID, CredentialID: issued.CredentialID, ExpectedGeneration: 2, IdempotencyKey: "backwards-revoke"}, r.admin); revokeErr != nil {
+		t.Fatal(revokeErr)
+	}
+	r.authenticates(t, issued.Secret, false)
+	if _, err = r.exposure.GetMCPPrincipal(t.Context(), r.principal.ID); err != nil {
+		t.Fatal("revocation invalidated principal")
+	}
+}
+
 func TestCredentialMigrationBackfillsLegacyDigestAndReopenRetainsRevocation(t *testing.T) {
 	r := newCredentialTestRig(t)
 	// Reconstruct the real pre-0031 shape around an already-persisted principal.

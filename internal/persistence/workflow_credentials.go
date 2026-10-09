@@ -185,6 +185,11 @@ func credentialGeneration(ctx context.Context, q workflowSQL, principal string, 
 	if p.Generation >= math.MaxInt64 {
 		return 0, fmt.Errorf("%w: credential generation exhausted", hoststate.ErrConflict)
 	}
+	// Preserve the principal snapshot's ordered timestamps if the wall clock
+	// moves backwards; credential deadlines still use the observed clock.
+	if now.Before(p.UpdatedAt) {
+		now = p.UpdatedAt
+	}
 	result, err := q.ExecContext(ctx, `UPDATE workflow_mcp_principals SET generation=generation+1, updated_at=? WHERE principal_id=? AND generation=?`, workflowTime(now), principal, expected)
 	if err != nil {
 		return 0, errors.New("credential generation update failed")
