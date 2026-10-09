@@ -185,7 +185,9 @@ func credentialRequest(cmd *cobra.Command, method, action string, body, out any)
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("credential operation refused (HTTP %d)", response.StatusCode)
 	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 64*1024))
+	// Match the existing admin API's bounded response size so a retained
+	// credential history is not truncated by a smaller CLI-only limit.
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 8<<20))
 	if decoder.Decode(out) != nil {
 		return errors.New("invalid credential issuer response")
 	}

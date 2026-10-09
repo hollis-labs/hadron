@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -171,5 +172,31 @@ func TestCredentialCLILostDeliveryReportsIDAndRefusesResponseSecretsInErrors(t *
 	err = cmd.Execute()
 	if err == nil || strings.Contains(err.Error(), secret) {
 		t.Fatal("issuer error body leaked")
+	}
+}
+
+func TestCredentialCLIListsRetainedHistoryBeyondSmallIssuanceResponse(t *testing.T) {
+	metadata := hoststate.CredentialList{PrincipalID: "operator:mcp-local", Generation: 400}
+	for i := range 400 {
+		metadata.Credentials = append(metadata.Credentials, hoststate.CredentialMetadata{PrincipalID: metadata.PrincipalID, CredentialID: fmt.Sprintf("cred_%032x", i+1), Generation: metadata.Generation, CreatedAt: time.Now().UTC(), Status: "revoked"})
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil || len(encoded) <= 64*1024 {
+		t.Fatal("large retained history fixture unavailable")
+	}
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(encoded) }))
+	t.Cleanup(daemon.Close)
+	withTokenFile(t, daemon.URL)
+	var output bytes.Buffer
+	cmd := buildCredentialCmd()
+	cmd.SetArgs([]string{"list", "--principal-id", metadata.PrincipalID})
+	cmd.SetOut(&output)
+	cmd.SetErr(&bytes.Buffer{})
+	if executeErr := cmd.Execute(); executeErr != nil {
+		t.Fatal(executeErr)
+	}
+	var actual hoststate.CredentialList
+	if json.Unmarshal(output.Bytes(), &actual) != nil || len(actual.Credentials) != len(metadata.Credentials) || actual.Credentials[len(actual.Credentials)-1].CredentialID != metadata.Credentials[len(metadata.Credentials)-1].CredentialID {
+		t.Fatal("retained history truncated by issuer client")
 	}
 }
