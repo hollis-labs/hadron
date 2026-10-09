@@ -108,19 +108,13 @@ func runServe(args []string) error {
 	}
 
 	// Initialize OpenTelemetry tracing.
-	otelCtx := context.Background()
-	otelShutdown, otelErr := feotel.Init(
-		otelCtx,
+	defer feotel.InitOrWarn(
+		context.Background(), log.Printf, 5*time.Second,
 		feotel.WithServiceName("hadron"),
 		feotel.WithServiceVersion(version),
 		feotel.WithServiceNamespace("hollis"),
 		feotel.WithEnvironment(hadronEnvironment()),
-	)
-	if otelErr != nil {
-		log.Printf("warning: OTel init failed: %v", otelErr)
-	} else {
-		defer func() { _ = otelShutdown(otelCtx) }()
-	}
+	)()
 
 	// Install a trace-correlated slog handler as the process default. Any code
 	// that emits via slog with a traced context (current code uses stdlib log,
