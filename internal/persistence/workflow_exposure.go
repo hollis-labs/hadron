@@ -173,13 +173,18 @@ func (s *WorkflowExposureStore) PutMCPPrincipal(ctx context.Context, record host
 				return fmt.Errorf("insert workflow MCP principal: %w", execErr)
 			}
 			result = hoststate.MCPPrincipalSnapshot{Record: record, Generation: 1, CreatedAt: now, UpdatedAt: now}
-			return nil
+			return insertInitialCredential(ctx, query, record.ID, record.CredentialDigest, now)
 		}
 		if loadErr != nil {
 			return loadErr
 		}
 		if expectedGeneration != prior.Generation {
 			return exposureCAS("MCP principal", expectedGeneration, prior.Generation)
+		}
+		// Updating grants/profile remains explicit, but this old single-token
+		// setter must not bypass the independently authorized credential issuer.
+		if !hoststate.MatchMCPTokenDigest(prior.Record.CredentialDigest, record.CredentialDigest) {
+			return fmt.Errorf("%w: use the credential issuer to change credentials", hoststate.ErrConflict)
 		}
 		generation := prior.Generation + 1
 		if now.Before(prior.UpdatedAt) {
@@ -212,14 +217,7 @@ func (s *WorkflowExposureStore) ResolveMCPPrincipalDigest(ctx context.Context, d
 	if err := checkWorkflowContext(ctx); err != nil {
 		return hoststate.MCPPrincipalSnapshot{}, err
 	}
-	result, err := loadMCPPrincipal(ctx, s.state.db, "credential_digest = ?", digest)
-	if err != nil {
-		return hoststate.MCPPrincipalSnapshot{}, err
-	}
-	if !hoststate.MatchMCPTokenDigest(result.Record.CredentialDigest, digest) {
-		return hoststate.MCPPrincipalSnapshot{}, fmt.Errorf("%w: MCP principal", workflowruntime.ErrNotFound)
-	}
-	return result, nil
+	return s.resolveCredential(ctx, digest)
 }
 
 func (s *WorkflowExposureStore) ListMCPPrincipals(ctx context.Context, limit int) ([]hoststate.MCPPrincipalSnapshot, error) {
