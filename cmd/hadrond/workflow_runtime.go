@@ -22,19 +22,6 @@ import (
 	"syscall"
 	"time"
 
-	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
-	calladapter "github.com/hollis-labs/libs/workflow/adapters/call"
-	gateadapter "github.com/hollis-labs/libs/workflow/adapters/gate"
-	scriptadapter "github.com/hollis-labs/libs/workflow/adapters/script"
-	"github.com/hollis-labs/libs/workflow/adapters/transform"
-	waitadapter "github.com/hollis-labs/libs/workflow/adapters/wait"
-	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
-	workflowgate "github.com/hollis-labs/libs/workflow/gate"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/api"
@@ -50,6 +37,19 @@ import (
 	"github.com/hollis-labs/hadron/internal/tetherhost"
 	"github.com/hollis-labs/hadron/internal/trigger"
 	"github.com/hollis-labs/hadron/internal/unattended"
+	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
+	calladapter "github.com/hollis-labs/libs/workflow/adapters/call"
+	gateadapter "github.com/hollis-labs/libs/workflow/adapters/gate"
+	scriptadapter "github.com/hollis-labs/libs/workflow/adapters/script"
+	"github.com/hollis-labs/libs/workflow/adapters/transform"
+	waitadapter "github.com/hollis-labs/libs/workflow/adapters/wait"
+	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
+	workflowgate "github.com/hollis-labs/libs/workflow/gate"
+	"github.com/hollis-labs/libs/workflow/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 )
 
 const (
@@ -89,6 +89,7 @@ type productionWorkflowRuntime struct {
 	a2a                 *a2a.Handler
 	card                *agentcard.Builder
 	auth                api.WorkflowRequestAuthenticator
+	credentialAuth      api.CredentialRequestAuthenticator
 	operator            *operatorAuth
 	catalog             *productionWorkflowCatalog
 	activationStore     hoststate.ActivationStore
@@ -418,7 +419,7 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	auth := &workflowHTTPAuthenticator{exposure: exposure, local: localWorkflowIdentity(), operator: operator}
 	return &productionWorkflowRuntime{
 		host: host, operations: operations, exposure: exposure, lifecycle: lifecycle, a2a: a2aHandler, card: card,
-		auth: auth, operator: operator, catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
+		auth: auth, credentialAuth: auth, operator: operator, catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
 		sourceActivations:   sourceActivationLifecycle,
 		externalActivations: trigger.ActivationManager{Service: activationService},
 		substrates:          substrates,

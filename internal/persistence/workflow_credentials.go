@@ -72,6 +72,7 @@ func scanCredential(row workflowScanner, now time.Time) (storedCredential, error
 	return out, nil
 }
 
+// #nosec G101 -- SQL projection names; contains no credential value.
 const credentialColumns = `credential_id, principal_id, credential_digest, created_at, expires_at, overlap_until, last_used_at, revoked_at`
 
 func loadCredential(ctx context.Context, q workflowSQL, principal, id string, now time.Time) (storedCredential, error) {
@@ -101,10 +102,10 @@ func listCredentials(ctx context.Context, q workflowSQL, principal string, now t
 func (s *WorkflowExposureStore) ListMCPCredentials(ctx context.Context, principal string, admin hoststate.CredentialAdministrator) (hoststate.CredentialList, error) {
 	var result hoststate.CredentialList
 	err := s.state.write(ctx, "inspect credentials", func(q workflowSQL) error {
-		if err := admin.Validate(ctx); err != nil {
-			return err
+		if adminErr := admin.Validate(ctx); adminErr != nil {
+			return adminErr
 		}
-		p, err := loadMCPPrincipal(ctx, q, "principal_id = ?", principal)
+		p, err := loadMCPPrincipal(ctx, q, principal)
 		if err != nil {
 			return err
 		}
@@ -149,7 +150,7 @@ func replayCredentialOperation(ctx context.Context, q workflowSQL, principal, ke
 	if savedActor != actor || savedOperation != operation || savedDigest != digest {
 		return hoststate.CredentialMetadata{}, false, fmt.Errorf("%w: credential request conflicts", hoststate.ErrConflict)
 	}
-	p, err := loadMCPPrincipal(ctx, q, "principal_id = ?", principal)
+	p, err := loadMCPPrincipal(ctx, q, principal)
 	if err != nil {
 		return hoststate.CredentialMetadata{}, false, err
 	}
@@ -174,7 +175,7 @@ func writeCredentialOperation(ctx context.Context, q workflowSQL, admin hoststat
 }
 
 func credentialGeneration(ctx context.Context, q workflowSQL, principal string, expected uint64, now time.Time) (uint64, error) {
-	p, err := loadMCPPrincipal(ctx, q, "principal_id = ?", principal)
+	p, err := loadMCPPrincipal(ctx, q, principal)
 	if err != nil {
 		return 0, err
 	}
@@ -224,29 +225,29 @@ func (s *WorkflowExposureStore) IssueMCPCredential(ctx context.Context, request 
 	normalized := request
 	overlap := request.EffectiveOverlapSeconds()
 	normalized.OverlapSeconds = &overlap
-	digest, err := credentialRequestDigest(normalized)
-	if err != nil {
-		return result, err
+	digest, digestErr := credentialRequestDigest(normalized)
+	if digestErr != nil {
+		return result, digestErr
 	}
-	err = s.state.write(ctx, "issue credential", func(q workflowSQL) error {
-		if err := admin.Validate(ctx); err != nil {
-			return err
+	writeErr := s.state.write(ctx, "issue credential", func(q workflowSQL) error {
+		if adminErr := admin.Validate(ctx); adminErr != nil {
+			return adminErr
 		}
 		now := s.now().UTC()
-		metadata, replayed, err := replayCredentialOperation(ctx, q, request.PrincipalID, request.IdempotencyKey, admin.Actor, "issue", digest, now)
-		if err != nil {
-			return err
+		metadata, replayed, replayErr := replayCredentialOperation(ctx, q, request.PrincipalID, request.IdempotencyKey, admin.Actor, "issue", digest, now)
+		if replayErr != nil {
+			return replayErr
 		}
 		if replayed {
 			result.CredentialMetadata = metadata
 			return nil
 		}
-		if _, err := loadCredential(ctx, q, request.PrincipalID, request.CredentialID, now); err != nil {
-			return err
+		if _, memberErr := loadCredential(ctx, q, request.PrincipalID, request.CredentialID, now); memberErr != nil {
+			return memberErr
 		}
-		generation, err := credentialGeneration(ctx, q, request.PrincipalID, request.ExpectedGeneration, now)
-		if err != nil {
-			return err
+		generation, generationErr := credentialGeneration(ctx, q, request.PrincipalID, request.ExpectedGeneration, now)
+		if generationErr != nil {
+			return generationErr
 		}
 		prior, err := listCredentials(ctx, q, request.PrincipalID, now)
 		if err != nil {
@@ -261,16 +262,16 @@ func (s *WorkflowExposureStore) IssueMCPCredential(ctx context.Context, request 
 			if c.metadata.ExpiresAt != nil && c.metadata.ExpiresAt.Before(expires) {
 				expires = *c.metadata.ExpiresAt
 			}
-			cap := deadline
-			if c.metadata.OverlapUntil != nil && c.metadata.OverlapUntil.Before(cap) {
-				cap = *c.metadata.OverlapUntil
+			overlapCap := deadline
+			if c.metadata.OverlapUntil != nil && c.metadata.OverlapUntil.Before(overlapCap) {
+				overlapCap = *c.metadata.OverlapUntil
 			}
-			if _, err := q.ExecContext(ctx, `UPDATE workflow_mcp_credentials SET expires_at=?,overlap_until=? WHERE credential_id=? AND principal_id=?`, workflowTime(expires), workflowTime(cap), c.metadata.CredentialID, request.PrincipalID); err != nil {
+			if _, execErr := q.ExecContext(ctx, `UPDATE workflow_mcp_credentials SET expires_at=?,overlap_until=? WHERE credential_id=? AND principal_id=?`, workflowTime(expires), workflowTime(overlapCap), c.metadata.CredentialID, request.PrincipalID); execErr != nil {
 				return errors.New("credential overlap update failed")
 			}
 		}
 		var secret [32]byte
-		if _, err := rand.Read(secret[:]); err != nil {
+		if _, randomErr := rand.Read(secret[:]); randomErr != nil {
 			return errors.New("credential randomness unavailable")
 		}
 		value := "hmc_" + base64.RawURLEncoding.EncodeToString(secret[:])
@@ -286,11 +287,11 @@ func (s *WorkflowExposureStore) IssueMCPCredential(ctx context.Context, request 
 		if request.TTLSeconds != nil {
 			expiry = workflowTime(now.Add(time.Duration(*request.TTLSeconds) * time.Second))
 		}
-		if _, err := q.ExecContext(ctx, `INSERT INTO workflow_mcp_credentials(credential_id,principal_id,credential_digest,created_at,expires_at) VALUES(?,?,?,?,?)`, id, request.PrincipalID, verifier, workflowTime(now), expiry); err != nil {
+		if _, execErr := q.ExecContext(ctx, `INSERT INTO workflow_mcp_credentials(credential_id,principal_id,credential_digest,created_at,expires_at) VALUES(?,?,?,?,?)`, id, request.PrincipalID, verifier, workflowTime(now), expiry); execErr != nil {
 			return errors.New("credential could not be persisted")
 		}
-		if err := writeCredentialOperation(ctx, q, admin, request.PrincipalID, id, request.IdempotencyKey, "issue", digest, generation, now); err != nil {
-			return err
+		if auditErr := writeCredentialOperation(ctx, q, admin, request.PrincipalID, id, request.IdempotencyKey, "issue", digest, generation, now); auditErr != nil {
+			return auditErr
 		}
 		c, err := loadCredential(ctx, q, request.PrincipalID, id, now)
 		if err != nil {
@@ -300,8 +301,8 @@ func (s *WorkflowExposureStore) IssueMCPCredential(ctx context.Context, request 
 		result = hoststate.CredentialIssue{CredentialMetadata: c.metadata, Secret: value}
 		return nil
 	})
-	if err != nil {
-		return hoststate.CredentialIssue{}, err
+	if writeErr != nil {
+		return hoststate.CredentialIssue{}, writeErr
 	}
 	return result, nil
 }
@@ -311,18 +312,18 @@ func (s *WorkflowExposureStore) RevokeMCPCredential(ctx context.Context, request
 	if err := request.Validate(); err != nil {
 		return result, fmt.Errorf("%w: invalid credential revocation", hoststate.ErrInvalidRecord)
 	}
-	digest, err := credentialRequestDigest(request)
-	if err != nil {
-		return result, err
+	digest, digestErr := credentialRequestDigest(request)
+	if digestErr != nil {
+		return result, digestErr
 	}
-	err = s.state.write(ctx, "revoke credential", func(q workflowSQL) error {
-		if err := admin.Validate(ctx); err != nil {
-			return err
+	writeErr := s.state.write(ctx, "revoke credential", func(q workflowSQL) error {
+		if adminErr := admin.Validate(ctx); adminErr != nil {
+			return adminErr
 		}
 		now := s.now().UTC()
-		metadata, replayed, err := replayCredentialOperation(ctx, q, request.PrincipalID, request.IdempotencyKey, admin.Actor, "revoke", digest, now)
-		if err != nil {
-			return err
+		metadata, replayed, replayErr := replayCredentialOperation(ctx, q, request.PrincipalID, request.IdempotencyKey, admin.Actor, "revoke", digest, now)
+		if replayErr != nil {
+			return replayErr
 		}
 		if replayed {
 			result = metadata
@@ -333,17 +334,23 @@ func (s *WorkflowExposureStore) RevokeMCPCredential(ctx context.Context, request
 			return err
 		}
 		if c.metadata.RevokedAt != nil {
-			return fmt.Errorf("%w: credential is already revoked", hoststate.ErrConflict)
+			principal, loadErr := loadMCPPrincipal(ctx, q, request.PrincipalID)
+			if loadErr != nil {
+				return loadErr
+			}
+			c.metadata.Generation = principal.Generation
+			result = c.metadata
+			return &hoststate.CredentialRefusal{Credential: c.metadata}
 		}
-		generation, err := credentialGeneration(ctx, q, request.PrincipalID, request.ExpectedGeneration, now)
-		if err != nil {
-			return err
+		generation, generationErr := credentialGeneration(ctx, q, request.PrincipalID, request.ExpectedGeneration, now)
+		if generationErr != nil {
+			return generationErr
 		}
-		if _, err := q.ExecContext(ctx, `UPDATE workflow_mcp_credentials SET revoked_at=? WHERE credential_id=? AND principal_id=?`, workflowTime(now), request.CredentialID, request.PrincipalID); err != nil {
+		if _, execErr := q.ExecContext(ctx, `UPDATE workflow_mcp_credentials SET revoked_at=? WHERE credential_id=? AND principal_id=?`, workflowTime(now), request.CredentialID, request.PrincipalID); execErr != nil {
 			return errors.New("credential revocation failed")
 		}
-		if err := writeCredentialOperation(ctx, q, admin, request.PrincipalID, request.CredentialID, request.IdempotencyKey, "revoke", digest, generation, now); err != nil {
-			return err
+		if auditErr := writeCredentialOperation(ctx, q, admin, request.PrincipalID, request.CredentialID, request.IdempotencyKey, "revoke", digest, generation, now); auditErr != nil {
+			return auditErr
 		}
 		c, err = loadCredential(ctx, q, request.PrincipalID, request.CredentialID, now)
 		if err != nil {
@@ -351,6 +358,43 @@ func (s *WorkflowExposureStore) RevokeMCPCredential(ctx context.Context, request
 		}
 		c.metadata.Generation, c.metadata.OperationGeneration = generation, generation
 		result = c.metadata
+		return nil
+	})
+	return result, writeErr
+}
+
+// ListMCPCredentialAudit returns the newest hundred mutation records; the
+// durable audit retains earlier records without exposing credentials/digests.
+func (s *WorkflowExposureStore) ListMCPCredentialAudit(ctx context.Context, principal string, admin hoststate.CredentialAdministrator) ([]hoststate.CredentialAudit, error) {
+	result := make([]hoststate.CredentialAudit, 0)
+	err := s.state.write(ctx, "inspect credential audit", func(q workflowSQL) error {
+		if authErr := admin.Validate(ctx); authErr != nil {
+			return authErr
+		}
+		if _, loadErr := loadMCPPrincipal(ctx, q, principal); loadErr != nil {
+			return loadErr
+		}
+		rows, queryErr := q.QueryContext(ctx, `SELECT id,principal_id,credential_id,generation,operation,actor,source,created_at FROM workflow_credential_audit WHERE principal_id=? ORDER BY id DESC LIMIT 100`, principal)
+		if queryErr != nil {
+			return errors.New("credential audit unavailable")
+		}
+		defer closeRows(rows)
+		for rows.Next() {
+			var record hoststate.CredentialAudit
+			var created string
+			if scanErr := rows.Scan(&record.ID, &record.PrincipalID, &record.CredentialID, &record.Generation, &record.Operation, &record.Actor, &record.Source, &created); scanErr != nil {
+				return errors.New("credential audit unavailable")
+			}
+			parsed, timeErr := parseWorkflowTime("credential audit", created)
+			if timeErr != nil {
+				return errors.New("credential audit unavailable")
+			}
+			record.CreatedAt = parsed
+			result = append(result, record)
+		}
+		if rows.Err() != nil {
+			return errors.New("credential audit unavailable")
+		}
 		return nil
 	})
 	return result, err
@@ -369,12 +413,12 @@ func (s *WorkflowExposureStore) resolveCredential(ctx context.Context, digest st
 		if c.metadata.Status != "active" || !hoststate.MatchMCPTokenDigest(c.digest, digest) {
 			return workflowruntime.ErrNotFound
 		}
-		p, err := loadMCPPrincipal(ctx, q, "principal_id = ?", c.metadata.PrincipalID)
+		p, err := loadMCPPrincipal(ctx, q, c.metadata.PrincipalID)
 		if err != nil {
 			return err
 		}
 		if c.metadata.LastUsedAt == nil || c.metadata.LastUsedAt.Before(now) {
-			if _, err := q.ExecContext(ctx, `UPDATE workflow_mcp_credentials SET last_used_at=? WHERE credential_id=?`, workflowTime(now), c.metadata.CredentialID); err != nil {
+			if _, execErr := q.ExecContext(ctx, `UPDATE workflow_mcp_credentials SET last_used_at=? WHERE credential_id=?`, workflowTime(now), c.metadata.CredentialID); execErr != nil {
 				return errors.New("credential observation could not be persisted")
 			}
 		}

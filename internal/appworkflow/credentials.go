@@ -2,6 +2,7 @@ package appworkflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
@@ -25,8 +26,21 @@ func WithCredentialAdministrator(ctx context.Context, source string, recheck fun
 
 type WorkflowCredentialStore interface {
 	ListMCPCredentials(context.Context, string, hoststate.CredentialAdministrator) (hoststate.CredentialList, error)
+	ListMCPCredentialAudit(context.Context, string, hoststate.CredentialAdministrator) ([]hoststate.CredentialAudit, error)
 	IssueMCPCredential(context.Context, hoststate.IssueCredentialRequest, hoststate.CredentialAdministrator) (hoststate.CredentialIssue, error)
 	RevokeMCPCredential(context.Context, hoststate.RevokeCredentialRequest, hoststate.CredentialAdministrator) (hoststate.CredentialMetadata, error)
+}
+
+func (s *WorkflowExposureService) CredentialAudit(ctx context.Context, principal string) ([]hoststate.CredentialAudit, error) {
+	store, admin, err := s.credentialAuthority(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if hoststate.ValidatePublicText(principal, 256, true) != nil {
+		return nil, fmt.Errorf("%w: invalid credential principal", hoststate.ErrInvalidRecord)
+	}
+	result, storeErr := store.ListMCPCredentialAudit(ctx, principal, admin)
+	return result, credentialStoreError(storeErr)
 }
 
 func (s *WorkflowExposureService) credentialAuthority(ctx context.Context) (WorkflowCredentialStore, hoststate.CredentialAdministrator, error) {
@@ -52,7 +66,8 @@ func (s *WorkflowExposureService) ListCredentials(ctx context.Context, principal
 	if hoststate.ValidatePublicText(principal, 256, true) != nil {
 		return hoststate.CredentialList{}, fmt.Errorf("%w: invalid credential principal", hoststate.ErrInvalidRecord)
 	}
-	return store.ListMCPCredentials(ctx, principal, admin)
+	result, storeErr := store.ListMCPCredentials(ctx, principal, admin)
+	return result, credentialStoreError(storeErr)
 }
 
 func (s *WorkflowExposureService) IssueCredential(ctx context.Context, request hoststate.IssueCredentialRequest) (hoststate.CredentialIssue, error) {
@@ -60,7 +75,8 @@ func (s *WorkflowExposureService) IssueCredential(ctx context.Context, request h
 	if err != nil {
 		return hoststate.CredentialIssue{}, err
 	}
-	return store.IssueMCPCredential(ctx, request, admin)
+	result, storeErr := store.IssueMCPCredential(ctx, request, admin)
+	return result, credentialStoreError(storeErr)
 }
 
 func (s *WorkflowExposureService) RevokeCredential(ctx context.Context, request hoststate.RevokeCredentialRequest) (hoststate.CredentialMetadata, error) {
@@ -68,5 +84,13 @@ func (s *WorkflowExposureService) RevokeCredential(ctx context.Context, request 
 	if err != nil {
 		return hoststate.CredentialMetadata{}, err
 	}
-	return store.RevokeMCPCredential(ctx, request, admin)
+	result, storeErr := store.RevokeMCPCredential(ctx, request, admin)
+	return result, credentialStoreError(storeErr)
+}
+
+func credentialStoreError(err error) error {
+	if errors.Is(err, hoststate.ErrCredentialAdministrator) {
+		return ErrPolicyDenied
+	}
+	return err
 }

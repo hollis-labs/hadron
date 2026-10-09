@@ -191,8 +191,8 @@ func TestCredentialMigrationBackfillsLegacyDigestAndReopenRetainsRevocation(t *t
 			t.Fatal(err)
 		}
 	}
-	if err := r.store.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := r.store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	var err error
 	r.store, err = Open(r.path)
@@ -211,11 +211,11 @@ func TestCredentialMigrationBackfillsLegacyDigestAndReopenRetainsRevocation(t *t
 	r.initial = list.Credentials[0]
 	r.authenticates(t, "synthetic-initial-credential", true)
 	issued := r.issue(t, "after-migration", 1, nil, nil)
-	if _, err := r.exposure.RevokeMCPCredential(t.Context(), hoststate.RevokeCredentialRequest{PrincipalID: r.principal.ID, CredentialID: r.initial.CredentialID, ExpectedGeneration: 2, IdempotencyKey: "revoke-old"}, r.admin); err != nil {
-		t.Fatal(err)
+	if _, revokeErr := r.exposure.RevokeMCPCredential(t.Context(), hoststate.RevokeCredentialRequest{PrincipalID: r.principal.ID, CredentialID: r.initial.CredentialID, ExpectedGeneration: 2, IdempotencyKey: "revoke-old"}, r.admin); revokeErr != nil {
+		t.Fatal(revokeErr)
 	}
-	if err := r.store.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := r.store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	r.store, err = Open(r.path)
 	if err != nil {

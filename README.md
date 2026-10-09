@@ -167,6 +167,7 @@ pins, lazy mounts, and the graph-native tool families.
 | [Workflow diagnostics and recovery](docs/workflow-diagnostics.md) | Graph-native inspect/events, telemetry export wiring, recovery actions, and local measurement |
 | [CLI reference](docs/cli-reference.md) | Active root and `hadron workflow` command contracts |
 | [MCP setup](docs/mcp-setup.md) | Token bootstrap, exposure profiles, discovery, and tools |
+| [MCP credential rotation](docs/credential-rotation.md) | Operator-authorized overlapping credentials, private delivery, retries, revocation and Tether cutover |
 | [Safety](docs/safety.md) | Identity, effects, secrets, redaction, and compatibility boundaries |
 | [Workflow development](docs/workflow-development.md) | Package ownership, host composition, adapters, conformance, and release checks |
 | [Embed the workflow engine](docs/workflow-engine-adoption.md) | Public Go boundary, minimal host, storage/timers, conformance, compatibility, and extraction criteria |

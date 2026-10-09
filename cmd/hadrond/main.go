@@ -161,6 +161,7 @@ func runServe(args []string) error {
 	srv := api.NewServer(cfg.Addr, api.Dependencies{
 		Workspaces: store, Workflows: workflowRuntime.operations, WorkflowReads: workflowRuntime.operations,
 		WorkflowLifecycle: workflowRuntime.lifecycle, WorkflowAuth: workflowRuntime.auth, OperatorAuth: workflowRuntime.operator,
+		WorkflowCredentials: workflowRuntime.exposure, CredentialAuth: workflowRuntime.credentialAuth,
 		WorkflowActivations: workflowRuntime.externalActivations,
 		A2ATasks:            workflowRuntime.a2a, AgentCard: workflowRuntime.card,
 		WorkflowHealth: workflowRuntime.host, BuildVersion: version, WebUI: webui.Handler(),

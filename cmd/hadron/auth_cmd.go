@@ -129,6 +129,7 @@ never reaches the browser.`,
 
 func buildAuthCmd() *cobra.Command {
 	command := &cobra.Command{Use: "auth", Short: "Manage the operator credential"}
+	command.AddCommand(buildCredentialCmd())
 	command.AddCommand(&cobra.Command{
 		Use:   "rotate",
 		Short: "Replace the operator token; the daemon ends every browser session",

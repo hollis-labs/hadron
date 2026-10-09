@@ -159,7 +159,7 @@ func (s *WorkflowExposureStore) PutMCPPrincipal(ctx context.Context, record host
 				return profileErr
 			}
 		}
-		prior, loadErr := loadMCPPrincipal(ctx, query, "principal_id = ?", record.ID)
+		prior, loadErr := loadMCPPrincipal(ctx, query, record.ID)
 		now := s.now().UTC()
 		if errors.Is(loadErr, workflowruntime.ErrNotFound) {
 			if expectedGeneration != 0 {
@@ -210,7 +210,7 @@ func (s *WorkflowExposureStore) GetMCPPrincipal(ctx context.Context, id string) 
 	if err := checkWorkflowContext(ctx); err != nil {
 		return hoststate.MCPPrincipalSnapshot{}, err
 	}
-	return loadMCPPrincipal(ctx, s.state.db, "principal_id = ?", id)
+	return loadMCPPrincipal(ctx, s.state.db, id)
 }
 
 func (s *WorkflowExposureStore) ResolveMCPPrincipalDigest(ctx context.Context, digest string) (hoststate.MCPPrincipalSnapshot, error) {
@@ -249,7 +249,7 @@ func (s *WorkflowExposureStore) ListMCPPrincipals(ctx context.Context, limit int
 
 func (s *WorkflowExposureStore) DeleteMCPPrincipal(ctx context.Context, id string, expectedGeneration uint64) error {
 	return s.state.write(ctx, "delete workflow MCP principal", func(query workflowSQL) error {
-		prior, err := loadMCPPrincipal(ctx, query, "principal_id = ?", id)
+		prior, err := loadMCPPrincipal(ctx, query, id)
 		if err != nil {
 			return err
 		}
@@ -300,8 +300,8 @@ func scanExposureProfile(row workflowScanner) (hoststate.ExposureProfileSnapshot
 	return snapshot.Clone(), nil
 }
 
-func loadMCPPrincipal(ctx context.Context, query workflowSQL, predicate string, argument any) (hoststate.MCPPrincipalSnapshot, error) {
-	row := query.QueryRowContext(ctx, `SELECT principal_id, credential_digest, COALESCE(profile_id, ''), generation, record_json, created_at, updated_at FROM workflow_mcp_principals WHERE `+predicate, argument)
+func loadMCPPrincipal(ctx context.Context, query workflowSQL, principal string) (hoststate.MCPPrincipalSnapshot, error) {
+	row := query.QueryRowContext(ctx, `SELECT principal_id, credential_digest, COALESCE(profile_id, ''), generation, record_json, created_at, updated_at FROM workflow_mcp_principals WHERE principal_id = ?`, principal)
 	return scanMCPPrincipal(row)
 }
 

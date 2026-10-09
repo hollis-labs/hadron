@@ -93,6 +93,26 @@ type CredentialList struct {
 	Credentials []CredentialMetadata `json:"credentials"`
 }
 
+// CredentialAudit contains only authorized, secret-free mutation provenance.
+type CredentialAudit struct {
+	ID           uint64    `json:"id"`
+	PrincipalID  string    `json:"principal_id"`
+	CredentialID string    `json:"credential_id"`
+	Generation   uint64    `json:"generation"`
+	Operation    string    `json:"operation"`
+	Actor        string    `json:"actor"`
+	Source       string    `json:"source"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// CredentialRefusal includes current metadata for an already-revoked target.
+type CredentialRefusal struct {
+	Credential CredentialMetadata `json:"credential"`
+}
+
+func (r *CredentialRefusal) Error() string { return "credential is already revoked" }
+func (r *CredentialRefusal) Unwrap() error { return ErrConflict }
+
 // CredentialIssue separates the one-time secret from durable public metadata.
 // Formatting it deliberately cannot reveal the secret.
 type CredentialIssue struct {
@@ -111,15 +131,18 @@ type CredentialAdministrator struct {
 	Recheck func(context.Context) error
 }
 
+// ErrCredentialAdministrator denotes missing or no-longer-valid issuer authority.
+var ErrCredentialAdministrator = errors.New("credential administrator refused")
+
 func (a CredentialAdministrator) Validate(ctx context.Context) error {
 	if ctx == nil || a.Recheck == nil || ValidatePublicText(a.Actor, 256, true) != nil || ValidatePublicText(a.Source, 512, true) != nil {
-		return errors.New("credential administrator required")
+		return ErrCredentialAdministrator
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if a.Recheck(ctx) != nil {
-		return errors.New("credential administrator refused")
+		return ErrCredentialAdministrator
 	}
 	return nil
 }
