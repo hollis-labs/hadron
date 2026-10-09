@@ -159,7 +159,7 @@ func (s *WorkflowExposureStore) PutMCPPrincipal(ctx context.Context, record host
 				return profileErr
 			}
 		}
-		prior, loadErr := loadMCPPrincipal(ctx, query, "principal_id = ?", record.ID)
+		prior, loadErr := loadMCPPrincipal(ctx, query, record.ID)
 		now := s.now().UTC()
 		if errors.Is(loadErr, workflowruntime.ErrNotFound) {
 			if expectedGeneration != 0 {
@@ -173,13 +173,18 @@ func (s *WorkflowExposureStore) PutMCPPrincipal(ctx context.Context, record host
 				return fmt.Errorf("insert workflow MCP principal: %w", execErr)
 			}
 			result = hoststate.MCPPrincipalSnapshot{Record: record, Generation: 1, CreatedAt: now, UpdatedAt: now}
-			return nil
+			return insertInitialCredential(ctx, query, record.ID, record.CredentialDigest, now)
 		}
 		if loadErr != nil {
 			return loadErr
 		}
 		if expectedGeneration != prior.Generation {
 			return exposureCAS("MCP principal", expectedGeneration, prior.Generation)
+		}
+		// Updating grants/profile remains explicit, but this old single-token
+		// setter must not bypass the independently authorized credential issuer.
+		if !hoststate.MatchMCPTokenDigest(prior.Record.CredentialDigest, record.CredentialDigest) {
+			return fmt.Errorf("%w: use the credential issuer to change credentials", hoststate.ErrConflict)
 		}
 		generation := prior.Generation + 1
 		if now.Before(prior.UpdatedAt) {
@@ -205,21 +210,14 @@ func (s *WorkflowExposureStore) GetMCPPrincipal(ctx context.Context, id string) 
 	if err := checkWorkflowContext(ctx); err != nil {
 		return hoststate.MCPPrincipalSnapshot{}, err
 	}
-	return loadMCPPrincipal(ctx, s.state.db, "principal_id = ?", id)
+	return loadMCPPrincipal(ctx, s.state.db, id)
 }
 
 func (s *WorkflowExposureStore) ResolveMCPPrincipalDigest(ctx context.Context, digest string) (hoststate.MCPPrincipalSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return hoststate.MCPPrincipalSnapshot{}, err
 	}
-	result, err := loadMCPPrincipal(ctx, s.state.db, "credential_digest = ?", digest)
-	if err != nil {
-		return hoststate.MCPPrincipalSnapshot{}, err
-	}
-	if !hoststate.MatchMCPTokenDigest(result.Record.CredentialDigest, digest) {
-		return hoststate.MCPPrincipalSnapshot{}, fmt.Errorf("%w: MCP principal", workflowruntime.ErrNotFound)
-	}
-	return result, nil
+	return s.resolveCredential(ctx, digest)
 }
 
 func (s *WorkflowExposureStore) ListMCPPrincipals(ctx context.Context, limit int) ([]hoststate.MCPPrincipalSnapshot, error) {
@@ -251,7 +249,7 @@ func (s *WorkflowExposureStore) ListMCPPrincipals(ctx context.Context, limit int
 
 func (s *WorkflowExposureStore) DeleteMCPPrincipal(ctx context.Context, id string, expectedGeneration uint64) error {
 	return s.state.write(ctx, "delete workflow MCP principal", func(query workflowSQL) error {
-		prior, err := loadMCPPrincipal(ctx, query, "principal_id = ?", id)
+		prior, err := loadMCPPrincipal(ctx, query, id)
 		if err != nil {
 			return err
 		}
@@ -302,8 +300,8 @@ func scanExposureProfile(row workflowScanner) (hoststate.ExposureProfileSnapshot
 	return snapshot.Clone(), nil
 }
 
-func loadMCPPrincipal(ctx context.Context, query workflowSQL, predicate string, argument any) (hoststate.MCPPrincipalSnapshot, error) {
-	row := query.QueryRowContext(ctx, `SELECT principal_id, credential_digest, COALESCE(profile_id, ''), generation, record_json, created_at, updated_at FROM workflow_mcp_principals WHERE `+predicate, argument)
+func loadMCPPrincipal(ctx context.Context, query workflowSQL, principal string) (hoststate.MCPPrincipalSnapshot, error) {
+	row := query.QueryRowContext(ctx, `SELECT principal_id, credential_digest, COALESCE(profile_id, ''), generation, record_json, created_at, updated_at FROM workflow_mcp_principals WHERE principal_id = ?`, principal)
 	return scanMCPPrincipal(row)
 }
 

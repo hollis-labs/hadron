@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/libs/util/otel/propagation"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/trigger"
+	"github.com/hollis-labs/libs/util/otel/propagation"
 )
 
 // Handler returns the underlying HTTP handler (useful for testing with httptest).
@@ -34,6 +34,7 @@ func NewServer(addr string, deps Dependencies) *Server {
 	mux.HandleFunc("/v1/workflows/runs/", s.handleWorkflowRunAction)
 	mux.HandleFunc("/v1/workflows/activations/", s.handleWorkflowActivationFire)
 	mux.HandleFunc("/v1/workflows/lifecycle/", s.handleWorkflowLifecycle)
+	mux.HandleFunc("/v1/auth/credentials/", s.handleCredentials)
 
 	// Workspaces
 	mux.HandleFunc("/v1/workspaces", s.handleWorkspaces)
