@@ -1,6 +1,6 @@
 # Workflow library migration
 
-Hadron consumes `github.com/hollis-labs/go-workflow` at exact release
+Hadron consumes `github.com/hollis-labs/libs/workflow` at exact release
 `v0.1.0`. The former in-repository `workflow/` tree was extracted without
 changing package names below the module root or changing graph, plan,
 authoring, value, wait, runtime-event, and offline-manifest schema identifiers.
@@ -14,7 +14,7 @@ generated graph schema, public API snapshot, and conformance fixtures.
 
 Consumer rules:
 
-- import reusable packages from `github.com/hollis-labs/go-workflow/...`;
+- import reusable packages from `github.com/hollis-labs/libs/workflow/...`;
 - pin a released version in `go.mod` without a local `replace`;
 - never restore `github.com/hollis-labs/hadron/workflow/...` or a local
   `workflow/` implementation;

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 func TestWorkflowServicesReopenTwoHandleCASAndChronology(t *testing.T) {

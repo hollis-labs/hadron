@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 )
 
 // WorkflowHostStore is Hadron's SQLite-owned application journal. It shares a

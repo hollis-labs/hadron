@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-otel/propagation"
+	"github.com/hollis-labs/libs/util/otel/propagation"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/trigger"
 )

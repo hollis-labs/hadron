@@ -193,6 +193,7 @@ func (a *operatorAuth) serveLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "This sign-in link is invalid, expired or already used. Run `hadron ui` for a new one.", http.StatusUnauthorized)
 		return
 	}
+	// #nosec G124 -- local HTTP transport requires a non-Secure cookie; HttpOnly and Strict SameSite protect this authenticated session.
 	http.SetCookie(w, &http.Cookie{
 		Name: localauth.SessionCookie, Value: id, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: int(localauth.SessionTTL / time.Second),
@@ -212,6 +213,7 @@ func (a *operatorAuth) serveLogout(w http.ResponseWriter, r *http.Request) {
 		}
 		a.sessions.End(cookie.Value)
 	}
+	// #nosec G124 -- local HTTP transport requires a non-Secure cookie; HttpOnly and Strict SameSite protect this authenticated session.
 	http.SetCookie(w, &http.Cookie{Name: localauth.SessionCookie, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 	writeAuthJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }

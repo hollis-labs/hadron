@@ -17,19 +17,19 @@ import (
 	"strconv"
 	"strings"
 
-	gateadapter "github.com/hollis-labs/go-workflow/adapters/gate"
-	llmadapter "github.com/hollis-labs/go-workflow/adapters/llm"
-	mcpadapter "github.com/hollis-labs/go-workflow/adapters/mcp"
-	"github.com/hollis-labs/go-workflow/adapters/script"
-	"github.com/hollis-labs/go-workflow/adapters/transform"
-	waitadapter "github.com/hollis-labs/go-workflow/adapters/wait"
-	"github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/diagnostic"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/offline"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
+	gateadapter "github.com/hollis-labs/libs/workflow/adapters/gate"
+	llmadapter "github.com/hollis-labs/libs/workflow/adapters/llm"
+	mcpadapter "github.com/hollis-labs/libs/workflow/adapters/mcp"
+	"github.com/hollis-labs/libs/workflow/adapters/script"
+	"github.com/hollis-labs/libs/workflow/adapters/transform"
+	waitadapter "github.com/hollis-labs/libs/workflow/adapters/wait"
+	"github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/diagnostic"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/offline"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 type Options struct {
@@ -375,8 +375,8 @@ import (
 	"os"
 
 	"github.com/hollis-labs/hadron/internal/offlinebuild"
-	"github.com/hollis-labs/go-workflow/offline"
-	"github.com/hollis-labs/go-workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/offline"
+	"github.com/hollis-labs/libs/workflow/stepkind"
 )
 
 const embeddedManifest = ` + quoted + `

@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"unicode/utf8"
 
-	agentadapter "github.com/hollis-labs/go-workflow/adapters/agent"
+	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
 )
 
 // ResultMailbox is the address every result reply must be sent to.

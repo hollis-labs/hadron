@@ -1,5 +1,5 @@
 // Package scheduler wires Hadron's persistence and execution layers to the
-// shared github.com/hollis-labs/go-scheduler cron engine.
+// shared github.com/hollis-labs/libs/util/scheduler cron engine.
 //
 // The cron engine itself lives in go-scheduler. This package is a thin
 // adapter: New constructs the engine over Hadron-specific Store and Runner
@@ -11,7 +11,7 @@ package scheduler
 import (
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
 )

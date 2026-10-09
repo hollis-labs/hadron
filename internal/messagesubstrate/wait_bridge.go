@@ -12,10 +12,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/hollis-labs/go-messaging"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/substrate/mesh/messaging"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 )
 
 // WaitResumer is the narrow generic resume surface required by message

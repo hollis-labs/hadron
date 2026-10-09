@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 // A2ATaskCorrelationStore is Hadron's narrow durable application-state port.

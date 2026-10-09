@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
 )
 
 // legacyClaimLease preserves the lease this store enforced before

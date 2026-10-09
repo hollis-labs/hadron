@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/libs/workflow/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 )
 
 func TestWorkflowDerivedActivationReconcilePreservesHistoryAndOperatorRows(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 var _ workflowruntime.FanOutStore = (*WorkflowStateStore)(nil)

@@ -16,9 +16,9 @@ import (
 
 	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/go-mcp/compat"
-	"github.com/hollis-labs/go-otel/propagation"
-	workflowmcp "github.com/hollis-labs/go-workflow/adapters/mcp"
 	"github.com/hollis-labs/hadron/internal/execution"
+	"github.com/hollis-labs/libs/util/otel/propagation"
+	workflowmcp "github.com/hollis-labs/libs/workflow/adapters/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -287,10 +287,13 @@ func (c *InternalCaller) callExternalToolResult(ctx context.Context, serverName,
 
 	for attempt := 0; attempt < 2; attempt++ {
 		callArguments := cloneAnyMap(arguments)
-		callArguments = propagation.InjectMCP(ctx, callArguments)
-		params := &mcpsdk.CallToolParams{Name: toolName, Arguments: callArguments}
+
+		params := &mcpsdk.CallToolParams{Name: toolName, Arguments: callArguments, Meta: propagation.InjectMCPMeta(ctx, nil)}
 		if idempotencyKey != "" {
-			params.Meta = mcpsdk.Meta{"hadron/idempotencyKey": idempotencyKey}
+			if params.Meta == nil {
+				params.Meta = mcpsdk.Meta{}
+			}
+			params.Meta["hadron/idempotencyKey"] = idempotencyKey
 		}
 		result, err := entry.client.CallTool(ctx, params)
 		if err == nil {

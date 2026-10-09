@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-messaging"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/messagesubstrate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/settings"
+	"github.com/hollis-labs/substrate/mesh/messaging"
 )
 
 func TestLaunchAgent_LaunchesSessionAndPlantsNativeFiles(t *testing.T) {

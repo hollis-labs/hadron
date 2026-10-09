@@ -7,10 +7,10 @@ import (
 	"fmt"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 const maximumPlanSnapshotCleanup = 1000

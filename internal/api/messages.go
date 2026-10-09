@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hollis-labs/go-messaging"
+	"github.com/hollis-labs/substrate/mesh/messaging"
 )
 
 var validMessageKinds = map[messaging.Kind]struct{}{

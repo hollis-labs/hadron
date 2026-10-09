@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-messaging"
+	"github.com/hollis-labs/substrate/mesh/messaging"
 	"github.com/hollis-labs/go-mcp/budget"
 	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"

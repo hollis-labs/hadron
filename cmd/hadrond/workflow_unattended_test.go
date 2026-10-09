@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-workflow/graph"
+	"github.com/hollis-labs/libs/workflow/graph"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/unattended"

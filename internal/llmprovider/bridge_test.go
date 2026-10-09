@@ -11,14 +11,14 @@ import (
 	"sync/atomic"
 	"testing"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	providers "github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	providers "github.com/hollis-labs/substrate/harness/adapters/provider"
 
 	"github.com/hollis-labs/hadron/internal/llmprovider"
-	workflowllm "github.com/hollis-labs/go-workflow/adapters/llm"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowllm "github.com/hollis-labs/libs/workflow/adapters/llm"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 type fakeProvider struct {

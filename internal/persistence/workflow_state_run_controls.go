@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 )
 
 var _ workflowruntime.RunControlStore = (*WorkflowStateStore)(nil)

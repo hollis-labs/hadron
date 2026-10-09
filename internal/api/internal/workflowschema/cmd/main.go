@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/hollis-labs/hadron/internal/api/internal/workflowschema"
-	graphschema "github.com/hollis-labs/go-workflow/graph/schema"
+	graphschema "github.com/hollis-labs/libs/workflow/graph/schema"
 )
 
 func main() {

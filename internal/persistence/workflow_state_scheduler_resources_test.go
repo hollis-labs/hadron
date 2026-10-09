@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/libs/workflow/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 func TestWorkflowSQLiteSchedulerAdmissionTwoHandlesRestartAndExpiry(t *testing.T) {

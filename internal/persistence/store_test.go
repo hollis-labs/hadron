@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 )
 
 func TestOpen_AppliesMigrations(t *testing.T) {

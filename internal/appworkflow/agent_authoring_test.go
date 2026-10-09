@@ -9,15 +9,15 @@ import (
 	"time"
 
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	agentadapter "github.com/hollis-labs/go-workflow/adapters/agent"
-	"github.com/hollis-labs/go-workflow/adapters/transform"
-	"github.com/hollis-labs/go-workflow/authoring"
-	"github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/diagnostic"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/stepkind/stepkindtest"
-	"github.com/hollis-labs/go-workflow/values"
+	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
+	"github.com/hollis-labs/libs/workflow/adapters/transform"
+	"github.com/hollis-labs/libs/workflow/authoring"
+	"github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/diagnostic"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/stepkind/stepkindtest"
+	"github.com/hollis-labs/libs/workflow/values"
 )
 
 var testAgentHostIdentity = AgentAuthoringHostIdentity{

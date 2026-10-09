@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hollis-labs/hadron/internal/localauth"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,21 +16,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	agentlaunch "github.com/hollis-labs/agentkit/agentlaunch"
-	launcherpkg "github.com/hollis-labs/agentkit/agentlaunch/launcher"
-	"github.com/hollis-labs/agentkit/agentlaunch/providerplant"
-	"github.com/hollis-labs/agentkit/agentlaunch/sessionshim"
-	runtimebootdir "github.com/hollis-labs/agentkit/agentruntime/bootdir"
-	"github.com/hollis-labs/agentkit/agentruntime/runtimebind"
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
-	"github.com/hollis-labs/agentkit/agentruntime/turn"
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-messaging"
-	"github.com/hollis-labs/go-providers/provider"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	"github.com/hollis-labs/substrate/harness/adapters/runtimebind"
+	"github.com/hollis-labs/substrate/harness/adapters/turn"
+	agentlaunch "github.com/hollis-labs/substrate/harness/agentlaunch"
+	launcherpkg "github.com/hollis-labs/substrate/harness/agentlaunch/launcher"
+	"github.com/hollis-labs/substrate/harness/agentlaunch/sessionshim"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	"github.com/hollis-labs/substrate/mesh/messaging"
 
 	"github.com/hollis-labs/hadron/internal/execution"
+	"github.com/hollis-labs/hadron/internal/launchartifacts"
 	"github.com/hollis-labs/hadron/internal/settings"
+	"github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 const (
@@ -47,19 +47,20 @@ const (
 )
 
 type Launcher struct {
-	dataDir    string
-	substrates map[string]settings.AgentSubstrateSettings
-	mcpServers map[string]settings.MCPServerSettings
-	sessions   *agentsessions.Manager
-	codexTurns turn.CodexAppServerCache
-	replies    replyMessenger
-	seq        atomic.Uint64
-	mu         sync.Mutex
-	goroutines sync.WaitGroup
-	closed     bool
-	closeOnce  sync.Once
-	closeCtx   context.Context
-	cancel     context.CancelFunc
+	dataDir            string
+	substrates         map[string]settings.AgentSubstrateSettings
+	mcpServers         map[string]settings.MCPServerSettings
+	sessions           *agentsessions.Manager
+	codexTurns         turn.CodexAppServerCache
+	replies            replyMessenger
+	seq                atomic.Uint64
+	mu                 sync.Mutex
+	goroutines         sync.WaitGroup
+	closed             bool
+	artifactOperations map[string]string
+	closeOnce          sync.Once
+	closeCtx           context.Context
+	cancel             context.CancelFunc
 }
 
 type replyMessenger interface {
@@ -189,7 +190,8 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 	// refused below rather than launched blind.
 	binding, err := runtimebind.Resolve(runtimebind.Request{
 		Provider:         cfg.Provider,
-		RequestedRuntime: agentlaunch.RuntimeKind(cfg.Runtime),
+		RequestedRuntime: runtimeMode(cfg.Runtime),
+		Posture:          runtimePosture(cfg.Runtime),
 		AllowPTY:         true,
 	})
 	if err != nil {
@@ -218,7 +220,12 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 
 	sessionID := l.nextSessionID(req)
 	mailbox := mailboxURN(cfg.Authority, req.LogicalAgentID)
-	sessionLaunch, bootDir, workspaceDir, err := buildSessionLaunch(ctx, l.dataDir, cfg, req, sessionID, mailbox, projectDir, binding, adapter, mcpSpecFromSettings(l.mcpServers))
+	admission, release, err := l.acceptArtifactOperation(ctx, sessionID, cfg, req)
+	if err != nil {
+		return execution.AgentLaunchResult{}, err
+	}
+	defer release()
+	sessionLaunch, bootDir, workspaceDir, err := buildSessionLaunch(ctx, l.dataDir, cfg, req, sessionID, mailbox, projectDir, adapter, mcpSpecFromSettings(l.mcpServers), admission)
 	if err != nil {
 		return execution.AgentLaunchResult{}, err
 	}
@@ -235,7 +242,7 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 			"launch_id":        req.LaunchID,
 			"logical_agent_id": req.LogicalAgentID,
 			"provider":         binding.Provider,
-			"runtime":          string(binding.Runtime),
+			"runtime":          runtimeSetting(binding.Runtime),
 			"mailbox":          mailbox,
 			"session_uri":      sessionURN(cfg.Authority, sessionID),
 			"correlation":      strings.TrimSpace(anyString(req.Metadata["correlation_id"])),
@@ -262,7 +269,7 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 		Handles: map[string]any{
 			"logical_agent_id": req.LogicalAgentID,
 			"provider":         binding.Provider,
-			"runtime":          string(binding.Runtime),
+			"runtime":          runtimeSetting(binding.Runtime),
 			"session_urn":      sessionURN(cfg.Authority, sessionID),
 			"workdir":          projectDir,
 			"workspace_dir":    workspaceDir,
@@ -272,32 +279,12 @@ func (l *Launcher) LaunchAgent(ctx context.Context, req execution.AgentLaunchReq
 	return result, nil
 }
 
-func buildSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir string, binding runtimebind.Binding, adapter provider.CLIAdapter, mcp agentlaunch.MCPSpec) (sessionshim.SessionLaunch, string, string, error) {
+func buildSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir string, adapter provider.CLIAdapter, mcp agentlaunch.MCPSpec, admission launchartifacts.Admission) (sessionshim.SessionLaunch, string, string, error) {
 	workspaceDir := filepath.Join(dataDir, "agents", "sessions", sessionID)
-	if supportsAgentkitLaunch(binding) {
-		return buildAgentkitSessionLaunch(ctx, dataDir, cfg, req, sessionID, mailbox, projectDir, workspaceDir, adapter, mcp)
-	}
-	bootDir := filepath.Join(workspaceDir, "boot")
-	bootPrompt, bootContent, extraFiles, err := renderBootArtifacts(dataDir, cfg, bootRenderContext{
-		SessionID:      sessionID,
-		SessionURN:     sessionURN(cfg.Authority, sessionID),
-		MailboxURN:     mailbox,
-		ProjectDir:     projectDir,
-		BlueprintPath:  req.BlueprintPath,
-		BootDir:        bootDir,
-		LaunchID:       req.LaunchID,
-		LogicalAgentID: req.LogicalAgentID,
-		PromptAppend:   req.PromptAppend,
-		Metadata:       req.Metadata,
-		InjectedFiles:  req.Injection.NativeFiles,
-	})
-	if err != nil {
-		return sessionshim.SessionLaunch{}, "", "", err
-	}
-	return buildFallbackSessionLaunch(cfg, req, workspaceDir, projectDir, bootPrompt, bootContent, extraFiles, adapter)
+	return buildAgentkitSessionLaunch(ctx, dataDir, cfg, req, sessionID, mailbox, projectDir, workspaceDir, adapter, mcp, admission)
 }
 
-func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir, workspaceDir string, adapter provider.CLIAdapter, mcp agentlaunch.MCPSpec) (sessionshim.SessionLaunch, string, string, error) {
+func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, sessionID, mailbox, projectDir, workspaceDir string, adapter provider.CLIAdapter, mcp agentlaunch.MCPSpec, admission launchartifacts.Admission) (launchResult sessionshim.SessionLaunch, bootRoot string, workspaceRoot string, err error) {
 	bootPrompt, bootContent, _, err := renderBootArtifacts(dataDir, cfg, bootRenderContext{
 		SessionID:      sessionID,
 		SessionURN:     sessionURN(cfg.Authority, sessionID),
@@ -313,7 +300,7 @@ func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg setting
 	if err != nil {
 		return sessionshim.SessionLaunch{}, "", "", err
 	}
-	plan, err := buildLaunchPlan(cfg, req, projectDir, workspaceDir, bootPrompt, bootContent, nil, mcp)
+	plan, err := buildLaunchPlan(cfg, req, projectDir, workspaceDir, bootPrompt, bootContent, mcp)
 	if err != nil {
 		return sessionshim.SessionLaunch{}, "", "", err
 	}
@@ -321,14 +308,15 @@ func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg setting
 	if err != nil {
 		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("compile launch plan: %w", err)
 	}
-	bootDirAdapter, ok := adapter.(provider.BootDirProvider)
+	_, ok := adapter.(provider.BootDirProvider)
 	if !ok {
 		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("adapter %q does not support bootdir planting", adapter.Name())
 	}
-	prepared, err := providerplant.PrepareAndPlant(ctx, compiled, providerplant.WithPlantOption(providerplant.WithAdapter(bootDirAdapter)))
+	prepared, custody, err := launchartifacts.Prepare(ctx, compiled, admission)
 	if err != nil {
-		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("prepare launch: %w", err)
+		return sessionshim.SessionLaunch{}, "", "", err
 	}
+	defer func() { err = errors.Join(err, custody.Close()) }()
 	_, _, extraFiles, err := renderBootArtifacts(dataDir, cfg, bootRenderContext{
 		SessionID:      sessionID,
 		SessionURN:     sessionURN(cfg.Authority, sessionID),
@@ -345,10 +333,8 @@ func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg setting
 	if err != nil {
 		return sessionshim.SessionLaunch{}, "", "", err
 	}
-	if len(extraFiles) > 0 {
-		if _, writeErr := (runtimebootdir.Writer{}).WriteFiles(prepared.PlantedBootDir, extraFiles); writeErr != nil {
-			return sessionshim.SessionLaunch{}, "", "", writeErr
-		}
+	if plantErr := plantCanonicalArtifacts(ctx, prepared, adapter, extraFiles, custody.Authorize); plantErr != nil {
+		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("prepare launch: %w", plantErr)
 	}
 	if mkdirErr := os.MkdirAll(filepath.Join(prepared.WorkspaceDir, "logs"), 0o750); mkdirErr != nil {
 		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure workspace dir: %w", mkdirErr)
@@ -364,48 +350,6 @@ func buildAgentkitSessionLaunch(ctx context.Context, dataDir string, cfg setting
 	sessionLaunch.Options.LogPath = filepath.Join(prepared.WorkspaceDir, "logs", "session.log")
 	sessionLaunch.Options.Env = prependEnvPath(sessionLaunch.Options.Env, prepared.PlantedBootDir)
 	return sessionLaunch, prepared.PlantedBootDir, prepared.WorkspaceDir, nil
-}
-
-func buildFallbackSessionLaunch(cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, workspaceDir, projectDir, bootPrompt, bootContent string, extraFiles []runtimebootdir.File, adapter provider.CLIAdapter) (sessionshim.SessionLaunch, string, string, error) {
-	bootDir := filepath.Join(workspaceDir, "boot")
-	if err := os.MkdirAll(filepath.Join(workspaceDir, "logs"), 0o750); err != nil {
-		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure workspace dir: %w", err)
-	}
-	if err := os.MkdirAll(bootDir, 0o750); err != nil {
-		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure boot dir: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(bootDir, replyOutboxRelDir), 0o750); err != nil {
-		return sessionshim.SessionLaunch{}, "", "", fmt.Errorf("ensure reply outbox dir: %w", err)
-	}
-	opts := agentsessions.StartOptions{
-		Workdir:      bootDir,
-		WorkspaceDir: workspaceDir,
-		LogPath:      filepath.Join(workspaceDir, "logs", "session.log"),
-		Env:          mergeEnv(cfg.Env, nil),
-	}
-	if bp, ok := adapter.(provider.BootDirProvider); ok {
-		spec := bp.BootDirSpec()
-		plantCtx := provider.PlantContext{
-			SystemPrompt: bootPrompt,
-			BootContent:  bootContent,
-			AgentName:    req.LogicalAgentID,
-			ProjectDir:   projectDir,
-			BootDir:      bootDir,
-		}
-		if err := materializeBootDir(bootDir, spec, plantCtx, req, cfg); err != nil {
-			return sessionshim.SessionLaunch{}, "", "", err
-		}
-		if len(extraFiles) > 0 {
-			if _, err := (runtimebootdir.Writer{}).WriteFiles(bootDir, extraFiles); err != nil {
-				return sessionshim.SessionLaunch{}, "", "", err
-			}
-		}
-		opts.Workdir = spec.SpawnWorkdir(bootDir, projectDir)
-		opts.Env = mergeEnv(cfg.Env, renderEnv(spec.EnvAmendments, bootDir, projectDir))
-		opts.ExtraArgs = append(opts.ExtraArgs, renderProjectDirArgs(spec.ProjectDirArg, bootDir, projectDir)...)
-	}
-	opts.Env = prependEnvPath(opts.Env, bootDir)
-	return sessionshim.SessionLaunch{Options: opts}, bootDir, workspaceDir, nil
 }
 
 func launchKickoffPayload(adapter provider.CLIAdapter) []byte {
@@ -623,12 +567,12 @@ func (l *Launcher) sendTurn(ctx context.Context, sessionID, providerName, text s
 			sessionID: sessionID,
 		}, text, turn.Options{
 			Provider: providerName,
-			Runtime:  runtimekind.JSONRPCStdio,
+			Runtime:  runtimes.ModeJSONRPCStdio,
 		})
 	case info.Caps.StreamingStdio:
 		framed, err := turn.Frame(text, turn.Options{
 			Provider: providerName,
-			Runtime:  runtimekind.StreamingStdio,
+			Runtime:  runtimes.ModeStreamingStdio,
 		})
 		if err != nil {
 			return fmt.Errorf("frame streaming-stdio turn: %w", err)
@@ -637,44 +581,6 @@ func (l *Launcher) sendTurn(ctx context.Context, sessionID, providerName, text s
 	default:
 		return l.sessions.SendInput(sessionID, []byte(text))
 	}
-}
-
-func materializeBootDir(bootDir string, spec provider.BootDirSpec, plantCtx provider.PlantContext, req execution.AgentLaunchRequest, cfg settings.AgentSubstrateSettings) error {
-	for _, pf := range spec.PlantedFiles {
-		if pf.Render == nil {
-			continue
-		}
-		content, err := pf.Render(plantCtx)
-		if err != nil {
-			return fmt.Errorf("render provider boot file %q: %w", pf.RelPath, err)
-		}
-		mode := pf.Mode
-		if mode == 0 {
-			mode = 0o644
-		}
-		if _, err := (runtimebootdir.Writer{}).WriteFiles(bootDir, []runtimebootdir.File{{
-			RelPath: pf.RelPath,
-			Content: content,
-			Mode:    mode,
-		}}); err != nil {
-			return err
-		}
-	}
-	if !cfg.Boot.PlantNativeFiles || len(req.Injection.NativeFiles) == 0 {
-		return nil
-	}
-	files := make([]runtimebootdir.File, 0, len(req.Injection.NativeFiles))
-	for _, nf := range req.Injection.NativeFiles {
-		files = append(files, runtimebootdir.File{
-			RelPath: nf.RelPath,
-			Content: nf.Source,
-			Mode:    0o644,
-		})
-	}
-	if _, err := (runtimebootdir.Writer{}).WriteFiles(bootDir, files); err != nil {
-		return err
-	}
-	return nil
 }
 
 func resolveWorkdir(cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest) (string, error) {
@@ -710,37 +616,37 @@ func newAdapter(binding runtimebind.Binding, cfg settings.AgentSubstrateSettings
 	)
 
 	switch {
-	case binding.Provider == "claude" && binding.Runtime == agentlaunch.RuntimeSubprocess:
+	case binding.Provider == "claude" && binding.Runtime == runtimes.ModeSubprocessPerTurn:
 		a := provider.NewClaudeAdapter()
 		a.AdditionalDirectories = []string{projectDir}
 		adapter = a
 		caps = agentsessions.Capabilities{ProviderSessionID: true, BinaryRequired: true}
-	case binding.Provider == "claude" && binding.Runtime == agentlaunch.RuntimeStreamingStdio:
+	case binding.Provider == "claude" && binding.Runtime == runtimes.ModeStreamingStdio:
 		a := provider.NewClaudeAdapterStreamingStdio()
 		a.AdditionalDirectories = []string{projectDir}
 		adapter = a
 		caps = agentsessions.Capabilities{StreamingStdio: true, ProviderSessionID: true, BinaryRequired: true}
-	case binding.Provider == "claude" && (binding.Runtime == agentlaunch.RuntimePTY || binding.Runtime == runtimekind.PTYDebug):
+	case binding.Provider == "claude" && binding.Runtime == runtimes.ModePTY:
 		a := provider.NewClaudeAdapterPTY()
 		a.AdditionalDirectories = []string{projectDir}
 		adapter = a
 		caps = agentsessions.Capabilities{PTY: true, Resize: true, ProviderSessionID: true, BinaryRequired: true}
-	case binding.Provider == "codex" && binding.Runtime == agentlaunch.RuntimeSubprocess:
+	case binding.Provider == "codex" && binding.Runtime == runtimes.ModeSubprocessPerTurn:
 		a := provider.NewCodexAdapter()
 		a.WritableRoots = []string{projectDir}
 		adapter = a
 		caps = agentsessions.Capabilities{BinaryRequired: true}
-	case binding.Provider == "codex" && binding.Runtime == agentlaunch.RuntimeJsonRpcStdio:
+	case binding.Provider == "codex" && binding.Runtime == runtimes.ModeJSONRPCStdio:
 		a := provider.NewCodexAdapterAppServer()
 		a.WritableRoots = []string{projectDir}
 		adapter = a
 		caps = agentsessions.Capabilities{JsonRpcStdio: true, BinaryRequired: true}
-	case binding.Provider == "opencode" && binding.Runtime == agentlaunch.RuntimeSubprocess:
+	case binding.Provider == "opencode" && binding.Runtime == runtimes.ModeSubprocessPerTurn:
 		a := provider.NewOpencodeAdapter()
 		a.Dir = projectDir
 		adapter = a
 		caps = agentsessions.Capabilities{BinaryRequired: true}
-	case binding.Provider == "opencode" && binding.Runtime == agentlaunch.RuntimeServeHTTP:
+	case binding.Provider == "opencode" && binding.Runtime == runtimes.ModeHTTPSSE:
 		a := provider.NewOpencodeAdapterServeHTTP()
 		a.Dir = projectDir
 		adapter = a
@@ -781,23 +687,7 @@ func (e *UnsupportedRuntimeError) Is(target error) bool { return target == ErrRu
 
 func (e *UnsupportedRuntimeError) Unwrap() error { return e.Cause }
 
-func supportsAgentkitLaunch(binding runtimebind.Binding) bool {
-	switch binding.Provider {
-	case "claude", "codex", "opencode":
-		return true
-	default:
-		return false
-	}
-}
-
-func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, projectDir, workspaceDir, bootPrompt, bootContent string, extraFiles []runtimebootdir.File, mcp agentlaunch.MCPSpec) (agentlaunch.LaunchPlan, error) {
-	overlay := make(map[string]string, len(extraFiles))
-	for _, file := range extraFiles {
-		if err := agentlaunch.ValidateBootDirRelPath(file.RelPath); err != nil {
-			return agentlaunch.LaunchPlan{}, fmt.Errorf("extra boot file %q: %w", file.RelPath, err)
-		}
-		overlay[file.RelPath] = file.Content
-	}
+func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLaunchRequest, projectDir, workspaceDir, bootPrompt, bootContent string, mcp agentlaunch.MCPSpec) (agentlaunch.LaunchPlan, error) {
 	nativeFiles := make([]agentlaunch.NativeFile, 0, len(req.Injection.NativeFiles))
 	if cfg.Boot.PlantNativeFiles {
 		for _, file := range req.Injection.NativeFiles {
@@ -820,6 +710,14 @@ func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLau
 	if agentID == "" {
 		agentID = "agent"
 	}
+	binding, err := runtimebind.Resolve(runtimebind.Request{Provider: cfg.Provider, RequestedRuntime: runtimeMode(cfg.Runtime), Posture: runtimePosture(cfg.Runtime), AllowPTY: true})
+	if err != nil {
+		return agentlaunch.LaunchPlan{}, err
+	}
+	posture := permission.Mode("")
+	if binding.Provider == "claude" {
+		posture = permission.ModeDefault
+	}
 	return agentlaunch.LaunchPlan{
 		Project: agentlaunch.ProjectSpec{
 			ID:   projectID,
@@ -831,11 +729,12 @@ func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLau
 			Name: req.LogicalAgentID,
 		},
 		Provider: agentlaunch.ProviderSpec{
-			ID:     normalizedProviderName(cfg.Provider),
-			Binary: cfg.Command,
-			Env:    mapsClone(cfg.Env),
+			ID:         binding.Provider,
+			Binary:     cfg.Command,
+			Env:        mapsClone(cfg.Env),
+			Permission: posture,
 		},
-		Runtime: agentlaunch.RuntimeKind(cfg.Runtime),
+		Runtime: binding.Runtime,
 		MCP:     mcp,
 		Workspace: agentlaunch.WorkspaceSpec{
 			Mode:         agentlaunch.WorkspaceFresh,
@@ -850,8 +749,8 @@ func buildLaunchPlan(cfg settings.AgentSubstrateSettings, req execution.AgentLau
 			},
 		},
 		Injection: agentlaunch.InjectionSpec{
-			BootDirOverlay: overlay,
-			NativeFiles:    nativeFiles,
+
+			NativeFiles: nativeFiles,
 		},
 		Mode: agentlaunch.LaunchBackground,
 		Metadata: agentlaunch.Metadata{
@@ -988,35 +887,6 @@ func envMapToKV(env map[string]string) []string {
 		out = append(out, k+"="+env[k])
 	}
 	return out
-}
-
-func renderEnv(in []string, bootDir, projectDir string) []string {
-	out := make([]string, 0, len(in))
-	for _, entry := range in {
-		out = append(out, renderPathTemplate(entry, bootDir, projectDir))
-	}
-	return out
-}
-
-func renderPathTemplate(in, bootDir, projectDir string) string {
-	out := strings.ReplaceAll(in, "{{.BootDir}}", bootDir)
-	out = strings.ReplaceAll(out, "{{.ProjectDir}}", projectDir)
-	return out
-}
-
-func renderProjectDirArgs(pattern, bootDir, projectDir string) []string {
-	rendered := strings.TrimSpace(renderPathTemplate(pattern, bootDir, projectDir))
-	if rendered == "" {
-		return nil
-	}
-	parts := strings.SplitN(rendered, " ", 2)
-	if len(parts) == 1 {
-		return parts
-	}
-	if strings.TrimSpace(parts[1]) == "" {
-		return []string{parts[0]}
-	}
-	return []string{parts[0], strings.TrimSpace(parts[1])}
 }
 
 func prependEnvPath(env []string, dir string) []string {

@@ -42,7 +42,7 @@ Current implementation references:
 ## Telemetry Export
 
 `hadrond serve` initializes OpenTelemetry through the pinned
-`github.com/hollis-labs/go-otel` module:
+`github.com/hollis-labs/libs/util/otel` module:
 
 - service name: `hadron`
 - service namespace: `hollis`

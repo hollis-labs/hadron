@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/go-otel"
-	"github.com/hollis-labs/go-otel/propagation"
+	feotel "github.com/hollis-labs/libs/util/otel"
+	"github.com/hollis-labs/libs/util/otel/propagation"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/hadron/internal/blueprint"

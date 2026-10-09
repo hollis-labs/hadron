@@ -10,19 +10,19 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	calladapter "github.com/hollis-labs/go-workflow/adapters/call"
-	waitadapter "github.com/hollis-labs/go-workflow/adapters/wait"
-	workflowcompile "github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	calladapter "github.com/hollis-labs/libs/workflow/adapters/call"
+	waitadapter "github.com/hollis-labs/libs/workflow/adapters/wait"
+	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 )
 
 func TestSourceActivationsMaterializeCompiledDeclarationsAndUseCommonHostStart(t *testing.T) {
