@@ -46,8 +46,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/hollis-labs/go-mcp v0.4.3 h1:i43GZhA/NLoPCCsFGiMAHuntKRW1QQhWu/d6K1pNYiI=
 github.com/hollis-labs/go-mcp v0.4.3/go.mod h1:sy+7ptjvPxcwu3XDL5EGC6OUlze0iy/hHddLh5T4MZQ=
-github.com/hollis-labs/libs/util v0.2.0 h1:q+loirMZzmjo3GDrA0yNoOCRBTLWUhdOFPvEV+a5Keg=
-github.com/hollis-labs/libs/util v0.2.0/go.mod h1:MPkSgYHqmxtlHp3vGKaUpBAGv8Xt5l6RcRU76HSfH2Y=
+github.com/hollis-labs/libs/util v0.2.1 h1:FwkxCO7bmNB2vQM2pQXpENopKx3uFAMQk6vo0TCez/g=
+github.com/hollis-labs/libs/util v0.2.1/go.mod h1:4DmoHv5m5NlFg76GA6sj4PVpiV1v7vBUreU3d85gzBw=
 github.com/hollis-labs/libs/workflow v0.1.0 h1:H9u0B0FfsQmLjtP4YwzbgTJH9cgC0f8kFXCNivh8m54=
 github.com/hollis-labs/libs/workflow v0.1.0/go.mod h1:lYMLQkL3Cys4vUoJFtUbOjWlTo+8+gBs4oTeASurRRY=
 github.com/hollis-labs/substrate/agent v0.1.0 h1:KAf3hQOe1EO88KU08V29UmyViHnVfY98m5dqXRV7G3c=

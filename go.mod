@@ -9,7 +9,7 @@ require (
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/hollis-labs/go-mcp v0.4.3
-	github.com/hollis-labs/libs/util v0.2.0
+	github.com/hollis-labs/libs/util v0.2.1
 	github.com/hollis-labs/libs/workflow v0.1.0
 	github.com/hollis-labs/substrate/harness v0.3.0
 	github.com/hollis-labs/substrate/llm-core v0.1.0
