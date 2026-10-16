@@ -10,11 +10,12 @@ const DefaultAddr = "127.0.0.1:8095"
 
 // Config holds runtime configuration for hadrond and the hadron CLI.
 type Config struct {
-	Addr        string // daemon listen address
-	DBPath      string // SQLite database path
-	LogsDir     string // run event logs directory
-	DataDir     string // settings + misc data directory
-	WorkspaceID string // default workspace ID
+	Addr             string // daemon listen address
+	DBPath           string // SQLite database path
+	LogsDir          string // run event logs directory
+	DataDir          string // settings + misc data directory
+	WorkspaceID      string // default workspace ID
+	EventStreamLimit int    // per-principal concurrent SSE/long-poll cap; zero uses the application default
 }
 
 // Default returns a Config with paths rooted in ~/.hadron/.

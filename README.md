@@ -194,3 +194,17 @@ make e2e
 
 `make e2e` builds the current binaries and exercises the production daemon,
 graph validation, typed run/inspect flow, and rejection of retired CLI roots.
+
+### Concurrent run event streams
+
+`hadrond serve --event-stream-limit 16` (also available on `hadrond mcp`)
+limits concurrent SSE and waiting event reads per authenticated principal in
+one daemon process. The default is 16; the value must be positive. SSE holds a
+slot for the whole connection, and long-poll holds one until it returns or is
+canceled. The transports share the limit; changing a run or session does not
+create a separate allowance. Non-waiting event reads do not consume slots.
+
+At the limit, requests fail with `event_stream_limit_exceeded` (HTTP 429
+before SSE headers). Retry after an existing follower finishes. The OpenTelemetry
+counter `hadron.workflow.event_stream.rejected` counts rejections without
+principal or run labels. No database migration is required.

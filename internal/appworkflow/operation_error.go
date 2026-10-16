@@ -29,6 +29,9 @@ func SafeWorkflowOperationError(err error, result *StartRunResult) WorkflowOpera
 	if errors.Is(err, ErrWorkflowUnauthenticated) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeUnauthenticated}
 	}
+	if errors.Is(err, ErrEventStreamLimit) {
+		return WorkflowOperationError{Code: WorkflowErrorCodeEventStreamLimit}
+	}
 	if errors.Is(err, ErrWorkflowInvalidRequest) {
 		return WorkflowOperationError{Code: WorkflowErrorCodeInvalidRequest}
 	}

@@ -33,7 +33,7 @@ func (p *pagedInspector) Events(_ context.Context, query rundiagnostics.EventsQu
 	return page, nil
 }
 
-func newEventsOperator(t *testing.T, inspector appworkflow.GraphRunInspector, authorize func(appworkflow.RunOperationAuthorization) error) (*appworkflow.WorkflowOperator, context.Context, workflowruntime.RunID) {
+func newEventsOperator(t *testing.T, inspector appworkflow.GraphRunInspector, authorize func(appworkflow.RunOperationAuthorization) error, configure ...func(*appworkflow.WorkflowOperatorOptions)) (*appworkflow.WorkflowOperator, context.Context, workflowruntime.RunID) {
 	t.Helper()
 	fixture := newHostFixture(t, hoststate.PolicyAllow, time.Hour, nil)
 	if err := fixture.host.Start(t.Context()); err != nil {
@@ -45,7 +45,7 @@ func newEventsOperator(t *testing.T, inspector appworkflow.GraphRunInspector, au
 	if _, err := fixture.host.StartRun(ctx, start); err != nil {
 		t.Fatal(err)
 	}
-	operator, err := appworkflow.NewWorkflowOperator(appworkflow.WorkflowOperatorOptions{
+	options := appworkflow.WorkflowOperatorOptions{
 		Host: fixture.host, Diagnostics: inspector,
 		Replay: replayRunnerFunc(func(context.Context, workflowruntime.ReplayRequest) (workflowruntime.BeginReplayResult, error) {
 			return workflowruntime.BeginReplayResult{}, nil
@@ -53,7 +53,11 @@ func newEventsOperator(t *testing.T, inspector appworkflow.GraphRunInspector, au
 		RunAccess: appworkflow.RunOperationAuthorizerFunc(func(_ context.Context, request appworkflow.RunOperationAuthorization) error {
 			return authorize(request)
 		}),
-	})
+	}
+	for _, configure := range configure {
+		configure(&options)
+	}
+	operator, err := appworkflow.NewWorkflowOperator(options)
 	if err != nil {
 		t.Fatal(err)
 	}

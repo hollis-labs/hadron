@@ -20,6 +20,7 @@ import (
 	feotel "github.com/hollis-labs/libs/core/util/otel"
 
 	"github.com/hollis-labs/hadron/internal/api"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/config"
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
 	"github.com/hollis-labs/hadron/internal/persistence"
@@ -82,6 +83,7 @@ func runServe(args []string) error {
 	dbFlag := fs.String("db", "", "SQLite database path")
 	logsFlag := fs.String("logs", "", "run logs directory")
 	dataFlag := fs.String("data", "", "data directory")
+	streamLimit := fs.Int("event-stream-limit", appworkflow.DefaultEventStreamLimit, "maximum concurrent event streams per authenticated principal")
 	allowUnauthenticatedLoopback := fs.Bool("allow-unauthenticated-loopback", false,
 		"TRANSITION ONLY, INSECURE: treat any credential-less loopback request as the operator, as before operator.token existed. Any local process, including agents, gets full operator access.")
 
@@ -89,7 +91,11 @@ func runServe(args []string) error {
 		return err
 	}
 
+	if *streamLimit < 1 {
+		return fmt.Errorf("event-stream-limit must be positive")
+	}
 	cfg := config.Default()
+	cfg.EventStreamLimit = *streamLimit
 	if *addrFlag != "" {
 		cfg.Addr = *addrFlag
 	}
@@ -206,6 +212,7 @@ func runMCP(args []string) error {
 	dbFlag := fs.String("db", "", "SQLite database path")
 	logsFlag := fs.String("logs", "", "run logs directory")
 	dataFlag := fs.String("data", "", "data directory")
+	streamLimit := fs.Int("event-stream-limit", appworkflow.DefaultEventStreamLimit, "maximum concurrent event streams per authenticated principal")
 	tokenFlag := fs.String("token", "", "durable workflow principal token (legacy; prefer HADRON_MCP_TOKEN or --token-file)")
 	tokenFileFlag := fs.String("token-file", "", "file containing the principal token; overrides HADRON_MCP_TOKEN and --token")
 
@@ -219,7 +226,11 @@ func runMCP(args []string) error {
 		return tokenErr
 	}
 
+	if *streamLimit < 1 {
+		return fmt.Errorf("event-stream-limit must be positive")
+	}
 	cfg := config.Default()
+	cfg.EventStreamLimit = *streamLimit
 	if *dbFlag != "" {
 		cfg.DBPath = *dbFlag
 	}
