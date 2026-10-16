@@ -106,6 +106,39 @@ func TestOnlyAGateWaitSuspensionBecomesAGateEvaluatedBlocked(t *testing.T) {
 	}
 }
 
+// Canceling a run records a run.cancellation_requested event (not a status
+// change) that carries the move to canceled; it is the run's terminal state for a
+// consumer, so it exports as run.state_changed. A request that leaves the run active
+// carries no terminal to_status and stays local, and the cancel reason code never
+// leaves.
+func TestACancellationThatTerminatesTheRunBecomesRunStateChanged(t *testing.T) {
+	cancel := workflowruntime.Event{Sequence: 9, RunID: "run-1", Type: workflowruntime.EventRunCancellationRequested, OccurredAt: at,
+		Attributes: map[string]string{"from_status": "running", "to_status": "canceled", "reason_code": "operator said so"}}
+	e, ok := mapOne(t, cancel)
+	if !ok {
+		t.Fatal("a terminal cancellation was not exported")
+	}
+	var p map[string]any
+	_ = json.Unmarshal(e.Payload, &p)
+	if e.Kind != KindRunStateChanged || p["to"] != "canceled" || p["from"] != "running" || p["run_sequence"] != float64(9) {
+		t.Fatalf("envelope %+v payload %v", e, p)
+	}
+	if strings.Contains(string(e.Payload), "operator") || strings.Contains(string(e.Payload), "reason") {
+		t.Fatalf("the cancel reason leaked: %s", e.Payload)
+	}
+	if got := strings.Join(e.Class.Labels, ","); got != "run-terminal" {
+		t.Fatalf("labels = %q", got)
+	}
+	cancel.Attributes = map[string]string{"from_status": "running", "to_status": "running"}
+	if _, ok := mapOne(t, cancel); ok {
+		t.Fatal("a cancellation request that left the run active was exported")
+	}
+	cancel.Attributes = map[string]string{"reason_code": "x"}
+	if _, ok := mapOne(t, cancel); ok {
+		t.Fatal("a cancellation request without a status was exported")
+	}
+}
+
 // Everything else stays in the local feed, and a gate's resume (which carries no
 // explicit decision) does not become a pass or fail.
 func TestEveryOtherEventTypeIsNotExported(t *testing.T) {
