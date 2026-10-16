@@ -406,8 +406,13 @@ func (r *hadronConformanceRunner) createRunningRun(ctx context.Context, suffix s
 }
 
 func (r *hadronConformanceRunner) createPendingNode(ctx context.Context, id workflowruntime.NodeInvocationID, at time.Time) error {
-	_, err := r.state.CreateNodeInvocation(ctx, workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
-		ID: id, Status: workflowruntime.NodePending, CreatedAt: at, UpdatedAt: at,
+	// Control-flow fixtures have no plan inputs; persist that empty set before readiness.
+	inputs, err := r.state.SaveValues(ctx, workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "node-inputs", RunID: id.RunID, Invocation: &id}, Values: values.ValueSet{}})
+	if err != nil {
+		return err
+	}
+	_, err = r.state.CreateNodeInvocation(ctx, workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{
+		ID: id, Inputs: &inputs, Status: workflowruntime.NodePending, CreatedAt: at, UpdatedAt: at,
 	}})
 	return err
 }

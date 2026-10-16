@@ -1599,6 +1599,7 @@ func TestHostCancellationWithFinalizersFencesProgressesAndReplays(t *testing.T) 
 		t.Fatalf("finalizer cancellation replay = %#v failures=%v, %v", replayed, failures, err)
 	}
 	coordinator := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil)
+	bindHostFixtureEmptyInputs(t, fixture, cleanupID, fixture.now.Add(time.Second))
 	progress, err := coordinator.ProgressFinally(t.Context(), plan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, fixture.now.Add(time.Second))
 	if err != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
 		t.Fatalf("ProgressFinally = %#v, %v", progress, err)
@@ -1683,6 +1684,7 @@ func TestHostFinalizerCancellationReconcilesRunningAttemptBeforeCleanup(t *testi
 		t.Fatalf("pending cancellation intents = %#v, %v", pending, err)
 	}
 	cleanupID := workflowruntime.NodeInvocationID{RunID: start.RunID, NodeID: "cleanup"}
+	bindHostFixtureEmptyInputs(t, fixture, cleanupID, fixture.now.Add(2*time.Second))
 	progress, err := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil).ProgressFinally(t.Context(), plan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, fixture.now.Add(2*time.Second))
 	if err != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
 		t.Fatalf("ProgressFinally after reconciled attempt = %#v, %v", progress, err)
@@ -1767,6 +1769,7 @@ func TestHostCancellationLoadsPinnedChildStartGraphAndPreservesChildCleanup(t *t
 		t.Fatalf("child cleanup fence = run %#v work %#v cleanup %#v", childAfter, work, cleanup)
 	}
 	coordinator := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil)
+	bindHostFixtureEmptyInputs(t, fixture, cleanupID, childBase.Add(2*time.Second))
 	progress, progressErr := coordinator.ProgressFinally(t.Context(), childPlan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, childBase.Add(2*time.Second))
 	if progressErr != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
 		t.Fatalf("child ProgressFinally = %#v, %v", progress, progressErr)
@@ -3035,5 +3038,18 @@ func (h *periodicBlockHook) RecoverWorkflow(ctx context.Context, _ workflowrunti
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// Direct coordinator tests provide the explicit empty inputs that a production
+// NodeDriver binds before making an eligible finalizer ready.
+func bindHostFixtureEmptyInputs(t *testing.T, fixture *hostFixture, id workflowruntime.NodeInvocationID, at time.Time) {
+	t.Helper()
+	node, err := fixture.state.LoadNodeInvocation(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.state.BindNodeInputs(t.Context(), workflowruntime.BindNodeInputsRequest{InvocationID: id, ExpectedGeneration: node.Generation, IdempotencyKey: "fixture-empty-inputs", Values: values.ValueSet{}, At: at}); err != nil {
+		t.Fatal(err)
 	}
 }
