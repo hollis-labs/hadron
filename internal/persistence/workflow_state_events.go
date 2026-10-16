@@ -117,6 +117,13 @@ INSERT INTO workflow_events(
 	); err != nil {
 		return workflowruntime.Event{}, fmt.Errorf("insert workflow event: %w", err)
 	}
+	// With the event outbox enabled, the envelope for this event is written in the
+	// same transaction, so the two commit or roll back together.
+	if observer, ok := query.(eventObserver); ok {
+		if err := observer.observeEvent(ctx, event); err != nil {
+			return workflowruntime.Event{}, err
+		}
+	}
 	return event, nil
 }
 

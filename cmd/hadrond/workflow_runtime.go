@@ -31,6 +31,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/artifacts"
 	"github.com/hollis-labs/hadron/internal/config"
+	"github.com/hollis-labs/hadron/internal/eventmap"
 	"github.com/hollis-labs/hadron/internal/localauth"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
@@ -180,6 +181,15 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	state, err := persistence.NewWorkflowStateStore(store)
 	if err != nil {
 		return nil, err
+	}
+	if sett.Events.Outbox {
+		mapper, mapperErr := eventmap.NewMapper(nil)
+		if mapperErr != nil {
+			return nil, fmt.Errorf("event outbox: %w", mapperErr)
+		}
+		if enableErr := state.EnableEventOutbox(context.Background(), mapper); enableErr != nil {
+			return nil, fmt.Errorf("event outbox: %w", enableErr)
+		}
 	}
 	journal, err := persistence.NewWorkflowHostStore(store)
 	if err != nil {
