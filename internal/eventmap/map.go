@@ -3,7 +3,9 @@ package eventmap
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
@@ -18,6 +20,10 @@ const (
 	schemaStateChanged = "urn:hollis-labs:events:state_changed@1"
 	schemaGate         = "urn:hollis-labs:events:gate.evaluated@1"
 )
+
+// ChannelAdmission is the source channel of the admission policy decisions, which
+// the host store persists outside workflow_events.
+const ChannelAdmission runtimeevents.SourceChannel = "workflow_admission"
 
 // Kinds exported.
 const (
@@ -39,7 +45,7 @@ func DefaultAllowlist() Allowlist {
 func build(ev workflowruntime.Event) (runtimeevents.Event, bool) {
 	run := string(ev.RunID)
 	base := runtimeevents.Event{
-		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: ev.OccurredAt.UTC(), Subject: "msg://workflow_run/hadron/" + run,
+		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: ev.OccurredAt.UTC(), Subject: "msg://workflow_run/hadron/" + url.PathEscape(run),
 		Source: runtimeevents.Source{Channel: Channel, Confidence: runtimeevents.ConfidenceDerived},
 		Corr:   &runtimeevents.Corr{CorrelationID: run},
 	}
@@ -104,4 +110,59 @@ func mustJSON(v any) json.RawMessage {
 		panic("eventmap: marshal " + strconv.Quote(fmt.Sprintf("%T", v)) + ": " + err.Error())
 	}
 	return b
+}
+
+// Admission is what the mapper needs to know of a persisted admission policy
+// evaluation: the decision, never its facts, reason or attributes.
+type Admission struct {
+	// DecisionID is the evaluation's id (hoststate PolicyDecision.ID).
+	DecisionID string
+	// RunID is the run the start would create.
+	RunID string
+	// Outcome is the policy outcome: allow, deny or confirm.
+	Outcome string
+	// DecidedAt is when the decision was made.
+	DecidedAt time.Time
+}
+
+// AdmissionGateID is the gate id of the admission policy evaluation.
+const AdmissionGateID = "hadron.admission"
+
+// buildAdmission maps an admission decision to gate.evaluated (gate hadron.admission,
+// kind custom): allow is pass, deny is fail, confirm is blocked. An allow is followed
+// by the run it admits, so its subject is that run. A deny creates no run, and a
+// confirm may never, so those are about the evaluation itself. The reason and the
+// attributes of the decision are free text and never leave.
+func buildAdmission(a Admission) (runtimeevents.Event, bool) {
+	var result string
+	switch a.Outcome {
+	case "allow":
+		result = "pass"
+	case "deny":
+		result = "fail"
+	case "confirm":
+		result = "blocked"
+	default:
+		return runtimeevents.Event{}, false
+	}
+	if a.DecisionID == "" || a.RunID == "" {
+		return runtimeevents.Event{}, false
+	}
+	subjectType, subjectID, subject := "workflow_admission", a.DecisionID, "msg://workflow_admission/hadron/"+url.PathEscape(a.DecisionID)
+	if a.Outcome == "allow" {
+		subjectType, subjectID, subject = "workflow_run", a.RunID, "msg://workflow_run/hadron/"+url.PathEscape(a.RunID)
+	}
+	e := runtimeevents.Event{
+		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: a.DecidedAt.UTC(), Subject: subject,
+		Source: runtimeevents.Source{Channel: ChannelAdmission, Confidence: runtimeevents.ConfidenceDerived},
+		Corr:   &runtimeevents.Corr{CorrelationID: a.RunID},
+		Kind:   KindGateEvaluated,
+		Class:  &runtimeevents.Class{Category: "state", Severity: "notice", PayloadSchema: schemaGate},
+	}
+	e.Payload = mustJSON(map[string]any{
+		"gate":    map[string]string{"id": AdmissionGateID, "kind": "custom"},
+		"subject": map[string]string{"type": subjectType, "id": subjectID},
+		"result":  result, "blocking": result == "blocked",
+	})
+	return e, true
 }

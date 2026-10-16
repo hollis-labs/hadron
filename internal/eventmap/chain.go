@@ -63,6 +63,20 @@ func (m *Mapper) MapWorkflowEvent(ctx context.Context, ev workflowruntime.Event,
 	if !ok {
 		return nil, "", false, nil
 	}
+	return m.finish(ctx, e, generation, seq)
+}
+
+// MapAdmission implements persistence.AdmissionMapper: the host's admission policy
+// decision becomes a gate.evaluated event.
+func (m *Mapper) MapAdmission(ctx context.Context, a Admission, generation, seq uint64) ([]byte, string, bool, error) {
+	e, ok := buildAdmission(a)
+	if !ok {
+		return nil, "", false, nil
+	}
+	return m.finish(ctx, e, generation, seq)
+}
+
+func (m *Mapper) finish(ctx context.Context, e runtimeevents.Event, generation, seq uint64) ([]byte, string, bool, error) {
 	e.Sequence, e.Generation = seq, generation
 	report := m.chain.Apply(ctx, &e)
 	if !report.Emit() {
