@@ -164,6 +164,18 @@ func (s *WorkflowHostStore) RecordStart(ctx context.Context, input hoststate.Sta
 			if _, execErr := query.ExecContext(ctx, `INSERT INTO workflow_host_policy_decisions(decision_id, start_key, run_id, decision_json, decided_at) VALUES (?, ?, ?, ?, ?)`, input.Decision.ID, input.StartKey, input.Run.ID, decisionJSON, workflowTime(input.Decision.DecidedAt)); execErr != nil {
 				return fmt.Errorf("insert workflow start policy decision: %w", execErr)
 			}
+			// This start created its decision row (no prior evaluation recorded it), so
+			// the admission event is exported here, at the same key and with the same
+			// mapping as RecordPolicyEvaluation. Both entry points export only when they
+			// insert the row, so a decision is exported exactly once whichever comes first.
+			if observer, ok := query.(admissionObserver); ok {
+				if observeErr := observer.observeAdmission(ctx, eventmap.Admission{
+					DecisionID: input.Decision.ID, RunID: string(input.Run.ID),
+					Outcome: string(input.Decision.Outcome), DecidedAt: input.Decision.DecidedAt,
+				}); observeErr != nil {
+					return observeErr
+				}
+			}
 		} else if decisionErr != nil {
 			return decisionErr
 		}
