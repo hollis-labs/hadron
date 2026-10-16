@@ -259,10 +259,16 @@ func TestProductionLifecycleActivationsUseStableRegistryIdentityAcrossRestartAnd
 	if runtimeErr != nil {
 		t.Fatal(runtimeErr)
 	}
+	// This test drives the source schedule explicitly below. Keep its production
+	// engine, but do not let background ticks consume the due occurrence while
+	// the registry moves and external activation assertions are running.
+	sourceScheduler := restarted.activation.source
+	restarted.activation.bindSourceScheduler(nil)
 	if startErr := restarted.Start(ctx); startErr != nil {
 		t.Fatal(startErr)
 	}
 	t.Cleanup(func() { _ = restarted.Shutdown(context.Background()) })
+	t.Cleanup(sourceScheduler.Stop)
 	v2Record, inspectV2Err := restarted.catalog.InspectWorkflow(ctx, registry.WorkflowQuery{
 		Name: v2.Descriptor.Definition.ID, Version: v2.Descriptor.Definition.Version, Digest: v2.Descriptor.Definition.Digest,
 	})
@@ -306,7 +312,7 @@ func TestProductionLifecycleActivationsUseStableRegistryIdentityAcrossRestartAnd
 		t.Fatalf("due production schedule = %#v, %v", due, dueErr)
 	}
 	scheduledAt := due[0].NextRun
-	if tickErr := restarted.activation.source.TickNow(context.Background()); tickErr != nil {
+	if tickErr := sourceScheduler.TickNow(context.Background()); tickErr != nil {
 		t.Fatal(tickErr)
 	}
 	dispatch, loadErr := restarted.activationStore.LoadActivationDispatch(ctx, gosched.DeriveFireID(scheduleRegistration.ID, scheduledAt))
