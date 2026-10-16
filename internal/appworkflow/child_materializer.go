@@ -129,7 +129,7 @@ func (m *PinnedChildRunMaterializer) materializeChildNodes(ctx context.Context, 
 		}
 		invocationID := runtime.NodeInvocationID{RunID: request.ChildRunID, NodeID: node.ID}
 		var bound values.ValueSet
-		if !hasDependencies(request.Definition.Graph, node.ID) && len(node.InputBindings) != 0 {
+		if !hasDependencies(request.Definition.Graph, node.ID) && node.ForEach == nil {
 			boundInputs, err := bindNodeInputs(node, request.Inputs, request.ChildRunID)
 			if err != nil {
 				return false, fmt.Errorf("bind child root node %s: %w", node.ID, err)
@@ -297,7 +297,7 @@ func (m *PinnedChildRunMaterializer) readyChildRoots(ctx context.Context, reques
 			continue
 		}
 		_, err = coordinator.ProgressNode(ctx, runtime.ProgressNodeRequest{
-			InvocationID: id, Rule: node.ReadyWhen, Predicate: node.If,
+			Node: &node, InvocationID: id, Rule: node.ReadyWhen, Predicate: node.If,
 			ExpressionContext: values.ExpressionContext{Inputs: request.Inputs},
 			At:                maxTime(m.clock.Now(), current.UpdatedAt),
 		})

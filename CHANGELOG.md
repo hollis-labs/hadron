@@ -37,6 +37,12 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ### Changed
 
+- Pass plan-node context for root and child fan-out readiness, persist explicit
+  empty inputs for ordinary child roots, and recheck concurrent dependency
+  progress in the contract runner (CW-20261016-0246). Adopt workflow/engine
+  v0.2.0 to prevent dependency-completion races from dispatching unbound inputs
+  and to recover legacy unbound ready nodes atomically.
+
 - Adopt the grouped `hollis-labs/libs` modules: `core/util` v0.4.0,
   `mcp/plugin-mcp` v0.3.0, `workflow/engine` v0.1.0, `harness/core` v0.10.0,
   `llm/core` v0.2.0, `mesh/core` v0.4.0 and `security/policy` v0.1.0.

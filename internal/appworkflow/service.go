@@ -688,7 +688,7 @@ func (h *Host) readyRootNodes(ctx context.Context, record hoststate.StartRecord)
 		if current.Status == runtime.NodeReady || current.Status == runtime.NodeSkipped {
 			continue
 		}
-		_, progressErr := coordinator.ProgressNode(ctx, runtime.ProgressNodeRequest{InvocationID: id, Rule: node.ReadyWhen, Predicate: node.If, ExpressionContext: values.ExpressionContext{Inputs: inputs}, At: maxTime(h.now(), current.UpdatedAt)})
+		_, progressErr := coordinator.ProgressNode(ctx, runtime.ProgressNodeRequest{Node: &node, InvocationID: id, Rule: node.ReadyWhen, Predicate: node.If, ExpressionContext: values.ExpressionContext{Inputs: inputs}, At: maxTime(h.now(), current.UpdatedAt)})
 		if progressErr != nil {
 			if errors.Is(progressErr, runtime.ErrCASMismatch) {
 				replayed, reloadErr := h.state.LoadNodeInvocation(ctx, id)
