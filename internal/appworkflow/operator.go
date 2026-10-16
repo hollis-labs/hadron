@@ -166,6 +166,9 @@ type WorkflowRunReadRequest struct {
 	AttemptLimit int                   `json:"attempt_limit,omitempty"`
 	EventLimit   int                   `json:"event_limit,omitempty"`
 	ValueLimit   int                   `json:"value_limit,omitempty"`
+	// After resumes the event list after a cursor returned as NextCursor by
+	// an earlier read of the same run. Empty starts from the first event.
+	After string `json:"after,omitempty"`
 }
 
 type WorkflowWaitListItem struct {
@@ -189,6 +192,9 @@ type WorkflowEventListResult struct {
 	RunID     workflowruntime.RunID           `json:"run_id"`
 	Events    []workflowruntime.RenderedEvent `json:"events"`
 	Truncated bool                            `json:"truncated"`
+	// NextCursor resumes after the last event returned, or after the cursor
+	// the read started from when no event followed it. Pass it as After.
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 type CancelWorkflowRunRequest struct {
@@ -327,6 +333,13 @@ type RerunWorkflowRequest struct {
 
 type GraphRunInspector interface {
 	Inspect(context.Context, rundiagnostics.Query) (rundiagnostics.Result, error)
+}
+
+// EventPager is implemented by inspectors that can return a run's events in
+// pages after a position. FetchWorkflowEvents uses it when available;
+// rundiagnostics.Service implements it.
+type EventPager interface {
+	Events(context.Context, rundiagnostics.EventsQuery) (rundiagnostics.EventPage, error)
 }
 
 type ReplayRunner interface {
@@ -481,11 +494,46 @@ func (s *WorkflowOperator) FetchWorkflowValues(ctx context.Context, request Work
 }
 
 func (s *WorkflowOperator) FetchWorkflowEvents(ctx context.Context, request WorkflowRunReadRequest) (WorkflowEventListResult, error) {
-	inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationEvents)
+	pager, paged := s.diagnostics.(EventPager)
+	if !paged {
+		// An inspector without paging serves the first page only.
+		if request.After != "" {
+			return WorkflowEventListResult{}, fmt.Errorf("%w: event cursors are not supported by this inspector", ErrWorkflowInvalidRequest)
+		}
+		inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationEvents)
+		if err != nil {
+			return WorkflowEventListResult{}, err
+		}
+		return WorkflowEventListResult{RunID: request.RunID, Events: inspection.Events, Truncated: inspection.Truncated.Events, NextCursor: nextEventCursor(request.RunID, 0, inspection.Events)}, nil
+	}
+	if err := request.Display.Validate(); err != nil {
+		return WorkflowEventListResult{}, fmt.Errorf("invalid workflow display policy: %w", err)
+	}
+	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: RunOperationEvents, RunID: request.RunID, Display: &request.Display}, request.Identity); err != nil {
+		return WorkflowEventListResult{}, err
+	}
+	after, err := decodeEventCursor(request.RunID, request.After)
 	if err != nil {
 		return WorkflowEventListResult{}, err
 	}
-	return WorkflowEventListResult{RunID: request.RunID, Events: inspection.Events, Truncated: inspection.Truncated.Events}, nil
+	page, err := pager.Events(ctx, rundiagnostics.EventsQuery{RunID: request.RunID, Display: request.Display, After: after, Limit: request.EventLimit})
+	if err != nil {
+		return WorkflowEventListResult{}, err
+	}
+	return WorkflowEventListResult{RunID: request.RunID, Events: page.Events, Truncated: page.Truncated, NextCursor: nextEventCursor(request.RunID, after, page.Events)}, nil
+}
+
+// nextEventCursor is the cursor after the last event, or the starting position
+// when the page is empty so a caller that has caught up polls from the same
+// place.
+func nextEventCursor(run RunID, after uint64, events []workflowruntime.RenderedEvent) string {
+	if len(events) > 0 {
+		after = events[len(events)-1].Sequence
+	}
+	if after == 0 {
+		return ""
+	}
+	return EncodeEventCursor(run, after)
 }
 
 func (s *WorkflowOperator) inspectWorkflowProjection(ctx context.Context, request WorkflowRunReadRequest, operation RunOperation) (rundiagnostics.Result, error) {
