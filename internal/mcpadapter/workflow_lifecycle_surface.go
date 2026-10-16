@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
 )
 
 func (w *workflowSurface) lifecycleSession(ctx context.Context, args map[string]any) (context.Context, appworkflow.WorkflowExposureSession, error) {
@@ -138,9 +138,9 @@ func (w *workflowSurface) handleLifecyclePackage(ctx context.Context, args map[s
 		return nil, workflowFailure(err)
 	}
 	var input struct {
-		Name    string                             `json:"name"`
-		Version string                             `json:"version"`
-		Digest  string                             `json:"digest"`
+		Name    string                            `json:"name"`
+		Version string                            `json:"version"`
+		Digest  string                            `json:"digest"`
 		Suite   appworkflow.WorkflowContractSuite `json:"suite"`
 	}
 	if err = decodeWorkflowArguments(args, &input); err != nil {

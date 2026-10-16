@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/libs/util/otel"
-	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	feotel "github.com/hollis-labs/libs/core/util/otel"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
 	"go.opentelemetry.io/otel/attribute"
 )
 

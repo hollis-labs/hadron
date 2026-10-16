@@ -18,17 +18,6 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/workflow/adapters/transform"
-	"github.com/hollis-labs/libs/workflow/authoring"
-	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/runtime/inmemory"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
@@ -39,6 +28,17 @@ import (
 	"github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/trigger"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/workflow/engine/adapters/transform"
+	"github.com/hollis-labs/libs/workflow/engine/authoring"
+	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/runtime/inmemory"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 func TestProductionWorkflowRuntimeExecutesPinnedGraphAndStopsCleanly(t *testing.T) {
@@ -259,10 +259,16 @@ func TestProductionLifecycleActivationsUseStableRegistryIdentityAcrossRestartAnd
 	if runtimeErr != nil {
 		t.Fatal(runtimeErr)
 	}
+	// This test drives the source schedule explicitly below. Keep its production
+	// engine, but do not let background ticks consume the due occurrence while
+	// the registry moves and external activation assertions are running.
+	sourceScheduler := restarted.activation.source
+	restarted.activation.bindSourceScheduler(nil)
 	if startErr := restarted.Start(ctx); startErr != nil {
 		t.Fatal(startErr)
 	}
 	t.Cleanup(func() { _ = restarted.Shutdown(context.Background()) })
+	t.Cleanup(sourceScheduler.Stop)
 	v2Record, inspectV2Err := restarted.catalog.InspectWorkflow(ctx, registry.WorkflowQuery{
 		Name: v2.Descriptor.Definition.ID, Version: v2.Descriptor.Definition.Version, Digest: v2.Descriptor.Definition.Digest,
 	})
@@ -306,7 +312,7 @@ func TestProductionLifecycleActivationsUseStableRegistryIdentityAcrossRestartAnd
 		t.Fatalf("due production schedule = %#v, %v", due, dueErr)
 	}
 	scheduledAt := due[0].NextRun
-	if tickErr := restarted.activation.source.TickNow(context.Background()); tickErr != nil {
+	if tickErr := sourceScheduler.TickNow(context.Background()); tickErr != nil {
 		t.Fatal(tickErr)
 	}
 	dispatch, loadErr := restarted.activationStore.LoadActivationDispatch(ctx, gosched.DeriveFireID(scheduleRegistration.ID, scheduledAt))

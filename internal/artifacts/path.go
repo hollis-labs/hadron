@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 const (

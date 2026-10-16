@@ -9,7 +9,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/trigger"
-	"github.com/hollis-labs/libs/util/otel/propagation"
+	"github.com/hollis-labs/libs/core/util/otel/propagation"
 )
 
 // Handler returns the underlying HTTP handler (useful for testing with httptest).

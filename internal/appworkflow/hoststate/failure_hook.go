@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 type FailureHookStatus string

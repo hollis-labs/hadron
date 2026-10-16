@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 // WorkflowActivationAttemptDiagnosticRecord is the bounded, credential-free

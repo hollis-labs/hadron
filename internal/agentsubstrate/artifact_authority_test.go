@@ -9,9 +9,9 @@ import (
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/launchartifacts"
 	"github.com/hollis-labs/hadron/internal/settings"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	"github.com/hollis-labs/substrate/harness/adapters/runtimebind"
-	"github.com/hollis-labs/substrate/harness/agentlaunch/launcher"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/adapters/runtimebind"
+	"github.com/hollis-labs/libs/harness/core/agentlaunch/launcher"
 )
 
 func TestArtifactAdmissionRefusesChangedAcceptedOperation(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 // ClaimNode implements runtime.StateStore. Only ready nodes are eligible;

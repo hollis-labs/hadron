@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 func TestStoreStreamsPutOpenStatAndPreservesMetadata(t *testing.T) {

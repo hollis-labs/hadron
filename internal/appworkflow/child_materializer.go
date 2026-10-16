@@ -11,11 +11,11 @@ import (
 	"sort"
 	"time"
 
-	calladapter "github.com/hollis-labs/libs/workflow/adapters/call"
-	"github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
+	calladapter "github.com/hollis-labs/libs/workflow/engine/adapters/call"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 var ErrInvalidChildRunMaterializer = errors.New("invalid child-run materializer")

@@ -20,12 +20,12 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/offlinebuild"
 	"github.com/hollis-labs/hadron/internal/persistence"
-	mcpadapter "github.com/hollis-labs/libs/workflow/adapters/mcp"
-	"github.com/hollis-labs/libs/workflow/adapters/transform"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/offline"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
+	mcpadapter "github.com/hollis-labs/libs/workflow/engine/adapters/mcp"
+	"github.com/hollis-labs/libs/workflow/engine/adapters/transform"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/offline"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 const source = `workflow:

@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
@@ -21,12 +20,13 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
-	"github.com/hollis-labs/libs/workflow/adapters/transform"
-	"github.com/hollis-labs/libs/workflow/authoring"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
+	"github.com/hollis-labs/libs/workflow/engine/adapters/transform"
+	"github.com/hollis-labs/libs/workflow/engine/authoring"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 func TestWorkflowLifecycleCrossSurfaceFlywheel(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/hollis-labs/hadron/internal/persistence"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 // PersistenceActivationAttemptSource adapts migration-0023 activation journal

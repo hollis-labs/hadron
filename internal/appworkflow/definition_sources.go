@@ -15,9 +15,9 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/pack"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	"github.com/hollis-labs/libs/workflow/authoring"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/authoring"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 type definitionSourceOptions struct {

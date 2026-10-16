@@ -8,15 +8,15 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	calladapter "github.com/hollis-labs/libs/workflow/adapters/call"
-	"github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
-	"github.com/hollis-labs/libs/workflow/verification"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
+	calladapter "github.com/hollis-labs/libs/workflow/engine/adapters/call"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	"github.com/hollis-labs/libs/workflow/engine/verification"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 var (
@@ -255,10 +255,10 @@ type Options struct {
 	// Verifiers is the exact host verification catalog. Nil adopts a catalog
 	// exposed by Definitions when available, otherwise the deterministic core.
 	// Construction freezes implementations and specs for the Host lifetime.
-	Verifiers   verification.Registry
-	DryRun      DryRunSupport
+	Verifiers verification.Registry
+	DryRun    DryRunSupport
 	// Confirm, when set, decides who may confirm (see ConfirmAuthorizer).
-	Confirm ConfirmAuthorizer
+	Confirm     ConfirmAuthorizer
 	Activations workflowwait.ActivationScheduler
 	// ActivationStore enables restart-durable reactor recovery from exact
 	// source-owned message/event registrations.

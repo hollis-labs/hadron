@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/substrate/mesh/messaging"
-	"github.com/hollis-labs/libs/util/otel/propagation"
+	"github.com/hollis-labs/libs/core/util/otel/propagation"
+	"github.com/hollis-labs/libs/mesh/core/messaging"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/settings"

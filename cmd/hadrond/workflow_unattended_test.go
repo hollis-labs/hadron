@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/graph"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/unattended"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
 )
 
 // The production daemon reads the unattended allow-list from its data dir:

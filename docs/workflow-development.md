@@ -20,18 +20,18 @@ runtime, or persistence internals or construct policy-authorizing facts.
 
 Key boundaries:
 
-- [`go-workflow/graph`](https://github.com/hollis-labs/libs/tree/workflow/v0.1.0/workflow/graph): canonical graph IR and generated
+- [`go-workflow/graph`](https://github.com/hollis-labs/libs/tree/workflow/engine/v0.1.0/workflow/engine/graph): canonical graph IR and generated
   source schema.
-- [`go-workflow/compile`](https://github.com/hollis-labs/libs/tree/workflow/v0.1.0/workflow/compile): source lowering and immutable
+- [`go-workflow/compile`](https://github.com/hollis-labs/libs/tree/workflow/engine/v0.1.0/workflow/engine/compile): source lowering and immutable
   execution plans.
-- [`go-workflow/stepkind`](https://github.com/hollis-labs/libs/tree/workflow/v0.1.0/workflow/stepkind): executor contracts and frozen
+- [`go-workflow/stepkind`](https://github.com/hollis-labs/libs/tree/workflow/engine/v0.1.0/workflow/engine/stepkind): executor contracts and frozen
   kind registry.
-- [`go-workflow/runtime`](https://github.com/hollis-labs/libs/tree/workflow/v0.1.0/workflow/runtime) and
-  [`go-workflow/wait`](https://github.com/hollis-labs/libs/tree/workflow/v0.1.0/workflow/wait): durable state transitions,
+- [`go-workflow/runtime`](https://github.com/hollis-labs/libs/tree/workflow/engine/v0.1.0/workflow/engine/runtime) and
+  [`go-workflow/wait`](https://github.com/hollis-labs/libs/tree/workflow/engine/v0.1.0/workflow/engine/wait): durable state transitions,
   scheduling, waits, replay, and recovery.
-- [`go-workflow/values`](https://github.com/hollis-labs/libs/tree/workflow/v0.1.0/workflow/values): typed values, artifacts, expression
+- [`go-workflow/values`](https://github.com/hollis-labs/libs/tree/workflow/engine/v0.1.0/workflow/engine/values): typed values, artifacts, expression
   evaluation, visibility, and redaction.
-- [`go-workflow/adapters`](https://github.com/hollis-labs/libs/tree/workflow/v0.1.0/workflow/adapters): executor implementations and
+- [`go-workflow/adapters`](https://github.com/hollis-labs/libs/tree/workflow/engine/v0.1.0/workflow/engine/adapters): executor implementations and
   adapter conformance tests.
 - [`internal/appworkflow`](../internal/appworkflow): authenticated application
   operations and lifecycle.
@@ -76,7 +76,7 @@ admission, renew lease-only state without invalidating semantic node CAS, and
 drain before stores close.
 
 Useful focused suites live beside their contract packages. The shared
-[go-workflow's conformance harness](https://github.com/hollis-labs/libs/tree/workflow/v0.1.0/workflow/conformance) and its
+[go-workflow's conformance harness](https://github.com/hollis-labs/libs/tree/workflow/engine/v0.1.0/workflow/engine/conformance) and its
 [test fixtures](https://github.com/hollis-labs/libs/blob/workflow/v0.1.0/workflow/conformance/testdata/fixtures/README.md) exercise
 portable kind contracts. Cross-surface tests
 under `internal/appworkflow`, `internal/api`, `internal/mcpadapter`, and
@@ -155,7 +155,7 @@ pipeline's semantics, not something a Make target can override.
 Blueprint/pipeline parsers and execution code retained under legacy packages
 are archive/rewrite-only and not mounted by production defaults. There is no
 public compatibility execution path. The one graph-native output compatibility
-shim is the explicit `github.com/hollis-labs/libs/workflow/adapters/cmd` capture mode for exactly one
+shim is the explicit `github.com/hollis-labs/libs/workflow/engine/adapters/cmd` capture mode for exactly one
 selected stream using `parse: set-output` plus `compatibility: true`. It is not
 a global scanner, emits a deprecation warning, and is unavailable in the stock
 daemon because `cmd@v1` is not registered there.

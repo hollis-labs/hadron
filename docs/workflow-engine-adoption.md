@@ -1,7 +1,7 @@
 # Embed the workflow engine in a Go host
 
 Hadron consumes the reusable engine boundary from the complete public
-`github.com/hollis-labs/libs/workflow/...` module. It contains graph and source
+`github.com/hollis-labs/libs/workflow/engine/...` module. It contains graph and source
 contracts, compiler phases, typed values, runtime state machines, waits,
 verification, step-kind SDKs and adapters, offline embedding, and conformance
 fixtures. Version `v0.1.0` is Hadron's first extracted dependency; the module
@@ -72,9 +72,9 @@ lifecycle hooks. `stepkind.Resolve` never selects a latest version when more
 than one version exists. Register all implementations, verify the advertised
 specs, then treat the registry as frozen for a plan's lifetime.
 
-`github.com/hollis-labs/libs/workflow/stepkind/stepkindtest` provides public
+`github.com/hollis-labs/libs/workflow/engine/stepkind/stepkindtest` provides public
 application-neutral fake kinds for downstream tests. Concrete packages under
-`github.com/hollis-labs/libs/workflow/adapters` are optional
+`github.com/hollis-labs/libs/workflow/engine/adapters` are optional
 embeddable capabilities; importing an adapter does not enable it. The stock
 Hadron daemon's six-kind profile is a product-host choice, not an engine limit.
 

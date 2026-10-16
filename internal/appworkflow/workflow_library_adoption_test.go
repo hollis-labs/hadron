@@ -12,18 +12,18 @@ import (
 	"testing"
 	"time"
 
-	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/conformance"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/stepkind/stepkindtest"
-	"github.com/hollis-labs/libs/workflow/values"
-	"github.com/hollis-labs/libs/workflow/verification"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/conformance"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind/stepkindtest"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	"github.com/hollis-labs/libs/workflow/engine/verification"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 // TestWorkflowLibraryProductionStoreRunExhaustive is the Hadron adoption gate

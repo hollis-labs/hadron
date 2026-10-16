@@ -7,17 +7,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/mesh/messaging"
 	"github.com/hollis-labs/hadron/internal/messagesubstrate"
-	gateadapter "github.com/hollis-labs/libs/workflow/adapters/gate"
-	waitadapter "github.com/hollis-labs/libs/workflow/adapters/wait"
-	workflowgate "github.com/hollis-labs/libs/workflow/gate"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/runtime/inmemory"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
+	"github.com/hollis-labs/libs/mesh/core/messaging"
+	gateadapter "github.com/hollis-labs/libs/workflow/engine/adapters/gate"
+	waitadapter "github.com/hollis-labs/libs/workflow/engine/adapters/wait"
+	workflowgate "github.com/hollis-labs/libs/workflow/engine/gate"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/runtime/inmemory"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 func TestSleepDispatcherSuccessfulTimerContinuationEndToEnd(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 var _ workflowruntime.SchedulerResourceStore = (*WorkflowStateStore)(nil)

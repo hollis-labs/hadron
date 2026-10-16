@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	waitadapter "github.com/hollis-labs/libs/workflow/adapters/wait"
-	"github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	waitadapter "github.com/hollis-labs/libs/workflow/engine/adapters/wait"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 func (h *Host) recoverChildTerminalWaits(ctx context.Context) error {

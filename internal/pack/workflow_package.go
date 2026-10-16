@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 const maxBuiltWorkflowPackageBytes = 64 << 20

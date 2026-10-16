@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	workflowmcp "github.com/hollis-labs/libs/workflow/adapters/mcp"
 	"github.com/hollis-labs/hadron/internal/execution"
+	workflowmcp "github.com/hollis-labs/libs/workflow/engine/adapters/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

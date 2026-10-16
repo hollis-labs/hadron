@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/runtime/inmemory"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/stepkind/stepkindtest"
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/runtime/inmemory"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind/stepkindtest"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 func TestWorkflowExternalReconcilerDrivesPendingOperationToCompletion(t *testing.T) {

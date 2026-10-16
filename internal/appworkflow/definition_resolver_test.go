@@ -18,13 +18,13 @@ import (
 	"testing"
 
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/stepkind/stepkindtest"
-	"github.com/hollis-labs/libs/workflow/values"
-	"github.com/hollis-labs/libs/workflow/verification"
+	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind/stepkindtest"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	"github.com/hollis-labs/libs/workflow/engine/verification"
 )
 
 func TestDefinitionResolverFreezesNodeExpanderNamesInSemanticIdentity(t *testing.T) {

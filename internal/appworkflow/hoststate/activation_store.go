@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/workflow/runtime"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 var (

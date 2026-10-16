@@ -3,7 +3,7 @@ package appworkflow
 import (
 	"testing"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 func TestCompensationInspectionProjectionDefaultsAndCapsAtHostBatchLimit(t *testing.T) {

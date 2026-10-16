@@ -7,12 +7,12 @@ import (
 	"reflect"
 	"sync"
 
-	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
-	"github.com/hollis-labs/libs/workflow/values"
+	agentadapter "github.com/hollis-labs/libs/workflow/engine/adapters/agent"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
 )
 
 // LegacyWorkflowBridgeOptions binds the workflow adapter to the legacy Hadron

@@ -9,15 +9,15 @@ import (
 	"time"
 
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
-	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
-	"github.com/hollis-labs/libs/workflow/adapters/transform"
-	"github.com/hollis-labs/libs/workflow/authoring"
-	"github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/stepkind/stepkindtest"
-	"github.com/hollis-labs/libs/workflow/values"
+	agentadapter "github.com/hollis-labs/libs/workflow/engine/adapters/agent"
+	"github.com/hollis-labs/libs/workflow/engine/adapters/transform"
+	"github.com/hollis-labs/libs/workflow/engine/authoring"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind/stepkindtest"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 var testAgentHostIdentity = AgentAuthoringHostIdentity{

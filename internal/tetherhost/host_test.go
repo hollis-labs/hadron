@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/tetherhost"
 	"github.com/hollis-labs/hadron/internal/tetherhost/tethertest"
+	agentadapter "github.com/hollis-labs/libs/workflow/engine/adapters/agent"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 var testSecret = bytes.Repeat([]byte{7}, 32)

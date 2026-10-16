@@ -6,10 +6,10 @@ import (
 	"net/url"
 	"strings"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 func (s *Server) handleAgentCard(w http.ResponseWriter, r *http.Request) {

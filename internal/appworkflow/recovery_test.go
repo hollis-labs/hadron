@@ -3,9 +3,9 @@ package appworkflow
 import (
 	"testing"
 
-	"github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 func TestChildRecoveryPlanBindsExactSemanticGraphDigest(t *testing.T) {

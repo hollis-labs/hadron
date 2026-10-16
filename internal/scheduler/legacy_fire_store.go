@@ -5,14 +5,25 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
 )
 
 // legacyClaimLease preserves the lease this store enforced before
 // go-scheduler v0.2.0 owned it; scheduler.New hands it to the engine.
 const legacyClaimLease = 2 * time.Minute
+
+// Prune preserves quarantined legacy history. This adapter has neither an
+// authorized retention policy nor durable fences against recreating removed
+// occurrences, so it must refuse rather than report a successful cleanup.
+func (a storeAdapter) Prune(ctx context.Context, _ time.Time) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("legacy schedule history pruning: %w", errors.ErrUnsupported)
+}
 
 func (a storeAdapter) CreateFire(ctx context.Context, creation gosched.FireCreation) (bool, error) {
 	created := false

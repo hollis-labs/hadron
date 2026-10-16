@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/hadron/internal/localauth"
 	"io"
 	"net/http"
 	"os/exec"
@@ -14,11 +13,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
-	"github.com/hollis-labs/go-mcp/compat"
+	"github.com/hollis-labs/hadron/internal/localauth"
+
 	"github.com/hollis-labs/hadron/internal/execution"
-	"github.com/hollis-labs/libs/util/otel/propagation"
-	workflowmcp "github.com/hollis-labs/libs/workflow/adapters/mcp"
+	"github.com/hollis-labs/libs/core/util/otel/propagation"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/compat"
+	workflowmcp "github.com/hollis-labs/libs/workflow/engine/adapters/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

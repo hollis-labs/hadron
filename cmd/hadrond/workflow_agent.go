@@ -6,12 +6,12 @@ import (
 	"sort"
 	"time"
 
-	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
-	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/tetherhost"
+	agentadapter "github.com/hollis-labs/libs/workflow/engine/adapters/agent"
+	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
 )
 
 // productionWorkflowOptions are optional collaborators injected into

@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
 	"github.com/hollis-labs/hadron/internal/settings"
+	agentadapter "github.com/hollis-labs/libs/workflow/engine/adapters/agent"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 // Failure codes the host reports. The go-workflow agent kind carries them

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
 )
 
 func (a *Adapter) handleWorkspacesList(ctx context.Context, _ map[string]any) (any, error) {

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 func TestSafeFireWorkflowActivationResultRejectsAmbiguousAndInconsistentResults(t *testing.T) {
