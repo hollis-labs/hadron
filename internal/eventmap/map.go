@@ -133,6 +133,9 @@ type Admission struct {
 	DecidedAt time.Time
 }
 
+// ServiceActorURN is Hadron's own actor, for an event no person caused.
+const ServiceActorURN = "msg://service/hadron"
+
 // AdmissionGateID is the gate id of the admission policy evaluation.
 const AdmissionGateID = "hadron.admission"
 
@@ -192,4 +195,49 @@ func WithCausation(ctx context.Context, eventID string) context.Context {
 func causationFrom(ctx context.Context) string {
 	id, _ := ctx.Value(causationKey{}).(string)
 	return id
+}
+
+// AdmissionConfirmation is a confirm decision that was then satisfied: the start was
+// confirmed by a caller (or is a dry run, which proceeds without confirmation).
+type AdmissionConfirmation struct {
+	// DecisionID is the evaluation's id; the subject is the same as the blocked event's.
+	DecisionID string
+	// RunID is the run of the start, kept for correlation.
+	RunID string
+	// BlockedEventID is the id of the exported blocked event this answers; empty when
+	// that event was not exported.
+	BlockedEventID string
+	// ActorURN, ActorKind, ActorRole and Verified say who confirmed and how Hadron
+	// knows (token or claimed). Every exported event has an actor: when ActorURN is
+	// empty the mapper uses Hadron's own service actor, claimed.
+	ActorURN, ActorKind, ActorRole, Verified string
+	// At is when the confirmed start was recorded.
+	At time.Time
+}
+
+// buildConfirmation maps a satisfied confirm decision to a second gate.evaluated on
+// the same admission subject: result pass, blocking false, caused by the blocked
+// event, with the confirmer (or Hadron's service actor) as the actor.
+func buildConfirmation(c AdmissionConfirmation) (runtimeevents.Event, bool) {
+	if c.DecisionID == "" || c.RunID == "" {
+		return runtimeevents.Event{}, false
+	}
+	_, _, subject := admissionSubject(Admission{DecisionID: c.DecisionID})
+	e := runtimeevents.Event{
+		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: c.At.UTC(), Subject: subject,
+		Source: runtimeevents.Source{Channel: ChannelAdmission, Confidence: runtimeevents.ConfidenceDerived},
+		Corr:   &runtimeevents.Corr{CorrelationID: c.RunID, CausationID: c.BlockedEventID},
+		Kind:   KindGateEvaluated,
+		Class:  &runtimeevents.Class{Category: "state", Severity: "notice", PayloadSchema: schemaGate},
+	}
+	e.Actor = &runtimeevents.Actor{URN: c.ActorURN, Kind: c.ActorKind, Role: c.ActorRole, Verified: c.Verified}
+	if c.ActorURN == "" {
+		e.Actor = &runtimeevents.Actor{URN: ServiceActorURN, Kind: "service", Role: "system", Verified: "claimed"}
+	}
+	e.Payload = mustJSON(map[string]any{
+		"gate":    map[string]string{"id": AdmissionGateID, "kind": "custom"},
+		"subject": map[string]string{"type": "workflow_admission", "id": c.DecisionID},
+		"result":  "pass", "blocking": false,
+	})
+	return e, true
 }

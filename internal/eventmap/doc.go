@@ -22,6 +22,19 @@
 // corr.causation_id = the admission event's id (architect ruling
 // hadron_admission_event_subject_2026_10_16).
 //
+// A confirm decision exports `blocked`. When a start then satisfies it (a caller
+// confirmed, or a dry run, which proceeds without confirmation), the transaction that
+// records the start exports a SECOND gate.evaluated on the same admission subject:
+// result pass, blocking false, corr.causation_id = the blocked event, actor = the
+// confirmer (token only when Hadron authenticated them over its HTTP path AND the
+// principal is already a msg:// URN, which is then the actor; otherwise
+// msg://user/hadron/<escaped principal>, claimed; local trust alone is claimed; a confirm
+// dry run, which has no confirmer, gets msg://service/hadron, claimed), at key (decision
+// id, run_sequence 1). The run's first
+// run.state_changed cites that pass, not the blocked event; a dry run's run cites
+// nothing (CW-0250, architect ruling rev 2). Hadron records no rejected or expired
+// confirmation, so there is no fail counterpart yet.
+//
 // The outbox key of an admission is (decision id, run_sequence 0): in
 // workflow_event_outbox and in workflow_event_outbox_skipped the run_id column holds
 // the DECISION id for these rows, and no workflow event can take sequence 0 (they
