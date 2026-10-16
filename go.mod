@@ -7,10 +7,10 @@ require (
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/hollis-labs/libs/core/util v0.4.0
-	github.com/hollis-labs/libs/harness/core v0.10.0
+	github.com/hollis-labs/libs/harness/core v0.12.0
 	github.com/hollis-labs/libs/llm/core v0.2.0
 	github.com/hollis-labs/libs/mcp/plugin-mcp v0.3.0
-	github.com/hollis-labs/libs/mesh/core v0.4.0
+	github.com/hollis-labs/libs/mesh/core v0.6.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/workflow/engine v0.1.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0

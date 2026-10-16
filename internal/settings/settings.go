@@ -18,6 +18,16 @@ type Settings struct {
 	Execution         ExecutionSettings                  `json:"execution"`
 	Safety            SafetySettings                     `json:"safety"`
 	Telemetry         TelemetrySettings                  `json:"telemetry"`
+	Events            EventSettings                      `json:"events,omitempty"`
+}
+
+// EventSettings configures the event-stream exporter. The outbox is off unless
+// enabled here: with it off no envelope is built and the outbox table stays empty.
+type EventSettings struct {
+	// Outbox writes an event-stream envelope, in the same transaction, for each
+	// run state change, step execution and gate block. Nothing is sent anywhere;
+	// a relay reads the outbox later.
+	Outbox bool `json:"outbox,omitempty"`
 }
 
 type MCPServerSettings struct {

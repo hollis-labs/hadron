@@ -21,7 +21,8 @@ const workflowValueIDPrefix = "values-"
 // Its tables and operations remain separate from legacy blueprint and pipeline
 // persistence APIs on Store.
 type WorkflowStateStore struct {
-	db *sql.DB
+	db     *sql.DB
+	outbox *eventOutbox // nil unless EnableEventOutbox was called
 }
 
 var _ workflowruntime.StateStore = (*WorkflowStateStore)(nil)
@@ -68,7 +69,11 @@ func (s *WorkflowStateStore) write(ctx context.Context, operation string, fn fun
 		_, _ = conn.ExecContext(rollbackCtx, "ROLLBACK")
 	}()
 
-	if err := fn(conn); err != nil {
+	var handle workflowSQL = conn
+	if s.outbox != nil {
+		handle = observedSQL{workflowSQL: conn, outbox: s.outbox}
+	}
+	if err := fn(handle); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
