@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
 	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
 	gomcphttp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/transport/http"
@@ -87,7 +88,7 @@ func (s *recordingStore) CreateTrigger(ctx context.Context, rec persistence.Trig
 
 func newTestStore(t *testing.T) *persistence.Store {
 	t.Helper()
-	store, err := persistence.Open(filepath.Join(t.TempDir(), "test.db"))
+	store, err := testdb.Open(filepath.Join(t.TempDir(), "test.db"), persistence.Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

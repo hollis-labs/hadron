@@ -11,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/testdb"
 )
 
 func TestRunner_ExecutesStagesInOrder(t *testing.T) {
@@ -689,7 +690,7 @@ func TestEvaluateIfTemplate(t *testing.T) {
 
 func openStore(t *testing.T) *persistence.Store {
 	t.Helper()
-	store, err := persistence.Open(filepath.Join(t.TempDir(), "pipeline.db"))
+	store, err := testdb.Open(filepath.Join(t.TempDir(), "pipeline.db"), persistence.Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

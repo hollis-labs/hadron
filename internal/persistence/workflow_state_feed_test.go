@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/testdb"
 	"github.com/hollis-labs/libs/workflow/engine/compile"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 	"github.com/hollis-labs/libs/workflow/engine/values"
@@ -58,7 +59,7 @@ func TestEventHighWaterTracksAppendsPerRun(t *testing.T) {
 
 func TestEventsChangedWakesAfterACommitAcrossStoresOnOneDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wake.db")
-	db, err := Open(path)
+	db, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}

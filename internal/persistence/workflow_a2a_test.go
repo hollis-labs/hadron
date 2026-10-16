@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	"github.com/hollis-labs/libs/workflow/engine/graph"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 	"github.com/hollis-labs/libs/workflow/engine/values"
@@ -16,11 +17,11 @@ import (
 
 func TestWorkflowA2ATaskStoreReplayConflictReopenAndTwoHandles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a2a.db")
-	first, err := Open(path)
+	first, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Open(path)
+	second, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,7 @@ func TestWorkflowA2ATaskStoreReplayConflictReopenAndTwoHandles(t *testing.T) {
 	if closeErr := second.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	reopened, err := Open(path)
+	reopened, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestWorkflowA2ATaskStoreReplayConflictReopenAndTwoHandles(t *testing.T) {
 }
 
 func TestWorkflowA2ATaskCorrelationsAreAppendOnly(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "a2a.db"))
+	store, err := testdb.Open(filepath.Join(t.TempDir(), "a2a.db"), Open)
 	if err != nil {
 		t.Fatal(err)
 	}

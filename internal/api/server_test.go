@@ -20,13 +20,14 @@ import (
 	"github.com/hollis-labs/hadron/internal/pipeline"
 	"github.com/hollis-labs/hadron/internal/scheduler"
 	"github.com/hollis-labs/hadron/internal/settings"
+	"github.com/hollis-labs/hadron/internal/testdb"
 )
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 func openTestStore(t *testing.T) *persistence.Store {
 	t.Helper()
-	store, err := persistence.Open(filepath.Join(t.TempDir(), "test.db"))
+	store, err := testdb.Open(filepath.Join(t.TempDir(), "test.db"), persistence.Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

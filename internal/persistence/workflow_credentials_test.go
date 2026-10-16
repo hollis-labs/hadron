@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
@@ -28,7 +29,7 @@ func newCredentialTestRig(t *testing.T) *credentialTestRig {
 	t.Helper()
 	r := &credentialTestRig{now: workflowTestTime(), path: filepath.Join(t.TempDir(), "rotation.db")}
 	var err error
-	r.store, err = Open(r.path)
+	r.store, err = testdb.Open(r.path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +218,7 @@ func TestCredentialMigrationBackfillsLegacyDigestAndReopenRetainsRevocation(t *t
 		t.Fatal(closeErr)
 	}
 	var err error
-	r.store, err = Open(r.path)
+	r.store, err = testdb.Open(r.path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +240,7 @@ func TestCredentialMigrationBackfillsLegacyDigestAndReopenRetainsRevocation(t *t
 	if closeErr := r.store.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	r.store, err = Open(r.path)
+	r.store, err = testdb.Open(r.path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}

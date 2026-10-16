@@ -27,6 +27,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
 	"github.com/hollis-labs/hadron/internal/settings"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	"github.com/hollis-labs/hadron/internal/trigger"
 	gosched "github.com/hollis-labs/libs/core/util/scheduler"
 	"github.com/hollis-labs/libs/workflow/engine/adapters/transform"
@@ -1124,7 +1125,7 @@ outputs:
 	if writeErr := os.WriteFile(filepath.Join(workflowRoot, "production-transform.workflow.yaml"), source, 0o600); writeErr != nil {
 		t.Fatal(writeErr)
 	}
-	store, err := persistence.Open(cfg.DBPath)
+	store, err := testdb.Open(cfg.DBPath, persistence.Open)
 	if err != nil {
 		t.Fatal(err)
 	}

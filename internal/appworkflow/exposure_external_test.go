@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/registry"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	"github.com/hollis-labs/libs/workflow/engine/authoring"
 	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
 	"github.com/hollis-labs/libs/workflow/engine/graph"
@@ -402,7 +403,7 @@ func (*typedNilExposureAuthority) AuthorizePrivateWorkflowDisplay(context.Contex
 
 func newExposureFixture(t *testing.T) exposureFixture {
 	t.Helper()
-	db, err := persistence.Open(filepath.Join(t.TempDir(), "exposure.db"))
+	db, err := testdb.Open(filepath.Join(t.TempDir(), "exposure.db"), persistence.Open)
 	if err != nil {
 		t.Fatal(err)
 	}

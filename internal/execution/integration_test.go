@@ -18,13 +18,14 @@ import (
 	"github.com/hollis-labs/hadron/internal/messagesubstrate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/settings"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	gomcpserver "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
 	"github.com/hollis-labs/libs/mesh/core/messaging"
 )
 
 func openStore(t *testing.T) *persistence.Store {
 	t.Helper()
-	store, err := persistence.Open(filepath.Join(t.TempDir(), "hadron.db"))
+	store, err := testdb.Open(filepath.Join(t.TempDir(), "hadron.db"), persistence.Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

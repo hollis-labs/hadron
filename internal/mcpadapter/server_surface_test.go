@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestNewServer_ToolAnnotations(t *testing.T) {
-	store, err := persistence.Open(t.TempDir() + "/test.db")
+	store, err := testdb.Open(t.TempDir()+"/test.db", persistence.Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestHandlePromptPickBlueprint(t *testing.T) {
 }
 
 func TestHandleBlueprintSchemaResource(t *testing.T) {
-	store, err := persistence.Open(t.TempDir() + "/test.db")
+	store, err := testdb.Open(t.TempDir()+"/test.db", persistence.Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -112,7 +113,7 @@ steps:
 }
 
 func TestBlueprintCompletions(t *testing.T) {
-	store, err := persistence.Open(t.TempDir() + "/test.db")
+	store, err := testdb.Open(t.TempDir()+"/test.db", persistence.Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

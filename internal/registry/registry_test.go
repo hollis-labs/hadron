@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/testdb"
 )
 
 func setupTestRegistry(t *testing.T) (*Registry, func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	store, err := persistence.Open(dbPath)
+	store, err := testdb.Open(dbPath, persistence.Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -42,6 +43,7 @@ func legacyExamplesDir(t *testing.T) string {
 }
 
 func TestIndex_AllBlueprints(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -62,6 +64,7 @@ func TestIndex_AllBlueprints(t *testing.T) {
 }
 
 func TestIndex_ReindexUnchanged(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -89,6 +92,7 @@ func TestIndex_ReindexUnchanged(t *testing.T) {
 }
 
 func TestIndex_DetectsUpdate(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -150,6 +154,7 @@ steps:
 }
 
 func TestSearch_FindsLaravel(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -179,6 +184,7 @@ func TestSearch_FindsLaravel(t *testing.T) {
 }
 
 func TestSearch_Nonexistent(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -198,6 +204,7 @@ func TestSearch_Nonexistent(t *testing.T) {
 }
 
 func TestResolve_ByName(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -220,6 +227,7 @@ func TestResolve_ByName(t *testing.T) {
 }
 
 func TestResolve_BySlug(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -259,6 +267,7 @@ steps:
 }
 
 func TestResolve_Unknown(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -269,6 +278,7 @@ func TestResolve_Unknown(t *testing.T) {
 }
 
 func TestShow_ByName(t *testing.T) {
+	t.Parallel()
 	reg, cleanup := setupTestRegistry(t)
 	defer cleanup()
 
@@ -297,6 +307,7 @@ func TestShow_ByName(t *testing.T) {
 }
 
 func TestIndex_BestEffortOnUnreadableSubdir(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: directory permission bits are not enforced")
 	}

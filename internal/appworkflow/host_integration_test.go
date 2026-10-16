@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/artifacts"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	calladapter "github.com/hollis-labs/libs/workflow/engine/adapters/call"
 	"github.com/hollis-labs/libs/workflow/engine/adapters/transform"
 	waitadapter "github.com/hollis-labs/libs/workflow/engine/adapters/wait"
@@ -223,7 +224,7 @@ steps:
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopenedStore, reopenErr := persistence.Open(fixture.dbPath)
+	reopenedStore, reopenErr := testdb.Open(fixture.dbPath, persistence.Open)
 	if reopenErr != nil {
 		t.Fatal(reopenErr)
 	}
@@ -1012,7 +1013,7 @@ func TestPinnedRecoveryPlanFollowsReplayOfReplayAcrossSQLiteRestart(t *testing.T
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopenedStore, openErr := persistence.Open(databasePath)
+	reopenedStore, openErr := testdb.Open(databasePath, persistence.Open)
 	if openErr != nil {
 		t.Fatal(openErr)
 	}
@@ -2311,7 +2312,7 @@ func newHostFixtureWithPlan(t *testing.T, outcome hoststate.PolicyOutcome, inter
 	t.Helper()
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 	dbPath := filepath.Join(t.TempDir(), "host.db")
-	store, openErr := persistence.Open(dbPath)
+	store, openErr := testdb.Open(dbPath, persistence.Open)
 	if openErr != nil {
 		t.Fatal(openErr)
 	}
