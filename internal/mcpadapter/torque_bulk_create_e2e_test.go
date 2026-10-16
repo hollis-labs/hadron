@@ -44,6 +44,7 @@ func TestTorqueBulkCreateThroughPinnedWorkflowMCP(t *testing.T) {
 	fake := newTorqueCreateFake(t)
 	trusted := newTrustedTorqueCaller(t, fake.url)
 	kinds, mcpKind := torqueKinds(t, trusted, nil)
+	executionGate := &torqueExecutionGate{remaining: 4, ready: make(chan struct{})}
 
 	root := filepath.Clean(filepath.Join("..", "..", "examples", "workflow"))
 	source, err := os.ReadFile(filepath.Join(root, "torque-task-bulk-create.workflow.yaml"))
@@ -115,7 +116,7 @@ func TestTorqueBulkCreateThroughPinnedWorkflowMCP(t *testing.T) {
 		t.Fatalf("resolve registered Torque plan: %v", resolveErr)
 	}
 	clock := &torqueClock{current: torqueBaseTime.Add(time.Hour)}
-	host := newTorqueHost(t, state, journal, resolver, kinds, trusted, artifactStore, clock)
+	host := newTorqueHost(t, state, journal, resolver, kinds, trusted, artifactStore, clock, executionGate)
 	if startErr := host.Start(ctx); startErr != nil {
 		t.Fatal(startErr)
 	}
@@ -175,6 +176,7 @@ func TestTorqueBulkCreateThroughPinnedWorkflowMCP(t *testing.T) {
 	recovery := torqueRecoveryPlan(t, &startedRecord.Record.Plan)
 	runner := newTorqueRuntimeDriver(t, state, journal, host, recovery, trusted, clock)
 	runner.driveUntilRetryWaiting(ctx, runID)
+	fake.releaseLostResponse()
 	if fake.uniqueCreates("project-42") != 5 {
 		t.Fatalf("logical creates before restart = %d, want 5", fake.uniqueCreates("project-42"))
 	}
@@ -189,7 +191,7 @@ func TestTorqueBulkCreateThroughPinnedWorkflowMCP(t *testing.T) {
 
 	store, state, journal, exposureStore = openTorqueStores(t, dbPath)
 	clock.advance(time.Hour)
-	host = newTorqueHost(t, state, journal, resolver, kinds, trusted, artifactStore, clock)
+	host = newTorqueHost(t, state, journal, resolver, kinds, trusted, artifactStore, clock, executionGate)
 	if startErr := host.Start(ctx); startErr != nil {
 		t.Fatal(startErr)
 	}
@@ -484,16 +486,18 @@ func assertTorquePlan(t *testing.T, plan *workflowcompile.ExecutionPlan, mcpKind
 type torqueCreateFake struct {
 	url string
 
-	mu          sync.Mutex
-	active      int
-	peak        int
-	started     int
-	initialGate chan struct{}
-	gateOnce    sync.Once
-	byKey       map[string]torqueCreateOutcome
-	callByTitle map[string]int
-	keysByTitle map[string][]string
-	violation   error
+	mu               sync.Mutex
+	active           int
+	peak             int
+	started          int
+	initialGate      chan struct{}
+	gateOnce         sync.Once
+	lostResponse     chan struct{}
+	lostResponseOnce sync.Once
+	byKey            map[string]torqueCreateOutcome
+	callByTitle      map[string]int
+	keysByTitle      map[string][]string
+	violation        error
 }
 
 type torqueCreateOutcome struct {
@@ -507,7 +511,7 @@ type torqueCreateOutcome struct {
 func newTorqueCreateFake(t *testing.T) *torqueCreateFake {
 	t.Helper()
 	fake := &torqueCreateFake{
-		initialGate: make(chan struct{}), byKey: make(map[string]torqueCreateOutcome),
+		initialGate: make(chan struct{}), lostResponse: make(chan struct{}), byKey: make(map[string]torqueCreateOutcome),
 		callByTitle: make(map[string]int), keysByTitle: make(map[string][]string),
 	}
 	mcpServer := gomcp.NewServer("torque-e2e-fake", "1.0.0")
@@ -528,7 +532,7 @@ func newTorqueCreateFake(t *testing.T) *torqueCreateFake {
 	})
 	testServer := httptest.NewServer(gomcphttp.NewHandler(mcpServer, gomcphttp.HandlerOptions{}))
 	fake.url = testServer.URL
-	t.Cleanup(testServer.Close)
+	t.Cleanup(func() { fake.releaseLostResponse(); testServer.Close() })
 	return fake
 }
 
@@ -589,26 +593,24 @@ func (f *torqueCreateFake) create(ctx context.Context, args map[string]any) (any
 		// The external logical create is already committed and keyed before the
 		// response is delayed beyond the workflow call timeout. The durable retry
 		// must reuse that same key/result after the Host and SQLite handle reopen.
-		timer := time.NewTimer(400 * time.Millisecond)
-		defer timer.Stop()
+		// MCP server contexts need not inherit client cancellation. Release only
+		// after the driver observes the durable timeout retry (or test cleanup).
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-timer.C:
-		}
-	} else {
-		timer := time.NewTimer(35 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-timer.C:
+		case <-f.lostResponse:
+			return nil, context.DeadlineExceeded
 		}
 	}
+
 	if outcome.failed {
 		return nil, errors.New("fixture rejected one task")
 	}
 	return map[string]any{"id": outcome.id, "project_id": outcome.project, "title": outcome.title, "description": outcome.description}, nil
+}
+
+func (f *torqueCreateFake) releaseLostResponse() {
+	f.lostResponseOnce.Do(func() { close(f.lostResponse) })
 }
 
 func (f *torqueCreateFake) attempts(title string) int {
@@ -822,7 +824,49 @@ func (torqueRetryAuthorizer) AuthorizeRetry(_ context.Context, request workflowr
 	return nil
 }
 
-func newTorqueHost(t *testing.T, state *persistence.WorkflowStateStore, journal *persistence.WorkflowHostStore, resolver *appworkflow.DefinitionResolver, buildKinds stepkind.Registry, caller trustedTorqueCaller, artifactStore values.ArtifactStore, clock *torqueClock) *appworkflow.Host {
+// torqueExecutionGate synchronizes the first fan-out batch after durable
+// dispatch preparation, before the real MCP adapter starts its 250ms deadline.
+// The server still proves four simultaneous calls. Scheduler/SQLite skew must
+// not consume that deadline while an early call waits for its peers to prepare.
+// Keep the same gate across the host restart: retries must not wait for a new batch.
+type torqueExecutionGate struct {
+	mu        sync.Mutex
+	remaining int
+	ready     chan struct{}
+}
+
+func (g *torqueExecutionGate) wait(ctx context.Context) error {
+	g.mu.Lock()
+	if g.remaining == 0 {
+		g.mu.Unlock()
+		return nil
+	}
+	g.remaining--
+	if g.remaining == 0 {
+		close(g.ready)
+	}
+	g.mu.Unlock()
+	select {
+	case <-g.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type torqueCoordinatedMCP struct {
+	*workflowmcp.Kind
+	gate *torqueExecutionGate
+}
+
+func (k *torqueCoordinatedMCP) Execute(ctx context.Context, invocation stepkind.PreparedInvocation) (stepkind.StepResult, error) {
+	if err := k.gate.wait(ctx); err != nil {
+		return stepkind.StepResult{}, err
+	}
+	return k.Kind.Execute(ctx, invocation)
+}
+
+func newTorqueHost(t *testing.T, state *persistence.WorkflowStateStore, journal *persistence.WorkflowHostStore, resolver *appworkflow.DefinitionResolver, buildKinds stepkind.Registry, caller trustedTorqueCaller, artifactStore values.ArtifactStore, clock *torqueClock, executionGate *torqueExecutionGate) *appworkflow.Host {
 	t.Helper()
 	mcpKind, ok := buildKinds.Lookup(workflowmcp.KindName, workflowmcp.KindVersion)
 	if !ok {
@@ -858,7 +902,7 @@ func newTorqueHost(t *testing.T, state *persistence.WorkflowStateStore, journal 
 			}
 			return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "allow pinned Torque acceptance"}, nil
 		}),
-		Kinds:         []stepkind.StepKind{mcpKind, transformKind},
+		Kinds:         []stepkind.StepKind{&torqueCoordinatedMCP{Kind: mcpKind.(*workflowmcp.Kind), gate: executionGate}, transformKind},
 		RequiredKinds: []appworkflow.KindRef{{Name: workflowmcp.KindName, Version: workflowmcp.KindVersion}, {Name: transform.Name, Version: transform.Version}},
 		Activations:   torqueActivationScheduler{}, Artifacts: artifactStore, Clock: clock,
 		RecoveryInterval: time.Hour, RecoveryBatchLimit: 100,
