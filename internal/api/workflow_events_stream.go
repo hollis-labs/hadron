@@ -53,7 +53,7 @@ var (
 // reveals private values: it uses the default display policy.
 //
 // Writes are not error-checked: the loop ends when the request context is
-// cancelled, which net/http does when the client disconnects.
+// canceled, which net/http does when the client disconnects.
 func (s *Server) handleWorkflowEventStreamRoute(w http.ResponseWriter, r *http.Request, escapedRunID string) {
 	if r.Method != http.MethodGet {
 		writeWorkflowOperationError(w, http.StatusMethodNotAllowed, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInvalidRequest})
