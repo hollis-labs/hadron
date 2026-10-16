@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -279,7 +280,7 @@ func (s *WorkflowStateStore) ResumeNodeWait(ctx context.Context, request workflo
 		}
 		events := make([]workflowruntime.Event, 0, 2)
 		for _, eventRequest := range []workflowruntime.AppendEventRequest{
-			{RunID: invocation.RunID, Invocation: &invocation, Attempt: &attemptID, Type: workflowruntime.EventWaitResumed, OccurredAt: request.ReceivedAt, Attributes: workflowWaitEventAttributes(nextWait, string(workflowruntime.WaitOpen), string(workflowruntime.WaitResumed)), Redaction: values.RedactionPrivate, Retention: values.RetentionRun},
+			{RunID: invocation.RunID, Invocation: &invocation, Attempt: &attemptID, Type: workflowruntime.EventWaitResumed, OccurredAt: request.ReceivedAt, Attributes: gateDecisionAttributes(ctx, query, currentWait, request.Payload, workflowWaitEventAttributes(nextWait, string(workflowruntime.WaitOpen), string(workflowruntime.WaitResumed))), Redaction: values.RedactionPrivate, Retention: values.RetentionRun},
 			{RunID: invocation.RunID, Invocation: &invocation, Attempt: &attemptID, Type: workflowruntime.EventNodeStatusChanged, OccurredAt: request.ReceivedAt, Attributes: workflowTransitionAttributes("node", string(currentNode.Status), string(nextNode.Status)), Redaction: values.RedactionPrivate, Retention: values.RetentionRun},
 		} {
 			event, eventErr := appendWorkflowEvent(ctx, query, eventRequest)
@@ -565,6 +566,56 @@ func workflowWaitEventAttributes(snapshot workflowruntime.WaitSnapshot, from, to
 	if snapshot.Resolution != nil {
 		attributes["responder_kind"] = snapshot.Resolution.Responder.Kind
 		attributes["responder_reference"] = snapshot.Resolution.Responder.Reference
+	}
+	return attributes
+}
+
+// gateDecisionAttributes adds decision_option and decision_kind to a gate
+// wait.resumed event: the option id the responder chose and that option's declared
+// kind (decision or skip), read from the gate's private checkpoint. Both are
+// identifiers from the workflow definition, never free text. The attributes are
+// local to Hadron's event feed. Recording is best effort: a wait that is not a
+// gate, or a checkpoint or payload that cannot be read, leaves the event as it was
+// and never rejects the resume.
+func gateDecisionAttributes(ctx context.Context, query workflowSQL, wait workflowruntime.WaitSnapshot, payload values.Value, attributes map[string]string) map[string]string {
+	if wait.Kind != workflowwait.KindGate || wait.Payload == nil {
+		return attributes
+	}
+	object, ok := payload.Inline.(map[string]any)
+	if !ok {
+		return attributes
+	}
+	decision, ok := object["decision"].(string)
+	if !ok || decision == "" {
+		return attributes
+	}
+	set, err := loadWorkflowValues(ctx, query, *wait.Payload)
+	if err != nil {
+		return attributes
+	}
+	encoded, err := json.Marshal(set["checkpoint"].Inline)
+	if err != nil {
+		return attributes
+	}
+	var checkpoint struct {
+		Options []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(encoded, &checkpoint); err != nil {
+		return attributes
+	}
+	for _, option := range checkpoint.Options {
+		if option.ID != decision {
+			continue
+		}
+		kind := option.Kind
+		if kind == "" {
+			kind = "decision"
+		}
+		attributes["decision_option"], attributes["decision_kind"] = option.ID, kind
+		break
 	}
 	return attributes
 }
