@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/go-mcp/budget"
-	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
+	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
 )
 
 type blueprintCatalogEntry struct {

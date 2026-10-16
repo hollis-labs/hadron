@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/lint"
 	"github.com/hollis-labs/hadron/internal/pipeline"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
 )
 
 func (a *Adapter) handleBlueprintLint(_ context.Context, args map[string]any) (any, error) {

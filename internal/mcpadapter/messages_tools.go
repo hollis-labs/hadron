@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
-	"github.com/hollis-labs/substrate/mesh/messaging"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
+	"github.com/hollis-labs/libs/mesh/core/messaging"
 )
 
 func (a *Adapter) handleMessageSend(ctx context.Context, args map[string]any) (any, error) {

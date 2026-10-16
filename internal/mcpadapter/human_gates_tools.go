@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
 )
 
 func (a *Adapter) handleHumanGateGet(ctx context.Context, args map[string]any) (any, error) {

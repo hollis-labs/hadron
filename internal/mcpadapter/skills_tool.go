@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/hollis-labs/go-mcp/budget"
-	gomcp "github.com/hollis-labs/go-mcp/server"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
+	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
 )
 
 type hadronSkillDoc struct {

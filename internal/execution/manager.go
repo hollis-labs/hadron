@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/hadron/internal/localauth"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,8 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/localauth"
+
 	"github.com/creack/pty"
-	feotel "github.com/hollis-labs/libs/util/otel"
+	feotel "github.com/hollis-labs/libs/core/util/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/hadron/internal/blueprint"

@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/graph"
+	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
 )
 
 // FindBundledDefinitions resolves exact generated children only from complete

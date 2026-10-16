@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	gomcp "github.com/hollis-labs/go-mcp/server"
+	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
 )
 
 const serverInstructions = "Hadron by Hollis Labs is an agent-first blueprint automation runner. Prefer hadron_skills for orientation, hadron_blueprint_broker or hadron_blueprint_discover to choose workflows, hadron_blueprint_schema before hadron_run_enqueue, and hadron_run_operations before scraping raw run events. This server is in active public beta."

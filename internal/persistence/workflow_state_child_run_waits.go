@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 var _ hoststate.ChildRunWaitStore = (*WorkflowStateStore)(nil)

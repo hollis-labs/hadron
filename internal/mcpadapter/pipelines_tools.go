@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/pipeline"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
 )
 
 func (a *Adapter) handlePipelinesList(ctx context.Context, args map[string]any) (any, error) {

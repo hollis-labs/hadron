@@ -14,7 +14,7 @@ lowering contract.
 
 The authoritative generated JSON Schema is
 [published by go-workflow](https://github.com/hollis-labs/libs/blob/workflow/v0.1.0/workflow/graph/schema/workflow.schema.json).
-Hadron consumes it through `github.com/hollis-labs/libs/workflow/graph/schema`;
+Hadron consumes it through `github.com/hollis-labs/libs/workflow/engine/graph/schema`;
 schema generation and compatibility checks run in that module.
 
 Do not edit the schema or copy graph DTOs into a client by hand. The HTTP

@@ -12,12 +12,12 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
-	"github.com/hollis-labs/libs/workflow/authoring"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	graphschema "github.com/hollis-labs/libs/workflow/graph/schema"
-	"github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/authoring"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	graphschema "github.com/hollis-labs/libs/workflow/engine/graph/schema"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 const (

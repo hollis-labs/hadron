@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 const manifestVersion = 1

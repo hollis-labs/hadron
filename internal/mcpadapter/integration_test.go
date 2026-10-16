@@ -11,14 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
-	gomcp "github.com/hollis-labs/go-mcp/server"
-	gomcphttp "github.com/hollis-labs/go-mcp/transport/http"
+	"net/http/httptest"
+
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/mcpadapter"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/scheduler"
-	"net/http/httptest"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
+	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
+	gomcphttp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/transport/http"
 )
 
 // ── Fakes ──────────────────────────────────────────────────────────────────────

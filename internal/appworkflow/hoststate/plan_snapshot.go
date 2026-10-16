@@ -13,12 +13,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
-	"github.com/hollis-labs/libs/workflow/verification"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	"github.com/hollis-labs/libs/workflow/engine/verification"
 )
 
 const (

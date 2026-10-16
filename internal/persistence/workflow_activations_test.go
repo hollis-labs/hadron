@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 func TestWorkflowActivationRegistrationScheduleFireRecoveryAndObserver(t *testing.T) {
@@ -610,5 +610,15 @@ func TestWorkflowActivationStoreHonoursEngineClaimFence(t *testing.T) {
 		From: gosched.FireClaimed, To: gosched.FireSucceeded, ClaimedAt: claimed.FiredAt,
 		At: claimedAt.Add(time.Second)}); err != nil || !applied {
 		t.Fatalf("transition from the true owner = %v, %v", applied, err)
+	}
+
+	// The new scheduler retention seam must not erase Hadron's append-only
+	// activation evidence, even when the fire is terminal and older than cutoff.
+	if _, err := adapter.Prune(t.Context(), claimedAt.Add(time.Hour)); !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("Prune must explicitly refuse unsupported retention: %v", err)
+	}
+	retained, err := loadWorkflowActivationFire(t.Context(), adapter.db, fire.ID)
+	if err != nil || retained.Status != gosched.FireSucceeded || retained.Attempt != claimed.Attempt {
+		t.Fatalf("terminal fire lost after refused pruning: %#v, %v", retained, err)
 	}
 }

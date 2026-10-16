@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 func TestWorkflowSQLiteAtomicSuspendResumeAndReplay(t *testing.T) {

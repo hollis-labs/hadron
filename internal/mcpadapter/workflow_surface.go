@@ -14,12 +14,12 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/hollis-labs/go-mcp/budget"
-	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
+	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -254,28 +254,28 @@ func (w *workflowSurface) handlerMap() map[string]gomcp.ToolHandler {
 		"hadron_workflow_describe":                  w.handleDescribe,
 		"hadron_workflow_validate":                  w.handleValidate,
 		"hadron_workflow_run":                       w.handleRun,
-		"hadron_workflow_run_inspect":                w.handleInspectRun,
+		"hadron_workflow_run_inspect":               w.handleInspectRun,
 		"hadron_workflow_run_cancel":                w.handleCancelRun,
 		"hadron_workflow_run_events":                w.handleEvents,
-		"hadron_workflow_run_subscribe":              w.handleEvents,
+		"hadron_workflow_run_subscribe":             w.handleEvents,
 		"hadron_workflow_run_resume":                w.handleResume,
-		"hadron_workflow_gate_submit":                w.handleGate,
-		"hadron_workflow_message_submit":             w.handleMessage,
-		"hadron_workflow_signal":                     w.handleSignal,
-		"hadron_workflow_catalog_search":             w.handleLifecycleCatalogSearch,
-		"hadron_workflow_catalog_inspect":            w.handleLifecycleCatalogInspect,
-		"hadron_workflow_author_validate":            w.handleLifecycleAuthorValidate,
-		"hadron_workflow_author_scaffold":            w.handleLifecycleAuthorScaffold,
-		"hadron_workflow_author_test":                w.handleLifecycleAuthorTest,
-		"hadron_workflow_author_register":            w.handleLifecycleAuthorRegister,
-		"hadron_workflow_registry_package":           w.handleLifecyclePackage,
-		"hadron_workflow_registry_pin_version":       w.handleLifecycleRegistryPin,
-		"hadron_workflow_registry_unpin_version":     w.handleLifecycleRegistryUnpin,
-		"hadron_workflow_registry_publish":           w.handleLifecycleRegistryPublish,
-		"hadron_workflow_registry_clear_current":     w.handleLifecycleClearCurrent,
-		"hadron_workflow_exposure_inspect":           w.handleLifecycleExposureInspect,
-		"hadron_workflow_exposure_pin_definition":    w.handleLifecycleExposurePin,
-		"hadron_workflow_exposure_unpin_definition":  w.handleLifecycleExposureUnpin,
+		"hadron_workflow_gate_submit":               w.handleGate,
+		"hadron_workflow_message_submit":            w.handleMessage,
+		"hadron_workflow_signal":                    w.handleSignal,
+		"hadron_workflow_catalog_search":            w.handleLifecycleCatalogSearch,
+		"hadron_workflow_catalog_inspect":           w.handleLifecycleCatalogInspect,
+		"hadron_workflow_author_validate":           w.handleLifecycleAuthorValidate,
+		"hadron_workflow_author_scaffold":           w.handleLifecycleAuthorScaffold,
+		"hadron_workflow_author_test":               w.handleLifecycleAuthorTest,
+		"hadron_workflow_author_register":           w.handleLifecycleAuthorRegister,
+		"hadron_workflow_registry_package":          w.handleLifecyclePackage,
+		"hadron_workflow_registry_pin_version":      w.handleLifecycleRegistryPin,
+		"hadron_workflow_registry_unpin_version":    w.handleLifecycleRegistryUnpin,
+		"hadron_workflow_registry_publish":          w.handleLifecycleRegistryPublish,
+		"hadron_workflow_registry_clear_current":    w.handleLifecycleClearCurrent,
+		"hadron_workflow_exposure_inspect":          w.handleLifecycleExposureInspect,
+		"hadron_workflow_exposure_pin_definition":   w.handleLifecycleExposurePin,
+		"hadron_workflow_exposure_unpin_definition": w.handleLifecycleExposureUnpin,
 	}
 }
 
@@ -954,7 +954,7 @@ type workflowOperationErr struct {
 	safe appworkflow.WorkflowOperationError
 }
 
-func (e workflowOperationErr) Error() string        { return "workflow error: " + e.safe.Code }
+func (e workflowOperationErr) Error() string         { return "workflow error: " + e.safe.Code }
 func (e workflowOperationErr) ToolErrorContent() any { return map[string]any{"error": e.safe} }
 
 var _ budget.StructuredError = workflowOperationErr{}

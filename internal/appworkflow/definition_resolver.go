@@ -16,14 +16,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	"github.com/hollis-labs/libs/workflow/authoring"
-	"github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
-	"github.com/hollis-labs/libs/workflow/verification"
+	"github.com/hollis-labs/libs/workflow/engine/authoring"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	"github.com/hollis-labs/libs/workflow/engine/verification"
 	"gopkg.in/yaml.v3"
 )
 

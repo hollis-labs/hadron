@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
 )
 
 func (a *Adapter) handleTriggersList(ctx context.Context, _ map[string]any) (any, error) {

@@ -17,19 +17,19 @@ import (
 	"strconv"
 	"strings"
 
-	gateadapter "github.com/hollis-labs/libs/workflow/adapters/gate"
-	llmadapter "github.com/hollis-labs/libs/workflow/adapters/llm"
-	mcpadapter "github.com/hollis-labs/libs/workflow/adapters/mcp"
-	"github.com/hollis-labs/libs/workflow/adapters/script"
-	"github.com/hollis-labs/libs/workflow/adapters/transform"
-	waitadapter "github.com/hollis-labs/libs/workflow/adapters/wait"
-	"github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/diagnostic"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/offline"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/values"
+	gateadapter "github.com/hollis-labs/libs/workflow/engine/adapters/gate"
+	llmadapter "github.com/hollis-labs/libs/workflow/engine/adapters/llm"
+	mcpadapter "github.com/hollis-labs/libs/workflow/engine/adapters/mcp"
+	"github.com/hollis-labs/libs/workflow/engine/adapters/script"
+	"github.com/hollis-labs/libs/workflow/engine/adapters/transform"
+	waitadapter "github.com/hollis-labs/libs/workflow/engine/adapters/wait"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/offline"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 type Options struct {
@@ -375,8 +375,8 @@ import (
 	"os"
 
 	"github.com/hollis-labs/hadron/internal/offlinebuild"
-	"github.com/hollis-labs/libs/workflow/offline"
-	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/offline"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
 )
 
 const embeddedManifest = ` + quoted + `

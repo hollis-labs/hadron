@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 // NonDurableStartRecord is the bounded host audit for durability:none. It

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
 )
 
 func TestWorkflowIndexPinsVersionsAndMovesOnlyExplicitAlias(t *testing.T) {

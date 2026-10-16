@@ -14,13 +14,13 @@ import (
 	"strings"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/workflow/graph"
-	"github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	hadronregistry "github.com/hollis-labs/hadron/internal/registry"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 var (

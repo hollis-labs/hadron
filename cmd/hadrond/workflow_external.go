@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 const (

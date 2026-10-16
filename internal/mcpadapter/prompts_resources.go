@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/blueprint"
+	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

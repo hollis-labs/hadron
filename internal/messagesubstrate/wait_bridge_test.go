@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/mesh/messaging"
 	"github.com/hollis-labs/hadron/internal/messagesubstrate"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
+	"github.com/hollis-labs/libs/mesh/core/messaging"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 )
 
 func TestWaitBridgeBuildsCanonicalTypedResumeCommand(t *testing.T) {

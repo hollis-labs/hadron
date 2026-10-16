@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 // RecordPlan implements runtime.StateStore.

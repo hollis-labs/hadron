@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
 )
 
 func TestToSchedule(t *testing.T) {

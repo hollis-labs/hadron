@@ -4,9 +4,9 @@ import (
 	"errors"
 	"reflect"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
 )
 
 // NewWorkflow constructs the graph-native activation scheduler. Unlike New,

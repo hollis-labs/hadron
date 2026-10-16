@@ -11,13 +11,13 @@ import (
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
-	calladapter "github.com/hollis-labs/libs/workflow/adapters/call"
-	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/stepkind"
-	"github.com/hollis-labs/libs/workflow/stepkind/stepkindtest"
-	"github.com/hollis-labs/libs/workflow/values"
+	calladapter "github.com/hollis-labs/libs/workflow/engine/adapters/call"
+	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind/stepkindtest"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 type hostReversibleKind struct{ *stepkindtest.Kind }

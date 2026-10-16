@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/hollis-labs/go-mcp/budget"
-	gomcp "github.com/hollis-labs/go-mcp/server"
 	"github.com/hollis-labs/hadron/internal/registry"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
+	gomcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
 )
 
 func registerRegistryTools(s *gomcp.Server, reg *registry.Registry) {

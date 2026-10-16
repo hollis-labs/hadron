@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 func ensureWorkflowPlan(ctx context.Context, query workflowSQL, plan workflowruntime.PlanRef) error {

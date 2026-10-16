@@ -1,19 +1,18 @@
 module github.com/hollis-labs/hadron
 
-go 1.26.6
-
-toolchain go1.26.9
+go 1.26.9
 
 require (
 	github.com/creack/pty v1.1.24
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/hollis-labs/go-mcp v0.4.3
-	github.com/hollis-labs/libs/util v0.2.1
-	github.com/hollis-labs/libs/workflow v0.1.0
-	github.com/hollis-labs/substrate/harness v0.3.0
-	github.com/hollis-labs/substrate/llm-core v0.1.0
-	github.com/hollis-labs/substrate/mesh v0.1.0
+	github.com/hollis-labs/libs/core/util v0.4.0
+	github.com/hollis-labs/libs/harness/core v0.10.0
+	github.com/hollis-labs/libs/llm/core v0.2.0
+	github.com/hollis-labs/libs/mcp/plugin-mcp v0.3.0
+	github.com/hollis-labs/libs/mesh/core v0.4.0
+	github.com/hollis-labs/libs/security/policy v0.1.0
+	github.com/hollis-labs/libs/workflow/engine v0.1.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
@@ -36,7 +35,7 @@ require (
 	github.com/google/pprof v0.0.0-20260906184651-6331bc6350fe // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
-	github.com/hollis-labs/substrate/agent v0.1.0 // indirect
+	github.com/hollis-labs/libs/ui/ui-go v0.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

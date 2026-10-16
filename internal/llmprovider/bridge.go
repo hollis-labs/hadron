@@ -12,12 +12,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-	providers "github.com/hollis-labs/substrate/harness/adapters/provider"
+	providers "github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 
-	workflowllm "github.com/hollis-labs/libs/workflow/adapters/llm"
-	"github.com/hollis-labs/libs/workflow/values"
+	workflowllm "github.com/hollis-labs/libs/workflow/engine/adapters/llm"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 var (

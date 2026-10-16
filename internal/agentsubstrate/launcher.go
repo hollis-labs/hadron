@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/hadron/internal/localauth"
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 	"log"
 	"os"
 	"path/filepath"
@@ -16,20 +14,23 @@ import (
 	"sync/atomic"
 	"time"
 
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	"github.com/hollis-labs/substrate/harness/adapters/runtimebind"
-	"github.com/hollis-labs/substrate/harness/adapters/turn"
-	agentlaunch "github.com/hollis-labs/substrate/harness/agentlaunch"
-	launcherpkg "github.com/hollis-labs/substrate/harness/agentlaunch/launcher"
-	"github.com/hollis-labs/substrate/harness/agentlaunch/sessionshim"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-	"github.com/hollis-labs/substrate/mesh/messaging"
+	"github.com/hollis-labs/hadron/internal/localauth"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
+
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/adapters/runtimebind"
+	"github.com/hollis-labs/libs/harness/core/adapters/turn"
+	agentlaunch "github.com/hollis-labs/libs/harness/core/agentlaunch"
+	launcherpkg "github.com/hollis-labs/libs/harness/core/agentlaunch/launcher"
+	"github.com/hollis-labs/libs/harness/core/agentlaunch/sessionshim"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/libs/mesh/core/messaging"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/launchartifacts"
 	"github.com/hollis-labs/hadron/internal/settings"
-	"github.com/hollis-labs/substrate/harness/interception/permission"
+	"github.com/hollis-labs/libs/security/policy/permission"
 )
 
 const (

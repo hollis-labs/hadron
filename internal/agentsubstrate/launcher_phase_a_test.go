@@ -3,13 +3,14 @@ package agentsubstrate
 import (
 	"context"
 	"errors"
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/substrate/harness/adapters/runtimebind"
-	agentlaunch "github.com/hollis-labs/substrate/harness/agentlaunch"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
+
+	"github.com/hollis-labs/libs/harness/core/adapters/runtimebind"
+	agentlaunch "github.com/hollis-labs/libs/harness/core/agentlaunch"
 
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/settings"

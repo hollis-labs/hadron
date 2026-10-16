@@ -37,6 +37,13 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ### Changed
 
+- Adopt the grouped `hollis-labs/libs` modules: `core/util` v0.4.0,
+  `mcp/plugin-mcp` v0.3.0, `workflow/engine` v0.1.0, `harness/core` v0.10.0,
+  `llm/core` v0.2.0, `mesh/core` v0.4.0 and `security/policy` v0.1.0.
+  Permission types come from the shared policy module; Go 1.26.9 is required.
+  The scheduler's new pruning entrypoint explicitly returns unsupported for
+  Hadron's append-only activation history; adoption does not enable deletion.
+
 - Adopt published `libs/workflow` v0.1.0, `libs/util` v0.2.0 and substrate
   `harness` v0.3.0, `llm-core` and `mesh` v0.1.0. The compatibility agent
   launcher uses canonical native rendering and an accepted, process-local

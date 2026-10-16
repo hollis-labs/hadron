@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hollis-labs/go-mcp/budget"
 	"github.com/hollis-labs/hadron/internal/blueprint"
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/budget"
 )
 
 func (a *Adapter) handleRunsList(ctx context.Context, args map[string]any) (any, error) {

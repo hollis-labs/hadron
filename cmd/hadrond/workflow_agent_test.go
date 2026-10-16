@@ -14,16 +14,16 @@ import (
 	"testing"
 	"time"
 
-	agentadapter "github.com/hollis-labs/libs/workflow/adapters/agent"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/config"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/settings"
 	"github.com/hollis-labs/hadron/internal/tetherhost"
 	"github.com/hollis-labs/hadron/internal/tetherhost/tethertest"
+	agentadapter "github.com/hollis-labs/libs/workflow/engine/adapters/agent"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 const tetherAgentReviewSource = `workflow: {id: agent-review, version: v1}

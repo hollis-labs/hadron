@@ -13,11 +13,11 @@ import (
 	"sort"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/workflow/graph"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 const workflowActivationClaimLease = hoststate.ActivationClaimLease
@@ -35,6 +35,17 @@ func NewWorkflowActivationStore(store *Store) (*WorkflowActivationStore, error) 
 		return nil, err
 	}
 	return &WorkflowActivationStore{db: store.db, state: state}, nil
+}
+
+// Prune refuses retention changes: activation attempts and their results are
+// append-only evidence linked to the fire. Removing a fire would require a
+// separate retention policy and durable replay fence, neither of which this
+// store currently provides. The scheduler does not invoke Prune automatically.
+func (s *WorkflowActivationStore) Prune(ctx context.Context, _ time.Time) (int, error) {
+	if err := checkWorkflowContext(ctx); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("workflow activation history is append-only; pruning: %w", errors.ErrUnsupported)
 }
 
 func (s *WorkflowActivationStore) RegisterActivation(ctx context.Context, input hoststate.ActivationRegistration) (hoststate.ActivationRegistration, workflowruntime.IdempotencyOutcome, error) {

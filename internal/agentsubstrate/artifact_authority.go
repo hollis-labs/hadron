@@ -10,8 +10,8 @@ import (
 	"github.com/hollis-labs/hadron/internal/execution"
 	"github.com/hollis-labs/hadron/internal/launchartifacts"
 	"github.com/hollis-labs/hadron/internal/settings"
-	"github.com/hollis-labs/substrate/harness/adapters/runtimebind"
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
+	"github.com/hollis-labs/libs/harness/core/adapters/runtimebind"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 )
 
 // acceptArtifactOperation narrows this launcher's accepted configured launch to

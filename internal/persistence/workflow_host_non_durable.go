@@ -8,7 +8,7 @@ import (
 	"reflect"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 var _ hoststate.NonDurableJournal = (*WorkflowHostStore)(nil)
