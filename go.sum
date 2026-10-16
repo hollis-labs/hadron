@@ -58,8 +58,8 @@ github.com/hollis-labs/libs/security/policy v0.1.0 h1:XsksYYhpJ315wlr9QmWwxUKRfy
 github.com/hollis-labs/libs/security/policy v0.1.0/go.mod h1:vFJQekM6tI5OV+2rqK+mx/imNUSSJ26PkvAvgMmdQBo=
 github.com/hollis-labs/libs/ui/ui-go v0.1.0 h1:GFztthzyhlbrKemRItwyNlV+e83pZT+yFr5Y37iXlL4=
 github.com/hollis-labs/libs/ui/ui-go v0.1.0/go.mod h1:MBO41Mrbgo6YfRbm8MI50qQXjDfwhkvA/WxRdtOiL38=
-github.com/hollis-labs/libs/workflow/engine v0.1.0 h1:q1eC9iYRM+BS7Ij6OPo4YJQ8MU845e5e53+PHMI3BEw=
-github.com/hollis-labs/libs/workflow/engine v0.1.0/go.mod h1:y74RibX6OawPf+5rgxW3qkYWK9rjXIkq7mvDLi1d32U=
+github.com/hollis-labs/libs/workflow/engine v0.2.0 h1:K7aJh4ia0H9LyuCdxGQrr0iyUgb1IvkOAw4uqRjPf04=
+github.com/hollis-labs/libs/workflow/engine v0.2.0/go.mod h1:y74RibX6OawPf+5rgxW3qkYWK9rjXIkq7mvDLi1d32U=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

@@ -12,7 +12,7 @@ require (
 	github.com/hollis-labs/libs/mcp/plugin-mcp v0.3.0
 	github.com/hollis-labs/libs/mesh/core v0.6.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
-	github.com/hollis-labs/libs/workflow/engine v0.1.0
+	github.com/hollis-labs/libs/workflow/engine v0.2.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
