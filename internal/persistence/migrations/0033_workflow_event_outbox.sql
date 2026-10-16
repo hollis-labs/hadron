@@ -2,6 +2,7 @@
 -- the same transaction as the event (CW-20261016-0141 S2). Empty unless the
 -- exporter is enabled. Additive; migrations here are forward-only, so to roll
 -- back run DROP TABLE workflow_event_outbox; DROP TABLE workflow_event_outbox_counter;
+-- DROP INDEX workflow_event_outbox_skipped_open;
 -- DROP TABLE workflow_event_outbox_skipped;
 -- (nothing else references them).
 CREATE TABLE workflow_event_outbox (
@@ -27,6 +28,10 @@ CREATE TABLE workflow_event_outbox_skipped (
     run_id TEXT NOT NULL,
     run_sequence INTEGER NOT NULL,
     error_class TEXT NOT NULL,
-    repaired_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    -- NULL until a repair pass has re-exported the event; the open rows are the
+    -- repair worklist.
+    repaired_at TEXT,
     PRIMARY KEY (run_id, run_sequence)
 );
+CREATE INDEX workflow_event_outbox_skipped_open ON workflow_event_outbox_skipped(created_at) WHERE repaired_at IS NULL;

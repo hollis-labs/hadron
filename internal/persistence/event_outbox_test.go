@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -194,13 +195,18 @@ func TestAnEnvelopeFailureNeverRejectsTheWorkflowMutation(t *testing.T) {
 			if err := store.DB().QueryRow(`SELECT last_seq FROM workflow_event_outbox_counter`).Scan(&counter); err != nil || counter != int64(good) {
 				t.Fatalf("the counter advanced for a skipped event: %d (%v)", counter, err)
 			}
-			var gotClass, repaired string
+			var gotClass, created string
+			var repaired sql.NullString
 			var runSeq int64
-			if err := store.DB().QueryRow(`SELECT run_sequence, error_class, repaired_at FROM workflow_event_outbox_skipped WHERE run_id = ?`, string(run.ID)).Scan(&runSeq, &gotClass, &repaired); err != nil {
+			if err := store.DB().QueryRow(`SELECT run_sequence, error_class, created_at, repaired_at FROM workflow_event_outbox_skipped WHERE run_id = ?`, string(run.ID)).Scan(&runSeq, &gotClass, &created, &repaired); err != nil {
 				t.Fatalf("no skipped row: %v", err)
 			}
-			if gotClass != test.class || repaired == "" || failed.Event == nil || uint64(runSeq) != failed.Event.Sequence {
-				t.Fatalf("skipped row = seq %d class %q repaired_at %q; want seq %d class %q", runSeq, gotClass, repaired, failed.Event.Sequence, test.class)
+			if gotClass != test.class || created == "" || repaired.Valid || failed.Event == nil || uint64(runSeq) != failed.Event.Sequence {
+				t.Fatalf("skipped row = seq %d class %q repaired_at %v (must be NULL: the row is open for repair); want seq %d class %q", runSeq, gotClass, repaired, failed.Event.Sequence, test.class)
+			}
+			var open int
+			if err := store.DB().QueryRow(`SELECT COUNT(*) FROM workflow_event_outbox_skipped WHERE repaired_at IS NULL`).Scan(&open); err != nil || open != 1 {
+				t.Fatalf("open skipped rows = %d (%v); want 1", open, err)
 			}
 			if state.EventOutboxSkipped() != 1 {
 				t.Fatalf("skipped counter = %d", state.EventOutboxSkipped())

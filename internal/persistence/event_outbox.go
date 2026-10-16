@@ -124,9 +124,9 @@ func (o *eventOutbox) observe(ctx context.Context, query workflowSQL, ev workflo
 		return fmt.Errorf("outbox release after rollback: %w", err)
 	}
 	if _, err := query.ExecContext(ctx, `
-INSERT INTO workflow_event_outbox_skipped(run_id, run_sequence, error_class, repaired_at)
+INSERT INTO workflow_event_outbox_skipped(run_id, run_sequence, error_class, created_at)
 VALUES (?, ?, ?, ?)
-ON CONFLICT(run_id, run_sequence) DO UPDATE SET error_class = excluded.error_class, repaired_at = excluded.repaired_at`,
+ON CONFLICT(run_id, run_sequence) DO UPDATE SET error_class = excluded.error_class, created_at = excluded.created_at, repaired_at = NULL`,
 		string(ev.RunID), int64(ev.Sequence), class, workflowTime(o.now())); err != nil { // #nosec G115 -- a positive sequence
 		return fmt.Errorf("record skipped outbox entry: %w", err)
 	}
