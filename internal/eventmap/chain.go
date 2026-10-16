@@ -63,6 +63,9 @@ func (m *Mapper) MapWorkflowEvent(ctx context.Context, ev workflowruntime.Event,
 	if !ok {
 		return nil, "", false, nil
 	}
+	if cause := causationFrom(ctx); cause != "" && e.Kind == KindRunStateChanged && e.Corr != nil {
+		e.Corr.CausationID = cause
+	}
 	return m.finish(ctx, e, generation, seq)
 }
 

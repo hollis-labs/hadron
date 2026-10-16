@@ -12,10 +12,18 @@
 // outside workflow_events, in its own transaction, so the same outbox write happens
 // there (persistence.WorkflowHostStore.RecordPolicyEvaluation): gate.evaluated with
 // gate hadron.admission (kind custom), allow -> pass, deny -> fail, confirm ->
-// blocked. An allow's subject is the run it admits (msg://workflow_run/hadron/<run>);
-// a deny, which creates no run, and a confirm, which may never, carry
-// msg://workflow_admission/hadron/<decision id>. Its outbox key is (decision id,
-// run_sequence 0), which no workflow event can take (those start at 1). The
+// blocked. EVERY admission event, allow included, has the subject
+// msg://workflow_admission/hadron/<decision id>: a subject must name something that
+// exists, and a run may not (a dry run, a confirm). The run an allow goes on to create
+// cites the admission event as its cause: its first run.state_changed carries
+// corr.causation_id = the admission event's id (architect ruling
+// hadron_admission_event_subject_2026_10_16).
+//
+// The outbox key of an admission is (decision id, run_sequence 0): in
+// workflow_event_outbox and in workflow_event_outbox_skipped the run_id column holds
+// the DECISION id for these rows, and no workflow event can take sequence 0 (they
+// start at 1). A repair pass must re-derive a sequence-0 skipped row from the policy
+// decision (workflow_host_policy_decisions), not from workflow_events. The
 // decision's reason and attributes are free text and never leave.
 //
 // node.* events are NOT exported: they stay in Hadron's own subscription, and

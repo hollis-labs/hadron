@@ -1,6 +1,7 @@
 package eventmap
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -128,21 +129,19 @@ type Admission struct {
 // AdmissionGateID is the gate id of the admission policy evaluation.
 const AdmissionGateID = "hadron.admission"
 
-// admissionSubject is the one place that decides what an admission event is about:
-// the run it admits for an allow, the evaluation itself otherwise (a deny creates no
-// run, a confirm may never). A ruling on the dry-run case is a change here.
+// admissionSubject is the one place that decides what an admission event is about.
+// Every admission result, allow included, is about the evaluation: a subject must
+// name something that exists, and a run may not (a dry run, a confirm). The run an
+// allow goes on to create points back at this event through corr.causation_id on its
+// first run.state_changed (see WithCausation).
 func admissionSubject(a Admission) (subjectType, subjectID, subjectURN string) {
-	if a.Outcome == "allow" {
-		return "workflow_run", a.RunID, "msg://workflow_run/hadron/" + url.PathEscape(a.RunID)
-	}
 	return "workflow_admission", a.DecisionID, "msg://workflow_admission/hadron/" + url.PathEscape(a.DecisionID)
 }
 
 // buildAdmission maps an admission decision to gate.evaluated (gate hadron.admission,
 // kind custom): allow is pass, deny is fail, confirm is blocked. An allow is followed
-// by the run it admits, so its subject is that run. A deny creates no run, and a
-// confirm may never, so those are about the evaluation itself. The reason and the
-// attributes of the decision are free text and never leave.
+// by a run, which later cites this event as its cause. The reason and the attributes
+// of the decision are free text and never leave.
 func buildAdmission(a Admission) (runtimeevents.Event, bool) {
 	var result string
 	switch a.Outcome {
@@ -172,4 +171,18 @@ func buildAdmission(a Admission) (runtimeevents.Event, bool) {
 		"result":  result, "blocking": result == "blocked",
 	})
 	return e, true
+}
+
+type causationKey struct{}
+
+// WithCausation returns a context that makes the mapper set corr.causation_id on the
+// run.state_changed it builds to eventID: the id of the admission event that caused
+// the run. The caller decides when it applies (the run's first state change).
+func WithCausation(ctx context.Context, eventID string) context.Context {
+	return context.WithValue(ctx, causationKey{}, eventID)
+}
+
+func causationFrom(ctx context.Context) string {
+	id, _ := ctx.Value(causationKey{}).(string)
+	return id
 }

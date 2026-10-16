@@ -64,6 +64,31 @@ func mapAdmission(t *testing.T, a Admission) (runtimeevents.Event, bool) {
 	return e, true
 }
 
+// The causation context sets corr.causation_id on a run.state_changed and nowhere
+// else.
+func TestCausationIsSetOnRunStateChangedOnly(t *testing.T) {
+	ctx := WithCausation(context.Background(), "evt_cause")
+	raw, _, ok, err := newMapper(t).MapWorkflowEvent(ctx, runStatus("pending", "running"), 1, 1)
+	if err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	var e runtimeevents.Event
+	_ = json.Unmarshal(raw, &e)
+	if e.Corr == nil || e.Corr.CausationID != "evt_cause" || e.Corr.CorrelationID != "run-1" {
+		t.Fatalf("corr = %+v", e.Corr)
+	}
+	gate := workflowruntime.Event{Sequence: 3, RunID: "run-1", Type: workflowruntime.EventWaitSuspended, OccurredAt: at, Attributes: map[string]string{"kind": "gate", "wait_id": "w1", "wake_source": "gate"}}
+	raw, _, ok, err = newMapper(t).MapWorkflowEvent(ctx, gate, 1, 2)
+	if err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	var g runtimeevents.Event
+	_ = json.Unmarshal(raw, &g)
+	if g.Corr == nil || g.Corr.CausationID != "" {
+		t.Fatalf("a gate event carries causation: %+v", g.Corr)
+	}
+}
+
 // An admission with an unknown outcome, or without ids, is not exported rather than
 // guessed at; a known outcome maps allow to pass, deny to fail and confirm to blocked.
 func TestAdmissionOutcomesMapToGateResults(t *testing.T) {
@@ -93,6 +118,10 @@ func TestAdmissionOutcomesMapToGateResults(t *testing.T) {
 	e, _ := mapAdmission(t, Admission{DecisionID: "dec/1 x", RunID: "run-1", Outcome: "deny", DecidedAt: at})
 	if e.Subject != "msg://workflow_admission/hadron/dec%2F1%20x" {
 		t.Errorf("subject not escaped: %q", e.Subject)
+	}
+	// Allow too is about the evaluation, never the run (which may not exist).
+	if a, _ := mapAdmission(t, Admission{DecisionID: "dec-1", RunID: "run-1", Outcome: "allow", DecidedAt: at}); a.Subject != "msg://workflow_admission/hadron/dec-1" {
+		t.Errorf("an allow subject = %q", a.Subject)
 	}
 }
 

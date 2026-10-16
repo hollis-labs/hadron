@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/eventmap"
@@ -57,19 +58,17 @@ type admissionEnvelope struct {
 // The admission policy decision is persisted by the host store in its own
 // transaction, outside workflow_events. With the outbox on, the same transaction
 // writes a gate.evaluated (hadron.admission): allow is pass, deny is fail, confirm
-// is blocked. A deny (and a confirm) has no run, so it is about the evaluation; an
-// allow is followed by its run. The decision's reason and attributes never leave.
+// is blocked, and all three are about the evaluation. The decision's reason and
+// attributes never leave.
 func TestAdmissionDecisionIsExportedInItsOwnTransaction(t *testing.T) {
 	for _, test := range []struct {
-		outcome         hoststate.PolicyOutcome
-		result          string
-		blocking        bool
-		subjectType     string
-		subjectIsRunURN bool
+		outcome  hoststate.PolicyOutcome
+		result   string
+		blocking bool
 	}{
-		{hoststate.PolicyAllow, "pass", false, "workflow_run", true},
-		{hoststate.PolicyDeny, "fail", false, "workflow_admission", false},
-		{hoststate.PolicyConfirm, "blocked", true, "workflow_admission", false},
+		{hoststate.PolicyAllow, "pass", false},
+		{hoststate.PolicyDeny, "fail", false},
+		{hoststate.PolicyConfirm, "blocked", true},
 	} {
 		t.Run(string(test.outcome), func(t *testing.T) {
 			store, host := admissionHost(t, string(test.outcome), true)
@@ -89,15 +88,14 @@ func TestAdmissionDecisionIsExportedInItsOwnTransaction(t *testing.T) {
 			if err := json.Unmarshal(entry.Envelope, &env); err != nil {
 				t.Fatal(err)
 			}
+			// Every admission result, allow included, is about the evaluation (architect
+			// ruling hadron_admission_event_subject_2026_10_16): the run may not exist.
 			wantSubject := "msg://workflow_admission/hadron/" + evaluation.Decision.ID
 			wantSubjectID := evaluation.Decision.ID
-			if test.subjectIsRunURN {
-				wantSubject, wantSubjectID = "msg://workflow_run/hadron/"+string(evaluation.Decision.RunID), string(evaluation.Decision.RunID)
-			}
 			if env.Kind != "gate.evaluated" || env.Subject != wantSubject || env.Source.Channel != "workflow_admission" ||
 				env.Payload.Gate["id"] != "hadron.admission" || env.Payload.Gate["kind"] != "custom" ||
 				env.Payload.Result != test.result || env.Payload.Block != test.blocking ||
-				env.Payload.Subject["type"] != test.subjectType || env.Payload.Subject["id"] != wantSubjectID {
+				env.Payload.Subject["type"] != "workflow_admission" || env.Payload.Subject["id"] != wantSubjectID {
 				t.Fatalf("envelope = %s", entry.Envelope)
 			}
 			if strings.Contains(string(entry.Envelope), "SECRET") {
@@ -190,5 +188,67 @@ func TestAdmissionAndWorkflowEventsShareOneSequence(t *testing.T) {
 	}
 	if kinds := envelopeKinds(t, entries); kinds[0] != "gate.evaluated" || kinds[1] != "run.state_changed" {
 		t.Fatalf("kinds = %v", kinds)
+	}
+}
+
+// The run an allow goes on to create cites the admission event as its cause: its
+// FIRST run.state_changed carries corr.causation_id = the admission event's id. Later
+// state changes, a run with no exported admission, and a denied evaluation carry none.
+func TestTheRunAnAllowCreatesCitesTheAdmissionEventAsItsCause(t *testing.T) {
+	store, host := admissionHost(t, "cause", true)
+	state, err := NewWorkflowStateStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableOutbox(t, state)
+
+	evaluation := admissionEvaluation(t, "adm-cause", hoststate.PolicyAllow)
+	evaluation.Decision.RunID, evaluation.Facts.RunID = "caused-run", "caused-run"
+	if _, _, recordErr := host.RecordPolicyEvaluation(t.Context(), evaluation); recordErr != nil {
+		t.Fatal(recordErr)
+	}
+	admission, err := state.EventOutboxAfter(t.Context(), 0, 10)
+	if err != nil || len(admission) != 1 {
+		t.Fatalf("admission entries = %+v, %v", admission, err)
+	}
+
+	base := workflowTestTime()
+	run := createWorkflowTestRun(t, state, "caused-run", base)
+	running, err := state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunRunning, At: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: running.Snapshot.Generation, To: workflowruntime.RunSucceeded, At: base.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+
+	other := createWorkflowTestRun(t, state, "uncaused-run", base)
+	if _, err = state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: other.ID, ExpectedGeneration: other.Generation, To: workflowruntime.RunRunning, At: base}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := state.EventOutboxAfter(t.Context(), admission[0].Seq, 10)
+	if err != nil || len(entries) != 3 {
+		t.Fatalf("run entries = %+v, %v; want 3", entries, err)
+	}
+	causation := func(e OutboxEntry) string {
+		var env struct {
+			Corr struct {
+				CausationID string `json:"causation_id"`
+			} `json:"corr"`
+		}
+		if err := json.Unmarshal(e.Envelope, &env); err != nil {
+			t.Fatal(err)
+		}
+		return env.Corr.CausationID
+	}
+	if got := causation(entries[0]); got != admission[0].EventID {
+		t.Fatalf("first state change causation = %q; want the admission event %q", got, admission[0].EventID)
+	}
+	if got := causation(entries[1]); got != "" {
+		t.Fatalf("a later state change carries causation %q", got)
+	}
+	if got := causation(entries[2]); got != "" {
+		t.Fatalf("a run with no admission carries causation %q", got)
 	}
 }

@@ -135,6 +135,33 @@ func admissionKey(a eventmap.Admission) outboxKey {
 	return outboxKey{runID: a.DecisionID, sequence: 0, what: "admission"}
 }
 
+// admissionCause returns the id of the admission event that led to the run of ev, when
+// ev is the run's first state change and an admission decision for that run id was
+// exported. It is empty otherwise (no decision, or an earlier state change already
+// carried the cause), and any lookup error just means no causation: it must never
+// fail the write. The decision row carries the run id it was made for, and the
+// admission envelope sits in the outbox under (decision id, 0).
+func admissionCause(ctx context.Context, query workflowSQL, ev workflowruntime.Event) string {
+	if ev.Type != workflowruntime.EventRunStatusChanged && ev.Type != workflowruntime.EventRunCancellationRequested {
+		return ""
+	}
+	var earlier int
+	if err := query.QueryRowContext(ctx, `
+SELECT COUNT(1) FROM workflow_events
+WHERE run_id = ? AND sequence < ? AND event_type IN (?, ?)`,
+		string(ev.RunID), int64(ev.Sequence), workflowruntime.EventRunStatusChanged, workflowruntime.EventRunCancellationRequested).Scan(&earlier); err != nil || earlier != 0 { // #nosec G115 -- a positive sequence
+		return ""
+	}
+	var eventID string
+	if err := query.QueryRowContext(ctx, `
+SELECT o.event_id FROM workflow_host_policy_decisions d
+JOIN workflow_event_outbox o ON o.run_id = d.decision_id AND o.run_sequence = 0
+WHERE d.run_id = ? ORDER BY d.decided_at, d.decision_id LIMIT 1`, string(ev.RunID)).Scan(&eventID); err != nil {
+		return ""
+	}
+	return eventID
+}
+
 func eventKey(ev workflowruntime.Event) outboxKey {
 	return outboxKey{runID: string(ev.RunID), sequence: int64(ev.Sequence), what: ev.Type} // #nosec G115 -- a positive sequence
 }
@@ -149,7 +176,11 @@ func eventKey(ev workflowruntime.Event) outboxKey {
 // the skipped row) fails the write.
 func (o *eventOutbox) observe(ctx context.Context, query workflowSQL, ev workflowruntime.Event) error {
 	return o.guard(ctx, query, eventKey(ev), func(seq uint64) ([]byte, string, bool, error) {
-		return o.mapper.MapWorkflowEvent(ctx, ev, o.generation, seq)
+		mapCtx := ctx
+		if cause := admissionCause(ctx, query, ev); cause != "" {
+			mapCtx = eventmap.WithCausation(ctx, cause)
+		}
+		return o.mapper.MapWorkflowEvent(mapCtx, ev, o.generation, seq)
 	})
 }
 
