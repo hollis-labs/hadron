@@ -72,13 +72,13 @@ func (s *WorkflowStateStore) EnableEventOutbox(ctx context.Context, mapper Outbo
 }
 
 // generationNumber is the envelope generation derived from the store generation:
-// its first 60 bits (15 hex digits). It is stable for a database and changes
+// its first 52 bits (13 hex digits), nonzero and below 2^53 so it is exact in every JSON reader. It is stable for a database and changes
 // when a different one is created or restored over it.
 func generationNumber(storeGeneration string) (uint64, error) {
-	if len(storeGeneration) < 15 {
+	if len(storeGeneration) < 13 {
 		return 0, fmt.Errorf("store generation %q is too short", storeGeneration)
 	}
-	n, err := strconv.ParseUint(storeGeneration[:15], 16, 64)
+	n, err := strconv.ParseUint(storeGeneration[:13], 16, 64)
 	if err != nil || n == 0 {
 		return 0, fmt.Errorf("store generation %q is not hexadecimal", storeGeneration)
 	}

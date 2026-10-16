@@ -78,29 +78,6 @@ func TestRunStatusBecomesRunStateChanged(t *testing.T) {
 	}
 }
 
-func TestAttemptFinishedBecomesStepExecuted(t *testing.T) {
-	inv := workflowruntime.NodeInvocationID{RunID: "run-1", NodeID: "build", Iteration: "item-3"}
-	att := workflowruntime.AttemptID{Invocation: inv, Number: 2}
-	for status, want := range map[string]string{"succeeded": "ok", "failed": "failed", "canceled": "skipped", "timed_out": "failed"} {
-		e, ok := mapOne(t, workflowruntime.Event{Sequence: 9, RunID: "run-1", Invocation: &inv, Attempt: &att, Type: workflowruntime.EventNodeAttemptFinished, OccurredAt: at,
-			Attributes: map[string]string{"attempt_status": status, "failure_code": "boom", "executor_target": "https://SECRET-host", "executor_kind": "script"}})
-		if !ok || e.Kind != KindStepExecuted {
-			t.Fatalf("%s: %+v", status, e)
-		}
-		var p map[string]any
-		_ = json.Unmarshal(e.Payload, &p)
-		if p["outcome"] != want || p["step_id"] != "build/item-3" || p["node_id"] != "build" || p["attempt"] != float64(2) || p["failure_code"] != "boom" || p["run_sequence"] != float64(9) {
-			t.Fatalf("%s: payload = %v", status, p)
-		}
-		if strings.Contains(string(e.Payload), "SECRET") || strings.Contains(string(e.Payload), "script") {
-			t.Fatalf("executor details leaked: %s", e.Payload)
-		}
-		if e.Class.Category != "step" || e.Class.PayloadSchema != schemaStepExecuted {
-			t.Fatalf("class = %+v", e.Class)
-		}
-	}
-}
-
 func TestOnlyAGateWaitSuspensionBecomesAGateEvaluatedBlocked(t *testing.T) {
 	inv := workflowruntime.NodeInvocationID{RunID: "run-1", NodeID: "approve"}
 	gate, ok := mapOne(t, workflowruntime.Event{Sequence: 3, RunID: "run-1", Invocation: &inv, Type: workflowruntime.EventWaitSuspended, OccurredAt: at,
@@ -117,6 +94,12 @@ func TestOnlyAGateWaitSuspensionBecomesAGateEvaluatedBlocked(t *testing.T) {
 	if !strings.Contains(strings.Join(gate.Class.Labels, ","), "gate-blocked") {
 		t.Fatalf("labels = %v", gate.Class.Labels)
 	}
+	// A gate wait that is not a human decision is a custom gate.
+	custom, ok := mapOne(t, workflowruntime.Event{Sequence: 4, RunID: "run-1", Invocation: &inv, Type: workflowruntime.EventWaitSuspended, OccurredAt: at,
+		Attributes: map[string]string{"kind": "gate", "wait_id": "wait-10", "wake_source": "callback"}})
+	if !ok || !strings.Contains(string(custom.Payload), `"kind":"custom"`) {
+		t.Fatalf("a non-human gate wait = %+v ok=%v", custom, ok)
+	}
 	if _, ok := mapOne(t, workflowruntime.Event{Sequence: 3, RunID: "run-1", Invocation: &inv, Type: workflowruntime.EventWaitSuspended, OccurredAt: at,
 		Attributes: map[string]string{"kind": "timer", "wait_id": "wait-1"}}); ok {
 		t.Fatal("a timer wait was exported as a gate")
@@ -127,7 +110,7 @@ func TestOnlyAGateWaitSuspensionBecomesAGateEvaluatedBlocked(t *testing.T) {
 // explicit decision) does not become a pass or fail.
 func TestEveryOtherEventTypeIsNotExported(t *testing.T) {
 	for _, typ := range []string{
-		workflowruntime.EventNodeStatusChanged, workflowruntime.EventNodeAttemptStarted, workflowruntime.EventWaitResumed,
+		workflowruntime.EventNodeStatusChanged, workflowruntime.EventNodeAttemptStarted, workflowruntime.EventNodeAttemptFinished, workflowruntime.EventWaitResumed,
 		workflowruntime.EventWaitTimedOut, workflowruntime.EventRetryScheduled, workflowruntime.EventFanOutExpanded,
 		workflowruntime.EventRunCancellationRequested, workflowruntime.EventCrashReconciled, "adapter.observation",
 	} {
@@ -141,11 +124,9 @@ func TestEveryOtherEventTypeIsNotExported(t *testing.T) {
 // kind, and the schema id on the envelope is the catalog's.
 func TestPayloadsValidateAgainstTheCatalogSchemas(t *testing.T) {
 	inv := workflowruntime.NodeInvocationID{RunID: "run-1", NodeID: "n"}
-	att := workflowruntime.AttemptID{Invocation: inv, Number: 1}
 	events := []workflowruntime.Event{
 		runStatus("pending", "running"), runStatus("", "succeeded"),
-		{Sequence: 2, RunID: "run-1", Invocation: &inv, Attempt: &att, Type: workflowruntime.EventNodeAttemptFinished, OccurredAt: at, Attributes: map[string]string{"attempt_status": "succeeded"}},
-		{Sequence: 3, RunID: "run-1", Invocation: &inv, Type: workflowruntime.EventWaitSuspended, OccurredAt: at, Attributes: map[string]string{"kind": "gate", "wait_id": "w1"}},
+		{Sequence: 3, RunID: "run-1", Invocation: &inv, Type: workflowruntime.EventWaitSuspended, OccurredAt: at, Attributes: map[string]string{"kind": "gate", "wait_id": "w1", "wake_source": "gate"}},
 	}
 	for _, ev := range events {
 		e, ok := mapOne(t, ev)

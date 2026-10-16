@@ -87,10 +87,8 @@ func TestProductionRuntimeWritesTheEventOutboxOnlyWhenSettingsEnableIt(t *testin
 	sett.Events.Outbox = true
 	on := runTransformToSuccess(t, sett)
 	kinds := strings.Join(outboxKinds(t, on), ",")
-	for _, want := range []string{"run.state_changed", "step.executed"} {
-		if !strings.Contains(kinds, want) {
-			t.Fatalf("outbox kinds = %q, want %s among them", kinds, want)
-		}
+	if !strings.Contains(kinds, "run.state_changed") || strings.Contains(kinds, "step.executed") {
+		t.Fatalf("outbox kinds = %q: want run.state_changed and no step.executed (node.* stays local)", kinds)
 	}
 	// The run succeeded, so the last run.state_changed says so.
 	var to string

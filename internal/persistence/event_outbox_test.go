@@ -92,7 +92,8 @@ func TestEnvelopesAreWrittenInTheSameTransactionAsTheirEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"run.state_changed", "step.executed", "run.state_changed"}
+	// node.* events (the finished attempt) are not exported.
+	want := []string{"run.state_changed", "run.state_changed"}
 	if got := envelopeKinds(t, entries); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("kinds = %v, want %v", got, want)
 	}
@@ -114,7 +115,7 @@ func TestEnvelopesAreWrittenInTheSameTransactionAsTheirEvents(t *testing.T) {
 			t.Fatalf("entry %d: payload run_sequence %d, column %d", i, env.Payload.RunSequence, e.RunSequence)
 		}
 		var typ string
-		if typeErr := store.DB().QueryRow(`SELECT event_type FROM workflow_events WHERE run_id = ? AND sequence = ?`, string(run.ID), int64(e.RunSequence)).Scan(&typ); typeErr != nil || (typ != "run.status_changed" && typ != "node.attempt_finished") {
+		if typeErr := store.DB().QueryRow(`SELECT event_type FROM workflow_events WHERE run_id = ? AND sequence = ?`, string(run.ID), int64(e.RunSequence)).Scan(&typ); typeErr != nil || typ != "run.status_changed" {
 			t.Fatalf("entry %d points at a %q event (%v)", i, typ, typeErr)
 		}
 	}
@@ -191,5 +192,21 @@ func TestOutboxSequencesAreNeverReusedAfterTrimming(t *testing.T) {
 	entries, err := state.EventOutboxAfter(t.Context(), 0, 0)
 	if err != nil || len(entries) != 1 || entries[0].Seq != 2 {
 		t.Fatalf("entries = %+v, %v: the sequence came back after the tail was trimmed", entries, err)
+	}
+}
+
+// The envelope generation must be exact in every JSON reader: nonzero and below 2^53.
+func TestGenerationNumberIsJSONSafe(t *testing.T) {
+	for _, hex := range []string{strings.Repeat("f", 32), "0123456789abcdef0123456789abcdef", strings.Repeat("1", 32)} {
+		n, err := generationNumber(hex)
+		if err != nil || n == 0 || n >= 1<<53 {
+			t.Errorf("%s -> %d, %v", hex, n, err)
+		}
+	}
+	if _, err := generationNumber(strings.Repeat("0", 32)); err == nil {
+		t.Error("a zero generation was accepted")
+	}
+	if _, err := generationNumber("short"); err == nil {
+		t.Error("a short generation was accepted")
 	}
 }
