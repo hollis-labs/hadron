@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
 	"github.com/hollis-labs/libs/workflow/engine/conformance"
 	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
@@ -48,7 +49,7 @@ func (h hadronConformanceHost) CompensationFactory() conformance.Factory     { r
 
 func (h hadronConformanceHost) factory() conformance.Factory {
 	return func() (conformance.Runner, error) {
-		db, err := persistence.Open(filepath.Join(h.t.TempDir(), "workflow-conformance.db"))
+		db, err := testdb.Open(filepath.Join(h.t.TempDir(), "workflow-conformance.db"), persistence.Open)
 		if err != nil {
 			return nil, fmt.Errorf("open production workflow store: %w", err)
 		}

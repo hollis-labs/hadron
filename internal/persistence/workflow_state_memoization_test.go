@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/testdb"
 	"github.com/hollis-labs/libs/workflow/engine/graph"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 	"github.com/hollis-labs/libs/workflow/engine/runtime/inmemory"
@@ -118,7 +119,7 @@ func publishMemoOrderingEntry(t *testing.T, store memoOrderingStore, plan workfl
 func TestWorkflowSQLiteMemoPinReuseReopenAndContention(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memo-pin.db")
 	store, first := openWorkflowStateTest(t, path)
-	secondStore, err := Open(path)
+	secondStore, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +297,7 @@ func workflowMemoValue(t *testing.T, payload string) values.Value {
 
 func mustWorkflowStateStore(t *testing.T, path string) *WorkflowStateStore {
 	t.Helper()
-	store, err := Open(path)
+	store, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}

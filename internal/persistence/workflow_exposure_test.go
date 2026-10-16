@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/testdb"
 	"github.com/hollis-labs/libs/workflow/engine/graph"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 	"github.com/hollis-labs/libs/workflow/engine/values"
@@ -16,7 +17,7 @@ import (
 
 func TestWorkflowExposureStoreRoundTripReopenAndNoRawToken(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "exposure.db")
-	store, err := Open(path)
+	store, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestWorkflowExposureStoreRoundTripReopenAndNoRawToken(t *testing.T) {
 		t.Fatal(closeErr)
 	}
 
-	reopened, err := Open(path)
+	reopened, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,12 +89,12 @@ func TestWorkflowExposureStoreRoundTripReopenAndNoRawToken(t *testing.T) {
 
 func TestWorkflowExposureStoreCASAndAssignedProfileGuardAcrossHandles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "exposure.db")
-	first, err := Open(path)
+	first, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = first.Close() })
-	second, err := Open(path)
+	second, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +160,7 @@ func TestWorkflowExposureStoreCASAndAssignedProfileGuardAcrossHandles(t *testing
 }
 
 func TestWorkflowExposureStoreRejectsMissingProfileAndDuplicateCredential(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "exposure.db"))
+	store, err := testdb.Open(filepath.Join(t.TempDir(), "exposure.db"), Open)
 	if err != nil {
 		t.Fatal(err)
 	}

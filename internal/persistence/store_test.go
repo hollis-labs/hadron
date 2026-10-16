@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/testdb"
 	"github.com/hollis-labs/libs/workflow/engine/graph"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
@@ -349,7 +350,7 @@ func hasColumn(t *testing.T, store *Store, table, column string) bool {
 
 func TestRunAndScheduleCRUD(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hadron.db")
-	store, openErr := Open(dbPath)
+	store, openErr := testdb.Open(dbPath, Open)
 	if openErr != nil {
 		t.Fatalf("open store: %v", openErr)
 	}
@@ -434,7 +435,7 @@ func TestOpen_RequiresPath(t *testing.T) {
 
 func TestUpdateRunStatus_LeavesNullErrorWhenNil(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hadron.db")
-	store, err := Open(dbPath)
+	store, err := testdb.Open(dbPath, Open)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -462,7 +463,7 @@ func TestUpdateRunStatus_LeavesNullErrorWhenNil(t *testing.T) {
 
 func TestRunEventsCRUD(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hadron.db")
-	store, openErr := Open(dbPath)
+	store, openErr := testdb.Open(dbPath, Open)
 	if openErr != nil {
 		t.Fatalf("open store: %v", openErr)
 	}
@@ -502,7 +503,7 @@ func TestRunEventsCRUD(t *testing.T) {
 
 func TestPipelineRunsAndStagesCRUD(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hadron.db")
-	store, openErr := Open(dbPath)
+	store, openErr := testdb.Open(dbPath, Open)
 	if openErr != nil {
 		t.Fatalf("open store: %v", openErr)
 	}
@@ -571,7 +572,7 @@ func TestPipelineRunsAndStagesCRUD(t *testing.T) {
 
 func TestUpdateScheduleEnabledAndNext_PreservesNextRunWhenNil(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hadron.db")
-	store, openErr := Open(dbPath)
+	store, openErr := testdb.Open(dbPath, Open)
 	if openErr != nil {
 		t.Fatalf("open store: %v", openErr)
 	}
@@ -645,7 +646,7 @@ func TestUpdateScheduleEnabledAndNext_PreservesNextRunWhenNil(t *testing.T) {
 
 func TestHumanGateLifecycle(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hadron.db")
-	store, openErr := Open(dbPath)
+	store, openErr := testdb.Open(dbPath, Open)
 	if openErr != nil {
 		t.Fatalf("open store: %v", openErr)
 	}

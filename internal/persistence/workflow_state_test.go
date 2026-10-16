@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/testdb"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 	"github.com/hollis-labs/libs/workflow/engine/values"
 	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
@@ -521,7 +522,7 @@ func TestWorkflowStateSkippedExplanationAndBlockedRefreshParity(t *testing.T) {
 func TestWorkflowStateClaimsContentionExpiryAndNonReady(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hadron.db")
 	firstStore, first := openWorkflowStateTest(t, dbPath)
-	secondStore, err := Open(dbPath)
+	secondStore, err := testdb.Open(dbPath, Open)
 	if err != nil {
 		t.Fatalf("open second handle: %v", err)
 	}
@@ -947,7 +948,7 @@ func TestWorkflowStateSaveValuesEnforcesSecretAndRetentionInvariantsBeforeWrite(
 
 func openWorkflowStateTest(t *testing.T, path string) (*Store, *WorkflowStateStore) {
 	t.Helper()
-	store, err := Open(path)
+	store, err := testdb.Open(path, Open)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
 	}
@@ -1035,7 +1036,7 @@ func workflowTestOpenWaitRecord(t *testing.T, id workflowruntime.WaitID, token s
 func TestWorkflowStateEventSequenceConcurrentPerRun(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "hadron.db")
 	firstStore, first := openWorkflowStateTest(t, dbPath)
-	secondStore, err := Open(dbPath)
+	secondStore, err := testdb.Open(dbPath, Open)
 	if err != nil {
 		t.Fatalf("open second store: %v", err)
 	}
