@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
@@ -50,6 +52,7 @@ type eventOutbox struct {
 	mapper     OutboxMapper
 	generation uint64
 	now        func() time.Time
+	skipped    atomic.Uint64
 }
 
 // EnableEventOutbox starts writing envelopes for the events mapper selects, in
@@ -85,28 +88,97 @@ func generationNumber(storeGeneration string) (uint64, error) {
 	return n, nil
 }
 
+// Skip classes recorded when an envelope could not be written. A mapper may name
+// its own by returning an error with a SkipClass() string method.
+const (
+	skipMapper = "mapper_error"
+	skipPanic  = "mapper_panic"
+	skipInsert = "insert_error"
+)
+
+type skipClasser interface{ SkipClass() string }
+
+// observe writes the envelope for ev inside the caller's transaction, under a
+// SAVEPOINT. Recording never rejects a valid mutation (platform rule, CW-0149): if
+// the envelope cannot be produced or stored, only the envelope work is rolled back
+// to the savepoint, a workflow_event_outbox_skipped row says which event and why,
+// the failure is logged at ERROR and counted, and nil is returned so the workflow
+// event commits. The sequence counter is not advanced for a skipped event. Only a
+// database error in the outer transaction itself (the savepoint, the rollback, or
+// the skipped row) fails the write.
 func (o *eventOutbox) observe(ctx context.Context, query workflowSQL, ev workflowruntime.Event) error {
+	if _, err := query.ExecContext(ctx, `SAVEPOINT workflow_event_outbox`); err != nil {
+		return fmt.Errorf("outbox savepoint: %w", err)
+	}
+	class, cause := o.record(ctx, query, ev)
+	if cause == nil {
+		if _, err := query.ExecContext(ctx, `RELEASE workflow_event_outbox`); err != nil {
+			return fmt.Errorf("outbox release: %w", err)
+		}
+		return nil
+	}
+	if _, err := query.ExecContext(ctx, `ROLLBACK TO workflow_event_outbox`); err != nil {
+		return fmt.Errorf("outbox rollback: %w (after %s)", err, class)
+	}
+	if _, err := query.ExecContext(ctx, `RELEASE workflow_event_outbox`); err != nil {
+		return fmt.Errorf("outbox release after rollback: %w", err)
+	}
+	if _, err := query.ExecContext(ctx, `
+INSERT INTO workflow_event_outbox_skipped(run_id, run_sequence, error_class, repaired_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(run_id, run_sequence) DO UPDATE SET error_class = excluded.error_class, repaired_at = excluded.repaired_at`,
+		string(ev.RunID), int64(ev.Sequence), class, workflowTime(o.now())); err != nil { // #nosec G115 -- a positive sequence
+		return fmt.Errorf("record skipped outbox entry: %w", err)
+	}
+	o.skipped.Add(1)
+	slog.Error("event outbox skipped an event", "run_id", string(ev.RunID), "run_sequence", ev.Sequence, "event_type", ev.Type, "class", class)
+	return nil
+}
+
+// record maps ev and inserts its envelope. It returns the skip class and cause on
+// failure. A panic in the mapper is a failure like any other.
+func (o *eventOutbox) record(ctx context.Context, query workflowSQL, ev workflowruntime.Event) (class string, cause error) {
+	defer func() {
+		if r := recover(); r != nil {
+			class, cause = skipPanic, fmt.Errorf("mapper panicked: %T", r)
+		}
+	}()
 	var last int64
 	if err := query.QueryRowContext(ctx, `SELECT last_seq FROM workflow_event_outbox_counter WHERE id = 1`).Scan(&last); err != nil {
-		return fmt.Errorf("load outbox counter: %w", err)
+		return skipInsert, fmt.Errorf("load outbox counter: %w", err)
 	}
 	seq := uint64(last) + 1 // #nosec G115 -- last_seq is never negative
 	envelope, eventID, ok, err := o.mapper.MapWorkflowEvent(ctx, ev, o.generation, seq)
 	if err != nil {
-		return fmt.Errorf("map workflow event %s/%d: %w", ev.RunID, ev.Sequence, err)
+		class = skipMapper
+		var c skipClasser
+		if errors.As(err, &c) {
+			class = c.SkipClass()
+		}
+		return class, err
 	}
 	if !ok {
-		return nil
+		return "", nil
 	}
 	if _, err := query.ExecContext(ctx, `UPDATE workflow_event_outbox_counter SET last_seq = ? WHERE id = 1`, int64(seq)); err != nil { // #nosec G115 -- bounded by the table
-		return fmt.Errorf("advance outbox counter: %w", err)
+		return skipInsert, fmt.Errorf("advance outbox counter: %w", err)
 	}
 	if _, err := query.ExecContext(ctx, `
 INSERT INTO workflow_event_outbox(outbox_seq, run_id, run_sequence, event_id, envelope_json, created_at)
 VALUES (?, ?, ?, ?, ?, ?)`, int64(seq), string(ev.RunID), int64(ev.Sequence), eventID, string(envelope), workflowTime(o.now())); err != nil { // #nosec G115 -- bounded by the table
-		return fmt.Errorf("insert outbox entry: %w", err)
+		return skipInsert, fmt.Errorf("insert outbox entry: %w", err)
 	}
-	return nil
+	return "", nil
+}
+
+// EventOutboxSkipped is the number of events the outbox has skipped since this
+// store enabled it (see also the workflow_event_outbox_skipped table, which is
+// durable).
+func (s *WorkflowStateStore) EventOutboxSkipped() uint64 {
+	if s.outbox == nil {
+		return 0
+	}
+	return s.outbox.skipped.Load()
 }
 
 // EventOutboxAfter returns up to limit outbox entries with a sequence greater

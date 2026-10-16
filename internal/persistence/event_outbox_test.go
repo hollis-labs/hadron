@@ -136,16 +136,98 @@ func TestEnvelopesAreWrittenInTheSameTransactionAsTheirEvents(t *testing.T) {
 	}
 }
 
-// A failure while writing the envelope must undo the event with it, and a
-// transition that fails for another reason must leave no envelope behind.
-func TestAnEnvelopeAndItsEventCommitOrRollBackTogether(t *testing.T) {
-	store, state := outboxStore(t, filepath.Join(t.TempDir(), "atomic.db"))
+// Recording never rejects a valid mutation (platform rule, CW-0149): when the
+// envelope cannot be produced or stored, the workflow event still commits, the
+// envelope work is rolled back to the savepoint, the counter is not advanced, and a
+// skipped row says which event and why. Only a database error in the outer
+// transaction fails the write.
+func TestAnEnvelopeFailureNeverRejectsTheWorkflowMutation(t *testing.T) {
+	for name, test := range map[string]struct {
+		mapper OutboxMapper
+		class  string
+	}{
+		"mapper error":     {failingMapper{}, "mapper_error"},
+		"classed mapping":  {classedFailingMapper{class: "invalid_envelope"}, "invalid_envelope"},
+		"dropped by stage": {classedFailingMapper{class: "dropped"}, "dropped"},
+		"mapper panic":     {panickingMapper{}, "mapper_panic"},
+		"insert failure":   {nil, "insert_error"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store, state := outboxStore(t, filepath.Join(t.TempDir(), "skip.db"))
+			enableOutbox(t, state)
+			base := workflowTestTime()
+			run := createWorkflowTestRun(t, state, "skip", base)
+			running, err := state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunRunning, At: base})
+			if err != nil {
+				t.Fatal(err)
+			}
+			good := workflowRowCount(t, store, "workflow_event_outbox")
+			if good != 1 {
+				t.Fatalf("test setup: %d outbox rows after the first transition", good)
+			}
+			events := workflowRowCount(t, store, "workflow_events")
+
+			realMapper := state.outbox.mapper
+			state.outbox.mapper = test.mapper
+			if test.mapper == nil {
+				var firstID string
+				if err = store.DB().QueryRow(`SELECT event_id FROM workflow_event_outbox`).Scan(&firstID); err != nil {
+					t.Fatal(err)
+				}
+				state.outbox.mapper = duplicateIDMapper{id: firstID}
+			}
+			failed, err := state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: running.Snapshot.Generation, To: workflowruntime.RunFailed, At: base.Add(time.Minute)})
+			if err != nil {
+				t.Fatalf("an envelope failure rejected the workflow mutation: %v", err)
+			}
+			after, err := state.LoadRun(t.Context(), run.ID)
+			if err != nil || after.Status != workflowruntime.RunFailed {
+				t.Fatalf("the run did not move: %+v, %v", after, err)
+			}
+			if got := workflowRowCount(t, store, "workflow_events"); got != events+1 {
+				t.Fatalf("workflow events %d -> %d: the event was not committed", events, got)
+			}
+			if got := workflowRowCount(t, store, "workflow_event_outbox"); got != good {
+				t.Fatalf("a failed envelope left %d outbox rows (was %d)", got, good)
+			}
+			var counter int64
+			if err := store.DB().QueryRow(`SELECT last_seq FROM workflow_event_outbox_counter`).Scan(&counter); err != nil || counter != int64(good) {
+				t.Fatalf("the counter advanced for a skipped event: %d (%v)", counter, err)
+			}
+			var gotClass, repaired string
+			var runSeq int64
+			if err := store.DB().QueryRow(`SELECT run_sequence, error_class, repaired_at FROM workflow_event_outbox_skipped WHERE run_id = ?`, string(run.ID)).Scan(&runSeq, &gotClass, &repaired); err != nil {
+				t.Fatalf("no skipped row: %v", err)
+			}
+			if gotClass != test.class || repaired == "" || failed.Event == nil || uint64(runSeq) != failed.Event.Sequence {
+				t.Fatalf("skipped row = seq %d class %q repaired_at %q; want seq %d class %q", runSeq, gotClass, repaired, failed.Event.Sequence, test.class)
+			}
+			if state.EventOutboxSkipped() != 1 {
+				t.Fatalf("skipped counter = %d", state.EventOutboxSkipped())
+			}
+			// With a working mapper again, the next exported event takes the very next
+			// sequence number: the skipped one left no gap in the outbox.
+			state.outbox.mapper = realMapper
+			next := createWorkflowTestRun(t, state, "after-skip", base.Add(2*time.Minute))
+			if _, err := state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: next.ID, ExpectedGeneration: next.Generation, To: workflowruntime.RunRunning, At: base.Add(2 * time.Minute)}); err != nil {
+				t.Fatal(err)
+			}
+			var maxSeq int64
+			if err := store.DB().QueryRow(`SELECT MAX(outbox_seq) FROM workflow_event_outbox`).Scan(&maxSeq); err != nil || maxSeq != int64(good)+1 || workflowRowCount(t, store, "workflow_event_outbox") != good+1 {
+				t.Fatalf("the next event did not take the next sequence: max %d (%v)", maxSeq, err)
+			}
+		})
+	}
+}
+
+// A refused transition writes nothing anywhere, and a database error in the outer
+// transaction (here the skipped table is gone) still fails the whole write.
+func TestOuterTransactionErrorsStillFailTheWrite(t *testing.T) {
+	store, state := outboxStore(t, filepath.Join(t.TempDir(), "outer.db"))
 	enableOutbox(t, state)
 	base := workflowTestTime()
-	run := createWorkflowTestRun(t, state, "atomic", base)
+	run := createWorkflowTestRun(t, state, "outer", base)
 	events, outbox := workflowRowCount(t, store, "workflow_events"), workflowRowCount(t, store, "workflow_event_outbox")
-
-	// Stale generation: the transition is refused, nothing is written anywhere.
 	if _, err := state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation + 5, To: workflowruntime.RunRunning, At: base}); err == nil {
 		t.Fatal("a stale transition was accepted")
 	}
@@ -153,17 +235,16 @@ func TestAnEnvelopeAndItsEventCommitOrRollBackTogether(t *testing.T) {
 		t.Fatal("a refused transition left rows behind")
 	}
 
-	// The mapper fails: the whole transition rolls back, status included.
+	if _, err := store.DB().Exec(`DROP TABLE workflow_event_outbox_skipped`); err != nil {
+		t.Fatal(err)
+	}
 	state.outbox.mapper = failingMapper{}
 	if _, err := state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunRunning, At: base}); err == nil {
-		t.Fatal("a failing mapper did not fail the transition")
+		t.Fatal("the write succeeded although the skip could not be recorded")
 	}
 	after, err := state.LoadRun(t.Context(), run.ID)
-	if err != nil || after.Status != workflowruntime.RunPending || after.Generation != run.Generation {
-		t.Fatalf("the run moved although its envelope could not be written: %+v, %v", after, err)
-	}
-	if workflowRowCount(t, store, "workflow_events") != events || workflowRowCount(t, store, "workflow_event_outbox") != outbox {
-		t.Fatal("a failed envelope left rows behind")
+	if err != nil || after.Status != workflowruntime.RunPending {
+		t.Fatalf("the run moved although the write failed: %+v, %v", after, err)
 	}
 }
 
@@ -171,6 +252,31 @@ type failingMapper struct{}
 
 func (failingMapper) MapWorkflowEvent(context.Context, workflowruntime.Event, uint64, uint64) ([]byte, string, bool, error) {
 	return nil, "", false, errors.New("injected mapper failure")
+}
+
+type classedFailure struct{ class string }
+
+func (e classedFailure) Error() string     { return "injected " + e.class }
+func (e classedFailure) SkipClass() string { return e.class }
+
+type classedFailingMapper struct{ class string }
+
+func (m classedFailingMapper) MapWorkflowEvent(context.Context, workflowruntime.Event, uint64, uint64) ([]byte, string, bool, error) {
+	return nil, "", false, classedFailure(m)
+}
+
+type panickingMapper struct{}
+
+func (panickingMapper) MapWorkflowEvent(context.Context, workflowruntime.Event, uint64, uint64) ([]byte, string, bool, error) {
+	panic("injected mapper panic")
+}
+
+// duplicateIDMapper maps fine but reuses an event id the first transition already
+// stored, so the outbox insert violates the unique key.
+type duplicateIDMapper struct{ id string }
+
+func (m duplicateIDMapper) MapWorkflowEvent(ctx context.Context, ev workflowruntime.Event, generation, seq uint64) ([]byte, string, bool, error) {
+	return []byte(`{"kind":"run.state_changed"}`), m.id, true, nil
 }
 
 // Trimming the tail of the outbox must never make a sequence number come back.

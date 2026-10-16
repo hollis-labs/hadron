@@ -66,14 +66,16 @@ func (m *Mapper) MapWorkflowEvent(ctx context.Context, ev workflowruntime.Event,
 	e.Sequence, e.Generation = seq, generation
 	report := m.chain.Apply(ctx, &e)
 	if !report.Emit() {
-		return nil, "", false, nil
+		// A stage dropped an event that build selected: that is a failure to
+		// record it, not a choice not to, so it is reported rather than hidden.
+		return nil, "", false, &SkipError{Class: "dropped", Err: report.Err()}
 	}
 	if err := e.Validate(); err != nil {
-		return nil, "", false, fmt.Errorf("mapped envelope is invalid: %w", err)
+		return nil, "", false, &SkipError{Class: "invalid_envelope", Err: err}
 	}
 	out, err := json.Marshal(e)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", false, &SkipError{Class: "marshal", Err: err}
 	}
 	return out, e.ID, true, nil
 }
@@ -95,3 +97,14 @@ const classifyRules = `{
     {"name": "blocked gate", "event": {"kind": "gate.evaluated", "payload": {"result": "blocked"}}, "want": {"category": "state", "labels": ["gate-blocked"]}}
   ]
 }`
+
+// SkipError is a mapping failure with a class the outbox records. The workflow
+// event it was mapped from is not affected: recording never rejects a mutation.
+type SkipError struct {
+	Class string
+	Err   error
+}
+
+func (e *SkipError) Error() string     { return "eventmap: " + e.Class + ": " + fmt.Sprint(e.Err) }
+func (e *SkipError) Unwrap() error     { return e.Err }
+func (e *SkipError) SkipClass() string { return e.Class }

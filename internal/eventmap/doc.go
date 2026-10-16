@@ -31,6 +31,15 @@
 // when a new database is created or a different one is restored over it, which is
 // exactly when per-producer sequences stop being comparable.
 //
+// Recording never rejects a valid mutation (platform rule CW-0149). The outbox
+// insert runs inside a SAVEPOINT in the transaction that appends the workflow
+// event. If the mapper fails (error, panic, or a *SkipError from the chain) or the
+// insert fails, the savepoint is rolled back, the workflow event still commits, the
+// outbox counter is not advanced, and a row in workflow_event_outbox_skipped
+// records the run, the run sequence and a reason class (no payload), with a log
+// line and the EventOutboxSkipped counter. Only a database error in the outer
+// transaction fails the write. The skipped rows are the repair worklist.
+//
 // chain.go is the whole eventstage wiring and is meant to be read and copied by the
 // other producers.
 package eventmap
