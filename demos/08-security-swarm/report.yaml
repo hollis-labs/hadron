@@ -34,7 +34,7 @@ steps:
           echo "║  Campaign Link  : APT-41 cluster (72% similarity)           ║"
           echo "╠══════════════════════════════════════════════════════════════╣"
           echo "║  Next Steps:                                                 ║"
-          echo "║    1. Forensic image of 10.0.4.37, .38, .41                 ║"
+          echo "║    1. Forensic image of 192.0.2.37, .38, .41                 ║"
           echo "║    2. Contact jsmith for account recovery                   ║"
           echo "║    3. Scope data exposure (customer PII assessment)         ║"
           echo "║    4. Notify legal/compliance within 24h                    ║"

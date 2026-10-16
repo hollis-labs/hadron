@@ -76,9 +76,9 @@ Hadron now has a successful local dogfood run proving a realistic
 
 - Pipeline: `pl-20260525-164402-0001`
 - Run token: `dogfood-20260525164403`
-- Workspace: `/Users/chrispian/dev/chrispian/inbox/hadron-dogfood`
+- Workspace: `<dogfood-workspace>`
 - Final HTML:
-  `/Users/chrispian/dev/chrispian/inbox/hadron-dogfood/runs/dogfood-20260525164403/newsletter.html`
+  `<dogfood-workspace>/runs/dogfood-20260525164403/newsletter.html`
 
 The workflow fetches AI/agentic-development sources in fan-out, normalizes the
 raw artifacts, launches an AI synthesis agent, passes the synthesis into an HTML
@@ -484,7 +484,7 @@ Status: completed for the local runtime/local mailbox path on 2026-05-25.
 ### Slice 7 — Examples And Docs
 
 Status: in progress. The dogfood newsletter workflow exists locally under
-`/Users/chrispian/dev/chrispian/inbox/hadron-dogfood/blueprints`; promote a
+`<dogfood-workspace>/blueprints`; promote a
 cleaned, general-purpose variant into repo examples after the docs pass.
 
 - add narrow runnable examples

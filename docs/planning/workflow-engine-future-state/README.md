@@ -28,7 +28,7 @@ superseded requirements are not mistaken for omissions.
 - The reusable engine may start in this repo, but its core packages must remain
   extraction-ready and must not import `github.com/hollis-labs/hadron/internal/...`.
 - Implementation scope is this Hadron repository plus
-  `/Users/chrispian/dev/hollis-labs/libs/go-scheduler` for W00-T07 only.
+  `<scheduler-checkout>` for W00-T07 only.
 - Nanite, Torque, Cerberus, and other applications receive no code, migration,
   adapter, or coordination tasks in this plan. They own adoption after the
   Hadron engine contract is complete.

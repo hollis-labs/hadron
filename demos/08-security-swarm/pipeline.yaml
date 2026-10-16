@@ -34,7 +34,7 @@ stages:
     outputs:
       alert_id: "ALT-2026-0322-001"
       alert_type: "anomalous-egress"
-      source_ip: "10.0.4.37"
+      source_ip: "192.0.2.37"
       timestamp: "2026-03-22T14:32:18Z"
 
   - name: triage
