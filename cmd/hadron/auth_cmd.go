@@ -34,9 +34,9 @@ func operatorTokenPath() string {
 // exported variable is inherited by everything started from that shell.
 func operatorToken() (string, error) {
 	if globalTokenFile == "" {
-		if value := strings.TrimSpace(os.Getenv(localauth.EnvToken)); value != "" {
+		if value := strings.TrimSpace(os.Getenv(localauth.TokenEnvVar)); value != "" {
 			if !localauth.ValidToken(value) {
-				return "", fmt.Errorf("%s is set but is not a Hadron operator token", localauth.EnvToken)
+				return "", fmt.Errorf("%s is set but is not a Hadron operator token", localauth.TokenEnvVar)
 			}
 			return value, nil
 		}

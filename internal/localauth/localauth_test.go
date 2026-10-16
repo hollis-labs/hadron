@@ -171,7 +171,7 @@ func TestLoginRateLimits(t *testing.T) {
 }
 
 func TestScrubEnvRemovesToken(t *testing.T) {
-	got := ScrubEnv([]string{"PATH=/bin", EnvToken + "=secret", "HADRON_TOKEN_FILE=/x", "HOME=/h"})
+	got := ScrubEnv([]string{"PATH=/bin", TokenEnvVar + "=secret", "HADRON_TOKEN_FILE=/x", "HOME=/h"})
 	want := []string{"PATH=/bin", "HADRON_TOKEN_FILE=/x", "HOME=/h"}
 	if len(got) != len(want) {
 		t.Fatalf("ScrubEnv = %v", got)
@@ -180,5 +180,11 @@ func TestScrubEnvRemovesToken(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("ScrubEnv = %v", got)
 		}
+	}
+}
+
+func TestTokenEnvVarNameIsStable(t *testing.T) {
+	if TokenEnvVar != "HADRON_TOKEN" {
+		t.Fatal("operator environment variable name changed")
 	}
 }

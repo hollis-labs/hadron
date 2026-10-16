@@ -35,26 +35,26 @@ now mostly about:
 
 The structured task kinds are modeled and validated in:
 
-- [internal/blueprint/blueprint.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/blueprint/blueprint.go:274)
-- [schemas/blueprint-v0.4.schema.json](/Users/chrispian/dev/hollis-labs/apps/hadron/schemas/blueprint-v0.4.schema.json:509)
+- [internal/blueprint/blueprint.go](https://github.com/hollis-labs/hadron/blob/main/internal/blueprint/blueprint.go#L274)
+- [schemas/blueprint-v0.4.schema.json](https://github.com/hollis-labs/hadron/blob/main/schemas/blueprint-v0.4.schema.json#L509)
 
 Pipeline wait controls are also present:
 
-- [schemas/pipeline-v2.schema.json](/Users/chrispian/dev/hollis-labs/apps/hadron/schemas/pipeline-v2.schema.json:56)
+- [schemas/pipeline-v2.schema.json](https://github.com/hollis-labs/hadron/blob/main/schemas/pipeline-v2.schema.json#L56)
 
 ### Runtime / Daemon
 
 Execution paths exist for all step kinds:
 
-- [http_call.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/execution/http_call.go:1)
-- [mcp_call.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/execution/mcp_call.go:1)
-- [message_wait.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/execution/message_wait.go:1)
-- [agent_launch.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/execution/agent_launch.go:1)
-- [human_gate.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/execution/human_gate.go:1)
+- [http_call.go](https://github.com/hollis-labs/hadron/blob/main/internal/execution/http_call.go#L1)
+- [mcp_call.go](https://github.com/hollis-labs/hadron/blob/main/internal/execution/mcp_call.go#L1)
+- [message_wait.go](https://github.com/hollis-labs/hadron/blob/main/internal/execution/message_wait.go#L1)
+- [agent_launch.go](https://github.com/hollis-labs/hadron/blob/main/internal/execution/agent_launch.go#L1)
+- [human_gate.go](https://github.com/hollis-labs/hadron/blob/main/internal/execution/human_gate.go#L1)
 
 The stock daemon wires the needed adapters in:
 
-- [cmd/hadrond/main.go](/Users/chrispian/dev/hollis-labs/apps/hadron/cmd/hadrond/main.go:142)
+- [cmd/hadrond/main.go](https://github.com/hollis-labs/hadron/blob/main/cmd/hadrond/main.go#L142)
 
 ### Diagnostics / UI
 
@@ -67,8 +67,8 @@ Operation summaries exist for:
 
 via:
 
-- [internal/rundiagnostics/operations.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/rundiagnostics/operations.go:1)
-- [RunOperationsPanel.tsx](/Users/chrispian/dev/hollis-labs/apps/hadron/cmd/hadron-app/frontend/src/components/runs/RunOperationsPanel.tsx:1)
+- [internal/rundiagnostics/operations.go](https://github.com/hollis-labs/hadron/blob/main/internal/rundiagnostics/operations.go#L1)
+- [RunOperationsPanel.tsx](https://github.com/hollis-labs/hadron/blob/main/cmd/hadron-app/frontend/src/components/runs/RunOperationsPanel.tsx#L1)
 
 ### Current Tests
 
@@ -82,7 +82,7 @@ There is meaningful execution coverage for:
 
 The core execution integration surface is in:
 
-- [internal/execution/integration_test.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/execution/integration_test.go:1)
+- [internal/execution/integration_test.go](https://github.com/hollis-labs/hadron/blob/main/internal/execution/integration_test.go#L1)
 
 ## Remaining Gaps
 
@@ -106,7 +106,7 @@ The message API surface is:
 
 and the backing interface is also id-only:
 
-- [internal/api/types.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/api/types.go:62)
+- [internal/api/types.go](https://github.com/hollis-labs/hadron/blob/main/internal/api/types.go#L62)
 
 Optional substrate scoping now exists, but the id-only path is still supported
 for backward compatibility.
@@ -134,7 +134,7 @@ Missing or partial compared to the local/Tether prior art:
 
 Relevant code:
 
-- [internal/messagesubstrate/http_client.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/messagesubstrate/http_client.go:1)
+- [internal/messagesubstrate/http_client.go](https://github.com/hollis-labs/hadron/blob/main/internal/messagesubstrate/http_client.go#L1)
 
 Impact:
 
@@ -146,7 +146,7 @@ Impact:
 `agent_substrates[*].boot.profile` and `callbacks_profile` now do real work,
 but the implementation is still a simple file/template renderer:
 
-- [internal/agentsubstrate/boot.go](/Users/chrispian/dev/hollis-labs/apps/hadron/internal/agentsubstrate/boot.go:1)
+- [internal/agentsubstrate/boot.go](https://github.com/hollis-labs/hadron/blob/main/internal/agentsubstrate/boot.go#L1)
 
 It is **not** yet:
 

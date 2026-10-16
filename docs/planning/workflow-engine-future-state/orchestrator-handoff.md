@@ -27,9 +27,9 @@ another semantic runtime, or expand repository scope without escalation.
 ## Repository Scope
 
 - Default write root:
-  `/Users/chrispian/dev/hollis-labs/apps/hadron`.
+  `<hadron-checkout>`.
 - W00-T07 write root only:
-  `/Users/chrispian/dev/hollis-labs/libs/go-scheduler`.
+  `<scheduler-checkout>`.
 - Nanite may be inspected as evidence for W00-T07 but is read-only.
 - Torque is represented by a local fake MCP server in W06-T09 and is read-only.
 - Cerberus and every other application are read-only context. They own their own
@@ -79,7 +79,7 @@ exact files after dependency integration:
 | Lane | Primary ownership | Serialize when |
 | --- | --- | --- |
 | Foundation | `workflow` package layout, conformance, diagnostics, import guards | Public package names or conformance entry points overlap |
-| Shared scheduler | `/Users/chrispian/dev/hollis-labs/libs/go-scheduler` | Always one writer; W00-T07 is the only task in this plan |
+| Shared scheduler | `<scheduler-checkout>` | Always one writer; W00-T07 is the only task in this plan |
 | Graph/compiler | `workflow/graph`, `workflow/compile`, generated schema | IR structs, schema, digests, source maps, or validation overlap |
 | Values/state | `workflow/values`, state interfaces, artifacts, persistence migrations | Value envelopes, store methods, migrations, or generated DTOs overlap |
 | Runtime/waits | `workflow/runtime`, `workflow/wait`, runtime conformance | State transitions, claims, readiness, waits, or replay overlap |

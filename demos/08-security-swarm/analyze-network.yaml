@@ -10,7 +10,7 @@ steps:
     tasks:
       - name: traffic-analysis
         cmd: |
-          echo "[network] Analyzing traffic from 10.0.4.37..."
+          echo "[network] Analyzing traffic from 192.0.2.37..."
           echo "  Connections last 24h : 847 (baseline: 120)"
           echo "  Unique dest IPs     : 3 external (1 flagged)"
           echo "  Protocol breakdown  : HTTPS 94%, DNS 4%, SSH 2%"

@@ -185,7 +185,7 @@ before individual step kinds are implemented.
 timed activation substrate required by workflow retries, waits, callbacks, and
 scheduled starts.
 
-**Repository scope:** `/Users/chrispian/dev/hollis-labs/libs/go-scheduler`
+**Repository scope:** `<scheduler-checkout>`
 only. Nanite may be inspected as implementation evidence but receives no edits.
 
 **Current code refs:** `scheduler.go`, `engine.go`, `engine_test.go`, `README.md`
@@ -220,6 +220,6 @@ in the `go-scheduler` repository.
 
 **Verification:**
 
-- From `/Users/chrispian/dev/hollis-labs/libs/go-scheduler`: `go test ./...`
+- From `<scheduler-checkout>`: `go test ./...`
 - `go test -race ./...`
 - `go list -deps ./...` and review for application imports.
