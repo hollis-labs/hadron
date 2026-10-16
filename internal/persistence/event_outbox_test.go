@@ -322,3 +322,53 @@ func TestGenerationNumberIsJSONSafe(t *testing.T) {
 		t.Error("a short generation was accepted")
 	}
 }
+
+// A canceled run exports its terminal state. The engine records a cancel as
+// run.cancellation_requested (the run goes to canceled in the same transaction),
+// so the outbox must carry a run.state_changed to canceled for it, and nothing of
+// the cancel reason.
+func TestACanceledRunExportsItsTerminalState(t *testing.T) {
+	store, state := outboxStore(t, filepath.Join(t.TempDir(), "cancel.db"))
+	enableOutbox(t, state)
+	base := workflowTestTime()
+	fixture := prepareWorkflowSQLiteWait(t, state, "cancel-export", base, time.Hour)
+	suspended, err := (workflowruntime.WaitCoordinator{Store: state}).Suspend(t.Context(), workflowruntime.SuspendCommand{Request: fixture.request, ResumeToken: fixture.token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := state.LoadRun(t.Context(), suspended.Node.ID.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := workflowRowCount(t, store, "workflow_event_outbox")
+	reason := workflowruntime.Failure{Code: "user_canceled", Message: "SECRET operator note"}
+	result, err := state.RequestRunCancellation(t.Context(), workflowruntime.RequestRunCancellationRequest{RunID: run.ID, ExpectedGeneration: run.Generation, IdempotencyKey: "cancel-export", Reason: reason, At: base.Add(5 * time.Second)})
+	if err != nil || result.Run.Status != workflowruntime.RunCanceled {
+		t.Fatalf("RequestRunCancellation = %#v, %v", result, err)
+	}
+	entries, err := state.EventOutboxAfter(t.Context(), uint64(before), 10) // #nosec G115 -- a small count
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].RunID != run.ID {
+		t.Fatalf("outbox after cancel = %+v; want one entry for the run", entries)
+	}
+	if kinds := envelopeKinds(t, entries); kinds[0] != "run.state_changed" {
+		t.Fatalf("kinds = %v", kinds)
+	}
+	var env struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(entries[0].Envelope, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Payload["to"] != "canceled" || env.Payload["from"] == nil {
+		t.Fatalf("payload = %v", env.Payload)
+	}
+	if strings.Contains(string(entries[0].Envelope), "SECRET") || strings.Contains(string(entries[0].Envelope), "user_canceled") {
+		t.Fatalf("the cancel reason leaked into the envelope: %s", entries[0].Envelope)
+	}
+	if state.EventOutboxSkipped() != 0 {
+		t.Fatalf("%d events were skipped", state.EventOutboxSkipped())
+	}
+}

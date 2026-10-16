@@ -45,9 +45,16 @@ func build(ev workflowruntime.Event) (runtimeevents.Event, bool) {
 	}
 	runSequence := ev.Sequence
 	switch ev.Type {
-	case workflowruntime.EventRunStatusChanged:
+	case workflowruntime.EventRunStatusChanged, workflowruntime.EventRunCancellationRequested:
 		to := ev.Attributes["to_status"]
 		if to == "" {
+			return base, false
+		}
+		// Cancellation moves the run to canceled and records that as a
+		// cancellation request rather than a status change; it is the run's terminal
+		// state for a consumer. A request that leaves the run active carries no
+		// to_status and is not exported. The cancel reason code stays local.
+		if ev.Type == workflowruntime.EventRunCancellationRequested && !workflowruntime.RunStatus(to).Terminal() {
 			return base, false
 		}
 		payload := map[string]any{

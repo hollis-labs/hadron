@@ -5,6 +5,9 @@
 // event feed:
 //
 //   - run.status_changed -> run.state_changed (entity workflow_run)
+//   - run.cancellation_requested that moves the run to canceled -> run.state_changed
+//     (the engine records a cancel as this event, not as a status change; the cancel
+//     reason code stays local)
 //   - wait.suspended of a gate wait -> gate.evaluated with result blocked (gate kind
 //     approval for a human-decision wait, custom for any other gate wait)
 //
