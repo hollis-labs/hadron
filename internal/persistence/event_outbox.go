@@ -227,6 +227,15 @@ func (o *eventOutbox) observeAdmission(ctx context.Context, query workflowSQL, a
 		return nil
 	}
 	return o.guard(ctx, query, admissionKey(a), func(seq uint64) ([]byte, string, bool, error) {
+		// One admission event per decision across both entry points (the evaluation
+		// and the start): if it is already there, this is not a second one.
+		var exists int
+		if err := query.QueryRowContext(ctx, `SELECT COUNT(1) FROM workflow_event_outbox WHERE run_id = ? AND run_sequence = 0`, a.DecisionID).Scan(&exists); err != nil {
+			return nil, "", false, err
+		}
+		if exists != 0 {
+			return nil, "", false, nil
+		}
 		return mapper.MapAdmission(ctx, a, o.generation, seq)
 	})
 }

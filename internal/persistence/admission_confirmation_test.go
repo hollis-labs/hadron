@@ -308,3 +308,89 @@ func TestConfirmerActorRule(t *testing.T) {
 		})
 	}
 }
+
+// A start whose decision row is first created by RecordStart (no prior evaluation, as
+// for a call-started child) exports its admission event there, once, at (decision id,
+// 0); the run cites it. CW-0256.
+func TestADecisionCreatedByRecordStartIsExportedOnceAndTheRunCitesIt(t *testing.T) {
+	store, host := admissionHost(t, "startonly", true)
+	state, err := NewWorkflowStateStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableOutbox(t, state)
+	record := workflowHostStartFixture(t, "startonly") // an allow decision
+	if _, outcome, startErr := host.RecordStart(t.Context(), record); startErr != nil || outcome != workflowruntime.IdempotencyApplied {
+		t.Fatalf("RecordStart = %q, %v", outcome, startErr)
+	}
+	entries, err := state.EventOutboxAfter(t.Context(), 0, 10)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %+v, %v; want the one admission event", entries, err)
+	}
+	env := decodeConfirmation(t, entries[0])
+	if string(entries[0].RunID) != record.Decision.ID || entries[0].RunSequence != 0 || env.Payload.Result != "pass" ||
+		env.Subject != "msg://workflow_admission/hadron/"+record.Decision.ID || env.Payload.Gate["id"] != "hadron.admission" {
+		t.Fatalf("admission envelope = %s", entries[0].Envelope)
+	}
+
+	// Neither a replay of the start nor a late evaluation of the same decision exports again.
+	if _, outcome, replayErr := host.RecordStart(t.Context(), record); replayErr != nil || outcome != workflowruntime.IdempotencyReplayed {
+		t.Fatalf("replay = %q, %v", outcome, replayErr)
+	}
+	if _, outcome, evalErr := host.RecordPolicyEvaluation(t.Context(), hoststate.PolicyEvaluation{StartKey: record.StartKey, RequestDigest: record.RequestDigest, Facts: record.Facts, Decision: record.Decision}); evalErr != nil || outcome != workflowruntime.IdempotencyReplayed {
+		t.Fatalf("late evaluation = %q, %v", outcome, evalErr)
+	}
+	if got := workflowRowCount(t, store, "workflow_event_outbox"); got != 1 {
+		t.Fatalf("%d rows after the replay and the late evaluation; want 1", got)
+	}
+
+	// The run it admits cites it.
+	base := workflowTestTime()
+	run := createWorkflowTestRun(t, state, string(record.Run.ID), base)
+	if _, err = state.TransitionRun(t.Context(), workflowruntime.RunTransitionRequest{RunID: run.ID, ExpectedGeneration: run.Generation, To: workflowruntime.RunRunning, At: base}); err != nil {
+		t.Fatal(err)
+	}
+	if got := firstStateChangeCause(t, state, string(record.Run.ID), entries[0].Seq); got != entries[0].EventID {
+		t.Fatalf("the run cites %q; want the admission event %q", got, entries[0].EventID)
+	}
+}
+
+// A confirm decision created and confirmed in RecordStart alone exports blocked, then
+// the pass caused by it, in that order and once each.
+func TestAConfirmCreatedAndConfirmedInRecordStartExportsBlockedThenPass(t *testing.T) {
+	store, host := admissionHost(t, "startconfirm", true)
+	state, err := NewWorkflowStateStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, record := confirmStart(t, "startconfirm")
+	record.Confirmation = &hoststate.StartConfirmation{Confirmed: true, ConfirmedBy: "msg://user/local/chris"}
+	if _, _, startErr := host.RecordStart(t.Context(), record); startErr != nil {
+		t.Fatal(startErr)
+	}
+	entries, err := state.EventOutboxAfter(t.Context(), 0, 10)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("entries = %+v, %v; want blocked then pass", entries, err)
+	}
+	blocked, pass := decodeConfirmation(t, entries[0]), decodeConfirmation(t, entries[1])
+	if entries[0].RunSequence != 0 || entries[1].RunSequence != 1 || blocked.Payload.Result != "blocked" || pass.Payload.Result != "pass" || pass.Corr.CausationID != entries[0].EventID {
+		t.Fatalf("blocked = %s\npass = %s", entries[0].Envelope, entries[1].Envelope)
+	}
+}
+
+// An admission envelope failure in RecordStart never rejects the start: it is skipped
+// at (decision id, 0) like any other.
+func TestAnAdmissionFailureInRecordStartNeverRejectsTheStart(t *testing.T) {
+	store, host := admissionHost(t, "startfail", false)
+	if err := host.EnableEventOutbox(t.Context(), admissionFailingMapper{}); err != nil {
+		t.Fatal(err)
+	}
+	record := workflowHostStartFixture(t, "startfail")
+	if _, outcome, err := host.RecordStart(t.Context(), record); err != nil || outcome != workflowruntime.IdempotencyApplied {
+		t.Fatalf("RecordStart = %q, %v", outcome, err)
+	}
+	var seq int64
+	if err := store.DB().QueryRow(`SELECT run_sequence FROM workflow_event_outbox_skipped WHERE run_id = ? AND repaired_at IS NULL`, record.Decision.ID).Scan(&seq); err != nil || seq != 0 {
+		t.Fatalf("skipped row = %d, %v", seq, err)
+	}
+}
