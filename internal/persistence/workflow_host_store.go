@@ -167,9 +167,45 @@ func (s *WorkflowHostStore) RecordStart(ctx context.Context, input hoststate.Sta
 			return decisionErr
 		}
 		snapshot = hoststate.StartSnapshot{Record: input, Phase: hoststate.StartRecorded, Generation: 1, UpdatedAt: input.RecordedAt}
+		// A confirm decision that this start satisfies exports a second event (pass),
+		// in this same transaction and only for a start that is new (a replay returned
+		// above): a confirmed start, or a dry run, which proceeds without confirmation.
+		if confirmationSatisfied(input) {
+			if observer, ok := query.(confirmationObserver); ok {
+				confirmer, verified := confirmerOf(input)
+				return observer.observeConfirmation(ctx, eventmap.AdmissionConfirmation{
+					DecisionID: input.Decision.ID, RunID: string(input.Run.ID),
+					ConfirmedBy: confirmer, Verified: verified, At: input.RecordedAt,
+				})
+			}
+		}
 		return nil
 	})
 	return snapshot, outcome, err
+}
+
+// confirmationSatisfied says whether a new start clears a confirm decision: a caller
+// confirmed it, or it is a dry run, which needs no confirmation. Hadron records no
+// rejected or expired confirmation, so there is no fail counterpart (follow-up).
+func confirmationSatisfied(input hoststate.StartRecord) bool {
+	if input.Decision.Outcome != hoststate.PolicyConfirm {
+		return false
+	}
+	return input.DryRun || (input.Confirmation != nil && input.Confirmation.Confirmed)
+}
+
+// confirmerOf names who confirmed and how Hadron knows: "token" when the identity was
+// authenticated by the operator credential over HTTP, "claimed" otherwise. A dry run
+// has no confirmer. This is the one place that decides it.
+func confirmerOf(input hoststate.StartRecord) (principal, verified string) {
+	if input.DryRun || input.Confirmation == nil || input.Confirmation.ConfirmedBy == "" {
+		return "", ""
+	}
+	verified = "claimed"
+	if input.Identity.SourceAuthority == "http" && input.Identity.Trust == "local" {
+		verified = "token"
+	}
+	return input.Confirmation.ConfirmedBy, verified
 }
 
 func (s *WorkflowHostStore) LoadStart(ctx context.Context, runID workflowruntime.RunID) (hoststate.StartSnapshot, error) {

@@ -193,3 +193,48 @@ func causationFrom(ctx context.Context) string {
 	id, _ := ctx.Value(causationKey{}).(string)
 	return id
 }
+
+// AdmissionConfirmation is a confirm decision that was then satisfied: the start was
+// confirmed by a caller (or is a dry run, which proceeds without confirmation).
+type AdmissionConfirmation struct {
+	// DecisionID is the evaluation's id; the subject is the same as the blocked event's.
+	DecisionID string
+	// RunID is the run of the start, kept for correlation.
+	RunID string
+	// BlockedEventID is the id of the exported blocked event this answers; empty when
+	// that event was not exported.
+	BlockedEventID string
+	// ConfirmedBy is the principal that confirmed; empty for a dry run, which had no
+	// confirmer.
+	ConfirmedBy string
+	// Verified is how Hadron identified ConfirmedBy: "token" or "claimed".
+	Verified string
+	// At is when the confirmed start was recorded.
+	At time.Time
+}
+
+// buildConfirmation maps a satisfied confirm decision to a second gate.evaluated on
+// the same admission subject: result pass, blocking false, caused by the blocked
+// event, with the confirmer as the actor when there is one.
+func buildConfirmation(c AdmissionConfirmation) (runtimeevents.Event, bool) {
+	if c.DecisionID == "" || c.RunID == "" {
+		return runtimeevents.Event{}, false
+	}
+	_, _, subject := admissionSubject(Admission{DecisionID: c.DecisionID})
+	e := runtimeevents.Event{
+		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: c.At.UTC(), Subject: subject,
+		Source: runtimeevents.Source{Channel: ChannelAdmission, Confidence: runtimeevents.ConfidenceDerived},
+		Corr:   &runtimeevents.Corr{CorrelationID: c.RunID, CausationID: c.BlockedEventID},
+		Kind:   KindGateEvaluated,
+		Class:  &runtimeevents.Class{Category: "state", Severity: "notice", PayloadSchema: schemaGate},
+	}
+	if c.ConfirmedBy != "" {
+		e.Actor = &runtimeevents.Actor{URN: "msg://user/hadron/" + url.PathEscape(c.ConfirmedBy), Kind: "user", Role: "operator", Verified: c.Verified}
+	}
+	e.Payload = mustJSON(map[string]any{
+		"gate":    map[string]string{"id": AdmissionGateID, "kind": "custom"},
+		"subject": map[string]string{"type": "workflow_admission", "id": c.DecisionID},
+		"result":  "pass", "blocking": false,
+	})
+	return e, true
+}

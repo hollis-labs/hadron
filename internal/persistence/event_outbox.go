@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -29,6 +30,12 @@ type AdmissionMapper interface {
 	MapAdmission(ctx context.Context, a eventmap.Admission, generation, seq uint64) (envelope []byte, eventID string, ok bool, err error)
 }
 
+// ConfirmationMapper is implemented by a mapper that also exports the satisfied
+// confirmation of an admission decision.
+type ConfirmationMapper interface {
+	MapAdmissionConfirmation(ctx context.Context, c eventmap.AdmissionConfirmation, generation, seq uint64) (envelope []byte, eventID string, ok bool, err error)
+}
+
 // OutboxEntry is one stored envelope.
 type OutboxEntry struct {
 	Seq         uint64
@@ -52,6 +59,12 @@ type admissionObserver interface {
 	observeAdmission(ctx context.Context, a eventmap.Admission) error
 }
 
+// confirmationObserver is the same for the satisfied confirmation of an admission
+// decision, written in the transaction that records the start.
+type confirmationObserver interface {
+	observeConfirmation(ctx context.Context, c eventmap.AdmissionConfirmation) error
+}
+
 type observedSQL struct {
 	workflowSQL
 	outbox *eventOutbox
@@ -59,6 +72,10 @@ type observedSQL struct {
 
 func (o observedSQL) observeEvent(ctx context.Context, ev workflowruntime.Event) error {
 	return o.outbox.observe(ctx, o.workflowSQL, ev)
+}
+
+func (o observedSQL) observeConfirmation(ctx context.Context, c eventmap.AdmissionConfirmation) error {
+	return o.outbox.observeConfirmation(ctx, o.workflowSQL, c)
 }
 
 func (o observedSQL) observeAdmission(ctx context.Context, a eventmap.Admission) error {
@@ -135,6 +152,13 @@ func admissionKey(a eventmap.Admission) outboxKey {
 	return outboxKey{runID: a.DecisionID, sequence: 0, what: "admission"}
 }
 
+// confirmationKey is where the second event of a decision, its satisfied
+// confirmation, sits: the same decision id with sequence 1. A decision has at most
+// these two events, so one export per decision holds by the unique key.
+func confirmationKey(c eventmap.AdmissionConfirmation) outboxKey {
+	return outboxKey{runID: c.DecisionID, sequence: 1, what: "admission_confirmation"}
+}
+
 // admissionCause returns the id of the admission event that led to the run of ev, when
 // ev is the run's first state change and an admission decision for that run id was
 // exported. It is empty otherwise (no decision, or an earlier state change already
@@ -152,12 +176,22 @@ WHERE run_id = ? AND sequence < ? AND event_type IN (?, ?)`,
 		string(ev.RunID), int64(ev.Sequence), workflowruntime.EventRunStatusChanged, workflowruntime.EventRunCancellationRequested).Scan(&earlier); err != nil || earlier != 0 { // #nosec G115 -- a positive sequence
 		return ""
 	}
+	// The decision's last exported event: its satisfied confirmation (sequence 1) if
+	// there is one, else the admission itself (sequence 0).
 	var eventID string
+	var sequence int
 	if err := query.QueryRowContext(ctx, `
-SELECT o.event_id FROM workflow_host_policy_decisions d
-JOIN workflow_event_outbox o ON o.run_id = d.decision_id AND o.run_sequence = 0
-WHERE d.run_id = ? ORDER BY d.decided_at, d.decision_id LIMIT 1`, string(ev.RunID)).Scan(&eventID); err != nil {
+SELECT o.event_id, o.run_sequence FROM workflow_host_policy_decisions d
+JOIN workflow_event_outbox o ON o.run_id = d.decision_id AND o.run_sequence IN (0, 1)
+WHERE d.run_id = ? ORDER BY d.decided_at, d.decision_id, o.run_sequence DESC LIMIT 1`, string(ev.RunID)).Scan(&eventID, &sequence); err != nil {
 		return ""
+	}
+	if sequence == 1 {
+		// A confirm dry run is passed without a confirmation and links to no run.
+		var dry sql.NullInt64
+		if err := query.QueryRowContext(ctx, `SELECT json_extract(request_json, '$.dry_run') FROM workflow_host_starts WHERE run_id = ?`, string(ev.RunID)).Scan(&dry); err != nil || (dry.Valid && dry.Int64 != 0) {
+			return ""
+		}
 	}
 	return eventID
 }
@@ -194,6 +228,34 @@ func (o *eventOutbox) observeAdmission(ctx context.Context, query workflowSQL, a
 	}
 	return o.guard(ctx, query, admissionKey(a), func(seq uint64) ([]byte, string, bool, error) {
 		return mapper.MapAdmission(ctx, a, o.generation, seq)
+	})
+}
+
+// observeConfirmation exports the satisfied confirmation of a confirm decision as a
+// second gate.evaluated (pass) on the same admission subject, caused by the blocked
+// event. A decision's confirmation is exported once: a second one writes nothing.
+func (o *eventOutbox) observeConfirmation(ctx context.Context, query workflowSQL, c eventmap.AdmissionConfirmation) error {
+	mapper, ok := o.mapper.(ConfirmationMapper)
+	if !ok {
+		return nil
+	}
+	return o.guard(ctx, query, confirmationKey(c), func(seq uint64) ([]byte, string, bool, error) {
+		var exists int
+		if err := query.QueryRowContext(ctx, `SELECT COUNT(1) FROM workflow_event_outbox WHERE run_id = ? AND run_sequence = 1`, c.DecisionID).Scan(&exists); err != nil {
+			return nil, "", false, err
+		}
+		if exists != 0 {
+			return nil, "", false, nil
+		}
+		// The blocked event this answers. If it was never exported (skipped, or the
+		// outbox was enabled later), the pass simply has no cause.
+		var blocked string
+		err := query.QueryRowContext(ctx, `SELECT event_id FROM workflow_event_outbox WHERE run_id = ? AND run_sequence = 0`, c.DecisionID).Scan(&blocked)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, "", false, err
+		}
+		c.BlockedEventID = blocked
+		return mapper.MapAdmissionConfirmation(ctx, c, o.generation, seq)
 	})
 }
 

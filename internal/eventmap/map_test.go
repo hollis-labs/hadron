@@ -125,6 +125,51 @@ func TestAdmissionOutcomesMapToGateResults(t *testing.T) {
 	}
 }
 
+func mapConfirmation(t *testing.T, c AdmissionConfirmation) (runtimeevents.Event, bool) {
+	t.Helper()
+	raw, id, ok, err := newMapper(t).MapAdmissionConfirmation(context.Background(), c, 12345, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		return runtimeevents.Event{}, false
+	}
+	var e runtimeevents.Event
+	if err := json.Unmarshal(raw, &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.ID != id || e.Sequence != 8 || e.Generation != 12345 {
+		t.Fatalf("envelope %+v id %q", e, id)
+	}
+	return e, true
+}
+
+// A satisfied confirmation is a second gate.evaluated on the same admission subject:
+// pass, not blocking, caused by the blocked event, with the confirmer as actor.
+func TestConfirmationIsAPassOnTheAdmissionSubjectCausedByTheBlockedEvent(t *testing.T) {
+	blocked, _ := mapAdmission(t, Admission{DecisionID: "dec-1", RunID: "run-1", Outcome: "confirm", DecidedAt: at})
+	e, ok := mapConfirmation(t, AdmissionConfirmation{DecisionID: "dec-1", RunID: "run-1", BlockedEventID: "evt_blocked", ConfirmedBy: "operator:local", Verified: "claimed", At: at})
+	if !ok {
+		t.Fatal("not exported")
+	}
+	var p map[string]any
+	_ = json.Unmarshal(e.Payload, &p)
+	if e.Subject != blocked.Subject || p["result"] != "pass" || p["blocking"] != false || e.Corr.CausationID != "evt_blocked" || e.Corr.CorrelationID != "run-1" {
+		t.Fatalf("envelope %+v payload %v", e, p)
+	}
+	if e.Actor == nil || e.Actor.Kind != "user" || e.Actor.Role != "operator" || e.Actor.Verified != "claimed" || !strings.HasPrefix(e.Actor.URN, "msg://user/hadron/") {
+		t.Fatalf("actor = %+v", e.Actor)
+	}
+	// A dry run has no confirmer, so no actor; a missing blocked event means no cause.
+	d, ok := mapConfirmation(t, AdmissionConfirmation{DecisionID: "dec-1", RunID: "run-1", At: at})
+	if !ok || d.Actor != nil || d.Corr.CausationID != "" {
+		t.Fatalf("dry-run confirmation = %+v", d)
+	}
+	if _, ok := mapConfirmation(t, AdmissionConfirmation{RunID: "run-1", At: at}); ok {
+		t.Fatal("a confirmation without a decision id was exported")
+	}
+}
+
 func runStatus(from, to string) workflowruntime.Event {
 	return workflowruntime.Event{Sequence: 4, RunID: "run-1", Type: workflowruntime.EventRunStatusChanged, OccurredAt: at,
 		Attributes: map[string]string{"entity": "run", "from_status": from, "to_status": to}}
@@ -255,6 +300,11 @@ func TestPayloadsValidateAgainstTheCatalogSchemas(t *testing.T) {
 			t.Fatalf("admission %s not exported", outcome)
 		}
 		mapped = append(mapped, e)
+	}
+	if c, ok := mapConfirmation(t, AdmissionConfirmation{DecisionID: "dec-1", RunID: "run-1", BlockedEventID: "evt_blocked", ConfirmedBy: "operator:local", Verified: "token", At: at}); ok {
+		mapped = append(mapped, c)
+	} else {
+		t.Fatal("confirmation not exported")
 	}
 	for _, e := range mapped {
 		entry, found := catalog.Lookup(string(e.Kind))

@@ -79,6 +79,16 @@ func (m *Mapper) MapAdmission(ctx context.Context, a Admission, generation, seq 
 	return m.finish(ctx, e, generation, seq)
 }
 
+// MapAdmissionConfirmation implements persistence.ConfirmationMapper: the satisfied
+// confirmation of an admission decision becomes a second gate.evaluated (pass).
+func (m *Mapper) MapAdmissionConfirmation(ctx context.Context, c AdmissionConfirmation, generation, seq uint64) ([]byte, string, bool, error) {
+	e, ok := buildConfirmation(c)
+	if !ok {
+		return nil, "", false, nil
+	}
+	return m.finish(ctx, e, generation, seq)
+}
+
 func (m *Mapper) finish(ctx context.Context, e runtimeevents.Event, generation, seq uint64) ([]byte, string, bool, error) {
 	e.Sequence, e.Generation = seq, generation
 	report := m.chain.Apply(ctx, &e)
