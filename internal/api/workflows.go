@@ -417,6 +417,8 @@ func workflowHTTPStatus(code string) int {
 		return http.StatusConflict
 	case appworkflow.WorkflowErrorCodeDryRunUnsupported:
 		return http.StatusUnprocessableEntity
+	case appworkflow.WorkflowErrorCodeEventStreamLimit:
+		return http.StatusTooManyRequests
 	case appworkflow.WorkflowErrorCodeUnavailable:
 		return http.StatusServiceUnavailable
 	default:

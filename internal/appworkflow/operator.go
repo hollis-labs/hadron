@@ -383,15 +383,21 @@ type WorkflowOperatorOptions struct {
 	Diagnostics GraphRunInspector
 	Replay      ReplayRunner
 	RunAccess   RunOperationAuthorizer
+	// EventStreamLimit caps concurrent SSE and long-poll followers per principal.
+	// Zero selects DefaultEventStreamLimit; negative values are invalid.
+	EventStreamLimit int
+	// EventStreamRejected records a rejection without exposing the principal.
+	EventStreamRejected func(context.Context)
 }
 
 // WorkflowOperator is the transport-neutral Hadron operator facade. Its Host
 // remains the authority for identity, policy, durable run state, and waits.
 type WorkflowOperator struct {
-	host        *Host
-	diagnostics GraphRunInspector
-	replay      ReplayRunner
-	runAccess   RunOperationAuthorizer
+	host         *Host
+	diagnostics  GraphRunInspector
+	replay       ReplayRunner
+	runAccess    RunOperationAuthorizer
+	eventStreams *eventStreamLimiter
 }
 
 type RunOperation string
@@ -442,7 +448,15 @@ func NewWorkflowOperator(options WorkflowOperatorOptions) (*WorkflowOperator, er
 			return nil
 		})
 	}
-	return &WorkflowOperator{host: options.Host, diagnostics: options.Diagnostics, replay: options.Replay, runAccess: authorizer}, nil
+	limit := options.EventStreamLimit
+	if limit < 0 {
+		return nil, fmt.Errorf("%w: event stream limit must be positive", ErrInvalidHost)
+	}
+	if limit == 0 {
+		limit = DefaultEventStreamLimit
+	}
+	return &WorkflowOperator{host: options.Host, diagnostics: options.Diagnostics, replay: options.Replay, runAccess: authorizer,
+		eventStreams: &eventStreamLimiter{limit: limit, active: make(map[string]int), rejected: options.EventStreamRejected}}, nil
 }
 
 func (s *WorkflowOperator) ValidateWorkflow(ctx context.Context, request ValidateWorkflowRequest) (ValidateWorkflowResult, error) {
@@ -550,6 +564,18 @@ func (s *WorkflowOperator) FetchWorkflowEvents(ctx context.Context, request Work
 	after, generation, err := decodeEventCursor(request.RunID, request.After)
 	if err != nil {
 		return WorkflowEventListResult{}, err
+	}
+	if request.WaitMS > 0 {
+		identity, err := s.host.bindIdentity(ctx, request.Identity)
+		if err != nil {
+			return WorkflowEventListResult{}, err
+		}
+		leased, release, err := s.eventStreams.acquire(ctx, identity.Principal)
+		if err != nil {
+			return WorkflowEventListResult{}, err
+		}
+		defer release()
+		ctx = leased
 	}
 	page, err := pager.Events(ctx, rundiagnostics.EventsQuery{RunID: request.RunID, Display: request.Display, After: after, Limit: request.EventLimit, Wait: time.Duration(request.WaitMS) * time.Millisecond, Generation: generation})
 	if err != nil {

@@ -99,6 +99,18 @@ func (s *Server) handleWorkflowEventStreamRoute(w http.ResponseWriter, r *http.R
 		EventLimit: workflowStreamPageLimit, After: after, WaitMS: int(wait / time.Millisecond),
 	}
 
+	streams, ok := s.deps.WorkflowReads.(appworkflow.WorkflowEventStreamOperations)
+	if !ok {
+		s.writeWorkflowFailure(w, appworkflow.ErrHostNotReady, nil, false)
+		return
+	}
+	ctx, release, err := streams.BeginWorkflowEventStream(ctx, request)
+	if err != nil {
+		s.writeWorkflowFailure(w, err, nil, false)
+		return
+	}
+	defer release()
+
 	// The first read happens before any header is written, so a bad cursor, a
 	// missing run or a denial gets a normal HTTP error.
 	result, err := s.deps.WorkflowReads.FetchWorkflowEvents(ctx, request)

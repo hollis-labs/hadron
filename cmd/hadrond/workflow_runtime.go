@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/hollis-labs/hadron/internal/a2a"
 	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/api"
@@ -353,7 +355,14 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 		Resources: state, Starts: journal,
 	}
 	replay := &workflowruntime.ReplayService{Store: state, Replay: state, Inputs: state, Control: state, Plans: plans, Registry: host.Registry()}
-	operations, err := appworkflow.NewWorkflowOperator(appworkflow.WorkflowOperatorOptions{Host: host, Diagnostics: diagnostics, Replay: replay})
+	streamRejected, err := otel.Meter("hadron.workflow").Int64Counter("hadron.workflow.event_stream.rejected")
+	if err != nil {
+		return nil, err
+	}
+	operations, err := appworkflow.NewWorkflowOperator(appworkflow.WorkflowOperatorOptions{Host: host, Diagnostics: diagnostics, Replay: replay,
+		EventStreamLimit:    cfg.EventStreamLimit,
+		EventStreamRejected: func(ctx context.Context) { streamRejected.Add(ctx, 1) },
+	})
 	if err != nil {
 		return nil, err
 	}

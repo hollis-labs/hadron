@@ -26,16 +26,17 @@ import (
 )
 
 type workflowHTTPService struct {
-	validate func(context.Context, appworkflow.ValidateWorkflowRequest) (appworkflow.ValidateWorkflowResult, error)
-	explain  func(context.Context, appworkflow.ExplainWorkflowRequest) (appworkflow.StartRunResult, error)
-	run      func(context.Context, appworkflow.RunWorkflowRequest) (appworkflow.StartRunResult, error)
-	inspect  func(context.Context, appworkflow.InspectWorkflowRunRequest) (rundiagnostics.Result, error)
-	cancel   func(context.Context, appworkflow.CancelWorkflowRunRequest) (appworkflow.CancelWorkflowRunResult, error)
-	resume   func(context.Context, appworkflow.ResumeWorkflowRunRequest) (appworkflow.ResumeWorkflowRunResult, error)
-	rerun    func(context.Context, appworkflow.RerunWorkflowRequest) (appworkflow.RerunWorkflowResult, error)
-	waits    func(context.Context, appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowWaitListResult, error)
-	values   func(context.Context, appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowValueListResult, error)
-	events   func(context.Context, appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowEventListResult, error)
+	beginStream func(context.Context, appworkflow.WorkflowRunReadRequest) (context.Context, func(), error)
+	validate    func(context.Context, appworkflow.ValidateWorkflowRequest) (appworkflow.ValidateWorkflowResult, error)
+	explain     func(context.Context, appworkflow.ExplainWorkflowRequest) (appworkflow.StartRunResult, error)
+	run         func(context.Context, appworkflow.RunWorkflowRequest) (appworkflow.StartRunResult, error)
+	inspect     func(context.Context, appworkflow.InspectWorkflowRunRequest) (rundiagnostics.Result, error)
+	cancel      func(context.Context, appworkflow.CancelWorkflowRunRequest) (appworkflow.CancelWorkflowRunResult, error)
+	resume      func(context.Context, appworkflow.ResumeWorkflowRunRequest) (appworkflow.ResumeWorkflowRunResult, error)
+	rerun       func(context.Context, appworkflow.RerunWorkflowRequest) (appworkflow.RerunWorkflowResult, error)
+	waits       func(context.Context, appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowWaitListResult, error)
+	values      func(context.Context, appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowValueListResult, error)
+	events      func(context.Context, appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowEventListResult, error)
 }
 
 func (s *workflowHTTPService) ValidateWorkflow(ctx context.Context, request appworkflow.ValidateWorkflowRequest) (appworkflow.ValidateWorkflowResult, error) {
@@ -849,3 +850,10 @@ func TestWorkflowHTTPUnavailableFailsClosed(t *testing.T) {
 
 var _ appworkflow.WorkflowOperations = (*workflowHTTPService)(nil)
 var _ appworkflow.WorkflowRunReadOperations = (*workflowHTTPService)(nil)
+
+func (s *workflowHTTPService) BeginWorkflowEventStream(ctx context.Context, request appworkflow.WorkflowRunReadRequest) (context.Context, func(), error) {
+	if s.beginStream != nil {
+		return s.beginStream(ctx, request)
+	}
+	return ctx, func() {}, nil
+}

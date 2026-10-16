@@ -3,6 +3,7 @@ package api_test
 import (
 	"bufio"
 	"context"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -277,5 +278,59 @@ func TestWorkflowEventStreamEndsAtItsMaximumLifetimeAndCanBeResumed(t *testing.T
 	frames := readFrames(t, scanner)
 	if len(frames) == 0 || frames[len(frames)-1] != "event: end\ndata: {\"reason\":\"reconnect\"}" {
 		t.Fatalf("frames = %q", frames)
+	}
+}
+
+func TestWorkflowEventStreamLimitReturns429BeforeSSEHeaders(t *testing.T) {
+	service := &workflowHTTPService{beginStream: func(ctx context.Context, _ appworkflow.WorkflowRunReadRequest) (context.Context, func(), error) {
+		return ctx, nil, appworkflow.ErrEventStreamLimit
+	}}
+	server := workflowHTTPTestServer(t, service, allowWorkflowHTTP)
+	defer server.Close()
+	response, _ := openStream(t, server.URL, "/v1/workflows/runs/stream-run/events/stream", nil)
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusTooManyRequests || !strings.Contains(string(body), appworkflow.WorkflowErrorCodeEventStreamLimit) || strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("status=%d content-type=%q body=%s", response.StatusCode, response.Header.Get("Content-Type"), body)
+	}
+}
+
+func TestWorkflowEventStreamReleasesReservationOnReturn(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		name := "terminal"
+		if fail {
+			name = "read error"
+		}
+		t.Run(name, func(t *testing.T) {
+			released := make(chan struct{})
+			service := &workflowHTTPService{
+				beginStream: func(ctx context.Context, _ appworkflow.WorkflowRunReadRequest) (context.Context, func(), error) {
+					return ctx, func() { close(released) }, nil
+				},
+				events: func(_ context.Context, request appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowEventListResult, error) {
+					if fail {
+						return appworkflow.WorkflowEventListResult{}, appworkflow.ErrWorkflowInvalidRequest
+					}
+					return appworkflow.WorkflowEventListResult{RunID: request.RunID, RunTerminal: true}, nil
+				},
+			}
+			server := workflowHTTPTestServer(t, service, allowWorkflowHTTP)
+			defer server.Close()
+			response, scanner := openStream(t, server.URL, "/v1/workflows/runs/stream-run/events/stream", nil)
+			if fail {
+				if response.StatusCode != http.StatusBadRequest {
+					t.Fatalf("status=%d", response.StatusCode)
+				}
+			} else {
+				readFrames(t, scanner)
+			}
+			select {
+			case <-released:
+			case <-time.After(10 * time.Second):
+				t.Fatal("stream reservation not released")
+			}
+		})
 	}
 }
