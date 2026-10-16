@@ -21,7 +21,7 @@ func withTokenFile(t *testing.T, addr string) (string, string) {
 	oldAddr, oldFile := globalAddr, globalTokenFile
 	globalAddr, globalTokenFile = addr, path
 	t.Cleanup(func() { globalAddr, globalTokenFile = oldAddr, oldFile })
-	t.Setenv(localauth.EnvToken, "")
+	t.Setenv(localauth.TokenEnvVar, "")
 	return path, token
 }
 
@@ -58,7 +58,7 @@ func TestOperatorTransportSendsTokenOnlyToTheDaemon(t *testing.T) {
 
 func TestOperatorTokenPrefersFlagThenEnvThenDefault(t *testing.T) {
 	_, token := withTokenFile(t, "http://127.0.0.1:1")
-	t.Setenv(localauth.EnvToken, strings.Repeat("a", 64))
+	t.Setenv(localauth.TokenEnvVar, strings.Repeat("a", 64))
 	if got, err := operatorToken(); err != nil || got != token {
 		t.Fatalf("--token-file should win over the env var: %q, %v", got, err)
 	}
@@ -66,7 +66,7 @@ func TestOperatorTokenPrefersFlagThenEnvThenDefault(t *testing.T) {
 	if got, err := operatorToken(); err != nil || got != strings.Repeat("a", 64) {
 		t.Fatalf("env var = %q, %v", got, err)
 	}
-	t.Setenv(localauth.EnvToken, "not-a-token")
+	t.Setenv(localauth.TokenEnvVar, "not-a-token")
 	if _, err := operatorToken(); err == nil {
 		t.Fatal("malformed env token accepted")
 	}
@@ -117,7 +117,7 @@ func TestUnauthorizedErrorNamesTheTokenFile(t *testing.T) {
 	oldAddr, oldFile := globalAddr, globalTokenFile
 	globalAddr, globalTokenFile = daemon.URL, filepath.Join(t.TempDir(), "missing.token")
 	t.Cleanup(func() { globalAddr, globalTokenFile = oldAddr, oldFile })
-	t.Setenv(localauth.EnvToken, "")
+	t.Setenv(localauth.TokenEnvVar, "")
 	err := httpGet(daemon.URL+"/v1/workspaces", nil)
 	if err == nil || !strings.Contains(err.Error(), "missing.token") {
 		t.Fatalf("401 error = %v; want it to name the token file", err)

@@ -10,7 +10,7 @@ steps:
     tasks:
       - name: process-scan
         cmd: |
-          echo "[host] Scanning processes on 10.0.4.37..."
+          echo "[host] Scanning processes on 192.0.2.37..."
           echo "  Suspicious process : /tmp/.cache/svchost (PID 48201)"
           echo "  Parent             : bash (PID 48199)"
           echo "  Started            : 2026-03-22T14:27:53Z"

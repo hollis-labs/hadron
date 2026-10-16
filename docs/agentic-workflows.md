@@ -35,7 +35,7 @@ On 2026-05-25 Hadron successfully completed a realistic local AI pipeline:
 - Pipeline run: `pl-20260525-164402-0001`
 - Run token: `dogfood-20260525164403`
 - Output directory:
-  `/Users/chrispian/dev/chrispian/inbox/hadron-dogfood/runs/dogfood-20260525164403`
+  `<dogfood-workspace>/runs/dogfood-20260525164403`
 - Final artifact:
   `newsletter.html`
 

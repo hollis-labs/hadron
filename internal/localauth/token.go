@@ -34,10 +34,10 @@ import (
 // TokenFileName is the operator credential inside Hadron's data dir.
 const TokenFileName = "operator.token"
 
-// EnvToken names the environment variable the CLI also accepts. The token
+// TokenEnvVar names the environment variable the CLI also accepts. The token
 // file is preferred: an exported variable leaks into every process started
 // from that shell, agents included. Launchers scrub it (ScrubEnv).
-const EnvToken = "HADRON_TOKEN"
+const TokenEnvVar = "HADRON_TOKEN"
 
 const tokenBytes = 32
 
@@ -268,7 +268,7 @@ func statStamp(path string) stamp {
 func ScrubEnv(env []string) []string {
 	out := env[:0:0]
 	for _, entry := range env {
-		if strings.HasPrefix(entry, EnvToken+"=") {
+		if strings.HasPrefix(entry, TokenEnvVar+"=") {
 			continue
 		}
 		out = append(out, entry)

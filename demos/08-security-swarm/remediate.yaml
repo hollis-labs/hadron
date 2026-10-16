@@ -11,7 +11,7 @@ steps:
       - name: isolate-host
         cmd: |
           echo "[remediate] CONTAINMENT ACTIONS:"
-          echo "  [1/5] Isolating host 10.0.4.37 from network... DONE"
+          echo "  [1/5] Isolating host 192.0.2.37 from network... DONE"
         continue_on_error: true
 
       - name: block-ip

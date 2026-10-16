@@ -15,7 +15,7 @@ steps:
           echo "  INCIDENT TIMELINE:"
           echo "  ┌─────────────────────────────────────────────────────────┐"
           echo "  │ 14:25  jsmith login from 203.0.113.12 (no MFA)        │"
-          echo "  │ 14:26  SSH to 10.0.4.37, 10.0.4.38, 10.0.4.41        │"
+          echo "  │ 14:26  SSH to 192.0.2.37, 192.0.2.38, 192.0.2.41        │"
           echo "  │ 14:27  Dropped binary /tmp/.cache/svchost              │"
           echo "  │ 14:27  Added unauthorized SSH key                      │"
           echo "  │ 14:28  First connection to Tor exit 185.220.101.42     │"

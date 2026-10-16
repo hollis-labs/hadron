@@ -1,0 +1,23 @@
+# Reviewed synthetic test fixtures only. Production source and docs have no exceptions.
+# Literal values stay readable; these rules apply only to the named test files.
+bearer-token cmd/hadrond/credential_auth_test.go Malformed bearer fixture exercising authentication rejection; not a credential.
+credentials-in-url internal/appworkflow/hoststate/plan_snapshot_test.go Synthetic URL userinfo fixture asserting diagnostics redact embedded credentials.
+credentials-in-url internal/rundiagnostics/graph_test.go Synthetic URL userinfo fixture asserting diagnostics redact embedded credentials.
+secret-assignment cmd/hadron-app/frontend/src/api/workflows.test.ts Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment cmd/hadrond/credential_auth_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment cmd/hadrond/workflow_runtime_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/appworkflow/child_materializer_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/appworkflow/compensation_external_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/appworkflow/external_operations_external_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/appworkflow/host_integration_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/appworkflow/hoststate/plan_snapshot_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/appworkflow/operator_external_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/appworkflow/source_activations_external_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/mcpadapter/workflow_surface_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/messagesubstrate/wait_adapters_integration_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/persistence/workflow_compensation_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/persistence/workflow_state_control_flow_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/persistence/workflow_state_memoization_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/persistence/workflow_state_scheduler_resources_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/persistence/workflow_state_test.go Synthetic claim, authorization or redaction fixture; no live credential.
+secret-assignment internal/rundiagnostics/graph_test.go Synthetic claim, authorization or redaction fixture; no live credential.

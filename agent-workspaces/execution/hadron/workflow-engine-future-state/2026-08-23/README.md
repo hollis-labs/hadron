@@ -1,7 +1,7 @@
 # Workflow Engine Future-State Execution
 
 **Session:** `session-20260823-21fe5742`
-**Integration worktree:** `/Users/chrispian/dev/hollis-labs/apps/hadron`
+**Integration worktree:** `<hadron-checkout>`
 **Hadron baseline:** `68c435f` (contains planning baseline `7301e2a`)
 **go-scheduler baseline:** `962e415` (`v0.1.0`)
 **Plan status:** complete; all 68 indexed tasks are integrated, and every
