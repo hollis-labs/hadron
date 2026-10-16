@@ -102,7 +102,7 @@ func TestFetchWorkflowEventsRejectsUnusableCursors(t *testing.T) {
 	for name, cursor := range map[string]string{
 		"not base64":      "%%%",
 		"not json":        "bm90LWpzb24",
-		"another run":     appworkflow.EncodeEventCursor("some-other-run", 3),
+		"another run":     appworkflow.EncodeEventCursor("some-other-run", 3, ""),
 		"unknown version": "eyJ2Ijo5LCJydW4iOiJjdXJzb3ItcnVuIiwic2VxIjoxfQ",
 	} {
 		request.After = cursor
@@ -138,11 +138,96 @@ func TestFetchWorkflowEventsCursorNeedsAnInspectorThatPages(t *testing.T) {
 	operator, ctx, runID := newEventsOperator(t, inspector, func(appworkflow.RunOperationAuthorization) error { return nil })
 	request := appworkflow.WorkflowRunReadRequest{RunID: runID, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}}
 	first, err := operator.FetchWorkflowEvents(ctx, request)
-	if err != nil || first.NextCursor != appworkflow.EncodeEventCursor(runID, 7) {
+	if err != nil || first.NextCursor != appworkflow.EncodeEventCursor(runID, 7, "") {
 		t.Fatalf("first page = %+v, %v", first, err)
 	}
 	request.After = first.NextCursor
 	if _, err := operator.FetchWorkflowEvents(ctx, request); !errors.Is(err, appworkflow.ErrWorkflowInvalidRequest) {
 		t.Fatalf("cursor with a non-paging inspector: %v", err)
+	}
+}
+
+// gapInspector answers like rundiagnostics.Service does for a position it cannot resume.
+type gapInspector struct {
+	graphInspectorFunc
+	page rundiagnostics.EventPage
+	seen rundiagnostics.EventsQuery
+}
+
+func (g *gapInspector) Events(_ context.Context, query rundiagnostics.EventsQuery) (rundiagnostics.EventPage, error) {
+	g.seen = query
+	return g.page, nil
+}
+
+func TestEventCursorCarriesTheLogGenerationAndFlowsToTheReader(t *testing.T) {
+	inspector := &gapInspector{page: rundiagnostics.EventPage{
+		Generation: "0123456789abcdef0123456789abcdef", HighWater: 4,
+		Events: []workflowruntime.RenderedEvent{{Sequence: 3, Type: "e"}, {Sequence: 4, Type: "e"}},
+	}}
+	operator, ctx, runID := newEventsOperator(t, inspector, func(appworkflow.RunOperationAuthorization) error { return nil })
+	request := appworkflow.WorkflowRunReadRequest{RunID: runID, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}, WaitMS: 1500}
+
+	first, err := operator.FetchWorkflowEvents(ctx, request)
+	if err != nil || first.NextCursor != appworkflow.EncodeEventCursor(runID, 4, inspector.page.Generation) || first.CursorAfter(3) != appworkflow.EncodeEventCursor(runID, 3, inspector.page.Generation) {
+		t.Fatalf("first = %+v, %v", first, err)
+	}
+	if inspector.seen.Wait != 1500*time.Millisecond || inspector.seen.Generation != "" {
+		t.Fatalf("first read query = %+v", inspector.seen)
+	}
+	request.After = first.NextCursor
+	if _, err := operator.FetchWorkflowEvents(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if inspector.seen.After != 4 || inspector.seen.Generation != inspector.page.Generation {
+		t.Fatalf("resumed read query = %+v, want the cursor's position and generation", inspector.seen)
+	}
+}
+
+func TestFetchWorkflowEventsReturnsAGapAndWhereToContinue(t *testing.T) {
+	inspector := &gapInspector{page: rundiagnostics.EventPage{
+		Generation: "0123456789abcdef0123456789abcdef", HighWater: 9, Terminal: true,
+		Gap: &rundiagnostics.EventGap{Reason: rundiagnostics.GapGenerationChanged, EarliestAvailable: 1, HighWater: 9},
+	}}
+	operator, ctx, runID := newEventsOperator(t, inspector, func(appworkflow.RunOperationAuthorization) error { return nil })
+	result, err := operator.FetchWorkflowEvents(ctx, appworkflow.WorkflowRunReadRequest{RunID: runID, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}, After: appworkflow.EncodeEventCursor(runID, 2, "ffffffffffffffffffffffffffffffff")})
+	if err != nil || result.Gap == nil || result.Gap.Reason != "generation_changed" || result.Gap.HighWater != 9 || len(result.Events) != 0 || !result.RunTerminal {
+		t.Fatalf("result = %+v, %v", result, err)
+	}
+	if result.NextCursor != appworkflow.EncodeEventCursor(runID, 9, inspector.page.Generation) {
+		t.Fatalf("next cursor = %q, want the log's current end", result.NextCursor)
+	}
+}
+
+func TestFetchWorkflowEventsBoundsTheWait(t *testing.T) {
+	inspector := &pagedInspector{total: 1}
+	operator, ctx, runID := newEventsOperator(t, inspector, func(appworkflow.RunOperationAuthorization) error { return nil })
+	for _, wait := range []int{-1, appworkflow.MaxWorkflowEventWaitMS + 1} {
+		_, err := operator.FetchWorkflowEvents(ctx, appworkflow.WorkflowRunReadRequest{RunID: runID, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}, WaitMS: wait})
+		if !errors.Is(err, appworkflow.ErrWorkflowInvalidRequest) {
+			t.Errorf("wait %d: err = %v", wait, err)
+		}
+	}
+	if inspector.calls != 0 {
+		t.Fatalf("a bad wait reached the event store %d times", inspector.calls)
+	}
+
+	// An inspector that cannot page cannot honor a wait either.
+	plain := graphInspectorFunc(func(_ context.Context, query rundiagnostics.Query) (rundiagnostics.Result, error) {
+		return rundiagnostics.Result{}, nil
+	})
+	operator, ctx, runID = newEventsOperator(t, plain, func(appworkflow.RunOperationAuthorization) error { return nil })
+	if _, err := operator.FetchWorkflowEvents(ctx, appworkflow.WorkflowRunReadRequest{RunID: runID, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}, WaitMS: 100}); !errors.Is(err, appworkflow.ErrWorkflowInvalidRequest) {
+		t.Fatalf("wait on a non-paging inspector: %v", err)
+	}
+}
+
+func TestEventCursorRejectsAVersionOneCursorThatClaimsAGeneration(t *testing.T) {
+	inspector := &pagedInspector{total: 1}
+	operator, ctx, runID := newEventsOperator(t, inspector, func(appworkflow.RunOperationAuthorization) error { return nil })
+	// {"v":1,"run":"cursor-run","seq":1,"gen":"x"}
+	forged := "eyJ2IjoxLCJydW4iOiJjdXJzb3ItcnVuIiwic2VxIjoxLCJnZW4iOiJ4In0"
+	_, err := operator.FetchWorkflowEvents(ctx, appworkflow.WorkflowRunReadRequest{RunID: runID, Identity: appworkflow.IdentityRequest{SourceAuthority: "test"}, After: forged})
+	if !errors.Is(err, appworkflow.ErrWorkflowInvalidRequest) {
+		t.Fatalf("err = %v", err)
 	}
 }
