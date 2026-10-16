@@ -148,7 +148,7 @@ func mapConfirmation(t *testing.T, c AdmissionConfirmation) (runtimeevents.Event
 // pass, not blocking, caused by the blocked event, with the confirmer as actor.
 func TestConfirmationIsAPassOnTheAdmissionSubjectCausedByTheBlockedEvent(t *testing.T) {
 	blocked, _ := mapAdmission(t, Admission{DecisionID: "dec-1", RunID: "run-1", Outcome: "confirm", DecidedAt: at})
-	e, ok := mapConfirmation(t, AdmissionConfirmation{DecisionID: "dec-1", RunID: "run-1", BlockedEventID: "evt_blocked", ConfirmedBy: "operator:local", Verified: "claimed", At: at})
+	e, ok := mapConfirmation(t, AdmissionConfirmation{DecisionID: "dec-1", RunID: "run-1", BlockedEventID: "evt_blocked", ActorURN: "msg://user/hadron/operator:local", ActorKind: "user", ActorRole: "operator", Verified: "claimed", At: at})
 	if !ok {
 		t.Fatal("not exported")
 	}
@@ -160,9 +160,10 @@ func TestConfirmationIsAPassOnTheAdmissionSubjectCausedByTheBlockedEvent(t *test
 	if e.Actor == nil || e.Actor.Kind != "user" || e.Actor.Role != "operator" || e.Actor.Verified != "claimed" || !strings.HasPrefix(e.Actor.URN, "msg://user/hadron/") {
 		t.Fatalf("actor = %+v", e.Actor)
 	}
-	// A dry run has no confirmer, so no actor; a missing blocked event means no cause.
+	// With no actor given the pass still has one, Hadron's own service actor; a missing
+	// blocked event means no cause.
 	d, ok := mapConfirmation(t, AdmissionConfirmation{DecisionID: "dec-1", RunID: "run-1", At: at})
-	if !ok || d.Actor != nil || d.Corr.CausationID != "" {
+	if !ok || d.Actor == nil || d.Actor.URN != ServiceActorURN || d.Actor.Kind != "service" || d.Actor.Verified != "claimed" || d.Corr.CausationID != "" {
 		t.Fatalf("dry-run confirmation = %+v", d)
 	}
 	if _, ok := mapConfirmation(t, AdmissionConfirmation{RunID: "run-1", At: at}); ok {
@@ -301,7 +302,7 @@ func TestPayloadsValidateAgainstTheCatalogSchemas(t *testing.T) {
 		}
 		mapped = append(mapped, e)
 	}
-	if c, ok := mapConfirmation(t, AdmissionConfirmation{DecisionID: "dec-1", RunID: "run-1", BlockedEventID: "evt_blocked", ConfirmedBy: "operator:local", Verified: "token", At: at}); ok {
+	if c, ok := mapConfirmation(t, AdmissionConfirmation{DecisionID: "dec-1", RunID: "run-1", BlockedEventID: "evt_blocked", ActorURN: "msg://user/hadron/operator:local", ActorKind: "user", ActorRole: "operator", Verified: "claimed", At: at}); ok {
 		mapped = append(mapped, c)
 	} else {
 		t.Fatal("confirmation not exported")

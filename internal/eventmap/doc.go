@@ -26,8 +26,11 @@
 // confirmed, or a dry run, which proceeds without confirmation), the transaction that
 // records the start exports a SECOND gate.evaluated on the same admission subject:
 // result pass, blocking false, corr.causation_id = the blocked event, actor = the
-// confirmer (verified "token" for the operator credential over HTTP, else "claimed";
-// no actor for a dry run), at key (decision id, run_sequence 1). The run's first
+// confirmer (token only when Hadron authenticated them over its HTTP path AND the
+// principal is already a msg:// URN, which is then the actor; otherwise
+// msg://user/hadron/<escaped principal>, claimed; local trust alone is claimed; a confirm
+// dry run, which has no confirmer, gets msg://service/hadron, claimed), at key (decision
+// id, run_sequence 1). The run's first
 // run.state_changed cites that pass, not the blocked event; a dry run's run cites
 // nothing (CW-0250, architect ruling rev 2). Hadron records no rejected or expired
 // confirmation, so there is no fail counterpart yet.

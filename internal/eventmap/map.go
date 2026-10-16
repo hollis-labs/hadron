@@ -133,6 +133,9 @@ type Admission struct {
 	DecidedAt time.Time
 }
 
+// ServiceActorURN is Hadron's own actor, for an event no person caused.
+const ServiceActorURN = "msg://service/hadron"
+
 // AdmissionGateID is the gate id of the admission policy evaluation.
 const AdmissionGateID = "hadron.admission"
 
@@ -204,18 +207,17 @@ type AdmissionConfirmation struct {
 	// BlockedEventID is the id of the exported blocked event this answers; empty when
 	// that event was not exported.
 	BlockedEventID string
-	// ConfirmedBy is the principal that confirmed; empty for a dry run, which had no
-	// confirmer.
-	ConfirmedBy string
-	// Verified is how Hadron identified ConfirmedBy: "token" or "claimed".
-	Verified string
+	// ActorURN, ActorKind, ActorRole and Verified say who confirmed and how Hadron
+	// knows (token or claimed). Every exported event has an actor: when ActorURN is
+	// empty the mapper uses Hadron's own service actor, claimed.
+	ActorURN, ActorKind, ActorRole, Verified string
 	// At is when the confirmed start was recorded.
 	At time.Time
 }
 
 // buildConfirmation maps a satisfied confirm decision to a second gate.evaluated on
 // the same admission subject: result pass, blocking false, caused by the blocked
-// event, with the confirmer as the actor when there is one.
+// event, with the confirmer (or Hadron's service actor) as the actor.
 func buildConfirmation(c AdmissionConfirmation) (runtimeevents.Event, bool) {
 	if c.DecisionID == "" || c.RunID == "" {
 		return runtimeevents.Event{}, false
@@ -228,8 +230,9 @@ func buildConfirmation(c AdmissionConfirmation) (runtimeevents.Event, bool) {
 		Kind:   KindGateEvaluated,
 		Class:  &runtimeevents.Class{Category: "state", Severity: "notice", PayloadSchema: schemaGate},
 	}
-	if c.ConfirmedBy != "" {
-		e.Actor = &runtimeevents.Actor{URN: "msg://user/hadron/" + url.PathEscape(c.ConfirmedBy), Kind: "user", Role: "operator", Verified: c.Verified}
+	e.Actor = &runtimeevents.Actor{URN: c.ActorURN, Kind: c.ActorKind, Role: c.ActorRole, Verified: c.Verified}
+	if c.ActorURN == "" {
+		e.Actor = &runtimeevents.Actor{URN: ServiceActorURN, Kind: "service", Role: "system", Verified: "claimed"}
 	}
 	e.Payload = mustJSON(map[string]any{
 		"gate":    map[string]string{"id": AdmissionGateID, "kind": "custom"},

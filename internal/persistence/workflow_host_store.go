@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"sort"
 	"time"
@@ -172,10 +173,10 @@ func (s *WorkflowHostStore) RecordStart(ctx context.Context, input hoststate.Sta
 		// above): a confirmed start, or a dry run, which proceeds without confirmation.
 		if confirmationSatisfied(input) {
 			if observer, ok := query.(confirmationObserver); ok {
-				confirmer, verified := confirmerOf(input)
+				urn, kind, role, verified := confirmerOf(input)
 				return observer.observeConfirmation(ctx, eventmap.AdmissionConfirmation{
 					DecisionID: input.Decision.ID, RunID: string(input.Run.ID),
-					ConfirmedBy: confirmer, Verified: verified, At: input.RecordedAt,
+					ActorURN: urn, ActorKind: kind, ActorRole: role, Verified: verified, At: input.RecordedAt,
 				})
 			}
 		}
@@ -194,18 +195,34 @@ func confirmationSatisfied(input hoststate.StartRecord) bool {
 	return input.DryRun || (input.Confirmation != nil && input.Confirmation.Confirmed)
 }
 
-// confirmerOf names who confirmed and how Hadron knows: "token" when the identity was
-// authenticated by the operator credential over HTTP, "claimed" otherwise. A dry run
-// has no confirmer. This is the one place that decides it.
-func confirmerOf(input hoststate.StartRecord) (principal, verified string) {
-	if input.DryRun || input.Confirmation == nil || input.Confirmation.ConfirmedBy == "" {
-		return "", ""
+// confirmerOf names the actor of a confirmation pass and how Hadron knows it (the
+// same rule as Cerberus O3; verified is the closed vocabulary token | claimed | none).
+//
+//   - token only when Hadron authenticated the confirmer (the request came through its
+//     authenticated HTTP path) AND the principal is already a msg:// URN of a user,
+//     agent, service or tool: the actor is that URN.
+//   - otherwise msg://user/hadron/<escaped principal>, claimed. Local trust without a
+//     credential is claimed, and today's operator principal ("operator:local") is not a
+//     URN, so operator confirmations are claimed.
+//   - a start with no confirmer (a confirm dry run) gets Hadron's service actor, claimed.
+//
+// This is the one place that decides it.
+func confirmerOf(input hoststate.StartRecord) (urn, kind, role, verified string) {
+	if input.Confirmation == nil || input.Confirmation.ConfirmedBy == "" {
+		return eventmap.ServiceActorURN, "service", "system", "claimed"
 	}
-	verified = "claimed"
-	if input.Identity.SourceAuthority == "http" && input.Identity.Trust == "local" {
-		verified = "token"
+	principal := input.Confirmation.ConfirmedBy
+	if parsed, err := url.Parse(principal); err == nil && parsed.Scheme == "msg" && parsed.Path != "" && input.Identity.SourceAuthority == "http" {
+		switch parsed.Host {
+		case "user", "agent", "service", "tool":
+			role = ""
+			if parsed.Host == "user" {
+				role = "operator"
+			}
+			return principal, parsed.Host, role, "token"
+		}
 	}
-	return input.Confirmation.ConfirmedBy, verified
+	return "msg://user/hadron/" + url.PathEscape(principal), "user", "operator", "claimed"
 }
 
 func (s *WorkflowHostStore) LoadStart(ctx context.Context, runID workflowruntime.RunID) (hoststate.StartSnapshot, error) {

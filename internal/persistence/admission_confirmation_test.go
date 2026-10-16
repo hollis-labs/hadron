@@ -127,8 +127,10 @@ func TestAConfirmedStartExportsThePassAndTheRunCitesIt(t *testing.T) {
 	if env.Corr.CausationID != blocked.EventID {
 		t.Fatalf("pass causation = %q; want the blocked event %q", env.Corr.CausationID, blocked.EventID)
 	}
-	if env.Actor == nil || env.Actor.Kind != "user" || env.Actor.Role != "operator" || env.Actor.Verified != "token" || env.Actor.URN == "" {
-		t.Fatalf("actor = %+v; want the confirmer, verified by token", env.Actor)
+	// Today's operator principal ("operator:local") is not a msg:// URN, so even over
+	// the authenticated HTTP path the confirmer is claimed, never token.
+	if env.Actor == nil || env.Actor.Kind != "user" || env.Actor.Role != "operator" || env.Actor.Verified != "claimed" || env.Actor.URN != "msg://user/hadron/operator:local" {
+		t.Fatalf("actor = %+v; want the claimed operator", env.Actor)
 	}
 
 	// The run that follows cites the pass, not the blocked event.
@@ -202,7 +204,8 @@ func TestAConfirmDryRunExportsThePassWithNoRunLink(t *testing.T) {
 		t.Fatalf("entries = %+v, %v; want blocked then pass", entries, err)
 	}
 	env := decodeConfirmation(t, entries[1])
-	if env.Payload.Result != "pass" || env.Actor != nil || env.Corr.CausationID != entries[0].EventID {
+	// Every exported event has an actor: a dry run has no confirmer, so Hadron itself.
+	if env.Payload.Result != "pass" || env.Actor == nil || env.Actor.URN != "msg://service/hadron" || env.Actor.Kind != "service" || env.Actor.Verified != "claimed" || env.Corr.CausationID != entries[0].EventID {
 		t.Fatalf("dry-run pass = %s", entries[1].Envelope)
 	}
 	base := workflowTestTime()
@@ -255,18 +258,53 @@ func TestAConfirmationEnvelopeFailureNeverRejectsTheStart(t *testing.T) {
 	}
 }
 
-// How Hadron knows the confirmer: token only for the operator credential over HTTP.
-func TestConfirmerVerificationIsTokenOnlyForTheOperatorCredential(t *testing.T) {
-	record := hoststate.StartRecord{Confirmation: &hoststate.StartConfirmation{Confirmed: true, ConfirmedBy: "someone"}}
-	if who, verified := confirmerOf(record); who != "someone" || verified != "claimed" {
-		t.Fatalf("default = %q %q; want claimed", who, verified)
+// A confirmer who is a msg:// URN and was authenticated by Hadron's HTTP path is the
+// actor, verified by token; the pass carries that URN end to end.
+func TestAVerifiedURNConfirmerIsTheTokenActor(t *testing.T) {
+	_, host := admissionHost(t, "token", true)
+	evaluation, record := confirmStart(t, "token")
+	if _, _, err := host.RecordPolicyEvaluation(t.Context(), evaluation); err != nil {
+		t.Fatal(err)
 	}
-	record.Identity.SourceAuthority, record.Identity.Trust = "http", "local"
-	if _, verified := confirmerOf(record); verified != "token" {
-		t.Fatalf("operator credential = %q; want token", verified)
+	record.Confirmation = &hoststate.StartConfirmation{Confirmed: true, ConfirmedBy: "msg://user/local/chris"}
+	if _, _, err := host.RecordStart(t.Context(), record); err != nil {
+		t.Fatal(err)
 	}
-	record.DryRun = true
-	if who, verified := confirmerOf(record); who != "" || verified != "" {
-		t.Fatalf("a dry run has no confirmer: %q %q", who, verified)
+	entries, err := host.state.EventOutboxAfter(t.Context(), 0, 10)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("entries = %+v, %v", entries, err)
+	}
+	env := decodeConfirmation(t, entries[1])
+	if env.Actor == nil || env.Actor.URN != "msg://user/local/chris" || env.Actor.Kind != "user" || env.Actor.Verified != "token" {
+		t.Fatalf("actor = %+v", env.Actor)
+	}
+}
+
+// The actor rule, in one place: token only for an authenticated msg:// URN; everything
+// else is claimed; no confirmer means Hadron's service actor.
+func TestConfirmerActorRule(t *testing.T) {
+	type want struct{ urn, kind, verified string }
+	for name, test := range map[string]struct {
+		confirmer, source string
+		want              want
+	}{
+		"authenticated URN":          {"msg://user/local/chris", "http", want{"msg://user/local/chris", "user", "token"}},
+		"authenticated agent URN":    {"msg://agent/agent-mux/agt_1", "http", want{"msg://agent/agent-mux/agt_1", "agent", "token"}},
+		"URN without authentication": {"msg://user/local/chris", "test", want{"msg://user/hadron/msg:%2F%2Fuser%2Flocal%2Fchris", "user", "claimed"}},
+		"operator principal":         {"operator:local", "http", want{"msg://user/hadron/operator:local", "user", "claimed"}},
+		"unknown URN authority":      {"msg://thing/x", "http", want{"msg://user/hadron/msg:%2F%2Fthing%2Fx", "user", "claimed"}},
+		"no confirmer":               {"", "http", want{"msg://service/hadron", "service", "claimed"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			record := hoststate.StartRecord{}
+			record.Identity.SourceAuthority, record.Identity.Trust = test.source, "local" // trust alone never makes token
+			if test.confirmer != "" {
+				record.Confirmation = &hoststate.StartConfirmation{Confirmed: true, ConfirmedBy: test.confirmer}
+			}
+			urn, kind, _, verified := confirmerOf(record)
+			if urn != test.want.urn || kind != test.want.kind || verified != test.want.verified {
+				t.Fatalf("confirmerOf = %q %q %q; want %+v", urn, kind, verified, test.want)
+			}
+		})
 	}
 }
