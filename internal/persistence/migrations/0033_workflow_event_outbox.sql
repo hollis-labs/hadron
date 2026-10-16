@@ -5,6 +5,12 @@
 -- DROP INDEX workflow_event_outbox_skipped_open;
 -- DROP TABLE workflow_event_outbox_skipped;
 -- (nothing else references them).
+-- run_id and run_sequence name the source of an envelope. For a workflow event they
+-- are the run and its per-run workflow_events sequence (which starts at 1). For an
+-- admission policy decision (CW-0237) run_id holds the DECISION id and run_sequence is
+-- 0, which no workflow event can take; the skipped table below uses the same key, so a
+-- repair pass must re-derive a sequence-0 row from the policy decision
+-- (workflow_host_policy_decisions), not from workflow_events.
 CREATE TABLE workflow_event_outbox (
     outbox_seq INTEGER PRIMARY KEY,
     run_id TEXT NOT NULL,

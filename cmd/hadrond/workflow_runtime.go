@@ -195,6 +195,17 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 	if err != nil {
 		return nil, err
 	}
+	if sett.Events.Outbox {
+		// The host store has its own state handle, so it gets the outbox too: its
+		// admission decisions are written in its own transaction.
+		mapper, mapperErr := eventmap.NewMapper(nil)
+		if mapperErr != nil {
+			return nil, fmt.Errorf("event outbox: %w", mapperErr)
+		}
+		if enableErr := journal.EnableEventOutbox(context.Background(), mapper); enableErr != nil {
+			return nil, fmt.Errorf("event outbox: %w", enableErr)
+		}
+	}
 	activationStore, err := persistence.NewWorkflowActivationStore(store)
 	if err != nil {
 		return nil, err

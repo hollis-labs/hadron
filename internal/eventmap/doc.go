@@ -11,15 +11,31 @@
 //   - wait.suspended of a gate wait -> gate.evaluated with result blocked (gate kind
 //     approval for a human-decision wait, custom for any other gate wait)
 //
+// The admission policy decision is the third family. The host store persists it
+// outside workflow_events, in its own transaction, so the same outbox write happens
+// there (persistence.WorkflowHostStore.RecordPolicyEvaluation): gate.evaluated with
+// gate hadron.admission (kind custom), allow -> pass, deny -> fail, confirm ->
+// blocked. EVERY admission event, allow included, has the subject
+// msg://workflow_admission/hadron/<decision id>: a subject must name something that
+// exists, and a run may not (a dry run, a confirm). The run an allow goes on to create
+// cites the admission event as its cause: its first run.state_changed carries
+// corr.causation_id = the admission event's id (architect ruling
+// hadron_admission_event_subject_2026_10_16).
+//
+// The outbox key of an admission is (decision id, run_sequence 0): in
+// workflow_event_outbox and in workflow_event_outbox_skipped the run_id column holds
+// the DECISION id for these rows, and no workflow event can take sequence 0 (they
+// start at 1). A repair pass must re-derive a sequence-0 skipped row from the policy
+// decision (workflow_host_policy_decisions), not from workflow_events. The
+// decision's reason and attributes are free text and never leave.
+//
 // node.* events are NOT exported: they stay in Hadron's own subscription, and
 // step.executed@1 is for deterministic steps and reaction rules, not workflow nodes.
 // Any global node kind would come through the contract lane.
 //
-// A gate's pass or fail is not exported yet: the persisted wait.resumed event
-// carries the responder and a payload digest but no explicit decision, so there is
-// nothing to map without guessing. The admission policy evaluation
-// (gate hadron.admission) is written by the host store outside workflow_events and
-// is a separate slice.
+// A human gate's pass or fail is not exported yet: it waits for an explicit option
+// outcome in the workflow definition (CW-0236), and nothing is inferred from option
+// ids or labels.
 //
 // Every envelope is built field by field from the event's identifiers and
 // statuses, never from values or free text, and passes through the eventstage

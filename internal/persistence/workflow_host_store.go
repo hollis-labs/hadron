@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/eventmap"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
@@ -28,6 +29,18 @@ func NewWorkflowHostStore(store *Store) (*WorkflowHostStore, error) {
 	}
 	return &WorkflowHostStore{state: state, now: func() time.Time { return time.Now().UTC() }}, nil
 }
+
+// EnableEventOutbox makes RecordPolicyEvaluation also write the admission decision's
+// gate.evaluated envelope in its transaction (when the mapper exports admissions).
+// The host store has its own state handle, so the outbox of the main state store does
+// not reach it; both draw their sequence numbers from the same counter row. Call it
+// once at startup, before the store is used.
+func (s *WorkflowHostStore) EnableEventOutbox(ctx context.Context, mapper OutboxMapper) error {
+	return s.state.EnableEventOutbox(ctx, mapper)
+}
+
+// EventOutboxSkipped is the number of admission decisions this store skipped.
+func (s *WorkflowHostStore) EventOutboxSkipped() uint64 { return s.state.EventOutboxSkipped() }
 
 func canonicalHostStart(record hoststate.StartRecord) (hoststate.StartRecord, string, error) {
 	if record.Snapshot == nil {
@@ -375,6 +388,14 @@ func (s *WorkflowHostStore) RecordPolicyEvaluation(ctx context.Context, evaluati
 				return &workflowruntime.IdempotencyConflictError{Operation: "workflow policy evaluation", Key: evaluation.StartKey}
 			}
 			return execErr
+		}
+		// Written in this same transaction, and only on the insert: a replay of the
+		// start key above returned without writing, so it never exports a second time.
+		if observer, ok := query.(admissionObserver); ok {
+			return observer.observeAdmission(ctx, eventmap.Admission{
+				DecisionID: evaluation.Decision.ID, RunID: string(evaluation.Decision.RunID),
+				Outcome: string(evaluation.Decision.Outcome), DecidedAt: evaluation.Decision.DecidedAt,
+			})
 		}
 		return nil
 	})

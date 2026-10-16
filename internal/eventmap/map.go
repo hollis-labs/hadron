@@ -1,9 +1,12 @@
 package eventmap
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
@@ -18,6 +21,10 @@ const (
 	schemaStateChanged = "urn:hollis-labs:events:state_changed@1"
 	schemaGate         = "urn:hollis-labs:events:gate.evaluated@1"
 )
+
+// ChannelAdmission is the source channel of the admission policy decisions, which
+// the host store persists outside workflow_events.
+const ChannelAdmission runtimeevents.SourceChannel = "workflow_admission"
 
 // Kinds exported.
 const (
@@ -39,7 +46,7 @@ func DefaultAllowlist() Allowlist {
 func build(ev workflowruntime.Event) (runtimeevents.Event, bool) {
 	run := string(ev.RunID)
 	base := runtimeevents.Event{
-		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: ev.OccurredAt.UTC(), Subject: "msg://workflow_run/hadron/" + run,
+		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: ev.OccurredAt.UTC(), Subject: "msg://workflow_run/hadron/" + url.PathEscape(run),
 		Source: runtimeevents.Source{Channel: Channel, Confidence: runtimeevents.ConfidenceDerived},
 		Corr:   &runtimeevents.Corr{CorrelationID: run},
 	}
@@ -111,4 +118,78 @@ func mustJSON(v any) json.RawMessage {
 		panic("eventmap: marshal " + strconv.Quote(fmt.Sprintf("%T", v)) + ": " + err.Error())
 	}
 	return b
+}
+
+// Admission is what the mapper needs to know of a persisted admission policy
+// evaluation: the decision, never its facts, reason or attributes.
+type Admission struct {
+	// DecisionID is the evaluation's id (hoststate PolicyDecision.ID).
+	DecisionID string
+	// RunID is the run the start would create.
+	RunID string
+	// Outcome is the policy outcome: allow, deny or confirm.
+	Outcome string
+	// DecidedAt is when the decision was made.
+	DecidedAt time.Time
+}
+
+// AdmissionGateID is the gate id of the admission policy evaluation.
+const AdmissionGateID = "hadron.admission"
+
+// admissionSubject is the one place that decides what an admission event is about.
+// Every admission result, allow included, is about the evaluation: a subject must
+// name something that exists, and a run may not (a dry run, a confirm). The run an
+// allow goes on to create points back at this event through corr.causation_id on its
+// first run.state_changed (see WithCausation).
+func admissionSubject(a Admission) (subjectType, subjectID, subjectURN string) {
+	return "workflow_admission", a.DecisionID, "msg://workflow_admission/hadron/" + url.PathEscape(a.DecisionID)
+}
+
+// buildAdmission maps an admission decision to gate.evaluated (gate hadron.admission,
+// kind custom): allow is pass, deny is fail, confirm is blocked. An allow is followed
+// by a run, which later cites this event as its cause. The reason and the attributes
+// of the decision are free text and never leave.
+func buildAdmission(a Admission) (runtimeevents.Event, bool) {
+	var result string
+	switch a.Outcome {
+	case "allow":
+		result = "pass"
+	case "deny":
+		result = "fail"
+	case "confirm":
+		result = "blocked"
+	default:
+		return runtimeevents.Event{}, false
+	}
+	if a.DecisionID == "" || a.RunID == "" {
+		return runtimeevents.Event{}, false
+	}
+	subjectType, subjectID, subject := admissionSubject(a)
+	e := runtimeevents.Event{
+		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: a.DecidedAt.UTC(), Subject: subject,
+		Source: runtimeevents.Source{Channel: ChannelAdmission, Confidence: runtimeevents.ConfidenceDerived},
+		Corr:   &runtimeevents.Corr{CorrelationID: a.RunID},
+		Kind:   KindGateEvaluated,
+		Class:  &runtimeevents.Class{Category: "state", Severity: "notice", PayloadSchema: schemaGate},
+	}
+	e.Payload = mustJSON(map[string]any{
+		"gate":    map[string]string{"id": AdmissionGateID, "kind": "custom"},
+		"subject": map[string]string{"type": subjectType, "id": subjectID},
+		"result":  result, "blocking": result == "blocked",
+	})
+	return e, true
+}
+
+type causationKey struct{}
+
+// WithCausation returns a context that makes the mapper set corr.causation_id on the
+// run.state_changed it builds to eventID: the id of the admission event that caused
+// the run. The caller decides when it applies (the run's first state change).
+func WithCausation(ctx context.Context, eventID string) context.Context {
+	return context.WithValue(ctx, causationKey{}, eventID)
+}
+
+func causationFrom(ctx context.Context) string {
+	id, _ := ctx.Value(causationKey{}).(string)
+	return id
 }

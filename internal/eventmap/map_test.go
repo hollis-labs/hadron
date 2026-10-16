@@ -45,6 +45,86 @@ func mapOne(t *testing.T, ev workflowruntime.Event) (runtimeevents.Event, bool) 
 	return e, true
 }
 
+func mapAdmission(t *testing.T, a Admission) (runtimeevents.Event, bool) {
+	t.Helper()
+	raw, id, ok, err := newMapper(t).MapAdmission(context.Background(), a, 12345, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		return runtimeevents.Event{}, false
+	}
+	var e runtimeevents.Event
+	if err := json.Unmarshal(raw, &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.ID != id || e.Sequence != 7 || e.Generation != 12345 {
+		t.Fatalf("envelope %+v id %q", e, id)
+	}
+	return e, true
+}
+
+// The causation context sets corr.causation_id on a run.state_changed and nowhere
+// else.
+func TestCausationIsSetOnRunStateChangedOnly(t *testing.T) {
+	ctx := WithCausation(context.Background(), "evt_cause")
+	raw, _, ok, err := newMapper(t).MapWorkflowEvent(ctx, runStatus("pending", "running"), 1, 1)
+	if err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	var e runtimeevents.Event
+	_ = json.Unmarshal(raw, &e)
+	if e.Corr == nil || e.Corr.CausationID != "evt_cause" || e.Corr.CorrelationID != "run-1" {
+		t.Fatalf("corr = %+v", e.Corr)
+	}
+	gate := workflowruntime.Event{Sequence: 3, RunID: "run-1", Type: workflowruntime.EventWaitSuspended, OccurredAt: at, Attributes: map[string]string{"kind": "gate", "wait_id": "w1", "wake_source": "gate"}}
+	raw, _, ok, err = newMapper(t).MapWorkflowEvent(ctx, gate, 1, 2)
+	if err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	var g runtimeevents.Event
+	_ = json.Unmarshal(raw, &g)
+	if g.Corr == nil || g.Corr.CausationID != "" {
+		t.Fatalf("a gate event carries causation: %+v", g.Corr)
+	}
+}
+
+// An admission with an unknown outcome, or without ids, is not exported rather than
+// guessed at; a known outcome maps allow to pass, deny to fail and confirm to blocked.
+func TestAdmissionOutcomesMapToGateResults(t *testing.T) {
+	for outcome, want := range map[string]string{"allow": "pass", "deny": "fail", "confirm": "blocked"} {
+		e, ok := mapAdmission(t, Admission{DecisionID: "dec-1", RunID: "run-1", Outcome: outcome, DecidedAt: at})
+		if !ok {
+			t.Fatalf("%s not exported", outcome)
+		}
+		var p map[string]any
+		_ = json.Unmarshal(e.Payload, &p)
+		if p["result"] != want || p["blocking"] != (want == "blocked") || p["gate"].(map[string]any)["id"] != "hadron.admission" || p["gate"].(map[string]any)["kind"] != "custom" {
+			t.Errorf("%s: payload = %v", outcome, p)
+		}
+		if _, hasSeq := p["run_sequence"]; hasSeq {
+			t.Errorf("%s: an admission has no run sequence: %v", outcome, p)
+		}
+	}
+	for name, a := range map[string]Admission{
+		"unknown outcome": {DecisionID: "d", RunID: "r", Outcome: "maybe", DecidedAt: at},
+		"no decision id":  {RunID: "r", Outcome: "allow", DecidedAt: at},
+		"no run id":       {DecisionID: "d", Outcome: "allow", DecidedAt: at},
+	} {
+		if _, ok := mapAdmission(t, a); ok {
+			t.Errorf("%s was exported", name)
+		}
+	}
+	e, _ := mapAdmission(t, Admission{DecisionID: "dec/1 x", RunID: "run-1", Outcome: "deny", DecidedAt: at})
+	if e.Subject != "msg://workflow_admission/hadron/dec%2F1%20x" {
+		t.Errorf("subject not escaped: %q", e.Subject)
+	}
+	// Allow too is about the evaluation, never the run (which may not exist).
+	if a, _ := mapAdmission(t, Admission{DecisionID: "dec-1", RunID: "run-1", Outcome: "allow", DecidedAt: at}); a.Subject != "msg://workflow_admission/hadron/dec-1" {
+		t.Errorf("an allow subject = %q", a.Subject)
+	}
+}
+
 func runStatus(from, to string) workflowruntime.Event {
 	return workflowruntime.Event{Sequence: 4, RunID: "run-1", Type: workflowruntime.EventRunStatusChanged, OccurredAt: at,
 		Attributes: map[string]string{"entity": "run", "from_status": from, "to_status": to}}
@@ -161,11 +241,22 @@ func TestPayloadsValidateAgainstTheCatalogSchemas(t *testing.T) {
 		runStatus("pending", "running"), runStatus("", "succeeded"),
 		{Sequence: 3, RunID: "run-1", Invocation: &inv, Type: workflowruntime.EventWaitSuspended, OccurredAt: at, Attributes: map[string]string{"kind": "gate", "wait_id": "w1", "wake_source": "gate"}},
 	}
+	var mapped []runtimeevents.Event
 	for _, ev := range events {
 		e, ok := mapOne(t, ev)
 		if !ok {
 			t.Fatalf("%s not exported", ev.Type)
 		}
+		mapped = append(mapped, e)
+	}
+	for _, outcome := range []string{"allow", "deny", "confirm"} {
+		e, ok := mapAdmission(t, Admission{DecisionID: "dec-1", RunID: "run-1", Outcome: outcome, DecidedAt: at})
+		if !ok {
+			t.Fatalf("admission %s not exported", outcome)
+		}
+		mapped = append(mapped, e)
+	}
+	for _, e := range mapped {
 		entry, found := catalog.Lookup(string(e.Kind))
 		if !found || entry.PayloadSchema != e.Class.PayloadSchema || entry.Category != e.Class.Category {
 			t.Fatalf("%s: class %+v vs catalog %+v", e.Kind, e.Class, entry)
