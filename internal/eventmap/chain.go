@@ -63,6 +63,33 @@ func (m *Mapper) MapWorkflowEvent(ctx context.Context, ev workflowruntime.Event,
 	if !ok {
 		return nil, "", false, nil
 	}
+	if cause := causationFrom(ctx); cause != "" && e.Kind == KindRunStateChanged && e.Corr != nil {
+		e.Corr.CausationID = cause
+	}
+	return m.finish(ctx, e, generation, seq)
+}
+
+// MapAdmission implements persistence.AdmissionMapper: the host's admission policy
+// decision becomes a gate.evaluated event.
+func (m *Mapper) MapAdmission(ctx context.Context, a Admission, generation, seq uint64) ([]byte, string, bool, error) {
+	e, ok := buildAdmission(a)
+	if !ok {
+		return nil, "", false, nil
+	}
+	return m.finish(ctx, e, generation, seq)
+}
+
+// MapAdmissionConfirmation implements persistence.ConfirmationMapper: the satisfied
+// confirmation of an admission decision becomes a second gate.evaluated (pass).
+func (m *Mapper) MapAdmissionConfirmation(ctx context.Context, c AdmissionConfirmation, generation, seq uint64) ([]byte, string, bool, error) {
+	e, ok := buildConfirmation(c)
+	if !ok {
+		return nil, "", false, nil
+	}
+	return m.finish(ctx, e, generation, seq)
+}
+
+func (m *Mapper) finish(ctx context.Context, e runtimeevents.Event, generation, seq uint64) ([]byte, string, bool, error) {
 	e.Sequence, e.Generation = seq, generation
 	report := m.chain.Apply(ctx, &e)
 	if !report.Emit() {
