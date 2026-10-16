@@ -129,12 +129,18 @@ func (m *PinnedChildRunMaterializer) materializeChildNodes(ctx context.Context, 
 		}
 		invocationID := runtime.NodeInvocationID{RunID: request.ChildRunID, NodeID: node.ID}
 		var bound values.ValueSet
-		if !hasDependencies(request.Definition.Graph, node.ID) && len(node.InputBindings) != 0 {
-			boundInputs, err := bindNodeInputs(node, request.Inputs, request.ChildRunID)
-			if err != nil {
-				return false, fmt.Errorf("bind child root node %s: %w", node.ID, err)
+		if !hasDependencies(request.Definition.Graph, node.ID) {
+			// A root node is only claimable once its immutable inputs are durably
+			// bound (workflow/engine v0.2.0), so a root with no bindings binds the
+			// empty set rather than none.
+			bound = values.ValueSet{}
+			if len(node.InputBindings) != 0 {
+				boundInputs, err := bindNodeInputs(node, request.Inputs, request.ChildRunID)
+				if err != nil {
+					return false, fmt.Errorf("bind child root node %s: %w", node.ID, err)
+				}
+				bound = boundInputs
 			}
-			bound = boundInputs
 		}
 		current, loadErr := m.state.LoadNodeInvocation(ctx, invocationID)
 		if loadErr == nil {
@@ -296,11 +302,17 @@ func (m *PinnedChildRunMaterializer) readyChildRoots(ctx context.Context, reques
 		if current.Status != runtime.NodePending && current.Status != runtime.NodeBlocked {
 			continue
 		}
-		_, err = coordinator.ProgressNode(ctx, runtime.ProgressNodeRequest{
+		progressRequest := runtime.ProgressNodeRequest{
 			InvocationID: id, Rule: node.ReadyWhen, Predicate: node.If,
 			ExpressionContext: values.ExpressionContext{Inputs: request.Inputs},
 			At:                maxTime(m.clock.Now(), current.UpdatedAt),
-		})
+		}
+		if node.ForEach != nil {
+			// Root fan-out aggregates progress only with their exact plan node (workflow/engine v0.2.0).
+			aggregate := node
+			progressRequest.Node = &aggregate
+		}
+		_, err = coordinator.ProgressNode(ctx, progressRequest)
 		if err == nil {
 			continue
 		}

@@ -15,7 +15,7 @@ import (
 const (
 	sharedModule  = "github.com/hollis-labs/libs/workflow/engine"
 	formerModule  = "github.com/hollis-labs/hadron/" + "workflow"
-	pinnedVersion = "v0.1.0"
+	pinnedVersion = "v0.2.0"
 )
 
 func TestExtractedWorkflowDependencyBoundary(t *testing.T) {

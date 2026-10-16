@@ -688,7 +688,14 @@ func (h *Host) readyRootNodes(ctx context.Context, record hoststate.StartRecord)
 		if current.Status == runtime.NodeReady || current.Status == runtime.NodeSkipped {
 			continue
 		}
-		_, progressErr := coordinator.ProgressNode(ctx, runtime.ProgressNodeRequest{InvocationID: id, Rule: node.ReadyWhen, Predicate: node.If, ExpressionContext: values.ExpressionContext{Inputs: inputs}, At: maxTime(h.now(), current.UpdatedAt)})
+		request := runtime.ProgressNodeRequest{InvocationID: id, Rule: node.ReadyWhen, Predicate: node.If, ExpressionContext: values.ExpressionContext{Inputs: inputs}, At: maxTime(h.now(), current.UpdatedAt)}
+		if node.ForEach != nil {
+			// A root fan-out aggregate is coordinator-owned and has no executable inputs;
+			// workflow/engine v0.2.0 progresses it only with its exact plan node.
+			aggregate := node
+			request.Node = &aggregate
+		}
+		_, progressErr := coordinator.ProgressNode(ctx, request)
 		if progressErr != nil {
 			if errors.Is(progressErr, runtime.ErrCASMismatch) {
 				replayed, reloadErr := h.state.LoadNodeInvocation(ctx, id)
