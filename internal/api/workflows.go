@@ -178,11 +178,15 @@ func workflowActivationExposureDefinition(registration hoststate.ActivationRegis
 }
 
 func (s *Server) handleWorkflowRunAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.EscapedPath(), "/v1/workflows/runs/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 3 && parts[1] == "events" && parts[2] == "stream" {
+		s.handleWorkflowEventStreamRoute(w, r, parts[0])
+		return
+	}
 	if !s.requireWorkflowPOST(w, r) {
 		return
 	}
-	path := strings.TrimPrefix(r.URL.EscapedPath(), "/v1/workflows/runs/")
-	parts := strings.Split(path, "/")
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 		writeWorkflowOperationError(w, http.StatusNotFound, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeNotFound})
 		return

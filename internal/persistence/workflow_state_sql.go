@@ -75,6 +75,7 @@ func (s *WorkflowStateStore) write(ctx context.Context, operation string, fn fun
 		return fmt.Errorf("%s: commit sqlite transaction: %w", operation, err)
 	}
 	committed = true
+	signalFor(s.db).broadcast()
 	return nil
 }
 

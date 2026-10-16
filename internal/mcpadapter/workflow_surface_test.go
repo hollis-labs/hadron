@@ -420,6 +420,26 @@ func TestWorkflowEventToolsAcceptAResumeCursor(t *testing.T) {
 	}
 }
 
+func TestOnlySubscribeAcceptsAWait(t *testing.T) {
+	_, subscribe := workflowMetaToolSchema("hadron_workflow_run_subscribe")
+	if property, ok := subscribe["properties"].(map[string]any)["wait_ms"].(map[string]any); !ok || property["type"] != "integer" {
+		t.Fatalf("subscribe wait_ms schema = %#v", property)
+	}
+	_, events := workflowMetaToolSchema("hadron_workflow_run_events")
+	if _, present := events["properties"].(map[string]any)["wait_ms"]; present {
+		t.Fatal("hadron_workflow_run_events must stay a bounded, immediate read")
+	}
+	if wait, err := exactWorkflowIntegerArgument(map[string]any{"wait_ms": 2500.0}, "wait_ms", 0); err != nil || wait != 2500 {
+		t.Fatalf("wait_ms = %d, %v", wait, err)
+	}
+	if _, err := exactWorkflowIntegerArgument(map[string]any{"wait_ms": 2.5}, "wait_ms", 0); err == nil {
+		t.Fatal("a fractional wait was accepted")
+	}
+	if wait, err := exactWorkflowIntegerArgument(nil, "wait_ms", 0); err != nil || wait != 0 {
+		t.Fatalf("absent wait_ms = %d, %v", wait, err)
+	}
+}
+
 func TestWorkflowMetaLimitsRequireExactIntegers(t *testing.T) {
 	for _, name := range []string{"hadron_workflows_search", "hadron_workflow_catalog_search", "hadron_workflow_run_events", "hadron_workflow_run_subscribe"} {
 		_, schema := workflowMetaToolSchema(name)

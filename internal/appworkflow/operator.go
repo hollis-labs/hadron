@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
@@ -169,7 +170,14 @@ type WorkflowRunReadRequest struct {
 	// After resumes the event list after a cursor returned as NextCursor by
 	// an earlier read of the same run. Empty starts from the first event.
 	After string `json:"after,omitempty"`
+	// WaitMS, for an events read, holds the request open up to this many
+	// milliseconds (at most 30000) until an event follows After. Zero returns
+	// at once.
+	WaitMS int `json:"wait_ms,omitempty"`
 }
+
+// MaxWorkflowEventWaitMS bounds one long-polling events read.
+const MaxWorkflowEventWaitMS = 30000
 
 type WorkflowWaitListItem struct {
 	NodeID workflowruntime.NodeInvocationID `json:"node_id"`
@@ -195,6 +203,30 @@ type WorkflowEventListResult struct {
 	// NextCursor resumes after the last event returned, or after the cursor
 	// the read started from when no event followed it. Pass it as After.
 	NextCursor string `json:"next_cursor,omitempty"`
+	// RunTerminal is true when the run had finished before this read began. An
+	// empty, untruncated result then means no further event will arrive.
+	RunTerminal bool `json:"run_terminal,omitempty"`
+	// Gap is set instead of events when the caller's position cannot be
+	// resumed (see the Gap reasons). The caller must choose: continue from
+	// NextCursor, which points at the log's current high water, or start over.
+	Gap *WorkflowEventGap `json:"gap,omitempty"`
+
+	// generation is the event log identity NextCursor was issued under.
+	generation string
+}
+
+// CursorAfter returns the cursor that resumes right after the event with the
+// given sequence, in the same event log as this result. A transport that
+// delivers events one at a time uses it to label each.
+func (r WorkflowEventListResult) CursorAfter(sequence uint64) string {
+	return EncodeEventCursor(r.RunID, sequence, r.generation)
+}
+
+// WorkflowEventGap explains why a cursor could not be resumed.
+type WorkflowEventGap struct {
+	Reason            string `json:"reason"`
+	EarliestAvailable uint64 `json:"earliest_available"`
+	HighWater         uint64 `json:"high_water"`
 }
 
 type CancelWorkflowRunRequest struct {
@@ -494,17 +526,20 @@ func (s *WorkflowOperator) FetchWorkflowValues(ctx context.Context, request Work
 }
 
 func (s *WorkflowOperator) FetchWorkflowEvents(ctx context.Context, request WorkflowRunReadRequest) (WorkflowEventListResult, error) {
+	if request.WaitMS < 0 || request.WaitMS > MaxWorkflowEventWaitMS {
+		return WorkflowEventListResult{}, fmt.Errorf("%w: wait_ms must be between 0 and %d", ErrWorkflowInvalidRequest, MaxWorkflowEventWaitMS)
+	}
 	pager, paged := s.diagnostics.(EventPager)
 	if !paged {
 		// An inspector without paging serves the first page only.
-		if request.After != "" {
-			return WorkflowEventListResult{}, fmt.Errorf("%w: event cursors are not supported by this inspector", ErrWorkflowInvalidRequest)
+		if request.After != "" || request.WaitMS != 0 {
+			return WorkflowEventListResult{}, fmt.Errorf("%w: event cursors and waits are not supported by this inspector", ErrWorkflowInvalidRequest)
 		}
 		inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationEvents)
 		if err != nil {
 			return WorkflowEventListResult{}, err
 		}
-		return WorkflowEventListResult{RunID: request.RunID, Events: inspection.Events, Truncated: inspection.Truncated.Events, NextCursor: nextEventCursor(request.RunID, 0, inspection.Events)}, nil
+		return WorkflowEventListResult{RunID: request.RunID, Events: inspection.Events, Truncated: inspection.Truncated.Events, NextCursor: nextEventCursor(request.RunID, 0, "", inspection.Events)}, nil
 	}
 	if err := request.Display.Validate(); err != nil {
 		return WorkflowEventListResult{}, fmt.Errorf("invalid workflow display policy: %w", err)
@@ -512,28 +547,36 @@ func (s *WorkflowOperator) FetchWorkflowEvents(ctx context.Context, request Work
 	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: RunOperationEvents, RunID: request.RunID, Display: &request.Display}, request.Identity); err != nil {
 		return WorkflowEventListResult{}, err
 	}
-	after, err := decodeEventCursor(request.RunID, request.After)
+	after, generation, err := decodeEventCursor(request.RunID, request.After)
 	if err != nil {
 		return WorkflowEventListResult{}, err
 	}
-	page, err := pager.Events(ctx, rundiagnostics.EventsQuery{RunID: request.RunID, Display: request.Display, After: after, Limit: request.EventLimit})
+	page, err := pager.Events(ctx, rundiagnostics.EventsQuery{RunID: request.RunID, Display: request.Display, After: after, Limit: request.EventLimit, Wait: time.Duration(request.WaitMS) * time.Millisecond, Generation: generation})
 	if err != nil {
 		return WorkflowEventListResult{}, err
 	}
-	return WorkflowEventListResult{RunID: request.RunID, Events: page.Events, Truncated: page.Truncated, NextCursor: nextEventCursor(request.RunID, after, page.Events)}, nil
+	result := WorkflowEventListResult{RunID: request.RunID, Events: page.Events, Truncated: page.Truncated, RunTerminal: page.Terminal, generation: page.Generation}
+	if page.Gap != nil {
+		// Offer the log's current end as the place to continue from.
+		result.Gap = &WorkflowEventGap{Reason: page.Gap.Reason, EarliestAvailable: page.Gap.EarliestAvailable, HighWater: page.Gap.HighWater}
+		result.NextCursor = EncodeEventCursor(request.RunID, page.Gap.HighWater, page.Generation)
+		return result, nil
+	}
+	result.NextCursor = nextEventCursor(request.RunID, after, page.Generation, page.Events)
+	return result, nil
 }
 
 // nextEventCursor is the cursor after the last event, or the starting position
 // when the page is empty so a caller that has caught up polls from the same
 // place.
-func nextEventCursor(run RunID, after uint64, events []workflowruntime.RenderedEvent) string {
+func nextEventCursor(run RunID, after uint64, generation string, events []workflowruntime.RenderedEvent) string {
 	if len(events) > 0 {
 		after = events[len(events)-1].Sequence
 	}
-	if after == 0 {
+	if after == 0 && generation == "" {
 		return ""
 	}
-	return EncodeEventCursor(run, after)
+	return EncodeEventCursor(run, after, generation)
 }
 
 func (s *WorkflowOperator) inspectWorkflowProjection(ctx context.Context, request WorkflowRunReadRequest, operation RunOperation) (rundiagnostics.Result, error) {

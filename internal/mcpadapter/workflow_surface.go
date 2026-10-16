@@ -168,6 +168,9 @@ func workflowMetaToolSchema(name string) (string, map[string]any) {
 	case "hadron_workflow_run_events", "hadron_workflow_run_subscribe":
 		props["run_id"] = map[string]any{"type": "string"}
 		props["limit"] = map[string]any{"type": "integer"}
+		if name == "hadron_workflow_run_subscribe" {
+			props["wait_ms"] = map[string]any{"type": "integer", "description": "hold the call up to this many milliseconds (max 30000) until an event follows after; 0 returns at once"}
+		}
 		props["after"] = map[string]any{"type": "string", "description": "next_cursor from an earlier call for this run; returns the events after it"}
 		props["reveal_private"] = map[string]any{"type": "boolean"}
 		required = []any{"run_id"}
@@ -258,7 +261,7 @@ func (w *workflowSurface) handlerMap() map[string]gomcp.ToolHandler {
 		"hadron_workflow_run_inspect":               w.handleInspectRun,
 		"hadron_workflow_run_cancel":                w.handleCancelRun,
 		"hadron_workflow_run_events":                w.handleEvents,
-		"hadron_workflow_run_subscribe":             w.handleEvents,
+		"hadron_workflow_run_subscribe":             w.handleSubscribe,
 		"hadron_workflow_run_resume":                w.handleResume,
 		"hadron_workflow_gate_submit":               w.handleGate,
 		"hadron_workflow_message_submit":            w.handleMessage,
@@ -645,6 +648,17 @@ func (w *workflowSurface) handleCancelRun(ctx context.Context, args map[string]a
 }
 
 func (w *workflowSurface) handleEvents(ctx context.Context, args map[string]any) (any, error) {
+	return w.fetchEvents(ctx, args, false)
+}
+
+// handleSubscribe is handleEvents that may hold the call open (wait_ms) until
+// an event follows the cursor: a long poll, resumed by passing next_cursor as
+// after.
+func (w *workflowSurface) handleSubscribe(ctx context.Context, args map[string]any) (any, error) {
+	return w.fetchEvents(ctx, args, true)
+}
+
+func (w *workflowSurface) fetchEvents(ctx context.Context, args map[string]any, allowWait bool) (any, error) {
 	bound, session, err := w.requestSession(ctx, args)
 	if err != nil {
 		return nil, workflowFailure(err)
@@ -660,7 +674,13 @@ func (w *workflowSurface) handleEvents(ctx context.Context, args map[string]any)
 	if err != nil {
 		return nil, workflowFailure(err)
 	}
-	events, err := w.reads.FetchWorkflowEvents(bound, appworkflow.WorkflowRunReadRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Identity: workflowIdentityRequest(), Display: display, EventLimit: boundedWorkflowLimit(limit), After: argString(args, "after", "")})
+	waitMS := 0
+	if allowWait {
+		if waitMS, err = exactWorkflowIntegerArgument(args, "wait_ms", 0); err != nil {
+			return nil, workflowFailure(err)
+		}
+	}
+	events, err := w.reads.FetchWorkflowEvents(bound, appworkflow.WorkflowRunReadRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Identity: workflowIdentityRequest(), Display: display, EventLimit: boundedWorkflowLimit(limit), After: argString(args, "after", ""), WaitMS: waitMS})
 	return workflowResult(events, err)
 }
 
@@ -852,20 +872,24 @@ func validateWorkflowArgumentNumbers(value reflect.Value, depth int) error {
 }
 
 func exactWorkflowLimitArgument(args map[string]any, defaultValue int) (int, error) {
-	value, exists := args["limit"]
+	return exactWorkflowIntegerArgument(args, "limit", defaultValue)
+}
+
+func exactWorkflowIntegerArgument(args map[string]any, key string, defaultValue int) (int, error) {
+	value, exists := args[key]
 	if !exists {
 		return defaultValue, nil
 	}
 	if number, ok := value.(json.Number); ok {
 		parsed, err := number.Int64()
 		if err != nil {
-			return 0, errors.New("workflow argument \"limit\" must be an exact integer")
+			return 0, fmt.Errorf("workflow argument %q must be an exact integer", key)
 		}
 		return checkedWorkflowInteger(parsed)
 	}
 	reflected := reflect.ValueOf(value)
 	if !reflected.IsValid() {
-		return 0, errors.New("workflow argument \"limit\" must be an exact integer")
+		return 0, fmt.Errorf("workflow argument %q must be an exact integer", key)
 	}
 	switch reflected.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -873,7 +897,7 @@ func exactWorkflowLimitArgument(args map[string]any, defaultValue int) (int, err
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		maximum := uint64(^uint(0) >> 1)
 		if reflected.Uint() > maximum {
-			return 0, errors.New("workflow argument \"limit\" exceeds the supported integer range")
+			return 0, fmt.Errorf("workflow argument %q exceeds the supported integer range", key)
 		}
 		return int(reflected.Uint()), nil // #nosec G115 -- range checked against the platform int maximum above.
 	case reflect.Float32, reflect.Float64:
@@ -885,11 +909,11 @@ func exactWorkflowLimitArgument(args map[string]any, defaultValue int) (int, err
 		maximumInteger := float64(^uint(0) >> 1)
 		minimumInteger := -maximumInteger - 1
 		if math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number || math.Abs(number) > maximumExactInteger || number > maximumInteger || number < minimumInteger {
-			return 0, errors.New("workflow argument \"limit\" must be an exact integer")
+			return 0, fmt.Errorf("workflow argument %q must be an exact integer", key)
 		}
 		return int(number), nil
 	default:
-		return 0, errors.New("workflow argument \"limit\" must be an exact integer")
+		return 0, fmt.Errorf("workflow argument %q must be an exact integer", key)
 	}
 }
 
