@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/hadron/internal/api"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
@@ -58,6 +59,7 @@ func readFrames(t *testing.T, scanner *bufio.Scanner) []string {
 }
 
 func TestWorkflowEventStreamSendsLabelledEventsHeartbeatsAndEnds(t *testing.T) {
+	defer api.SetWorkflowStreamTuning(time.Millisecond, time.Hour)()
 	var mu sync.Mutex
 	var requests []appworkflow.WorkflowRunReadRequest
 	pages := []appworkflow.WorkflowEventListResult{
@@ -178,6 +180,7 @@ func TestWorkflowEventStreamFirstReadFailuresAreOrdinaryHTTPErrors(t *testing.T)
 }
 
 func TestWorkflowEventStreamStopsReadingWhenTheClientLeaves(t *testing.T) {
+	defer api.SetWorkflowStreamTuning(time.Millisecond, time.Hour)()
 	var mu sync.Mutex
 	calls := 0
 	service := &workflowHTTPService{events: func(ctx context.Context, request appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowEventListResult, error) {
@@ -212,5 +215,67 @@ func TestWorkflowEventStreamStopsReadingWhenTheClientLeaves(t *testing.T) {
 	defer mu.Unlock()
 	if settled == 0 || calls != settled {
 		t.Fatalf("reads continued after the client left: %d then %d", settled, calls)
+	}
+}
+
+// wait_ms=0 means "the default", and a tiny wait is raised to the floor, so an
+// idle stream cannot become a loop that hammers the event store.
+func TestWorkflowEventStreamCannotBeMadeToSpin(t *testing.T) {
+	for _, query := range []string{"wait_ms=0", "wait_ms=1", ""} {
+		var mu sync.Mutex
+		var waits []int
+		var reads int
+		service := &workflowHTTPService{events: func(ctx context.Context, request appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowEventListResult, error) {
+			mu.Lock()
+			reads++
+			waits = append(waits, request.WaitMS)
+			mu.Unlock()
+			// Behave like a real idle read: hold for the wait the stream asked for.
+			select {
+			case <-time.After(time.Duration(request.WaitMS) * time.Millisecond):
+			case <-ctx.Done():
+			}
+			return appworkflow.WorkflowEventListResult{RunID: request.RunID, NextCursor: request.After}, nil
+		}}
+		server := workflowHTTPTestServer(t, service, allowWorkflowHTTP)
+		ctx, cancel := context.WithTimeout(t.Context(), 2500*time.Millisecond)
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/v1/workflows/runs/idle-run/events/stream?"+query, nil)
+		request.Header.Set("Authorization", "Bearer allowed")
+		response, err := http.DefaultClient.Do(request)
+		if err == nil {
+			_, _ = bufio.NewReader(response.Body).WriteTo(discard{})
+			_ = response.Body.Close()
+		}
+		cancel()
+		server.Close()
+		mu.Lock()
+		if reads > 4 {
+			t.Errorf("%q: %d reads in 2.5s of an idle stream, want at most 4", query, reads)
+		}
+		for _, wait := range waits {
+			if wait < 1000 {
+				t.Errorf("%q: a read asked for a %dms wait, below the 1s floor", query, wait)
+			}
+		}
+		mu.Unlock()
+	}
+}
+
+type discard struct{}
+
+func (discard) Write(p []byte) (int, error) { return len(p), nil }
+
+func TestWorkflowEventStreamEndsAtItsMaximumLifetimeAndCanBeResumed(t *testing.T) {
+	defer api.SetWorkflowStreamTuning(time.Millisecond, 120*time.Millisecond)()
+	service := &workflowHTTPService{events: func(_ context.Context, request appworkflow.WorkflowRunReadRequest) (appworkflow.WorkflowEventListResult, error) {
+		time.Sleep(30 * time.Millisecond)
+		return appworkflow.WorkflowEventListResult{RunID: request.RunID, NextCursor: request.After}, nil
+	}}
+	server := workflowHTTPTestServer(t, service, allowWorkflowHTTP)
+	defer server.Close()
+	_, scanner := openStream(t, server.URL, "/v1/workflows/runs/long-run/events/stream?wait_ms=30", nil)
+	frames := readFrames(t, scanner)
+	if len(frames) == 0 || frames[len(frames)-1] != "event: end\ndata: {\"reason\":\"reconnect\"}" {
+		t.Fatalf("frames = %q", frames)
 	}
 }

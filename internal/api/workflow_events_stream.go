@@ -20,6 +20,19 @@ const (
 	workflowStreamPageLimit = 100
 )
 
+// Stream tuning. They are variables only so tests can shorten them.
+var (
+	// workflowStreamMinWait is the shortest wait one read of a stream may ask
+	// for. A shorter (but nonzero) ?wait_ms is raised to it, and zero means the
+	// default, so an idle stream can never turn into a read loop that spins.
+	workflowStreamMinWait = time.Second
+	// workflowStreamMaxLifetime bounds one connection. A stream that has lived
+	// this long ends with an end event whose reason is "reconnect"; the client
+	// resumes with Last-Event-ID. It stops a never-ending run from pinning a
+	// goroutine and polling the database for ever.
+	workflowStreamMaxLifetime = 20 * time.Minute
+)
+
 // handleWorkflowEventStreamRoute serves GET /v1/workflows/runs/{id}/events/stream,
 // a Server-Sent Events view of the same resumable feed the POST events read
 // pages through.
@@ -35,8 +48,12 @@ const (
 // time a wait ends with nothing new (a heartbeat). A "gap" event means the
 // position cannot be resumed (the data says why and where the log ends) and
 // ends the stream; an "end" event means the run finished and every event has
-// been sent. The stream never reveals private values: it uses the default
-// display policy.
+// been sent (reason "run_finished"), or the connection reached its maximum
+// lifetime (reason "reconnect": resume with Last-Event-ID). The stream never
+// reveals private values: it uses the default display policy.
+//
+// Writes are not error-checked: the loop ends when the request context is
+// cancelled, which net/http does when the client disconnects.
 func (s *Server) handleWorkflowEventStreamRoute(w http.ResponseWriter, r *http.Request, escapedRunID string) {
 	if r.Method != http.MethodGet {
 		writeWorkflowOperationError(w, http.StatusMethodNotAllowed, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInvalidRequest})
@@ -68,7 +85,9 @@ func (s *Server) handleWorkflowEventStreamRoute(w http.ResponseWriter, r *http.R
 			writeWorkflowOperationError(w, http.StatusBadRequest, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeInvalidRequest})
 			return
 		}
-		wait = time.Duration(ms) * time.Millisecond
+		if ms > 0 {
+			wait = max(time.Duration(ms)*time.Millisecond, workflowStreamMinWait)
+		}
 	}
 	var display values.DisplayPolicy
 	ctx, ok := s.authenticateWorkflow(w, r, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessEvents, RunID: runID, Display: &display}, false)
@@ -93,8 +112,14 @@ func (s *Server) handleWorkflowEventStreamRoute(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	started := time.Now()
 	for {
 		if done := writeWorkflowStreamPage(w, result); done {
+			flusher.Flush()
+			return
+		}
+		if time.Since(started) >= workflowStreamMaxLifetime {
+			writeWorkflowSSE(w, "", "end", map[string]string{"reason": "reconnect"})
 			flusher.Flush()
 			return
 		}
@@ -131,7 +156,7 @@ func writeWorkflowStreamPage(w http.ResponseWriter, result appworkflow.WorkflowE
 	}
 	if len(result.Events) == 0 {
 		if result.RunTerminal && !result.Truncated {
-			writeWorkflowSSE(w, "", "end", map[string]bool{"run_terminal": true})
+			writeWorkflowSSE(w, "", "end", map[string]string{"reason": "run_finished"})
 			return true
 		}
 		_, _ = w.Write([]byte(": heartbeat\n\n"))
