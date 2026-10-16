@@ -308,7 +308,13 @@ func optionalSource(source graph.SourceRef) *graph.SourceRef {
 }
 
 func (s Service) loadEvents(ctx context.Context, query normalizedQuery) ([]workflowruntime.Event, bool, error) {
-	events, err := s.State.ListEvents(ctx, workflowruntime.EventQuery{RunID: query.RunID, Limit: query.EventLimit + 1})
+	return s.loadEventsAfter(ctx, query.RunID, 0, query.EventLimit)
+}
+
+// loadEventsAfter returns up to limit events with a sequence greater than
+// after, in ascending order, and whether more follow.
+func (s Service) loadEventsAfter(ctx context.Context, runID workflowruntime.RunID, after uint64, limit int) ([]workflowruntime.Event, bool, error) {
+	events, err := s.State.ListEvents(ctx, workflowruntime.EventQuery{RunID: runID, AfterSequence: after, Limit: limit + 1})
 	if err != nil {
 		if errors.Is(err, workflowruntime.ErrInvalidRecord) {
 			return nil, false, corrupt("events", err)
@@ -316,7 +322,7 @@ func (s Service) loadEvents(ctx context.Context, query normalizedQuery) ([]workf
 		return nil, false, err
 	}
 	for index, event := range events {
-		if err := event.Validate(); err != nil || event.RunID != query.RunID {
+		if err := event.Validate(); err != nil || event.RunID != runID {
 			if err == nil {
 				err = errors.New("event belongs to another run")
 			}
@@ -324,6 +330,9 @@ func (s Service) loadEvents(ctx context.Context, query normalizedQuery) ([]workf
 		}
 		if index > 0 && events[index-1].Sequence >= event.Sequence {
 			return nil, false, corrupt("events", errors.New("sequence is not strictly increasing"))
+		}
+		if event.Sequence <= after {
+			return nil, false, corrupt("events", errors.New("event precedes the requested cursor"))
 		}
 		if event.Type == workflowruntime.EventNodeStatusChanged && event.Attributes["to_status"] == string(workflowruntime.NodeSkipped) {
 			if event.Attributes["explanation"] == "" {
@@ -343,9 +352,9 @@ func (s Service) loadEvents(ctx context.Context, query normalizedQuery) ([]workf
 			}
 		}
 	}
-	truncated := len(events) > query.EventLimit
+	truncated := len(events) > limit
 	if truncated {
-		events = events[:query.EventLimit]
+		events = events[:limit]
 	}
 	return events, truncated, nil
 }

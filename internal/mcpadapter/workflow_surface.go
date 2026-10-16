@@ -168,6 +168,7 @@ func workflowMetaToolSchema(name string) (string, map[string]any) {
 	case "hadron_workflow_run_events", "hadron_workflow_run_subscribe":
 		props["run_id"] = map[string]any{"type": "string"}
 		props["limit"] = map[string]any{"type": "integer"}
+		props["after"] = map[string]any{"type": "string", "description": "next_cursor from an earlier call for this run; returns the events after it"}
 		props["reveal_private"] = map[string]any{"type": "boolean"}
 		required = []any{"run_id"}
 	case "hadron_workflow_run_resume", "hadron_workflow_gate_submit", "hadron_workflow_message_submit":
@@ -659,7 +660,7 @@ func (w *workflowSurface) handleEvents(ctx context.Context, args map[string]any)
 	if err != nil {
 		return nil, workflowFailure(err)
 	}
-	events, err := w.reads.FetchWorkflowEvents(bound, appworkflow.WorkflowRunReadRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Identity: workflowIdentityRequest(), Display: display, EventLimit: boundedWorkflowLimit(limit)})
+	events, err := w.reads.FetchWorkflowEvents(bound, appworkflow.WorkflowRunReadRequest{RunID: appworkflow.RunID(argString(args, "run_id", "")), Identity: workflowIdentityRequest(), Display: display, EventLimit: boundedWorkflowLimit(limit), After: argString(args, "after", "")})
 	return workflowResult(events, err)
 }
 

@@ -409,6 +409,17 @@ func TestWorkflowMetaReplaySafeAnnotations(t *testing.T) {
 	}
 }
 
+func TestWorkflowEventToolsAcceptAResumeCursor(t *testing.T) {
+	for _, name := range []string{"hadron_workflow_run_events", "hadron_workflow_run_subscribe"} {
+		_, schema := workflowMetaToolSchema(name)
+		properties, _ := schema["properties"].(map[string]any)
+		property, ok := properties["after"].(map[string]any)
+		if !ok || property["type"] != "string" {
+			t.Fatalf("%s after schema = %#v", name, property)
+		}
+	}
+}
+
 func TestWorkflowMetaLimitsRequireExactIntegers(t *testing.T) {
 	for _, name := range []string{"hadron_workflows_search", "hadron_workflow_catalog_search", "hadron_workflow_run_events", "hadron_workflow_run_subscribe"} {
 		_, schema := workflowMetaToolSchema(name)
