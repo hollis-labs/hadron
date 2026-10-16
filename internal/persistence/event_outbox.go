@@ -128,6 +128,13 @@ type outboxKey struct {
 // mapFunc produces the envelope for the next outbox sequence.
 type mapFunc func(seq uint64) (envelope []byte, eventID string, ok bool, err error)
 
+// admissionKey is the one place that decides where an admission decision sits in the
+// outbox: the decision id in the run_id column and sequence 0, which no workflow
+// event takes. A ruling on the key is a change here.
+func admissionKey(a eventmap.Admission) outboxKey {
+	return outboxKey{runID: a.DecisionID, sequence: 0, what: "admission"}
+}
+
 func eventKey(ev workflowruntime.Event) outboxKey {
 	return outboxKey{runID: string(ev.RunID), sequence: int64(ev.Sequence), what: ev.Type} // #nosec G115 -- a positive sequence
 }
@@ -154,7 +161,7 @@ func (o *eventOutbox) observeAdmission(ctx context.Context, query workflowSQL, a
 	if !ok {
 		return nil
 	}
-	return o.guard(ctx, query, outboxKey{runID: a.DecisionID, sequence: 0, what: "admission"}, func(seq uint64) ([]byte, string, bool, error) {
+	return o.guard(ctx, query, admissionKey(a), func(seq uint64) ([]byte, string, bool, error) {
 		return mapper.MapAdmission(ctx, a, o.generation, seq)
 	})
 }

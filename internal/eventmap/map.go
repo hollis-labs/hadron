@@ -128,6 +128,16 @@ type Admission struct {
 // AdmissionGateID is the gate id of the admission policy evaluation.
 const AdmissionGateID = "hadron.admission"
 
+// admissionSubject is the one place that decides what an admission event is about:
+// the run it admits for an allow, the evaluation itself otherwise (a deny creates no
+// run, a confirm may never). A ruling on the dry-run case is a change here.
+func admissionSubject(a Admission) (subjectType, subjectID, subjectURN string) {
+	if a.Outcome == "allow" {
+		return "workflow_run", a.RunID, "msg://workflow_run/hadron/" + url.PathEscape(a.RunID)
+	}
+	return "workflow_admission", a.DecisionID, "msg://workflow_admission/hadron/" + url.PathEscape(a.DecisionID)
+}
+
 // buildAdmission maps an admission decision to gate.evaluated (gate hadron.admission,
 // kind custom): allow is pass, deny is fail, confirm is blocked. An allow is followed
 // by the run it admits, so its subject is that run. A deny creates no run, and a
@@ -148,10 +158,7 @@ func buildAdmission(a Admission) (runtimeevents.Event, bool) {
 	if a.DecisionID == "" || a.RunID == "" {
 		return runtimeevents.Event{}, false
 	}
-	subjectType, subjectID, subject := "workflow_admission", a.DecisionID, "msg://workflow_admission/hadron/"+url.PathEscape(a.DecisionID)
-	if a.Outcome == "allow" {
-		subjectType, subjectID, subject = "workflow_run", a.RunID, "msg://workflow_run/hadron/"+url.PathEscape(a.RunID)
-	}
+	subjectType, subjectID, subject := admissionSubject(a)
 	e := runtimeevents.Event{
 		SchemaVersion: "1", ID: runtimeevents.NewEventID(), Time: a.DecidedAt.UTC(), Subject: subject,
 		Source: runtimeevents.Source{Channel: ChannelAdmission, Confidence: runtimeevents.ConfidenceDerived},
