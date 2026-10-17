@@ -1598,6 +1598,7 @@ func TestHostCancellationWithFinalizersFencesProgressesAndReplays(t *testing.T) 
 	if err != nil || len(failures) != 0 || replayed.Outcome != workflowruntime.IdempotencyReplayed || replayed.Run.Generation != first.Run.Generation {
 		t.Fatalf("finalizer cancellation replay = %#v failures=%v, %v", replayed, failures, err)
 	}
+	bindEmptyNodeInputs(t, fixture.state, cleanupID)
 	coordinator := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil)
 	progress, err := coordinator.ProgressFinally(t.Context(), plan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, fixture.now.Add(time.Second))
 	if err != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
@@ -1683,6 +1684,7 @@ func TestHostFinalizerCancellationReconcilesRunningAttemptBeforeCleanup(t *testi
 		t.Fatalf("pending cancellation intents = %#v, %v", pending, err)
 	}
 	cleanupID := workflowruntime.NodeInvocationID{RunID: start.RunID, NodeID: "cleanup"}
+	bindEmptyNodeInputs(t, fixture.state, cleanupID)
 	progress, err := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil).ProgressFinally(t.Context(), plan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, fixture.now.Add(2*time.Second))
 	if err != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
 		t.Fatalf("ProgressFinally after reconciled attempt = %#v, %v", progress, err)
@@ -1766,6 +1768,7 @@ func TestHostCancellationLoadsPinnedChildStartGraphAndPreservesChildCleanup(t *t
 	if childAfter.Generation != running.Snapshot.Generation+1 || !childAfter.Status.Active() || work.Status != workflowruntime.NodeCanceled || cleanup.Status != workflowruntime.NodePending {
 		t.Fatalf("child cleanup fence = run %#v work %#v cleanup %#v", childAfter, work, cleanup)
 	}
+	bindEmptyNodeInputs(t, fixture.state, cleanupID)
 	coordinator := workflowruntime.NewControlFlowCoordinator(fixture.state, fixture.state, nil)
 	progress, progressErr := coordinator.ProgressFinally(t.Context(), childPlan.Graph, cleanupID, values.ExpressionContext{}, values.ExpressionOptions{}, childBase.Add(2*time.Second))
 	if progressErr != nil || progress.Snapshot.Status != workflowruntime.NodeReady {
@@ -3035,5 +3038,19 @@ func (h *periodicBlockHook) RecoverWorkflow(ctx context.Context, _ workflowrunti
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// bindEmptyNodeInputs binds the empty input set to a still-pending node. A node
+// with dependencies is bound by the driver in production; tests that call
+// ProgressFinally directly bind it first (workflow/engine v0.2.0).
+func bindEmptyNodeInputs(t *testing.T, state *persistence.WorkflowStateStore, id workflowruntime.NodeInvocationID) {
+	t.Helper()
+	node, err := state.LoadNodeInvocation(t.Context(), id)
+	if err != nil {
+		t.Fatalf("load %s: %v", id.NodeID, err)
+	}
+	if _, err := state.BindNodeInputs(t.Context(), workflowruntime.BindNodeInputsRequest{InvocationID: id, ExpectedGeneration: node.Generation, IdempotencyKey: "test-empty-inputs-" + string(id.RunID) + "-" + id.NodeID, Values: values.ValueSet{}, At: node.UpdatedAt}); err != nil {
+		t.Fatalf("bind %s inputs: %v", id.NodeID, err)
 	}
 }
