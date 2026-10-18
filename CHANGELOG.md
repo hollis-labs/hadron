@@ -70,6 +70,14 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ### Fixed
 
+- A child `for_each` aggregate no longer binds its inputs at startup, and the
+  contract runner rechecks progress when the engine asks for it (CW-20261016-0246).
+  The aggregate's bindings can name the item, which does not exist until an
+  iteration is materialized, so binding them early failed with `type nil has no
+  field`. Ordinary roots still persist explicit empty inputs. The contract runner now treats the engine's `Recheck` signal as
+  progress, so a dependency that completed concurrently gets another bounded
+  pass with a rebuilt expression context. The engine adoption itself (v0.2.0)
+  and the plan-node context shipped earlier with the dependency bump.
 - Lint findings (shadowed `err`, builtin shadowing), a flaky file-watch
   debounce test, and the agent-substrate kickoff reply lifecycle wait.
 

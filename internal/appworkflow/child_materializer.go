@@ -129,7 +129,10 @@ func (m *PinnedChildRunMaterializer) materializeChildNodes(ctx context.Context, 
 		}
 		invocationID := runtime.NodeInvocationID{RunID: request.ChildRunID, NodeID: node.ID}
 		var bound values.ValueSet
-		if !hasDependencies(request.Definition.Graph, node.ID) {
+		// A for_each aggregate is excluded: its bindings may name the item, which
+		// does not exist until an iteration is materialized, so it keeps no inputs
+		// of its own and its iterations bind theirs.
+		if !hasDependencies(request.Definition.Graph, node.ID) && node.ForEach == nil {
 			// A root node is only claimable once its immutable inputs are durably
 			// bound (workflow/engine v0.2.0), so a root with no bindings binds the
 			// empty set rather than none.
