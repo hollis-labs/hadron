@@ -325,7 +325,7 @@ func (e *contractExecution) driveNodes(ctx context.Context, run runtime.RunSnaps
 		if err != nil {
 			return false, err
 		}
-		if result.Binding != nil || result.Progressed.Snapshot.Generation != before.Generation || result.Progressed.Snapshot.Status != before.Status {
+		if result.Recheck || result.Binding != nil || result.Progressed.Snapshot.Generation != before.Generation || result.Progressed.Snapshot.Status != before.Status {
 			changed = true
 		}
 	}
