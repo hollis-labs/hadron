@@ -35,6 +35,11 @@
 // nothing (CW-0250, architect ruling rev 2). Hadron records no rejected or expired
 // confirmation, so there is no fail counterpart yet.
 //
+// A decision is exported by whichever of the two entry points first inserts its row:
+// the policy evaluation, or, for a start with no prior evaluation (a call-started
+// child), RecordStart. Each exports only on its insert, so a decision is exported once,
+// and the run it admits cites the event (CW-0256).
+//
 // The outbox key of an admission is (decision id, run_sequence 0): in
 // workflow_event_outbox and in workflow_event_outbox_skipped the run_id column holds
 // the DECISION id for these rows, and no workflow event can take sequence 0 (they
