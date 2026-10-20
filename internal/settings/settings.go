@@ -28,6 +28,9 @@ type EventSettings struct {
 	// run state change, step execution and gate block. Nothing is sent anywhere;
 	// a relay reads the outbox later.
 	Outbox bool `json:"outbox,omitempty"`
+	// HubRelay ships the outbox to the event hub (HOLLIS_EVENTS_URL). It needs
+	// Outbox, and does nothing without a hub URL. Off by default.
+	HubRelay bool `json:"hub_relay,omitempty"`
 }
 
 type MCPServerSettings struct {

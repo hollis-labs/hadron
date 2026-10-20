@@ -109,6 +109,9 @@ type productionWorkflowRuntime struct {
 	// agentSessions is the Tether-backed session host, nil while
 	// agent_session@v1 is gated.
 	agentSessions *tetherhost.Host
+	// hubRelay starts the event hub relay, nil while events.hub_relay is off.
+	hubRelay     func(ctx context.Context) (stop func())
+	stopHubRelay func()
 }
 
 // workflowSubstrateSettings is the slice of hadrond settings the graph
@@ -190,6 +193,10 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 		if enableErr := state.EnableEventOutbox(context.Background(), mapper); enableErr != nil {
 			return nil, fmt.Errorf("event outbox: %w", enableErr)
 		}
+	}
+	var hubRelay func(context.Context) func()
+	if sett.Events.Outbox && sett.Events.HubRelay {
+		hubRelay = hubRelayStarter(state, cfg.DataDir)
 	}
 	journal, err := persistence.NewWorkflowHostStore(store)
 	if err != nil {
@@ -453,6 +460,7 @@ func newProductionWorkflowRuntime(store *persistence.Store, cfg *config.Config, 
 		sourceActivations:   sourceActivationLifecycle,
 		externalActivations: trigger.ActivationManager{Service: activationService},
 		substrates:          substrates,
+		hubRelay:            hubRelay,
 		agentSessions:       agentSessions,
 	}, nil
 }
@@ -553,12 +561,18 @@ func (r *productionWorkflowRuntime) Start(ctx context.Context) error {
 	r.activation.Start()
 	r.workers.Start()
 	r.external.Start()
+	if r.hubRelay != nil {
+		r.stopHubRelay = r.hubRelay(ctx)
+	}
 	return nil
 }
 
 func (r *productionWorkflowRuntime) Shutdown(ctx context.Context) error {
 	if r == nil {
 		return nil
+	}
+	if r.stopHubRelay != nil {
+		r.stopHubRelay()
 	}
 	workerErr := r.workers.Stop(ctx)
 	if workerErr != nil {
