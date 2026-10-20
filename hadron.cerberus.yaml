@@ -10,6 +10,9 @@ resources:
     type: process
     project: hadron
     connector: local
+    env: dev
+    owner: self
+    admin: self
     config:
       build_strategy:
         kind: make_standard
@@ -42,6 +45,9 @@ resources:
     type: process
     project: hadron
     connector: local
+    env: dev
+    owner: self
+    admin: self
     config:
       command:
         - npm
@@ -59,11 +65,14 @@ resources:
       - frontend
       - vite
       - v2
-registry_urn: msg://agent/agent-mux/prj_46qak5fkx1
-  - name: Hadron DB Backup
+  - id: hadron-db-backup
+    name: Hadron DB Backup
     type: process
     project: hadron
     connector: local
+    env: dev
+    owner: self
+    admin: self
     config:
       command:
         - sqlite-backup
@@ -73,3 +82,4 @@ registry_urn: msg://agent/agent-mux/prj_46qak5fkx1
         - --keep-hourly=48
         - --keep-daily=14
       dir: .
+registry_urn: msg://agent/agent-mux/prj_46qak5fkx1
