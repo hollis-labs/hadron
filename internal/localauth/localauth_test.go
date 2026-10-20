@@ -67,7 +67,13 @@ func TestVerifierFollowsRotationAndEndsSessions(t *testing.T) {
 	}
 	var changed atomic.Int32
 	v := NewVerifier(path, nil, func() { changed.Add(1) })
-	if !v.Verify(old) || v.Verify(old[:63]+"0") || v.Verify("") {
+	// A wrong token that differs from old in its last digit, whatever that digit is
+	// (appending a fixed "0" equals old one time in sixteen).
+	wrong := old[:63] + "0"
+	if old[63] == '0' {
+		wrong = old[:63] + "1"
+	}
+	if !v.Verify(old) || v.Verify(wrong) || v.Verify("") {
 		t.Fatal("verifier accepted a wrong token or rejected the right one")
 	}
 	rotated, err := RotateToken(path)
