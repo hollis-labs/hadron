@@ -83,6 +83,8 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ### Added
 
+- **A relay from the event outbox to the event hub, off by default.** With `events.outbox` and `events.hub_relay` both `true` in settings, `hadrond` reads `workflow_event_outbox` in order and sends each envelope to the hub named by `HOLLIS_EVENTS_URL` (credential from `HOLLIS_AUTH_TOKEN_FILE_HADRON`), through `mesh/eventbus` v0.2.0. The cursor is a file per store generation under `<data dir>/events-hub`, and moves only over events the hub accepted or the client durably set aside, so a hub that is down or a credential that is missing holds events back and loses none. The relay removes the fields the hub assigns (`actor`, `recorded_at`, `cursor`) from the copy it sends and names the app; the stored envelope is not changed. With no URL nothing starts. Needs `harness/core` v0.15.0 (now required) for the hub's own ingest check, which a test runs over a real run's events.
+
 - Graph workflows: `call@v1` child runs (`mode: run`) in the production
   `hadrond` kind set. Call-started children pass the top-level start policy
   gate (plan validation, execution-target capabilities, persisted decision)
