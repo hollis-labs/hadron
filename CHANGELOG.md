@@ -10,6 +10,7 @@ History before `v0.4.0` (March–May 2026) is in the git log and is not backfill
 
 ### Security
 
+- Go toolchain 1.26.10 (`go` directive and CI pin) for GO-2026-6809 (crypto/x509); no behavior change.
 - **Loopback is no longer trusted (CW-20260930-0234).** Any process on the
   machine, agents included, could previously call `127.0.0.1:8095`, act as the
   operator and confirm its own runs. `hadrond` now creates
