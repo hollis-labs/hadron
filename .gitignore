@@ -1,0 +1,7 @@
+.flag-*/
+/examples/*/hello-*
+*.test
+/hadron
+*.db
+*.db-wal
+*.db-shm

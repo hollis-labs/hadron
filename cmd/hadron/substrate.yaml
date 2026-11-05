@@ -1,0 +1,14 @@
+# Hadron on Substrate. The manifest is the whole shell: modules, config, nothing else.
+app: hadron
+variant: app-host
+profiles: [agentic]
+modules:
+  add: [cli, database, queue, scheduler, events, policy]
+config:
+  logging: { level: info, format: text }
+  httphost: { addr: "127.0.0.1:8095" }
+  database:
+    sqlite: { path: hadron.db }
+  # The daemon command starts the worker and the engine; a short-lived command never does.
+  queue: { autostart: false }
+  scheduler: { autostart: false }

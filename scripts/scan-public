@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+"""Scan a repository for content that must not become public.
+
+Usage: scripts/scan-public [--repo DIR | --source PATH-OR-URL] [--tree | --history] [--ref REV ...]
+                           [--no-gitleaks] [--allowlist FILE | --no-allowlist]
+
+Scans the working tree (tracked files, and untracked files that are not ignored)
+AND the full history (every ref, every added line, every commit message), for:
+(--ref REV, repeatable, limits the history to what is reachable from those revisions;
+use --ref HEAD to gate one branch in a repository whose other branches are not yours)
+
+  secret        private keys, cloud/provider/CI tokens, JWTs, bearer tokens,
+                credentials inside URLs, quoted secret-like assignments
+  host          names of internal hosts: the Tailscale tailnet, the Nanite cloud and
+                the agent box (see HOST rules below for the exact patterns)
+  internal-ip   private, link-local and Tailscale (CGNAT) IPv4 addresses
+  private-path  /Users/<name>, /home/<name>, C:\\Users\\<name>
+  filename      key, certificate, .env and credential files (tree and history)
+
+gitleaks runs in addition when it is on PATH (tree and history), with its default rules.
+
+Every match is reported. Secret values are redacted in the output; other matches
+are shown in full so they can be triaged. There is no built-in allowlist. A file
+given with --allowlist (lines: RULE-ID PATH-GLOB REASON, RULE-ID may be *; a gitleaks
+rule id works too; PATH-GLOB@COMMIT pins an entry to the commit that first added the
+match, which is how one commit message is excused without excusing all of them) moves
+matching findings to a separate "allowlisted" section that is still printed and
+counted, so nothing is suppressed silently. Without --allowlist, a scan-public.allow
+file at the repository root and every scan-public.allow.d/*.allow file are used when they
+exist (one file per module, so branches do not conflict), so a local run and CI agree;
+--no-allowlist ignores them and shows every raw finding.
+
+--source PATH-OR-URL scans a repository that is about to be imported (a standalone
+repository on its way into a group): it is cloned into a scratch directory that is removed
+afterwards, and its tip AND its full history (every branch and tag the clone has) are
+scanned, never just the tip. The source's own scan-public.allow files, if any, and this
+repository's allowlists (their paths are not the source's) are not applied: every raw
+finding shows unless --allowlist FILE is given. scripts/import-repo runs this first.
+
+Exit status: 0 clean, 1 findings, 2 a scanner could not run.
+"""
+
+import argparse
+import fnmatch
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+SECRET, HOST, IP, PATH, FILENAME = "secret", "host", "internal-ip", "private-path", "filename"
+
+# (rule id, category, regex). Rule sources avoid spelling out the strings they look for,
+# so this file does not match its own rules.
+CONTENT_RULES = [
+    ("private-key", SECRET, r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----"),
+    ("aws-access-key", SECRET, r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA)[0-9A-Z]{16}\b"),
+    ("github-token", SECRET, r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b"),
+    ("slack-token", SECRET, r"\bxox[abposr]-[A-Za-z0-9-]{10,}"),
+    ("google-api-key", SECRET, r"\bAIza[0-9A-Za-z_-]{35}\b"),
+    ("stripe-key", SECRET, r"\b[sr]k_live_[0-9A-Za-z]{16,}"),
+    ("llm-provider-key", SECRET, r"\bsk-(?:ant-|proj-|or-v1-)?[A-Za-z0-9_-]{32,}"),
+    ("jwt", SECRET, r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+    ("bearer-token", SECRET, r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{24,}"),
+    ("credentials-in-url", SECRET, r"\b[a-z][a-z0-9+.-]*://[^\s/:@'\"]+:[^\s/@'\"]{3,}@[^\s/'\"]+"),
+    (
+        "secret-assignment",
+        SECRET,
+        # The keyword may end a longer identifier (apiToken, client_secret, DB_PASSWORD).
+        r"(?i)\b[A-Za-z0-9_-]*(?:api[_-]?key|secret|token|passw(?:or)?d|passwd|private[_-]?key)\b[\"']?\s*[:=]\s*[\"'][^\"'\s$<{][^\"'\s]{11,}[\"']",
+    ),
+    ("tailscale-host", HOST, r"(?i)\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.ts\.net\b"),
+    ("nanite-cloud-host", HOST, r"(?i)\b(?:[a-z0-9-]+\.)*nanite\.cloud\b"),
+    ("agent-box-host", HOST, r"(?i)\bagent[-]os\b"),
+    (
+        "internal-ip",
+        IP,
+        r"(?<![\w.])(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}"
+        r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+        r"|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}"
+        r"|169\.254\.\d{1,3}\.\d{1,3})(?![\w]|\.\d)",
+    ),
+    ("home-path-macos", PATH, r"/Users/[A-Za-z0-9._-]+"),
+    ("home-path-linux", PATH, r"/home/[A-Za-z0-9._-]+"),
+    ("home-path-windows", PATH, r"(?i)\b[a-z]:\\{1,2}Users\\{1,2}[A-Za-z0-9._-]+"),
+]
+COMPILED = [(rid, cat, re.compile(rx)) for rid, cat, rx in CONTENT_RULES]
+
+# (rule id, regex over the path, names that are fine: templates, not secrets)
+FILENAME_RULES = [
+    ("ssh-private-key-file", re.compile(r"(^|/)id_(rsa|dsa|ecdsa|ed25519)$"), ()),
+    ("key-or-certificate-file", re.compile(r"\.(pem|p12|pfx|key|keystore|jks)$"), ()),
+    ("env-file", re.compile(r"(^|/)\.env(\..+)?$"), (".example", ".sample", ".template")),
+    ("credentials-file", re.compile(r"(^|/)(credentials|secrets?)\.(json|ya?ml|toml)$"), ()),
+    ("token-store-file", re.compile(r"(^|/)\.(npmrc|netrc|pgpass|htpasswd)$"), ()),
+]
+
+MAX_LINE = 200_000  # longer lines (minified bundles, blobs) are counted, not scanned
+
+
+class Findings:
+    """Findings grouped by (where, rule, path, match); first and last position kept."""
+
+    def __init__(self):
+        self.items = {}
+        self.long_lines = 0
+
+    def add(self, where, rule, category, path, match, pos):
+        key = (where, rule, path, match)
+        rec = self.items.get(key)
+        if rec is None:
+            self.items[key] = {"category": category, "first": pos, "count": 1}
+        else:
+            rec["count"] += 1
+            if where == "history":
+                rec["first"] = pos  # scanned newest first, so this ends at the oldest commit
+
+
+def show(match, category):
+    if category == SECRET:
+        return "%s...<%d chars>" % (match[:4], len(match))
+    return match
+
+
+def scan_line(line, where, path, pos, findings):
+    if len(line) > MAX_LINE:
+        findings.long_lines += 1
+        return
+    for rid, cat, rx in COMPILED:
+        for m in rx.finditer(line):
+            findings.add(where, rid, cat, path, m.group(0), pos)
+
+
+def scan_name(path, where, pos, findings):
+    for rid, rx, ok_suffix in FILENAME_RULES:
+        if rx.search(path) and not path.endswith(ok_suffix):
+            findings.add(where, rid, FILENAME, path, os.path.basename(path), pos)
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo] + list(args), check=True, capture_output=True)
+
+
+def is_git_repo(repo):
+    r = subprocess.run(["git", "-C", repo, "rev-parse", "--git-dir"], capture_output=True)
+    return r.returncode == 0
+
+
+def tree_paths(repo):
+    if is_git_repo(repo):
+        out = git(repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard").stdout
+        return [p for p in out.decode("utf-8", "surrogateescape").split("\0") if p]
+    paths = []
+    for base, dirs, files in os.walk(repo):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for f in files:
+            paths.append(os.path.relpath(os.path.join(base, f), repo))
+    return paths
+
+
+def scan_tree(repo, findings):
+    stats = {"files": 0, "binary": 0}
+    for rel in tree_paths(repo):
+        full = os.path.join(repo, rel)
+        if not os.path.isfile(full) or os.path.islink(full):
+            continue
+        scan_name(rel, "tree", rel, findings)
+        try:
+            with open(full, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            continue
+        if b"\0" in data[:8192]:
+            stats["binary"] += 1
+            continue
+        stats["files"] += 1
+        for n, raw in enumerate(data.decode("utf-8", "replace").split("\n"), 1):
+            scan_line(raw, "tree", rel, "%s:%d" % (rel, n), findings)
+    return stats
+
+
+def scan_history(repo, findings, refs):
+    stats = {"commits": 0}
+    if not is_git_repo(repo):
+        return stats
+    count = subprocess.run(
+        ["git", "-C", repo, "rev-list", "--count"] + (refs or ["--all"]), capture_output=True, text=True
+    )
+    stats["commits"] = int(count.stdout.strip() or 0) if count.returncode == 0 else 0
+    if stats["commits"] == 0:
+        return stats
+
+    # Pass 1: commit messages and every added line, with the commit and file they belong to.
+    cmd = [
+        "git", "-c", "core.quotepath=off", "-C", repo, "log", "-p", "-U0", "--no-color", "--no-ext-diff",
+        "--no-textconv", "--no-renames", "--format=@@@COMMIT %H%n%B%n@@@BODYEND",
+    ] + (refs or ["--all"])
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    commit, state, path, in_hunk = "", "idle", None, False
+    for raw in proc.stdout:
+        line = raw.decode("utf-8", "replace").rstrip("\n")
+        if line.startswith("@@@COMMIT "):
+            commit, state, path = line.split()[1][:12], "msg", "(commit-message)"
+            continue
+        if state == "msg":
+            if line == "@@@BODYEND":
+                state, path = "diff", None
+            else:
+                scan_line(line, "history", path, commit, findings)
+            continue
+        if line.startswith("diff --git "):
+            in_hunk, path = False, None
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif not in_hunk and line.startswith("+++ "):
+            p = line[4:]
+            path = None if p == "/dev/null" else (p[2:] if p.startswith("b/") else p)
+        elif in_hunk and line.startswith("+") and path is not None:
+            scan_line(line[1:], "history", path, commit, findings)
+    if proc.wait() != 0:
+        raise RuntimeError("git log failed while scanning history")
+
+    # Pass 2: names of files that were ever added, even if later deleted.
+    cmd = [
+        "git", "-c", "core.quotepath=off", "-C", repo, "log", "--name-only", "--diff-filter=A", "--no-renames",
+        "--format=@@@COMMIT %H",
+    ] + (refs or ["--all"])
+    out = subprocess.run(cmd, capture_output=True, check=True).stdout
+    commit = ""
+    for line in out.decode("utf-8", "replace").split("\n"):
+        if line.startswith("@@@COMMIT "):
+            commit = line.split()[1][:12]
+        elif line:
+            scan_name(line, "history", commit, findings)
+    return stats
+
+
+def run_gitleaks(repo, mode, tmpdir, refs=(), ignore_path=None):
+    """Run gitleaks `dir` (tree) or `git` (history). Returns (entries, error or None)."""
+    report = os.path.join(tmpdir, "gitleaks-%s.json" % mode)
+    scan_repo = repo
+    original_paths = {}
+    if ignore_path is None:
+        ignore_path = os.path.join(tmpdir, "empty.gitleaksignore")
+        with open(ignore_path, "w"):
+            pass
+        # Gitleaks also loads SOURCE/.gitleaksignore even when an explicit
+        # empty ignore path is supplied. Never mutate the repository being
+        # inspected: scan a temporary tree with ignore files renamed as data, or
+        # point history scanning at Git's metadata directory instead.
+        if mode == "dir" and os.path.lexists(os.path.join(repo, ".gitleaksignore")):
+            scan_repo = os.path.join(tmpdir, "raw-tree")
+            shutil.copytree(
+                repo, scan_repo, symlinks=True,
+                ignore=shutil.ignore_patterns(".git"),
+            )
+            for directory, _, files in os.walk(scan_repo):
+                if ".gitleaksignore" not in files:
+                    continue
+                original = os.path.join(directory, ".gitleaksignore")
+                fd, neutral = tempfile.mkstemp(prefix=".scan-public-ignore-data-", dir=directory)
+                os.close(fd)
+                os.replace(original, neutral)
+                original_paths[os.path.relpath(neutral, scan_repo)] = os.path.relpath(original, scan_repo)
+        elif mode == "git":
+            gitdir = subprocess.run(
+                ["git", "-C", repo, "rev-parse", "--absolute-git-dir"],
+                capture_output=True, text=True,
+            )
+            if gitdir.returncode:
+                return [], "could not resolve Git metadata for raw history scan"
+            scan_repo = gitdir.stdout.strip()
+    cmd = [
+        "gitleaks", mode, "--no-banner", "--redact", "--report-format", "json",
+        "--report-path", report, "--gitleaks-ignore-path", ignore_path,
+    ] + (["--log-opts", " ".join(refs)] if mode == "git" and refs else []) + ["."]
+    # Stable relative paths make exact fingerprints portable across checkouts.
+    # The caller explicitly selects reviewed exceptions; targets cannot opt out.
+    r = subprocess.run(cmd, cwd=scan_repo, capture_output=True, text=True)
+    if r.returncode not in (0, 1):
+        return [], "gitleaks %s exited %d: %s" % (mode, r.returncode, r.stderr.strip()[-300:])
+    if not os.path.exists(report):
+        return [], None
+    try:
+        with open(report) as fh:
+            entries = json.load(fh) or []
+        for entry in entries:
+            path = entry.get("File", "")
+            if path in original_paths:
+                entry["File"] = original_paths[path]
+                fingerprint = entry.get("Fingerprint", "")
+                if fingerprint.startswith(path + ":"):
+                    entry["Fingerprint"] = original_paths[path] + fingerprint[len(path):]
+        return entries, None
+    except ValueError as e:
+        return [], "gitleaks %s wrote an unreadable report: %s" % (mode, e)
+
+
+def load_allowlist(path):
+    rules = []
+    with open(path) as fh:
+        for n, line in enumerate(fh, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 2)
+            if len(parts) < 3:
+                print("allowlist line %d: want 'RULE-ID PATH-GLOB REASON'" % n, file=sys.stderr)
+                sys.exit(2)  # a usage error is not "findings" (1)
+            rules.append(tuple(parts))
+    return rules
+
+
+def allowed_by(rules, rule, path, commit=""):
+    for rid, glob, reason in rules:
+        pin = None
+        if "@" in glob:
+            glob, pin = glob.rsplit("@", 1)
+        if rid not in ("*", rule) or not fnmatch.fnmatch(path, glob):
+            continue
+        if pin is not None and not (commit and commit.startswith(pin)):
+            continue
+        return reason
+    return None
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Scan a repository for content that must not become public.")
+    ap.add_argument("--repo", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    ap.add_argument("--source", help="clone this path or URL into a scratch directory and scan its tip and full history")
+    ap.add_argument("--tree", action="store_true", help="scan only the working tree")
+    ap.add_argument("--history", action="store_true", help="scan only the history")
+    ap.add_argument("--ref", action="append", default=[], help="scan history reachable from REV instead of every ref (repeatable)")
+    ap.add_argument("--no-gitleaks", action="store_true", help="do not run gitleaks even if installed")
+    ap.add_argument("--allowlist", help="file of 'RULE-ID PATH-GLOB REASON' lines; still reported")
+    ap.add_argument("--no-allowlist", action="store_true", help="ignore scan-public.allow and show every raw finding")
+    args = ap.parse_args()
+
+    scratch = None
+    if args.source:
+        if args.tree and not args.history:
+            print("--source scans history too; drop --tree", file=sys.stderr)
+            return 2
+        scratch = tempfile.mkdtemp(prefix="scan-public-src.")
+        name = os.path.basename(args.source.rstrip("/"))
+        name = re.sub(r"\.git$", "", name) or "source"
+        clone = os.path.join(scratch, name)
+        r = subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", args.source, clone],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            shutil.rmtree(scratch, ignore_errors=True)
+            print("ERROR: could not clone the source: %s" % r.stderr.strip()[-300:], file=sys.stderr)
+            return 2
+        args.repo = clone
+        args.no_allowlist = args.no_allowlist or not args.allowlist
+    try:
+        return scan(args)
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+def scan(args):
+    repo = os.path.realpath(args.repo)
+    do_tree = args.tree or not args.history
+    do_history = args.history or not args.tree
+    allow_files = [args.allowlist] if args.allowlist else []
+    if not allow_files and not args.no_allowlist:
+        root_file = os.path.join(repo, "scan-public.allow")
+        if os.path.exists(root_file):
+            allow_files.append(root_file)
+        d = os.path.join(repo, "scan-public.allow.d")
+        if os.path.isdir(d):
+            allow_files.extend(os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith(".allow"))
+    allow = []
+    for f in allow_files:
+        allow.extend(load_allowlist(f))
+    findings = Findings()
+    errors = []
+    stats = {}
+
+    try:
+        if do_tree:
+            stats.update(scan_tree(repo, findings))
+        if do_history:
+            stats.update(scan_history(repo, findings, args.ref))
+    except (RuntimeError, subprocess.CalledProcessError) as e:
+        errors.append("own scan failed: %s" % e)
+
+    gl_findings, gl_status = [], "not run (--no-gitleaks)"
+    if not args.no_gitleaks:
+        if shutil.which("gitleaks") is None:
+            gl_status = "not installed; own rules only"
+        else:
+            ver = subprocess.run(["gitleaks", "version"], capture_output=True, text=True).stdout.strip()
+            gl_status = "gitleaks %s" % ver
+            with tempfile.TemporaryDirectory() as tmp:
+                for mode, wanted in (("dir", do_tree), ("git", do_history)):
+                    if not wanted or (mode == "git" and not is_git_repo(repo)):
+                        continue
+                    own_repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    reviewed_ignore = os.path.join(own_repo, ".gitleaksignore")
+                    trusted_self_scan = (
+                        not args.no_allowlist and not args.source
+                        and os.path.realpath(repo) == os.path.realpath(own_repo)
+                        and os.path.isfile(reviewed_ignore)
+                    )
+                    entries, err = run_gitleaks(
+                        repo, mode, tmp, args.ref,
+                        ignore_path=reviewed_ignore if trusted_self_scan else None,
+                    )
+                    if err:
+                        errors.append(err)
+                    for e in entries:
+                        f = e.get("File", "?")
+                        if os.path.isabs(f):
+                            f = os.path.relpath(f, repo)  # never print the scanner's local path
+                        gl_findings.append(
+                            ("tree" if mode == "dir" else "history", e.get("RuleID", "?"),
+                             f, e.get("StartLine", 0), (e.get("Commit") or "")[:12])
+                        )
+
+    print("scan-public: %s" % os.path.basename(repo))  # not the full path: reports get pasted around
+    if allow_files:
+        print("  allowlist: %s (%d entries; every allowlisted finding is still printed below)" % (
+            ", ".join(os.path.relpath(f, repo) for f in allow_files), len(allow)))
+    print("  scope: %s; gitleaks: %s" % (
+        " + ".join(s for s, on in (("working tree", do_tree), ("full history", do_history)) if on), gl_status))
+    if do_tree:
+        print("  tree: %d text files scanned, %d binary files not scanned (names only)" % (
+            stats.get("files", 0), stats.get("binary", 0)))
+    if do_history:
+        print("  history: %d commits %s" % (stats.get("commits", 0), ("reachable from " + ", ".join(args.ref)) if args.ref else "across all refs"))
+    if findings.long_lines:
+        print("  note: %d lines over %d chars were not scanned" % (findings.long_lines, MAX_LINE))
+
+    live, allowed = [], []
+    for (where, rule, path, match), rec in sorted(findings.items.items(), key=lambda kv: (kv[0][0], kv[0][2], kv[0][1])):
+        reason = allowed_by(allow, rule, path, rec["first"] if where == "history" else "")
+        (allowed if reason else live).append((where, rule, path, match, rec, reason))
+
+    def render(rows, header):
+        if not rows:
+            return
+        print("\n%s" % header)
+        for where, rule, path, match, rec, reason in rows:
+            shown = show(match, rec["category"])
+            if where == "tree":
+                at = rec["first"] + (" (+%d more)" % (rec["count"] - 1) if rec["count"] > 1 else "")
+            else:
+                at = "%s: %s" % (
+                    "message" if path == "(commit-message)" else path,
+                    "first added in %s (%d line(s) overall)" % (rec["first"], rec["count"]),
+                )
+            line = "  [%s] %-22s %s  %s" % (rec["category"], rule, shown, at)
+            if reason:
+                line += "  -- allowlisted: %s" % reason
+            print(line)
+
+    gl_live = []
+    for where, rule, path, line, commit in gl_findings:
+        reason = allowed_by(allow, rule, path, commit)
+        if reason:
+            allowed.append((where, rule, path, "(gitleaks, value redacted)", {"category": "gitleaks", "first": ("%s:%s" % (path, line)) if where == "tree" else commit, "count": 1}, reason))
+        else:
+            gl_live.append((where, rule, path, line, commit))
+    gl_findings = gl_live
+    render([r for r in live if r[0] == "tree"], "WORKING TREE (%d)" % len([r for r in live if r[0] == "tree"]))
+    render([r for r in live if r[0] == "history"], "HISTORY (%d)" % len([r for r in live if r[0] == "history"]))
+    if gl_findings:
+        print("\nGITLEAKS (%d)" % len(gl_findings))
+        for where, rule, path, line, commit in gl_findings:
+            tail = "%s:%s" % (path, line) + (" in %s" % commit if commit else "")
+            print("  [%s] %-22s %s  (value redacted)" % (where, rule, tail))
+    render(allowed, "ALLOWLISTED (%d), reported, not counted as findings" % len(allowed))
+
+    for e in errors:
+        print("\nERROR: %s" % e, file=sys.stderr)
+
+    total = len(live) + len(gl_findings)
+    print()
+    if errors:
+        print("RESULT: a scanner could not run; this is NOT a clean bill of health")
+        return 2
+    if total:
+        print("RESULT: %d finding(s). NOT clean. Fix them (history too) or have the owner triage." % total)
+        return 1
+    print("RESULT: clean%s" % (" (%d allowlisted, see above)" % len(allowed) if allowed else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:  # a crashed scanner must never read as "findings" (1) or "clean" (0)
+        print("ERROR: scan-public crashed: %r" % (exc,), file=sys.stderr)
+        sys.exit(2)
