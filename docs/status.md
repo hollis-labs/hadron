@@ -9,7 +9,7 @@ Phases 0 and 1 of the port plan (Tesseract `plan_hadron_port_to_substrate_202611
 
 ## Schema still to add (with the subsystem that needs it)
 
-These old tables are not in `00001` yet; each is added, redesigned if needed, when its consumer is ported: `schedules` and `triggers` (activation and unattended), `messages` (message waits, agent boot), `workspaces` (workspace commands), `runs` and `run_events` (execution manager), `workflow` ones are all in. `settings` was a file, not a table.
+These old tables are not in `00001` yet; each is added, redesigned if needed, when its consumer is ported: `schedules` and `triggers` (activation and unattended), `messages` (message waits, agent boot), `workspaces` (workspace commands), `runs` and `run_events` (execution manager). Every `workflow_*` table is already in. `settings` was a file, not a table.
 Not carried forward (archive): `blueprint_registry`, `blueprint_versions`, `pipeline_runs`, `pipeline_stage_runs`, `human_gates`, `legacy_schedule_fires`, `legacy_schedule_fire_attempts`, `schema_migrations` (goose has its own version table).
 `store_generation` holds one row the old store seeded at open; seeding it moves with the store code.
 
