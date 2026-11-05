@@ -19,6 +19,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
+      - name: pins match the Substrate BOM
+        run: go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .
       - run: go test ./...
       - uses: golangci/golangci-lint-action@v7
         with:

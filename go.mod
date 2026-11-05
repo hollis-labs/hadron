@@ -3,8 +3,15 @@ module github.com/hollis-labs/hadron
 go 1.26.10
 
 require (
-	github.com/hollis-labs/substrate v0.1.1-0.20261105020146-ffbc401e8db0
+	github.com/expr-lang/expr v1.17.8
+	github.com/hollis-labs/libs/core/store v0.1.0
+	github.com/hollis-labs/libs/core/util v0.6.0
+	github.com/hollis-labs/libs/harness/core v0.16.0
+	github.com/hollis-labs/libs/workflow/engine v0.2.0
+	github.com/hollis-labs/substrate v0.1.1-0.20261105021858-b2471388d93b
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -15,9 +22,8 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hollis-labs/libs/app/app-host v0.1.0 // indirect
 	github.com/hollis-labs/libs/core/panics v0.1.0 // indirect
-	github.com/hollis-labs/libs/core/store v0.1.0 // indirect
-	github.com/hollis-labs/libs/core/util v0.6.0 // indirect
 	github.com/hollis-labs/libs/mcp/plugin-mcp v0.6.0 // indirect
+	github.com/hollis-labs/libs/mesh/core v0.6.0 // indirect
 	github.com/hollis-labs/libs/security/auth v0.3.0 // indirect
 	github.com/hollis-labs/libs/security/policy v0.1.0 // indirect
 	github.com/hollis-labs/libs/security/redact v0.2.0 // indirect
@@ -51,5 +57,4 @@ require (
 	modernc.org/libc v1.78.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.60.1 // indirect
 )

@@ -2,8 +2,12 @@ github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6N
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=
+github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2xWg=
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
+github.com/expr-lang/expr v1.17.8 h1:W1loDTT+0PQf5YteHSTpju2qfUfNoBt4yw9+wOEU9VM=
+github.com/expr-lang/expr v1.17.8/go.mod h1:8/vRC7+7HBzESEqt5kKpYXxrxkr31SaO8r40VO/1IT4=
 github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
 github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
@@ -26,8 +30,12 @@ github.com/hollis-labs/libs/core/store v0.1.0 h1:kcTrDBmi7ciKaSNCkWjrE+Uff6r10Zk
 github.com/hollis-labs/libs/core/store v0.1.0/go.mod h1:aKsmHWniP1YHsQQdK/JHmLXV2JGBu/gJy8/JRlCeMhU=
 github.com/hollis-labs/libs/core/util v0.6.0 h1:uqVSuuRtKAzwDcMf5ekFlBUO9g6aZzAAp81dRadac4U=
 github.com/hollis-labs/libs/core/util v0.6.0/go.mod h1:CpS3EUj+MHivKVnGWJj8Vtq1+J3TN1uPyPCbLzhQLh0=
+github.com/hollis-labs/libs/harness/core v0.16.0 h1:Kx1ycAgd61aBZJSDoOqX9CKlsvoRugcIypXJ+IEmkN0=
+github.com/hollis-labs/libs/harness/core v0.16.0/go.mod h1:9unAdOAJSvsw5i9rMub7n+kBv+YJbMVzGeTiE8HbgoI=
 github.com/hollis-labs/libs/mcp/plugin-mcp v0.6.0 h1:wS9KsD0Jk4QD+SEepirMGZJwUtXpL5hMjPL/wYdEk20=
 github.com/hollis-labs/libs/mcp/plugin-mcp v0.6.0/go.mod h1:jf0jxxm5UOa5YBETO4u8WTD6JY87VAhxkBZgCnFd+UA=
+github.com/hollis-labs/libs/mesh/core v0.6.0 h1:WQwxbGozmC+elJK96iNw275yNEKT+uC93qT+zoupzJI=
+github.com/hollis-labs/libs/mesh/core v0.6.0/go.mod h1:K1a1oeFXakkaJDyKogI/I2j+2lpKklTZgdtzSw45Bss=
 github.com/hollis-labs/libs/security/auth v0.3.0 h1:gy0PK2vPWBhr+tAQ5WDw+TZN6YgVHHWXN2oeaYNHxdA=
 github.com/hollis-labs/libs/security/auth v0.3.0/go.mod h1:GGJqJuSZwR57ygyml3kPt6Aw2rwPqAzTV2M9CXjTjo8=
 github.com/hollis-labs/libs/security/policy v0.1.0 h1:XsksYYhpJ315wlr9QmWwxUKRfyDAJSSRiekBh7jpI70=
@@ -38,8 +46,10 @@ github.com/hollis-labs/libs/security/secrets v0.1.0 h1:/wrYAM5viUnYMpDhvbQmPlTMe
 github.com/hollis-labs/libs/security/secrets v0.1.0/go.mod h1:Krd1kgmisOVmeN1G/ltaLMva58tIBki9xShsySqd86Y=
 github.com/hollis-labs/libs/ui/ui-go v0.1.0 h1:GFztthzyhlbrKemRItwyNlV+e83pZT+yFr5Y37iXlL4=
 github.com/hollis-labs/libs/ui/ui-go v0.1.0/go.mod h1:MBO41Mrbgo6YfRbm8MI50qQXjDfwhkvA/WxRdtOiL38=
-github.com/hollis-labs/substrate v0.1.1-0.20261105020146-ffbc401e8db0 h1:g7lFjUCC9s35OYWWlvFZTveDEkp2EyJm5w8W/BSFFuI=
-github.com/hollis-labs/substrate v0.1.1-0.20261105020146-ffbc401e8db0/go.mod h1:Mr2tzp62sg2iCqzby4GAre3fl+yWhlfx5P/E57FfUYE=
+github.com/hollis-labs/libs/workflow/engine v0.2.0 h1:K7aJh4ia0H9LyuCdxGQrr0iyUgb1IvkOAw4uqRjPf04=
+github.com/hollis-labs/libs/workflow/engine v0.2.0/go.mod h1:y74RibX6OawPf+5rgxW3qkYWK9rjXIkq7mvDLi1d32U=
+github.com/hollis-labs/substrate v0.1.1-0.20261105021858-b2471388d93b h1:jfc2/fjrOcrm7u4+/anBdeomJ8+UUZh7xEF/TYD5IRw=
+github.com/hollis-labs/substrate v0.1.1-0.20261105021858-b2471388d93b/go.mod h1:Mr2tzp62sg2iCqzby4GAre3fl+yWhlfx5P/E57FfUYE=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
@@ -72,6 +82,8 @@ github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzG
 github.com/rogpeppe/go-internal v1.16.0 h1:O9DK+vNMDVGLr2BeZqmpLeMjiMNkuXfcqntWbZV6S5g=
 github.com/rogpeppe/go-internal v1.16.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52ZOxX7yM1VHvnxs=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
+github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 h1:KRzFb2m7YtdldCEkzs6KqmJw4nqEVZGK7IN2kJkjTuQ=
+github.com/santhosh-tekuri/jsonschema/v6 v6.0.2/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
 github.com/segmentio/asm v1.2.1 h1:DTNbBqs57ioxAD4PrArqftgypG4/qNpXoJx8TVXxPR0=
 github.com/segmentio/asm v1.2.1/go.mod h1:BqMnlJP91P8d+4ibuonYZw9mfnzI9HfxselHZr5aAcs=
 github.com/segmentio/encoding v0.5.4 h1:OW1VRern8Nw6ITAtwSZ7Idrl3MXCFwXHPgqESYfvNt0=

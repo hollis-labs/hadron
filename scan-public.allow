@@ -1,0 +1,13 @@
+# RULE-ID PATH-GLOB REASON   (owner-reviewed; every allowlisted finding is still printed)
+#
+# Lease fencing tokens in engine-state unit tests: the ClaimProof.Token field is an opaque
+# string the test invents ("recovery-token"); it names no credential and guards nothing.
+secret-assignment internal/persistence/workflow_compensation_test.go test fixture: claim lease fencing token, not a credential
+secret-assignment internal/persistence/workflow_state_control_flow_test.go test fixture: claim lease fencing token, not a credential
+secret-assignment internal/persistence/workflow_state_memoization_test.go test fixture: claim lease fencing token, not a credential
+secret-assignment internal/persistence/workflow_state_scheduler_resources_test.go test fixture: claim lease fencing token, not a credential
+secret-assignment internal/persistence/workflow_state_test.go test fixture: claim lease fencing token, not a credential
+# The plan snapshot test feeds deliberately unsafe locators and a private marker to prove the
+# projection strips credentials, query strings and fragments. The unsafe values are the input.
+secret-assignment internal/appworkflow/hoststate/plan_snapshot_test.go test input for a redaction test, not a real secret
+credentials-in-url internal/appworkflow/hoststate/plan_snapshot_test.go test input for a redaction test, not a real URL
