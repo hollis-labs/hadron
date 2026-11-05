@@ -1,0 +1,51 @@
+workflow:
+  name: Activation Showcase
+  version: 1.2.0
+  provenance:
+    authority: project
+    revision: source-rev-42
+on:
+  webhook:
+    name: Incoming Hook
+    authority: project
+    path: /hooks/tasks
+    extract:
+      tasks: body.tasks
+      request_id:
+        interpolation: "request-{{ message.id }}"
+    overlap: Forbid
+    starting_deadline: 30s
+    catchup: false
+    deduplication_key: inputs.project_id
+    run_id_reuse: terminate_existing
+    metadata:
+      purpose: ingestion
+  schedule:
+    name: Daily Schedule
+    cron: "0 6 * * *"
+    overlap: Allow
+    catchup: true
+  message:
+    name: Agent Message
+    to: msg://agent/hadron/bulk-create
+    extract:
+      project_id: message.project_id
+  file:
+    name: Inbox Files
+    path: inbox/tasks.json
+    events: [create, write, rename, remove]
+  event:
+    name: Project Event
+    type: project.task.created
+    source: project://torque
+  one_shot:
+    name: Setup Callback
+    path: /callbacks/setup
+    ttl: 15m
+inputs:
+  - name: project_id
+    type: string
+steps:
+  - name: Accept
+    transform:
+      expression: inputs.project_id

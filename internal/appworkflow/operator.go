@@ -1,0 +1,839 @@
+package appworkflow
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/rundiagnostics"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/diagnostic"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
+)
+
+const maximumRunAuthorizationDepth = 64
+
+// WorkflowOperations is the shared application-service contract used by
+// transports. Transports collect caller intent; this boundary authenticates,
+// authorizes, resolves, evaluates policy, and performs durable operations.
+type WorkflowOperations interface {
+	ValidateWorkflow(context.Context, ValidateWorkflowRequest) (ValidateWorkflowResult, error)
+	ExplainWorkflow(context.Context, ExplainWorkflowRequest) (StartRunResult, error)
+	RunWorkflow(context.Context, RunWorkflowRequest) (StartRunResult, error)
+	InspectWorkflowRun(context.Context, InspectWorkflowRunRequest) (rundiagnostics.Result, error)
+	CancelWorkflowRun(context.Context, CancelWorkflowRunRequest) (CancelWorkflowRunResult, error)
+	ResumeWorkflowRun(context.Context, ResumeWorkflowRunRequest) (ResumeWorkflowRunResult, error)
+	RerunWorkflow(context.Context, RerunWorkflowRequest) (RerunWorkflowResult, error)
+}
+
+// WorkflowRunReadOperations extends the command surface with bounded, safe
+// projections used by HTTP and presentation clients. Implementations must
+// authorize each request before returning diagnostic data.
+type WorkflowRunReadOperations interface {
+	ListWorkflowWaits(context.Context, WorkflowRunReadRequest) (WorkflowWaitListResult, error)
+	FetchWorkflowValues(context.Context, WorkflowRunReadRequest) (WorkflowValueListResult, error)
+	FetchWorkflowEvents(context.Context, WorkflowRunReadRequest) (WorkflowEventListResult, error)
+}
+
+// WorkflowSignalOperations is a narrow optional control surface for named,
+// typed W07 signals. It stays separate from the initial W06 operation
+// contract so transports can fail closed when signal composition is absent.
+type WorkflowSignalOperations interface {
+	SignalWorkflowRun(context.Context, SignalWorkflowRunRequest) (ResumeWorkflowRunResult, error)
+}
+
+// WorkflowCompensationOperations is a source-compatible optional extension.
+// Manual rollback and rollback cancellation are never inferred from run-ID
+// possession and always traverse the host identity and policy boundary.
+type WorkflowCompensationOperations interface {
+	CompensateWorkflowRun(context.Context, CompensateWorkflowRunRequest) (WorkflowCompensationResult, error)
+	CancelWorkflowCompensation(context.Context, CancelWorkflowCompensationRequest) (WorkflowCompensationResult, error)
+	RetryWorkflowCompensation(context.Context, RetryWorkflowCompensationRequest) (WorkflowCompensationResult, error)
+	InspectWorkflowCompensation(context.Context, InspectWorkflowCompensationRequest) (WorkflowCompensationResult, error)
+}
+
+type RunID = workflowruntime.RunID
+type WaitID = workflowruntime.WaitID
+type WorkflowResumeOutcome = workflowruntime.ResumeOutcome
+type WorkflowWakeSource = workflowwait.WakeSource
+
+const (
+	WorkflowResumeApplied  WorkflowResumeOutcome = workflowruntime.ResumeApplied
+	WorkflowResumeReplayed WorkflowResumeOutcome = workflowruntime.ResumeReplayed
+	WorkflowWakeCallback   WorkflowWakeSource    = workflowwait.WakeCallback
+	WorkflowWakeGate       WorkflowWakeSource    = workflowwait.WakeGate
+	WorkflowWakeMessage    WorkflowWakeSource    = workflowwait.WakeMessage
+)
+
+type WorkflowAccessOperation string
+
+const (
+	WorkflowAccessValidate             WorkflowAccessOperation = "validate"
+	WorkflowAccessExplain              WorkflowAccessOperation = "explain"
+	WorkflowAccessRun                  WorkflowAccessOperation = "run"
+	WorkflowAccessInspect              WorkflowAccessOperation = "inspect"
+	WorkflowAccessCancel               WorkflowAccessOperation = "cancel"
+	WorkflowAccessResume               WorkflowAccessOperation = "resume"
+	WorkflowAccessRerun                WorkflowAccessOperation = "rerun"
+	WorkflowAccessWaits                WorkflowAccessOperation = "list_waits"
+	WorkflowAccessValues               WorkflowAccessOperation = "fetch_values"
+	WorkflowAccessEvents               WorkflowAccessOperation = "fetch_events"
+	WorkflowAccessSignal               WorkflowAccessOperation = "signal"
+	WorkflowAccessActivationFire       WorkflowAccessOperation = "activation_fire"
+	WorkflowAccessCatalogSearch        WorkflowAccessOperation = "catalog_search"
+	WorkflowAccessCatalogInspect       WorkflowAccessOperation = "catalog_inspect"
+	WorkflowAccessAuthorValidate       WorkflowAccessOperation = "author_validate"
+	WorkflowAccessAuthorScaffold       WorkflowAccessOperation = "author_scaffold"
+	WorkflowAccessAuthorTest           WorkflowAccessOperation = "author_test"
+	WorkflowAccessAuthorRegister       WorkflowAccessOperation = "author_register"
+	WorkflowAccessRegistryPackage      WorkflowAccessOperation = "registry_package"
+	WorkflowAccessRegistryPublish      WorkflowAccessOperation = "registry_publish"
+	WorkflowAccessRegistryPin          WorkflowAccessOperation = "registry_pin"
+	WorkflowAccessRegistryUnpin        WorkflowAccessOperation = "registry_unpin"
+	WorkflowAccessRegistryClearCurrent WorkflowAccessOperation = "registry_clear_current"
+	WorkflowAccessExposureInspect      WorkflowAccessOperation = "exposure_inspect"
+	WorkflowAccessExposurePin          WorkflowAccessOperation = "exposure_pin"
+	WorkflowAccessExposureUnpin        WorkflowAccessOperation = "exposure_unpin"
+)
+
+// WorkflowAccessIntent is the non-secret operation metadata supplied to a
+// transport authenticator/profile boundary. Authentication facts themselves
+// remain in the returned context and are rebound by Host.
+type WorkflowAccessIntent struct {
+	Operation  WorkflowAccessOperation `json:"operation"`
+	Definition *graph.DefinitionRef    `json:"definition,omitempty"`
+	RunID      workflowruntime.RunID   `json:"run_id,omitempty"`
+	Display    *values.DisplayPolicy   `json:"display,omitempty"`
+}
+
+type ValidateWorkflowRequest struct {
+	Definition graph.DefinitionRef `json:"definition"`
+	Identity   IdentityRequest     `json:"identity"`
+}
+
+type ValidateWorkflowResult struct {
+	Definition  graph.DefinitionRef      `json:"definition"`
+	Plan        *workflowruntime.PlanRef `json:"plan,omitempty"`
+	Diagnostics []diagnostic.Diagnostic  `json:"diagnostics"`
+
+	// GraphDigest is the digest an unattended allow-list entry pins; it is
+	// the same for top-level and call-started child runs.
+	GraphDigest string `json:"graph_digest,omitempty"`
+}
+
+type ExplainWorkflowRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Definition     graph.DefinitionRef   `json:"definition"`
+	Inputs         map[string]any        `json:"inputs,omitempty"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Identity       IdentityRequest       `json:"identity"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
+
+type RunWorkflowRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Definition     graph.DefinitionRef   `json:"definition"`
+	Inputs         map[string]any        `json:"inputs,omitempty"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Identity       IdentityRequest       `json:"identity"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+	DryRun         bool                  `json:"dry_run,omitempty"`
+	Pins           []hoststate.StartPin  `json:"pins,omitempty"`
+}
+
+type InspectWorkflowRunRequest struct {
+	RunID           workflowruntime.RunID `json:"run_id"`
+	Identity        IdentityRequest       `json:"identity"`
+	Display         values.DisplayPolicy  `json:"display,omitempty"`
+	NodeLimit       int                   `json:"node_limit,omitempty"`
+	AttemptLimit    int                   `json:"attempt_limit,omitempty"`
+	EventLimit      int                   `json:"event_limit,omitempty"`
+	ValueLimit      int                   `json:"value_limit,omitempty"`
+	ResourceLimit   int                   `json:"resource_limit,omitempty"`
+	ActivationLimit int                   `json:"activation_limit,omitempty"`
+}
+
+type WorkflowRunReadRequest struct {
+	RunID        workflowruntime.RunID `json:"run_id"`
+	Identity     IdentityRequest       `json:"identity"`
+	Display      values.DisplayPolicy  `json:"display,omitempty"`
+	NodeLimit    int                   `json:"node_limit,omitempty"`
+	AttemptLimit int                   `json:"attempt_limit,omitempty"`
+	EventLimit   int                   `json:"event_limit,omitempty"`
+	ValueLimit   int                   `json:"value_limit,omitempty"`
+	// After resumes the event list after a cursor returned as NextCursor by
+	// an earlier read of the same run. Empty starts from the first event.
+	After string `json:"after,omitempty"`
+	// WaitMS, for an events read, holds the request open up to this many
+	// milliseconds (at most 30000) until an event follows After. Zero returns
+	// at once.
+	WaitMS int `json:"wait_ms,omitempty"`
+}
+
+// MaxWorkflowEventWaitMS bounds one long-polling events read.
+const MaxWorkflowEventWaitMS = 30000
+
+type WorkflowWaitListItem struct {
+	NodeID workflowruntime.NodeInvocationID `json:"node_id"`
+	Wait   rundiagnostics.WaitDiagnostic    `json:"wait"`
+}
+
+type WorkflowWaitListResult struct {
+	RunID     workflowruntime.RunID  `json:"run_id"`
+	Waits     []WorkflowWaitListItem `json:"waits"`
+	Truncated bool                   `json:"truncated"`
+}
+
+type WorkflowValueListResult struct {
+	RunID     workflowruntime.RunID               `json:"run_id"`
+	Values    []rundiagnostics.ValueSetDiagnostic `json:"values"`
+	Truncated bool                                `json:"truncated"`
+}
+
+type WorkflowEventListResult struct {
+	RunID     workflowruntime.RunID           `json:"run_id"`
+	Events    []workflowruntime.RenderedEvent `json:"events"`
+	Truncated bool                            `json:"truncated"`
+	// NextCursor resumes after the last event returned, or after the cursor
+	// the read started from when no event followed it. Pass it as After.
+	NextCursor string `json:"next_cursor,omitempty"`
+	// RunTerminal is true when the run had finished before this read began. An
+	// empty, untruncated result then means no further event will arrive.
+	RunTerminal bool `json:"run_terminal,omitempty"`
+	// Gap is set instead of events when the caller's position cannot be
+	// resumed (see the Gap reasons). The caller must choose: continue from
+	// NextCursor, which points at the log's current high water, or start over.
+	Gap *WorkflowEventGap `json:"gap,omitempty"`
+
+	// generation is the event log identity NextCursor was issued under.
+	generation string
+}
+
+// CursorAfter returns the cursor that resumes right after the event with the
+// given sequence, in the same event log as this result. A transport that
+// delivers events one at a time uses it to label each.
+func (r WorkflowEventListResult) CursorAfter(sequence uint64) string {
+	return EncodeEventCursor(r.RunID, sequence, r.generation)
+}
+
+// WorkflowEventGap explains why a cursor could not be resumed.
+type WorkflowEventGap struct {
+	Reason            string `json:"reason"`
+	EarliestAvailable uint64 `json:"earliest_available"`
+	HighWater         uint64 `json:"high_water"`
+}
+
+type CancelWorkflowRunRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Identity       IdentityRequest       `json:"identity"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Reason         string                `json:"reason,omitempty"`
+}
+
+type OperationIssue struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// WorkflowOperationError is the bounded, transport-safe error envelope shared
+// by daemon routes and clients. Message text is intentionally not transported.
+type WorkflowOperationError struct {
+	Code        string                  `json:"code"`
+	Diagnostics []diagnostic.Diagnostic `json:"diagnostics,omitempty"`
+	Result      *StartRunResult         `json:"result,omitempty"`
+}
+
+const (
+	WorkflowErrorCodeDryRunUnsupported    = "dry_run_unsupported"
+	WorkflowErrorCodePolicyDenied         = "policy_denied"
+	WorkflowErrorCodeConfirmationRequired = "confirmation_required"
+	WorkflowErrorCodePinRejected          = "pin_rejected"
+	WorkflowErrorCodeInvalidRequest       = "invalid_request"
+	WorkflowErrorCodeUnauthenticated      = "unauthenticated"
+	WorkflowErrorCodeNotFound             = "not_found"
+	WorkflowErrorCodeIdempotencyConflict  = "idempotency_conflict"
+	WorkflowErrorCodeActivationConflict   = "activation_conflict"
+	WorkflowErrorCodeUnavailable          = "unavailable"
+	WorkflowErrorCodeInternal             = "internal_error"
+)
+
+// WorkflowErrorCodeConfirmationNotPermitted is returned when the caller set
+// confirmed but lacks the workflow.confirm grant.
+const WorkflowErrorCodeConfirmationNotPermitted = "confirmation_not_permitted"
+
+type CancelWorkflowRunResult struct {
+	Cancellation workflowruntime.RequestRunCancellationResult `json:"cancellation"`
+	Failures     []OperationIssue                             `json:"failures,omitempty"`
+}
+
+type ResumeWorkflowRunRequest struct {
+	RunID          workflowruntime.RunID   `json:"run_id"`
+	Identity       IdentityRequest         `json:"identity"`
+	WaitID         workflowruntime.WaitID  `json:"wait_id"`
+	Correlation    string                  `json:"correlation"`
+	Token          string                  `json:"token"`
+	WakeSource     workflowwait.WakeSource `json:"wake_source"`
+	Payload        values.Value            `json:"payload"`
+	IdempotencyKey string                  `json:"idempotency_key"`
+}
+
+type ResumeWorkflowRunResult struct {
+	Outcome workflowruntime.ResumeOutcome `json:"outcome"`
+	Wait    *ResumeWaitStatus             `json:"wait,omitempty"`
+	Node    *ResumeNodeStatus             `json:"node,omitempty"`
+	Attempt *ResumeAttemptStatus          `json:"attempt,omitempty"`
+	Values  *values.ValueSetRef           `json:"values,omitempty"`
+}
+
+type ResumeWaitStatus struct {
+	ID     workflowruntime.WaitID `json:"id"`
+	Status workflowwait.Status    `json:"status"`
+}
+
+type ResumeNodeStatus struct {
+	ID     workflowruntime.NodeInvocationID `json:"id"`
+	Status workflowruntime.NodeStatus       `json:"status"`
+}
+
+type ResumeAttemptStatus struct {
+	ID     workflowruntime.AttemptID  `json:"id"`
+	Status workflowruntime.NodeStatus `json:"status"`
+}
+
+type RerunWorkflowResult = workflowruntime.BeginReplayResult
+
+type SignalWorkflowRunRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Name           string                `json:"name"`
+	Correlation    string                `json:"correlation"`
+	Payload        values.Value          `json:"payload"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Identity       IdentityRequest       `json:"identity"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
+
+type CompensateWorkflowRunRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Identity       IdentityRequest       `json:"identity"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
+
+type CancelWorkflowCompensationRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Identity       IdentityRequest       `json:"identity"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Reason         string                `json:"reason"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
+
+type RetryWorkflowCompensationRequest struct {
+	RunID          workflowruntime.RunID `json:"run_id"`
+	Identity       IdentityRequest       `json:"identity"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Attestation    string                `json:"attestation"`
+	Confirmed      bool                  `json:"confirmed,omitempty"`
+}
+
+type InspectWorkflowCompensationRequest struct {
+	RunID    workflowruntime.RunID `json:"run_id"`
+	Identity IdentityRequest       `json:"identity"`
+	Limit    int                   `json:"limit,omitempty"`
+}
+
+type WorkflowCompensationResult struct {
+	Present   bool                                        `json:"present"`
+	Ledger    *workflowruntime.CompensationLedgerSnapshot `json:"ledger,omitempty"`
+	Entries   []workflowruntime.CompensationEntrySnapshot `json:"entries,omitempty"`
+	Truncated bool                                        `json:"truncated,omitempty"`
+}
+
+type RerunWorkflowRequest struct {
+	SourceRunID             workflowruntime.RunID `json:"source_run_id"`
+	RunID                   workflowruntime.RunID `json:"run_id"`
+	FromNodeID              string                `json:"from_node_id"`
+	IdempotencyKey          string                `json:"idempotency_key"`
+	Identity                IdentityRequest       `json:"identity"`
+	CompensationAttestation string                `json:"compensation_attestation,omitempty"`
+}
+
+type GraphRunInspector interface {
+	Inspect(context.Context, rundiagnostics.Query) (rundiagnostics.Result, error)
+}
+
+// EventPager is implemented by inspectors that can return a run's events in
+// pages after a position. FetchWorkflowEvents uses it when available;
+// rundiagnostics.Service implements it.
+type EventPager interface {
+	Events(context.Context, rundiagnostics.EventsQuery) (rundiagnostics.EventPage, error)
+}
+
+type ReplayRunner interface {
+	Rerun(context.Context, workflowruntime.ReplayRequest) (workflowruntime.BeginReplayResult, error)
+}
+
+type WorkflowOperatorOptions struct {
+	Host        *Host
+	Diagnostics GraphRunInspector
+	Replay      ReplayRunner
+	RunAccess   RunOperationAuthorizer
+	// EventStreamLimit caps concurrent SSE and long-poll followers per principal.
+	// Zero selects DefaultEventStreamLimit; negative values are invalid.
+	EventStreamLimit int
+	// EventStreamRejected records a rejection without exposing the principal.
+	EventStreamRejected func(context.Context)
+}
+
+// WorkflowOperator is the transport-neutral Hadron operator facade. Its Host
+// remains the authority for identity, policy, durable run state, and waits.
+type WorkflowOperator struct {
+	host         *Host
+	diagnostics  GraphRunInspector
+	replay       ReplayRunner
+	runAccess    RunOperationAuthorizer
+	eventStreams *eventStreamLimiter
+}
+
+type RunOperation string
+
+const (
+	RunOperationInspect RunOperation = "inspect"
+	RunOperationCancel  RunOperation = "cancel"
+	RunOperationRerun   RunOperation = "rerun"
+	RunOperationWaits   RunOperation = "list_waits"
+	RunOperationValues  RunOperation = "fetch_values"
+	RunOperationEvents  RunOperation = "fetch_events"
+)
+
+type RunOperationAuthorization struct {
+	Operation RunOperation              `json:"operation"`
+	RunID     workflowruntime.RunID     `json:"run_id"`
+	Caller    hoststate.IdentityBinding `json:"caller"`
+	Owner     hoststate.IdentityBinding `json:"owner"`
+	Display   *values.DisplayPolicy     `json:"display,omitempty"`
+	FromNode  string                    `json:"from_node,omitempty"`
+}
+
+// RunOperationAuthorizer permits a host to add delegated run access without
+// treating possession of a run ID as authority. Nil selects exact ownership.
+type RunOperationAuthorizer interface {
+	AuthorizeRunOperation(context.Context, RunOperationAuthorization) error
+}
+
+type RunOperationAuthorizerFunc func(context.Context, RunOperationAuthorization) error
+
+func (f RunOperationAuthorizerFunc) AuthorizeRunOperation(ctx context.Context, request RunOperationAuthorization) error {
+	return f(ctx, request)
+}
+
+func NewWorkflowOperator(options WorkflowOperatorOptions) (*WorkflowOperator, error) {
+	if options.Host == nil || nilInterface(options.Diagnostics) || nilInterface(options.Replay) {
+		return nil, fmt.Errorf("%w: host, diagnostics, and replay services are required", ErrInvalidHost)
+	}
+	authorizer := options.RunAccess
+	if authorizer != nil && nilInterface(authorizer) {
+		return nil, fmt.Errorf("%w: run operation authorizer must not be typed nil", ErrInvalidHost)
+	}
+	if authorizer == nil {
+		authorizer = RunOperationAuthorizerFunc(func(_ context.Context, request RunOperationAuthorization) error {
+			if !sameIdentity(request.Caller, request.Owner) {
+				return fmt.Errorf("%w: current caller is not authorized for this workflow run", ErrPolicyDenied)
+			}
+			return nil
+		})
+	}
+	limit := options.EventStreamLimit
+	if limit < 0 {
+		return nil, fmt.Errorf("%w: event stream limit must be positive", ErrInvalidHost)
+	}
+	if limit == 0 {
+		limit = DefaultEventStreamLimit
+	}
+	return &WorkflowOperator{host: options.Host, diagnostics: options.Diagnostics, replay: options.Replay, runAccess: authorizer,
+		eventStreams: &eventStreamLimiter{limit: limit, active: make(map[string]int), rejected: options.EventStreamRejected}}, nil
+}
+
+func (s *WorkflowOperator) ValidateWorkflow(ctx context.Context, request ValidateWorkflowRequest) (ValidateWorkflowResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return ValidateWorkflowResult{}, err
+	}
+	if _, err := s.host.bindIdentity(ctx, request.Identity); err != nil {
+		return ValidateWorkflowResult{}, err
+	}
+	plan, err := s.host.definitions.ResolvePlan(ctx, request.Definition)
+	if err != nil {
+		var withDiagnostics interface {
+			Diagnostics() []diagnostic.Diagnostic
+		}
+		if errors.As(err, &withDiagnostics) {
+			return ValidateWorkflowResult{Definition: request.Definition, Diagnostics: withDiagnostics.Diagnostics()}, nil
+		}
+		return ValidateWorkflowResult{}, err
+	}
+	validated, err := cloneExecutionPlan(plan)
+	if err != nil {
+		return ValidateWorkflowResult{}, err
+	}
+	findings := validateResolvedPlan(ctx, s.host, validated)
+	if findings == nil {
+		findings = []diagnostic.Diagnostic{}
+	}
+	result := ValidateWorkflowResult{Definition: validated.Definition, Diagnostics: findings}
+	if len(findings) == 0 {
+		ref := workflowruntime.PlanRef{ID: validated.ID, Version: validated.Graph.Version, Digest: validated.Digest, SchemaVersion: validated.SchemaVersion}
+		result.Plan = &ref
+		result.GraphDigest = validated.Graph.Digest
+	}
+	return result, nil
+}
+
+func (s *WorkflowOperator) ExplainWorkflow(ctx context.Context, request ExplainWorkflowRequest) (StartRunResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return StartRunResult{}, err
+	}
+	return s.host.StartRun(ctx, StartRunRequest{RunID: request.RunID, Definition: request.Definition, Inputs: request.Inputs, IdempotencyKey: request.IdempotencyKey, Identity: request.Identity, Confirmed: request.Confirmed, DryRun: true})
+}
+
+func (s *WorkflowOperator) RunWorkflow(ctx context.Context, request RunWorkflowRequest) (StartRunResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return StartRunResult{}, err
+	}
+	return s.host.StartRun(ctx, StartRunRequest{RunID: request.RunID, Definition: request.Definition, Inputs: request.Inputs, IdempotencyKey: request.IdempotencyKey, Identity: request.Identity, Confirmed: request.Confirmed, DryRun: request.DryRun, Pins: request.Pins})
+}
+
+func (s *WorkflowOperator) InspectWorkflowRun(ctx context.Context, request InspectWorkflowRunRequest) (rundiagnostics.Result, error) {
+	if err := request.Display.Validate(); err != nil {
+		return rundiagnostics.Result{}, fmt.Errorf("invalid workflow display policy: %w", err)
+	}
+	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: RunOperationInspect, RunID: request.RunID, Display: &request.Display}, request.Identity); err != nil {
+		return rundiagnostics.Result{}, err
+	}
+	return s.diagnostics.Inspect(ctx, rundiagnostics.Query{RunID: request.RunID, Now: s.host.now(), Display: request.Display, NodeLimit: request.NodeLimit, AttemptLimit: request.AttemptLimit, EventLimit: request.EventLimit, ValueLimit: request.ValueLimit, ResourceLimit: request.ResourceLimit, ActivationLimit: request.ActivationLimit})
+}
+
+func (s *WorkflowOperator) ListWorkflowWaits(ctx context.Context, request WorkflowRunReadRequest) (WorkflowWaitListResult, error) {
+	inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationWaits)
+	if err != nil {
+		return WorkflowWaitListResult{}, err
+	}
+	result := WorkflowWaitListResult{RunID: request.RunID, Waits: []WorkflowWaitListItem{}, Truncated: inspection.Truncated.Nodes || inspection.Truncated.Attempts}
+	for _, node := range inspection.Nodes {
+		if node.Wait != nil {
+			result.Waits = append(result.Waits, WorkflowWaitListItem{NodeID: node.ID, Wait: *node.Wait})
+		}
+	}
+	return result, nil
+}
+
+func (s *WorkflowOperator) FetchWorkflowValues(ctx context.Context, request WorkflowRunReadRequest) (WorkflowValueListResult, error) {
+	inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationValues)
+	if err != nil {
+		return WorkflowValueListResult{}, err
+	}
+	return WorkflowValueListResult{RunID: request.RunID, Values: inspection.Values, Truncated: inspection.Truncated.Values}, nil
+}
+
+func (s *WorkflowOperator) FetchWorkflowEvents(ctx context.Context, request WorkflowRunReadRequest) (WorkflowEventListResult, error) {
+	if request.WaitMS < 0 || request.WaitMS > MaxWorkflowEventWaitMS {
+		return WorkflowEventListResult{}, fmt.Errorf("%w: wait_ms must be between 0 and %d", ErrWorkflowInvalidRequest, MaxWorkflowEventWaitMS)
+	}
+	pager, paged := s.diagnostics.(EventPager)
+	if !paged {
+		// An inspector without paging serves the first page only.
+		if request.After != "" || request.WaitMS != 0 {
+			return WorkflowEventListResult{}, fmt.Errorf("%w: event cursors and waits are not supported by this inspector", ErrWorkflowInvalidRequest)
+		}
+		inspection, err := s.inspectWorkflowProjection(ctx, request, RunOperationEvents)
+		if err != nil {
+			return WorkflowEventListResult{}, err
+		}
+		return WorkflowEventListResult{RunID: request.RunID, Events: inspection.Events, Truncated: inspection.Truncated.Events, NextCursor: nextEventCursor(request.RunID, 0, "", inspection.Events)}, nil
+	}
+	if err := request.Display.Validate(); err != nil {
+		return WorkflowEventListResult{}, fmt.Errorf("invalid workflow display policy: %w", err)
+	}
+	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: RunOperationEvents, RunID: request.RunID, Display: &request.Display}, request.Identity); err != nil {
+		return WorkflowEventListResult{}, err
+	}
+	after, generation, err := decodeEventCursor(request.RunID, request.After)
+	if err != nil {
+		return WorkflowEventListResult{}, err
+	}
+	if request.WaitMS > 0 {
+		identity, err := s.host.bindIdentity(ctx, request.Identity)
+		if err != nil {
+			return WorkflowEventListResult{}, err
+		}
+		leased, release, err := s.eventStreams.acquire(ctx, identity.Principal)
+		if err != nil {
+			return WorkflowEventListResult{}, err
+		}
+		defer release()
+		ctx = leased
+	}
+	page, err := pager.Events(ctx, rundiagnostics.EventsQuery{RunID: request.RunID, Display: request.Display, After: after, Limit: request.EventLimit, Wait: time.Duration(request.WaitMS) * time.Millisecond, Generation: generation})
+	if err != nil {
+		return WorkflowEventListResult{}, err
+	}
+	result := WorkflowEventListResult{RunID: request.RunID, Events: page.Events, Truncated: page.Truncated, RunTerminal: page.Terminal, generation: page.Generation}
+	if page.Gap != nil {
+		// Offer the log's current end as the place to continue from.
+		result.Gap = &WorkflowEventGap{Reason: page.Gap.Reason, EarliestAvailable: page.Gap.EarliestAvailable, HighWater: page.Gap.HighWater}
+		result.NextCursor = EncodeEventCursor(request.RunID, page.Gap.HighWater, page.Generation)
+		return result, nil
+	}
+	result.NextCursor = nextEventCursor(request.RunID, after, page.Generation, page.Events)
+	return result, nil
+}
+
+// nextEventCursor is the cursor after the last event, or the starting position
+// when the page is empty so a caller that has caught up polls from the same
+// place.
+func nextEventCursor(run RunID, after uint64, generation string, events []workflowruntime.RenderedEvent) string {
+	if len(events) > 0 {
+		after = events[len(events)-1].Sequence
+	}
+	if after == 0 && generation == "" {
+		return ""
+	}
+	return EncodeEventCursor(run, after, generation)
+}
+
+func (s *WorkflowOperator) inspectWorkflowProjection(ctx context.Context, request WorkflowRunReadRequest, operation RunOperation) (rundiagnostics.Result, error) {
+	if err := request.Display.Validate(); err != nil {
+		return rundiagnostics.Result{}, fmt.Errorf("invalid workflow display policy: %w", err)
+	}
+	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: operation, RunID: request.RunID, Display: &request.Display}, request.Identity); err != nil {
+		return rundiagnostics.Result{}, err
+	}
+	return s.diagnostics.Inspect(ctx, rundiagnostics.Query{RunID: request.RunID, Now: s.host.now(), Display: request.Display, NodeLimit: request.NodeLimit, AttemptLimit: request.AttemptLimit, EventLimit: request.EventLimit, ValueLimit: request.ValueLimit})
+}
+
+func (s *WorkflowOperator) CancelWorkflowRun(ctx context.Context, request CancelWorkflowRunRequest) (CancelWorkflowRunResult, error) {
+	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: RunOperationCancel, RunID: request.RunID}, request.Identity); err != nil {
+		return CancelWorkflowRunResult{}, err
+	}
+	result, failures, err := s.host.CancelRun(ctx, CancelRunRequest{RunID: request.RunID, IdempotencyKey: request.IdempotencyKey, Reason: request.Reason})
+	response := CancelWorkflowRunResult{Cancellation: result}
+	for range failures {
+		response.Failures = append(response.Failures, OperationIssue{Code: "finalizer_cancel_failed", Message: "a workflow finalizer could not be canceled"})
+	}
+	return response, err
+}
+
+func (s *WorkflowOperator) ResumeWorkflowRun(ctx context.Context, request ResumeWorkflowRunRequest) (ResumeWorkflowRunResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return ResumeWorkflowRunResult{}, err
+	}
+	identity, err := s.host.bindIdentity(ctx, request.Identity)
+	if err != nil {
+		return ResumeWorkflowRunResult{}, err
+	}
+	wait, err := s.host.state.LoadWait(ctx, request.WaitID)
+	if err != nil {
+		return ResumeWorkflowRunResult{}, err
+	}
+	if wait.Invocation.RunID != request.RunID {
+		return ResumeWorkflowRunResult{}, fmt.Errorf("%w: wait does not belong to the requested run", ErrPolicyDenied)
+	}
+	result, resumeErr := s.host.ResumeWait(ctx, workflowruntime.ResumeCommand{WaitID: request.WaitID, Correlation: request.Correlation, Token: request.Token, WakeSource: request.WakeSource, Responder: workflowwait.Responder{Kind: "principal", Reference: identity.Principal}, Payload: request.Payload, IdempotencyKey: request.IdempotencyKey, ReceivedAt: s.host.now()})
+	return safeResumeWorkflowRunResult(result), resumeErr
+}
+
+func safeResumeWorkflowRunResult(result workflowruntime.ResumeWaitResult) ResumeWorkflowRunResult {
+	safe := ResumeWorkflowRunResult{Outcome: result.Outcome}
+	if result.Wait.Ref.ID != "" {
+		safe.Wait = &ResumeWaitStatus{ID: result.Wait.Ref.ID, Status: result.Wait.Status}
+	}
+	if result.Node.ID.RunID != "" {
+		safe.Node = &ResumeNodeStatus{ID: result.Node.ID, Status: result.Node.Status}
+	}
+	if result.Attempt.ID.Invocation.RunID != "" && result.Attempt.ID.Number > 0 {
+		safe.Attempt = &ResumeAttemptStatus{ID: result.Attempt.ID, Status: result.Attempt.Status}
+	}
+	if result.Values.Validate() == nil {
+		valuesRef := result.Values
+		safe.Values = &valuesRef
+	}
+	return safe
+}
+
+func (s *WorkflowOperator) RerunWorkflow(ctx context.Context, request RerunWorkflowRequest) (RerunWorkflowResult, error) {
+	if err := s.authorizeRun(ctx, RunOperationAuthorization{Operation: RunOperationRerun, RunID: request.SourceRunID, FromNode: request.FromNodeID}, request.Identity); err != nil {
+		return workflowruntime.BeginReplayResult{}, err
+	}
+	var compensationAuthorization *workflowruntime.ReplayCompensationAuthorization
+	source, err := s.host.state.LoadRun(ctx, request.SourceRunID)
+	if err != nil {
+		return workflowruntime.BeginReplayResult{}, err
+	}
+	plan, err := s.host.plans.LoadRecoveryPlan(ctx, source)
+	if err != nil {
+		return workflowruntime.BeginReplayResult{}, err
+	}
+	replayStore, ok := s.host.state.(workflowruntime.ReplayStore)
+	if !ok || nilInterface(replayStore) {
+		return workflowruntime.BeginReplayResult{}, fmt.Errorf("%w: replay requires durable invocation state", ErrInvalidHost)
+	}
+	riskDigest, riskErr := workflowruntime.ReplayCompensationRiskDigest(ctx, s.host.state, replayStore, source.ID)
+	if riskErr != nil {
+		return workflowruntime.BeginReplayResult{}, riskErr
+	}
+	var ledgerGeneration uint64
+	var ledgerOutcome workflowruntime.CompensationOutcome
+	if plan.Plan.Graph.Compensation != nil {
+		store, ok := s.host.state.(workflowruntime.CompensationStore)
+		if !ok || nilInterface(store) {
+			return workflowruntime.BeginReplayResult{}, fmt.Errorf("%w: compensated replay requires durable compensation state", ErrInvalidHost)
+		}
+		ledger, ledgerErr := store.LoadCompensationLedger(ctx, source.ID)
+		if ledgerErr == nil {
+			unsafe := ledger.Status != workflowruntime.CompensationTerminal || ledger.Outcome == workflowruntime.CompensationOutcomePartial || ledger.Outcome == workflowruntime.CompensationOutcomeFailed || ledger.Outcome == workflowruntime.CompensationOutcomeCanceled
+			if unsafe {
+				ledgerGeneration, ledgerOutcome = ledger.Generation, ledger.Outcome
+			}
+		} else if !errors.Is(ledgerErr, workflowruntime.ErrNotFound) {
+			return workflowruntime.BeginReplayResult{}, ledgerErr
+		}
+	}
+	if ledgerGeneration != 0 || riskDigest != "" {
+		if !boundedAttestation(request.CompensationAttestation) {
+			return workflowruntime.BeginReplayResult{}, fmt.Errorf("%w: replay requires a bounded compensation attestation", ErrPolicyDenied)
+		}
+		identity, bindErr := s.host.bindIdentity(ctx, request.Identity)
+		if bindErr != nil {
+			return workflowruntime.BeginReplayResult{}, bindErr
+		}
+		digest := compensationAuthorizationDigest("replay_compensation", identity, request.IdempotencyKey,
+			string(source.ID), source.Plan.Digest, fmt.Sprint(source.Generation), fmt.Sprint(ledgerGeneration), string(ledgerOutcome), riskDigest, string(request.RunID), values.SHA256Digest([]byte(request.CompensationAttestation)))
+		compensationAuthorization = &workflowruntime.ReplayCompensationAuthorization{LedgerGeneration: ledgerGeneration, LedgerOutcome: ledgerOutcome, RiskDigest: riskDigest, Digest: digest}
+	} else if request.CompensationAttestation != "" {
+		return workflowruntime.BeginReplayResult{}, fmt.Errorf("%w: replay compensation attestation is not applicable", ErrPolicyDenied)
+	}
+	return s.replay.Rerun(ctx, workflowruntime.ReplayRequest{SourceRunID: request.SourceRunID, RunID: request.RunID, FromNodeID: request.FromNodeID, IdempotencyKey: request.IdempotencyKey, CompensationAuthorization: compensationAuthorization, At: s.host.now()})
+}
+
+func (s *WorkflowOperator) SignalWorkflowRun(ctx context.Context, request SignalWorkflowRunRequest) (ResumeWorkflowRunResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return ResumeWorkflowRunResult{}, err
+	}
+	result, err := s.host.SignalRun(ctx, SignalRunRequest{
+		Selector: workflowruntime.SignalSelector{RunID: request.RunID, Name: request.Name, Correlation: request.Correlation},
+		Payload:  request.Payload, IdempotencyKey: request.IdempotencyKey, Identity: request.Identity, Confirmed: request.Confirmed,
+	})
+	return safeResumeWorkflowRunResult(result), err
+}
+
+func (s *WorkflowOperator) CompensateWorkflowRun(ctx context.Context, request CompensateWorkflowRunRequest) (WorkflowCompensationResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return WorkflowCompensationResult{}, err
+	}
+	return s.host.CompensateWorkflowRun(ctx, request)
+}
+
+func (s *WorkflowOperator) CancelWorkflowCompensation(ctx context.Context, request CancelWorkflowCompensationRequest) (WorkflowCompensationResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return WorkflowCompensationResult{}, err
+	}
+	return s.host.CancelWorkflowCompensation(ctx, request)
+}
+
+func (s *WorkflowOperator) RetryWorkflowCompensation(ctx context.Context, request RetryWorkflowCompensationRequest) (WorkflowCompensationResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return WorkflowCompensationResult{}, err
+	}
+	return s.host.RetryWorkflowCompensation(ctx, request)
+}
+
+func (s *WorkflowOperator) InspectWorkflowCompensation(ctx context.Context, request InspectWorkflowCompensationRequest) (WorkflowCompensationResult, error) {
+	if err := s.ready(ctx); err != nil {
+		return WorkflowCompensationResult{}, err
+	}
+	return s.host.InspectWorkflowCompensation(ctx, request)
+}
+
+var _ WorkflowCompensationOperations = (*WorkflowOperator)(nil)
+
+func (s *WorkflowOperator) ready(ctx context.Context) error {
+	if ctx == nil || s == nil || s.host == nil || nilInterface(s.diagnostics) || nilInterface(s.replay) || nilInterface(s.runAccess) {
+		return fmt.Errorf("%w: workflow operator is not initialized", ErrInvalidHost)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.host.requireReady()
+}
+
+func (s *WorkflowOperator) authorizeRun(ctx context.Context, authorization RunOperationAuthorization, request IdentityRequest) error {
+	if err := s.ready(ctx); err != nil {
+		return err
+	}
+	runID := authorization.RunID
+	if strings.TrimSpace(string(runID)) == "" {
+		return errors.New("workflow run id is required")
+	}
+	current, err := s.host.bindIdentity(ctx, request)
+	if err != nil {
+		return err
+	}
+	owner, err := s.host.runOwner(ctx, runID, make(map[workflowruntime.RunID]struct{}), 0)
+	if err != nil {
+		return err
+	}
+	authorization.Caller = current.Clone()
+	authorization.Owner = owner.Clone()
+	return s.runAccess.AuthorizeRunOperation(ctx, authorization)
+}
+
+func (h *Host) runOwner(ctx context.Context, runID workflowruntime.RunID, seen map[workflowruntime.RunID]struct{}, depth int) (hoststate.IdentityBinding, error) {
+	if depth > maximumRunAuthorizationDepth {
+		return hoststate.IdentityBinding{}, fmt.Errorf("%w: run authorization ancestry exceeds %d", ErrPolicyDenied, maximumRunAuthorizationDepth)
+	}
+	if _, duplicate := seen[runID]; duplicate {
+		return hoststate.IdentityBinding{}, fmt.Errorf("%w: run authorization ancestry contains a cycle", ErrPolicyDenied)
+	}
+	seen[runID] = struct{}{}
+	defer delete(seen, runID)
+	start, err := h.journal.LoadStart(ctx, runID)
+	if err == nil {
+		return start.Record.Identity.Clone(), nil
+	}
+	if !errors.Is(err, workflowruntime.ErrNotFound) {
+		return hoststate.IdentityBinding{}, err
+	}
+	if !nilInterface(h.childDefs) {
+		child, childErr := h.childDefs.LoadChildRunRequest(ctx, runID)
+		if childErr == nil {
+			return h.runOwner(ctx, workflowruntime.RunID(child.Parent.RunID), seen, depth+1)
+		}
+		if !errors.Is(childErr, workflowruntime.ErrNotFound) {
+			return hoststate.IdentityBinding{}, childErr
+		}
+	}
+	replays, ok := h.state.(workflowruntime.ReplayStore)
+	if !ok || nilInterface(replays) {
+		return hoststate.IdentityBinding{}, fmt.Errorf("%w: run has no authenticated root binding", ErrPolicyDenied)
+	}
+	provenance, replayErr := replays.LoadReplayProvenance(ctx, runID)
+	if replayErr != nil {
+		if errors.Is(replayErr, workflowruntime.ErrNotFound) {
+			return hoststate.IdentityBinding{}, fmt.Errorf("%w: run has no authenticated root binding", ErrPolicyDenied)
+		}
+		return hoststate.IdentityBinding{}, replayErr
+	}
+	return h.runOwner(ctx, provenance.SourceRunID, seen, depth+1)
+}
+
+func validateResolvedPlan(ctx context.Context, host *Host, plan *compile.ExecutionPlan) []diagnostic.Diagnostic {
+	options := compile.ValidationOptions{StepKinds: host.registry, Verifiers: host.verifiers}
+	if resolver, ok := host.definitions.(compile.DefinitionResolver); ok {
+		options.Definitions = resolver
+	}
+	return compile.ValidatePlan(ctx, plan, options)
+}

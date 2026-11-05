@@ -27,3 +27,9 @@ func (s *Store) Close() error {
 }
 
 func closeRows(rows *sql.Rows) { _ = rows.Close() }
+
+// NewStoreWithCloser is NewStore for a caller that opened the database itself
+// and wants Close to release it (test helpers). Production code uses NewStore.
+func NewStoreWithCloser(db *sql.DB, closer func() error) *Store {
+	return &Store{db: db, closer: closer}
+}

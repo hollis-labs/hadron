@@ -1,0 +1,135 @@
+package appworkflow
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	waitadapter "github.com/hollis-labs/libs/workflow/engine/adapters/wait"
+	"github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
+)
+
+func (h *Host) recoverChildTerminalWaits(ctx context.Context) error {
+	if source, ok := h.state.(hoststate.ChildRunWaitStore); ok && !nilInterface(source) && h.waits != nil {
+		return h.recoverChildRunWaits(ctx, source)
+	}
+	source, ok := h.state.(runtime.ChildTerminalWaitStore)
+	if !ok || nilInterface(source) || h.waits == nil {
+		return nil
+	}
+	for {
+		candidates, err := source.RecoverChildTerminalWaits(ctx, h.batchLimit)
+		if err != nil {
+			return err
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+		for _, candidate := range candidates {
+			payload, payloadErr := h.childTerminalPayload(ctx, candidate)
+			if payloadErr != nil {
+				return payloadErr
+			}
+			at := maxTime(h.now(), candidate.Child.UpdatedAt)
+			at = maxTime(at, candidate.Wait.UpdatedAt)
+			_, resumeErr := h.waits.Resume(context.WithoutCancel(ctx), runtime.ResumeCommand{
+				WaitID: candidate.Wait.Ref.ID, Correlation: candidate.Wait.Correlation, WakeSource: workflowwait.WakeChildRun,
+				Responder: workflowwait.Responder{Kind: "child_run", Reference: string(candidate.Child.ID)}, Payload: payload,
+				IdempotencyKey: childTerminalResumeKey(candidate.Child.ID), ReceivedAt: at,
+			})
+			var postCommit *runtime.PostCommitError
+			if resumeErr != nil && !errors.Is(resumeErr, runtime.ErrWaitClosed) && !errors.As(resumeErr, &postCommit) {
+				return fmt.Errorf("resume child terminal wait %s: %w", candidate.Wait.Ref.ID, resumeErr)
+			}
+		}
+	}
+}
+
+// recoverChildRunWaits wakes open child_run waits on any node of the parent
+// run (a call node completes with the child handle, so the collecting
+// wait_for is normally a separate node). Each wait is resumed at most once;
+// see childRunWaitResumeKey for its idempotency identity.
+func (h *Host) recoverChildRunWaits(ctx context.Context, source hoststate.ChildRunWaitStore) error {
+	for {
+		candidates, err := source.RecoverChildRunWaits(ctx, h.batchLimit)
+		if err != nil {
+			return err
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+		for _, candidate := range candidates {
+			payload, payloadErr := h.childTerminalPayload(ctx, runtime.ChildTerminalWait{Link: candidate.Link, Child: candidate.Child, Wait: candidate.Wait})
+			if payloadErr != nil {
+				return payloadErr
+			}
+			at := maxTime(h.now(), candidate.Child.UpdatedAt)
+			at = maxTime(at, candidate.Wait.UpdatedAt)
+			_, resumeErr := h.waits.Resume(context.WithoutCancel(ctx), runtime.ResumeCommand{
+				WaitID: candidate.Wait.Ref.ID, Correlation: candidate.Wait.Correlation, WakeSource: workflowwait.WakeChildRun,
+				Responder: workflowwait.Responder{Kind: "child_run", Reference: string(candidate.Child.ID)}, Payload: payload,
+				IdempotencyKey: childRunWaitResumeKey(candidate), ReceivedAt: at,
+			})
+			var postCommit *runtime.PostCommitError
+			if resumeErr != nil && !errors.Is(resumeErr, runtime.ErrWaitClosed) && !errors.As(resumeErr, &postCommit) {
+				return fmt.Errorf("resume child run wait %s: %w", candidate.Wait.Ref.ID, resumeErr)
+			}
+		}
+	}
+}
+
+// childRunWaitResumeKey keeps the established key for a wait on the call
+// node itself and binds the wait ID for a wait on any other parent node, so
+// several nodes may each collect the same child.
+func childRunWaitResumeKey(candidate hoststate.ChildRunWait) string {
+	if candidate.Wait.Invocation == candidate.Link.Invocation {
+		return childTerminalResumeKey(candidate.Child.ID)
+	}
+	return childTerminalResumeKey(candidate.Child.ID) + ":" + string(candidate.Wait.Ref.ID)
+}
+
+func (h *Host) childTerminalPayload(ctx context.Context, candidate runtime.ChildTerminalWait) (values.Value, error) {
+	status := waitadapter.ChildRunTerminalStatus(candidate.Child.Status)
+	envelope := waitadapter.ChildRunTerminalEnvelope{Status: status}
+	if candidate.Child.Status == runtime.RunSucceeded {
+		envelope.Outputs = map[string]any{}
+		if candidate.Child.Outputs != nil {
+			outputs, err := h.state.LoadValues(ctx, *candidate.Child.Outputs)
+			if err != nil {
+				return values.Value{}, err
+			}
+			for name, output := range outputs {
+				if output.Artifact != nil || output.SecretRef != nil {
+					// The wait adapter deliberately accepts only inline typed JSON.
+					// Convert an unexportable successful result to a deterministic,
+					// safe child failure so recovery converges instead of bricking the
+					// host on every restart.
+					envelope = waitadapter.ChildRunTerminalEnvelope{Status: waitadapter.ChildRunFailed, Failure: &waitadapter.ChildRunFailure{
+						Code: "child_output_not_inline", Message: "child run output cannot cross the inline wait boundary",
+					}}
+					break
+				}
+				envelope.Outputs[name] = output.Inline
+			}
+		}
+	} else {
+		envelope.Failure = &waitadapter.ChildRunFailure{Code: "child_run_" + string(candidate.Child.Status), Message: "child run reached terminal status " + string(candidate.Child.Status)}
+	}
+	if err := envelope.Validate(); err != nil {
+		return values.Value{}, err
+	}
+	inline := map[string]any{"status": string(envelope.Status)}
+	if envelope.Outputs != nil {
+		inline["outputs"] = envelope.Outputs
+	}
+	if envelope.Failure != nil {
+		inline["failure"] = map[string]any{"code": envelope.Failure.Code, "message": envelope.Failure.Message, "retryable": envelope.Failure.Retryable}
+	}
+	return values.NewInline(inline, values.Metadata{Producer: values.Producer{Kind: "child_run", Reference: string(candidate.Child.ID)},
+		MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun})
+}
+
+func childTerminalResumeKey(child runtime.RunID) string { return "child-terminal:" + string(child) }

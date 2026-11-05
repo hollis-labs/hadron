@@ -11,3 +11,16 @@ secret-assignment internal/persistence/workflow_state_test.go test fixture: clai
 # projection strips credentials, query strings and fragments. The unsafe values are the input.
 secret-assignment internal/appworkflow/hoststate/plan_snapshot_test.go test input for a redaction test, not a real secret
 credentials-in-url internal/appworkflow/hoststate/plan_snapshot_test.go test input for a redaction test, not a real URL
+#
+# Engine host tests (appworkflow, rundiagnostics). Two kinds of literal, neither a credential:
+# claim lease fencing tokens (ClaimProof.Token) and resume-token strings the tests invent, and
+# deliberately sensitive-looking inputs ("password", "api-key", a URL with user:password and a
+# token query) fed to privacy and redaction tests to prove the host strips or rejects them.
+secret-assignment internal/appworkflow/child_materializer_test.go test fixture: claim lease fencing token, not a credential
+secret-assignment internal/appworkflow/compensation_external_test.go test fixture: claim lease fencing token, not a credential
+secret-assignment internal/appworkflow/external_operations_external_test.go test fixture: claim lease fencing token, not a credential
+secret-assignment internal/appworkflow/host_integration_test.go test fixtures: lease fencing and resume tokens, and sensitive-looking attributes fed to redaction tests
+secret-assignment internal/appworkflow/operator_external_test.go test fixture: claim lease and resume tokens, not credentials
+secret-assignment internal/appworkflow/source_activations_external_test.go test fixture: claim lease fencing token, not a credential
+secret-assignment internal/rundiagnostics/graph_test.go test fixture: lease fencing token, not a credential
+credentials-in-url internal/rundiagnostics/graph_test.go test input for a redaction test, not a real URL
