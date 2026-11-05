@@ -4,14 +4,13 @@ Phases 0 and 1 of the port plan (Tesseract `plan_hadron_port_to_substrate_202611
 
 ## Ported
 
-- **Schema** (`internal/persistence/migrations/sqlite/00001_init.sql`): the old app's workflow engine host state, squashed from its migrations 0001-0033 into one goose migration: the `workflow_*` family plus `store_generation`, with their indexes and the immutability triggers. It was checked object by object against the old final schema (204 objects, none missing, none different) and is applied by Substrate's `database` module at start.
+- **Schema** (`internal/persistence/migrations/sqlite/00001_init.sql`): the old app's workflow engine host state, squashed from its migrations 0001-0033 into one goose migration: the `workflow_*` family plus `store_generation`, with their indexes and the immutability triggers. Its DDL was checked object by object against the old final schema (204 objects, none missing, none different), and its two seed rows (`store_generation`, `workflow_event_outbox_counter`) are in the file; it is applied by Substrate's `database` module at start.
 - Until the first release the schema lives in that one file and a change edits it; there are no deployed databases. After the first release changes are new numbered files.
 
 ## Schema still to add (with the subsystem that needs it)
 
 These old tables are not in `00001` yet; each is added, redesigned if needed, when its consumer is ported: `schedules` and `triggers` (activation and unattended), `messages` (message waits, agent boot), `workspaces` (workspace commands), `runs` and `run_events` (execution manager). Every `workflow_*` table is already in. `settings` was a file, not a table.
 Not carried forward (archive): `blueprint_registry`, `blueprint_versions`, `pipeline_runs`, `pipeline_stage_runs`, `human_gates`, `legacy_schedule_fires`, `legacy_schedule_fire_attempts`, `schema_migrations` (goose has its own version table).
-`store_generation` holds one row the old store seeded at open; seeding it moves with the store code.
 
 ## Next
 

@@ -1955,6 +1955,17 @@ CREATE TABLE workflow_event_outbox_skipped (
 CREATE INDEX workflow_event_outbox_skipped_open ON workflow_event_outbox_skipped(created_at) WHERE repaired_at IS NULL;
 -- +goose StatementEnd
 
+-- Seed rows. The old migrations inserted these; DDL alone is not the whole schema.
+-- store_generation names this database's event log: an event cursor carries it, so a
+-- different database cannot resume it. The outbox counter starts at zero.
+-- +goose StatementBegin
+INSERT INTO store_generation(id, generation) VALUES (1, lower(hex(randomblob(16))));
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+INSERT INTO workflow_event_outbox_counter(id, last_seq) VALUES (1, 0);
+-- +goose StatementEnd
+
 -- +goose Down
 
 -- +goose StatementBegin

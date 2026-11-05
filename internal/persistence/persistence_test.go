@@ -89,3 +89,29 @@ func TestMigrationsVerifyOnReopen(t *testing.T) {
 	}
 	_ = run.Stop(context.Background())
 }
+
+// The old migrations seeded two rows. DDL alone is not the schema.
+func TestSeedRowsExistAndEachDatabaseHasItsOwnGeneration(t *testing.T) {
+	ctx := context.Background()
+	gen := func() string {
+		run, _ := open(t)
+		st := database.From(run.App)
+		var g string
+		var rows int
+		if err := st.QueryRowContext(ctx, `SELECT generation FROM store_generation WHERE id = 1`).Scan(&g); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.QueryRowContext(ctx, `SELECT count(*) FROM store_generation`).Scan(&rows); err != nil || rows != 1 {
+			t.Fatalf("store_generation rows = %d, err %v", rows, err)
+		}
+		var seq int
+		if err := st.QueryRowContext(ctx, `SELECT last_seq FROM workflow_event_outbox_counter WHERE id = 1`).Scan(&seq); err != nil || seq != 0 {
+			t.Fatalf("outbox counter = %d, err %v", seq, err)
+		}
+		return g
+	}
+	a, b := gen(), gen()
+	if len(a) != 32 || a == b {
+		t.Fatalf("generations %q and %q: want two distinct 32-character values", a, b)
+	}
+}
