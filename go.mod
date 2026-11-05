@@ -3,7 +3,7 @@ module github.com/hollis-labs/hadron
 go 1.26.10
 
 require (
-	github.com/hollis-labs/substrate v0.1.1-0.20261105012424-98dfec768a6c
+	github.com/hollis-labs/substrate v0.1.1-0.20261105020146-ffbc401e8db0
 	github.com/spf13/cobra v1.10.2
 )
 

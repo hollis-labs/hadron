@@ -14,11 +14,14 @@ import (
 	"github.com/hollis-labs/substrate/boot"
 	"github.com/hollis-labs/substrate/module"
 	"github.com/hollis-labs/substrate/modules/cli"
+	"github.com/hollis-labs/substrate/modules/database"
 	"github.com/hollis-labs/substrate/modules/httphost"
 	"github.com/hollis-labs/substrate/modules/mcp"
 	"github.com/hollis-labs/substrate/modules/policy"
 	"github.com/hollis-labs/substrate/modules/queue"
 	"github.com/hollis-labs/substrate/modules/scheduler"
+
+	"github.com/hollis-labs/hadron/internal/persistence"
 )
 
 func main() {
@@ -28,6 +31,9 @@ func main() {
 	// TODO(hadron): replace AllowAll with Hadron's policy decision point when the
 	// engine host is ported (phase 2). It exists so the skeleton starts.
 	policy.UsePDP(policy.AllowAll{})
+
+	migFS, migRoot := persistence.Migrations()
+	database.UseMigrationFS(migFS, migRoot)
 
 	run, err := boot.Start(ctx, substrateApp, substrateModules, substrateConfigJSON)
 	if err != nil {
