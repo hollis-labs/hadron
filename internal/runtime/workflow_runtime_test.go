@@ -865,11 +865,21 @@ func qualifiedProductionRecord(name, namespace, version, source string) registry
 
 func newTestRuntime(t *testing.T) (*Runtime, Config, *persistence.Store) {
 	t.Helper()
+	return newTestRuntimeWith(t, nil)
+}
+
+// newTestRuntimeWith is newTestRuntime with the config adjusted before the
+// runtime is built and extra options (a fake Tether client, a clock).
+func newTestRuntimeWith(t *testing.T, mutate func(*Config), extra ...Option) (*Runtime, Config, *persistence.Store) {
+	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{DataDir: filepath.Join(root, "data"), Workers: 1}.withDefaults()
+	if mutate != nil {
+		mutate(&cfg)
+	}
 	workflowRoot := cfg.SourceRoot()
 	if mkdirErr := os.MkdirAll(workflowRoot, 0o750); mkdirErr != nil {
 		t.Fatal(mkdirErr)
@@ -905,7 +915,7 @@ outputs:
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	runtime, err := newTestRuntimeOn(store, cfg)
+	runtime, err := newTestRuntimeOn(store, cfg, extra...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,7 +925,7 @@ outputs:
 // newTestRuntimeOn builds a runtime the way production does: a libs scheduler
 // engine over the activation tables whose runner is the late-bound Fires, then
 // New binding the activation service behind it.
-func newTestRuntimeOn(store *persistence.Store, cfg Config) (*Runtime, error) {
+func newTestRuntimeOn(store *persistence.Store, cfg Config, extra ...Option) (*Runtime, error) {
 	activations, err := persistence.NewWorkflowActivationStore(store)
 	if err != nil {
 		return nil, err
@@ -924,7 +934,7 @@ func newTestRuntimeOn(store *persistence.Store, cfg Config) (*Runtime, error) {
 	engine := gosched.New(activations, fires,
 		gosched.WithClaimLease(hoststate.ActivationClaimLease),
 		gosched.WithObserver(appworkflow.ActivationObserver{Store: activations}))
-	return New(store, cfg, WithFires(fires), WithSourceEngine(engine))
+	return New(store, cfg, append([]Option{WithFires(fires), WithSourceEngine(engine)}, extra...)...)
 }
 
 // localCtx is a context carrying the local operator's identity: what the API

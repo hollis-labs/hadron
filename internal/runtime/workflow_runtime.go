@@ -28,6 +28,7 @@ import (
 	"github.com/hollis-labs/hadron/internal/eventmap"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/rundiagnostics"
+	"github.com/hollis-labs/hadron/internal/tetherhost"
 	"github.com/hollis-labs/hadron/internal/unattended"
 	agentadapter "github.com/hollis-labs/libs/workflow/engine/adapters/agent"
 	calladapter "github.com/hollis-labs/libs/workflow/engine/adapters/call"
@@ -74,12 +75,14 @@ func productionWorkflowKindBoundary(agentSessions bool) []appworkflow.KindRef {
 // Runtime owns every graph-native process collaborator.
 // Transports receive only its shared application-service facades.
 type Runtime struct {
-	host            *appworkflow.Host
-	operations      *appworkflow.WorkflowOperator
-	exposure        *appworkflow.WorkflowExposureService
-	lifecycle       *appworkflow.WorkflowLifecycleService
-	a2a             *a2a.Handler
-	card            *agentcard.Builder
+	host       *appworkflow.Host
+	operations *appworkflow.WorkflowOperator
+	exposure   *appworkflow.WorkflowExposureService
+	lifecycle  *appworkflow.WorkflowLifecycleService
+	a2a        *a2a.Handler
+	card       *agentcard.Builder
+	// agentSessions is the Tether-backed session host, nil while agent_session@v1 stays gated.
+	agentSessions   *tetherhost.Host
 	catalog         *productionWorkflowCatalog
 	activationStore hoststate.ActivationStore
 	workers         *workflowWorkers
@@ -204,13 +207,29 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 	kinds := []stepkind.StepKind{transform.New(), scriptadapter.New(), waitadapter.NewSleep(nil), waitFor, messageWait, gate, call}
 	policyHooks := []workflowcompile.PolicyHook{productionCallPolicy}
 	var agentLaunch workflowcompile.NodeExpander = newGatedAgentLaunchExpander()
+	agentSessions, err := newTetherSessionHost(cfg.DataDir, cfg.AgentSubstrates, opts)
+	if err != nil {
+		return nil, err
+	}
+	if agentSessions != nil {
+		// A durable session host is composed: agent_session@v1 is a real,
+		// dispatchable kind and agent_launch expands normally, except that
+		// typed inputs on tether_session substrates are refused at validation.
+		agentSession, agentErr := agentadapter.New(agentadapter.Options{Host: agentSessions})
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		kinds = append(kinds, agentSession)
+		agentLaunch = tetherAgentLaunchExpander{substrates: cfg.AgentSubstrates}
+		policyHooks = append(policyHooks, tetherAgentInputsPolicy(cfg.AgentSubstrates))
+	}
 	compileKinds := stepkind.NewRegistry()
 	for _, kind := range kinds {
 		if registerErr := compileKinds.Register(kind); registerErr != nil {
 			return nil, fmt.Errorf("register production workflow kind: %w", registerErr)
 		}
 	}
-	{
+	if agentSessions == nil {
 		// agent_session@v1 is compile-visible only so it refuses with a clear
 		// gate message; Host never registers it.
 		gatedAgentSession, gateErr := newGatedAgentSessionKind()
@@ -221,7 +240,7 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 			return nil, fmt.Errorf("register gated agent session kind: %w", registerErr)
 		}
 	}
-	required := productionWorkflowKindBoundary(false)
+	required := productionWorkflowKindBoundary(agentSessions != nil)
 	stager := appworkflow.NewAuthoringSourceStager()
 	resolver, err := appworkflow.NewDefinitionResolver(appworkflow.DefinitionResolverOptions{
 		Roots: []string{workflowRoot}, FileAuthority: "local", FileTrustClass: "local",
@@ -358,7 +377,7 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 		return nil, err
 	}
 	return &Runtime{
-		card: card,
+		card: card, agentSessions: agentSessions,
 		host: host, operations: operations, exposure: exposure, lifecycle: lifecycle, a2a: a2aHandler,
 		catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
 		sourceActivations: sourceActivationLifecycle, externalActivations: activationpkg.ActivationManager{Service: activationService},

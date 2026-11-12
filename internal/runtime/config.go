@@ -1,11 +1,15 @@
 package runtime
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/hollis-labs/substrate/module"
+
+	"github.com/hollis-labs/hadron/internal/agentsettings"
 )
 
 // Config is the runtime's slice of the hadron: block in the Substrate manifest
@@ -21,6 +25,9 @@ type Config struct {
 	EventStreamLimit int
 	// EventOutbox turns on the transactional event outbox in the stores.
 	EventOutbox bool
+	// AgentSubstrates are the places agent_session steps run; empty keeps
+	// agent_session@v1 gated.
+	AgentSubstrates map[string]agentsettings.Substrate
 }
 
 // defaultWorkflowWorkers applies when workers is unset.
@@ -86,9 +93,18 @@ func ConfigFromApp(app *module.App) (Config, error) {
 				}
 				c.EventOutbox = b
 			}
+		case "agent_substrates":
+			substrates, err := decodeAgentSubstrates(v)
+			if err != nil {
+				return c, err
+			}
+			c.AgentSubstrates = substrates
 		default:
-			return c, fmt.Errorf("hadron.%s is not a known setting (known: data_dir, workers, event_stream_limit, events)", key)
+			return c, fmt.Errorf("hadron.%s is not a known setting (known: data_dir, workers, event_stream_limit, events, agent_substrates)", key)
 		}
+	}
+	if err := agentsettings.Validate(c.AgentSubstrates); err != nil {
+		return c, err
 	}
 	if c.Workers < 0 || c.EventStreamLimit < 0 {
 		return c, fmt.Errorf("hadron.workers and hadron.event_stream_limit cannot be negative")
@@ -127,4 +143,20 @@ func wholeNumber(name string, v any) (int, error) {
 		return n, nil
 	}
 	return 0, fmt.Errorf("%s must be a whole number", name)
+}
+
+// decodeAgentSubstrates reads hadron.agent_substrates strictly: an unknown key
+// anywhere in the block is an error, not a setting that silently does nothing.
+func decodeAgentSubstrates(v any) (map[string]agentsettings.Substrate, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("hadron.agent_substrates: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var out map[string]agentsettings.Substrate
+	if err := dec.Decode(&out); err != nil {
+		return nil, fmt.Errorf("hadron.agent_substrates: %w", err)
+	}
+	return out, nil
 }

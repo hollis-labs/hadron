@@ -65,8 +65,8 @@ github.com/hollis-labs/libs/ui/ui-go v0.1.0 h1:GFztthzyhlbrKemRItwyNlV+e83pZT+yF
 github.com/hollis-labs/libs/ui/ui-go v0.1.0/go.mod h1:MBO41Mrbgo6YfRbm8MI50qQXjDfwhkvA/WxRdtOiL38=
 github.com/hollis-labs/libs/workflow/engine v0.2.0 h1:K7aJh4ia0H9LyuCdxGQrr0iyUgb1IvkOAw4uqRjPf04=
 github.com/hollis-labs/libs/workflow/engine v0.2.0/go.mod h1:y74RibX6OawPf+5rgxW3qkYWK9rjXIkq7mvDLi1d32U=
-github.com/hollis-labs/substrate v0.1.1-0.20261112021957-44fae7d6ca72 h1:gHbDZ8JaEZriajNBFoik5FLYFhKBL55NiLetFabZLbc=
-github.com/hollis-labs/substrate v0.1.1-0.20261112021957-44fae7d6ca72/go.mod h1:Mr2tzp62sg2iCqzby4GAre3fl+yWhlfx5P/E57FfUYE=
+github.com/hollis-labs/substrate v0.1.1-0.20261112031151-9c1da88de5de h1:mofJ+6ZJi6OuA9FXh5tpRuc/DSGo40dr0h/GQFAzxIo=
+github.com/hollis-labs/substrate v0.1.1-0.20261112031151-9c1da88de5de/go.mod h1:Mr2tzp62sg2iCqzby4GAre3fl+yWhlfx5P/E57FfUYE=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=

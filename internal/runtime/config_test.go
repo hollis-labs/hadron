@@ -71,3 +71,27 @@ func TestDataDirBehindASymlinkIsResolvedNotRefused(t *testing.T) {
 		t.Errorf("data dir %q, want %q", c.DataDir, want)
 	}
 }
+
+func TestAgentSubstratesAreDecodedStrictlyAndValidated(t *testing.T) {
+	good := map[string]any{"work": map[string]any{"kind": "tether_session", "tether": map[string]any{"launch": "claude-work", "stop_on_result": false}}}
+	c, err := ConfigFromApp(appWith(map[string]any{"data_dir": t.TempDir(), "agent_substrates": good}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := c.AgentSubstrates["work"]; s.Tether == nil || s.Tether.Launch != "claude-work" || s.Tether.EffectiveStopOnResult() {
+		t.Errorf("substrate = %+v", s)
+	}
+	for name, block := range map[string]any{
+		"unknown key":     map[string]any{"work": map[string]any{"kind": "tether_session", "tether": map[string]any{"launch": "l"}, "provider": "x"}},
+		"unknown tether":  map[string]any{"work": map[string]any{"kind": "tether_session", "tether": map[string]any{"launch": "l", "endpont": "x"}}},
+		"other kind":      map[string]any{"work": map[string]any{"kind": "go_agent_runtime"}},
+		"no tether block": map[string]any{"work": map[string]any{"kind": "tether_session"}},
+		"no launch":       map[string]any{"work": map[string]any{"kind": "tether_session", "tether": map[string]any{}}},
+		"bad timeout":     map[string]any{"work": map[string]any{"kind": "tether_session", "tether": map[string]any{"launch": "l", "unreachable_timeout": "soon"}}},
+		"not a mapping":   []any{"x"},
+	} {
+		if _, err := ConfigFromApp(appWith(map[string]any{"data_dir": t.TempDir(), "agent_substrates": block})); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}

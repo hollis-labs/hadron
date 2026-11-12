@@ -4,13 +4,32 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	libsched "github.com/hollis-labs/libs/core/util/scheduler"
+
+	"github.com/hollis-labs/hadron/internal/tetherhost"
 )
 
 type runtimeOptions struct {
 	fires  *Fires
 	source sourceEngine
+	// tetherClient replaces the Tether client built from the substrate's
+	// endpoint (tests inject a fake); tetherNow replaces the session host clock.
+	tetherClient tetherhost.Client
+	tetherNow    func() time.Time
+}
+
+// WithTetherClient injects the Tether client in place of the one built from the
+// tether_session substrate's endpoint. It does not enable agent_session@v1 by
+// itself: that still needs a configured tether_session substrate.
+func WithTetherClient(c tetherhost.Client) Option {
+	return func(o *runtimeOptions) { o.tetherClient = c }
+}
+
+// WithTetherClock replaces the session host's clock (the unreachable timeout).
+func WithTetherClock(now func() time.Time) Option {
+	return func(o *runtimeOptions) { o.tetherNow = now }
 }
 
 // Option configures New.
