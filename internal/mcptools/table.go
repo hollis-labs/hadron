@@ -56,7 +56,7 @@ func (s *surface) tools() []tool {
 		{"hadron_workflow_signal", "Deliver a named signal to a run.", obj(map[string]any{
 			"run_id": str(), "name": str(), "correlation": str(), "payload": objp(), "idempotency_key": str(), "confirmed": boolp(),
 		}, "run_id", "name", "correlation", "payload", "idempotency_key"), run, write, s.signal},
-		{"hadron_workflow_catalog_search", "Search the workflow catalog: bounded ranked matches and the next authoring step.", obj(map[string]any{"query": str(), "namespace": str(), "limit": intp()}), run, read, s.catalogSearch},
+		{"hadron_workflow_catalog_search", "Search one namespace of the workflow catalog: bounded ranked matches and the next authoring step.", obj(map[string]any{"query": str(), "namespace": str(), "limit": intp()}, "namespace"), run, read, s.catalogSearch},
 		{"hadron_workflow_catalog_inspect", "Inspect one exact catalog version.", ref(nil), run, read, s.catalogInspect},
 		{"hadron_workflow_author_validate", "Validate one bounded graph-native draft without mutating the catalog.", obj(map[string]any{"draft": workflowDraftProperty()}, "draft"), manage, read, s.authorValidate},
 		{"hadron_workflow_author_scaffold", "Validate a draft and generate an editable deterministic contract-test scaffold.", obj(map[string]any{"draft": workflowDraftProperty()}, "draft"), manage, read, s.authorScaffold},

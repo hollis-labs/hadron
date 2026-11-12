@@ -54,7 +54,7 @@ func main() {
 	defer func() { _ = run.Stop(context.Background()) }()
 
 	root := cli.Root(run.App)
-	root.AddCommand(serveCmd(ctx, run.App, fires), mcpCmd(ctx, run.App, fires))
+	root.AddCommand(serveCmd(ctx, run.App, fires), mcpCmd(ctx, run.App, fires), workflowCmd(ctx, run.App))
 	if err := root.ExecuteContext(ctx); err != nil {
 		_ = run.Stop(context.Background())
 		os.Exit(1)

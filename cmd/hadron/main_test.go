@@ -222,3 +222,50 @@ func TestMCPStdioListsAndCallsWorkflowTools(t *testing.T) {
 		t.Errorf("tools/call: %s", call)
 	}
 }
+
+func TestWorkflowCommandsTalkToTheRunningDaemon(t *testing.T) {
+	bin := build(t)
+	addr := freeAddr(t)
+	dir, environ := env(t, addr)
+	daemon := exec.Command(bin, "serve")
+	daemon.Dir, daemon.Env = dir, environ
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = daemon.Process.Kill(); _ = daemon.Wait() }()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if resp, err := http.Get("http://" + addr + "/healthz"); err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("daemon did not start")
+		}
+	}
+	cli := func(args ...string) (string, error) {
+		c := exec.Command(bin, append([]string{"workflow"}, args...)...)
+		c.Dir, c.Env = dir, environ
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+
+	out, err := cli("search", "--namespace", "team")
+	if err != nil || !strings.Contains(out, `"matches"`) {
+		t.Errorf("search: %v\n%s", err, out)
+	}
+	// An exact definition that is not registered fails with the flat code, and
+	// the command exits non-zero.
+	out, err = cli("run", "team/none", "v1", "sha256:"+strings.Repeat("0", 64))
+	if err == nil || !strings.Contains(out, "not_found") {
+		t.Errorf("run of an unknown definition: err=%v\n%s", err, out)
+	}
+	out, err = cli("inspect", "no-such-run")
+	if err == nil || !strings.Contains(out, "(") {
+		t.Errorf("inspect of an unknown run: err=%v\n%s", err, out)
+	}
+	// Nothing listening: a clear message, not a stack of connection errors.
+	out, err = cli("--server", "http://"+freeAddr(t), "search", "--namespace", "team")
+	if err == nil || !strings.Contains(out, "daemon unreachable") {
+		t.Errorf("no daemon: err=%v\n%s", err, out)
+	}
+}
