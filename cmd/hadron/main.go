@@ -54,7 +54,7 @@ func main() {
 	defer func() { _ = run.Stop(context.Background()) }()
 
 	root := cli.Root(run.App)
-	root.AddCommand(serveCmd(ctx, run.App, fires), mcpCmd(ctx, run.App, fires), workflowCmd(ctx, run.App))
+	root.AddCommand(serveCmd(ctx, run.App, fires), mcpCmd(ctx, run.App, fires), workflowCmd(ctx, run.App), buildCmd())
 	if err := root.ExecuteContext(ctx); err != nil {
 		_ = run.Stop(context.Background())
 		os.Exit(1)
@@ -104,6 +104,7 @@ func serveCmd(ctx context.Context, app *module.App, fires *runtime.Fires) *cobra
 		Short: "Run the Hadron daemon",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
+			defer startTelemetry(version)()
 			rt, err := startRuntime(ctx, app, fires)
 			if err != nil {
 				return err
@@ -121,7 +122,7 @@ func serveCmd(ctx context.Context, app *module.App, fires *runtime.Fires) *cobra
 				_ = stopRuntime(rt)
 				return err
 			}
-			serveErr := httphost.Serve(ctx, app, h, httphost.ServeOptions{})
+			serveErr := httphost.Serve(ctx, app, withTracing(h), httphost.ServeOptions{})
 			return errors.Join(serveErr, stopRuntime(rt))
 		},
 	}
@@ -138,6 +139,7 @@ func mcpCmd(ctx context.Context, app *module.App, fires *runtime.Fires) *cobra.C
 		Short: "Serve MCP over stdio",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
+			defer startTelemetry(version)()
 			rt, err := startRuntime(ctx, app, fires)
 			if err != nil {
 				return err

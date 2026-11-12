@@ -11,9 +11,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 // build compiles the real binary once per test and returns its path.
@@ -255,7 +258,7 @@ func TestWorkflowCommandsTalkToTheRunningDaemon(t *testing.T) {
 	}
 	// An exact definition that is not registered fails with the flat code, and
 	// the command exits non-zero.
-	out, err = cli("run", "team/none", "v1", "sha256:"+strings.Repeat("0", 64))
+	out, err = cli("run", "team/none@v1")
 	if err == nil || !strings.Contains(out, "not_found") {
 		t.Errorf("run of an unknown definition: err=%v\n%s", err, out)
 	}
@@ -266,7 +269,18 @@ func TestWorkflowCommandsTalkToTheRunningDaemon(t *testing.T) {
 	// Every remaining subcommand reaches a real route: an unknown run or profile
 	// is a flat workflow error, never an unmapped path (a bare 404/405 body).
 	payload := filepath.Join(dir, "payload.json")
-	if err := os.WriteFile(payload, []byte(`{"kind":"object","value":{}}`), 0o600); err != nil {
+	typed, err := values.NewInline("ok", values.Metadata{
+		Producer: values.Producer{Kind: "test", Reference: "cli", Output: "value"}, MediaType: "text/plain",
+		Redaction: values.RedactionPublic, Retention: values.RetentionRun,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(payload, encoded, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{
@@ -276,9 +290,9 @@ func TestWorkflowCommandsTalkToTheRunningDaemon(t *testing.T) {
 		{"waits", "no-run"},
 		{"values", "no-run"},
 		{"author", "validate", "--draft", payload},
-		{"registry", "publish", "team/none", "v1", "sha256:" + strings.Repeat("0", 64)},
+		{"registry", "publish", "team/none@v1#sha256:" + strings.Repeat("0", 64)},
 		{"exposure", "inspect", "no-profile"},
-		{"inspect-version", "team/none", "v1", "sha256:" + strings.Repeat("0", 64)},
+		{"inspect-version", "team/none@v1#sha256:" + strings.Repeat("0", 64)},
 	} {
 		out, err := cli(args...)
 		if err == nil || strings.Contains(out, "daemon answered") || !strings.Contains(out, "(4") && !strings.Contains(out, "(5") {
@@ -289,5 +303,201 @@ func TestWorkflowCommandsTalkToTheRunningDaemon(t *testing.T) {
 	out, err = cli("--server", "http://"+freeAddr(t), "search", "--namespace", "team")
 	if err == nil || !strings.Contains(out, "daemon unreachable") {
 		t.Errorf("no daemon: err=%v\n%s", err, out)
+	}
+}
+
+const helloSource = `workflow: {id: hello, version: v1}
+inputs:
+  - {name: message, type: string, required: true}
+steps:
+  - id: echo
+    kind_version: v1
+    transform: {result: inputs.message}
+    with: {message: inputs.message}
+    outputs: {result: {type: string}}
+    effects: [compute]
+outputs:
+  result: {type: string, value: steps.echo.outputs.result}
+`
+
+func TestWorkflowCommandsOutputFormatsAndFileRefs(t *testing.T) {
+	bin := build(t)
+	addr := freeAddr(t)
+	dir, environ := env(t, addr)
+	root := filepath.Join(dir, "hadron-data", "workflows")
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "hello.workflow.yaml"), []byte(helloSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	daemon := exec.Command(bin, "serve")
+	daemon.Dir, daemon.Env = dir, environ
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = daemon.Process.Kill(); _ = daemon.Wait() }()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if resp, err := http.Get("http://" + addr + "/healthz"); err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("daemon did not start")
+		}
+	}
+	cli := func(args ...string) (string, error) {
+		c := exec.Command(bin, append([]string{"workflow"}, args...)...)
+		c.Dir, c.Env = dir, environ
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+
+	// Text is the default: a file reference validates to a plan line.
+	out, err := cli("validate", "hello.workflow.yaml")
+	if err != nil || !strings.Contains(out, "valid hello@v1") || !strings.Contains(out, "graph ") {
+		t.Fatalf("validate text: %v\n%s", err, out)
+	}
+	// -o json is the daemon's body; -o yaml is the same data.
+	out, err = cli("validate", "hello.workflow.yaml", "-o", "json")
+	var asJSON struct{ Plan struct{ ID string } }
+	if err != nil || json.Unmarshal([]byte(out[strings.Index(out, "{"):]), &asJSON) != nil || asJSON.Plan.ID != "hello" {
+		t.Fatalf("validate json: %v\n%s", err, out)
+	}
+	if out, err = cli("validate", "hello.workflow.yaml", "-o", "yaml"); err != nil || !strings.Contains(out, "plan:") {
+		t.Fatalf("validate yaml: %v\n%s", err, out)
+	}
+	if _, err = cli("validate", "hello.workflow.yaml", "-o", "xml"); err == nil {
+		t.Error("an unknown --output was accepted")
+	}
+	// A run prints one summary line.
+	out, err = cli("run", "hello.workflow.yaml", "--input-json", `{"message":"hi"}`, "--run-id", "cli-hello", "--confirm")
+	if err != nil || !strings.Contains(out, "run cli-hello phase=") {
+		t.Fatalf("run text: %v\n%s", err, out)
+	}
+	// Diagnostics print as "severity CODE file:line:col: message" and fail the command.
+	if err := os.WriteFile(filepath.Join(root, "broken.workflow.yaml"), []byte("workflow: {id: broken, version: v1}\nsteps:\n  - id: s\n    kind_version: v1\n    nosuchkind: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err = cli("validate", "broken.workflow.yaml")
+	if err == nil || !regexp.MustCompile(`(?m)^error \S+ .*:\d+:\d+: `).MatchString(out) {
+		t.Errorf("validate of a broken workflow: err=%v\n%s", err, out)
+	}
+	// A registry reference that is not exact is refused by the client, before any call.
+	if out, err = cli("registry", "publish", "team/none@v1"); err == nil || !strings.Contains(out, "exact registry reference") {
+		t.Errorf("non-exact ref: err=%v\n%s", err, out)
+	}
+}
+
+func TestBuildProducesARunnableDaemonlessExecutable(t *testing.T) {
+	bin := build(t)
+	dir, environ := env(t, freeAddr(t))
+	if err := os.WriteFile(filepath.Join(dir, "hello.workflow.yaml"), []byte(helloSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(dir, "hello-exe")
+	c := exec.Command(bin, "build", "hello.workflow.yaml", "-o", artifact)
+	c.Dir, c.Env = dir, environ
+	if out, err := c.CombinedOutput(); err != nil || !strings.Contains(string(out), "built ") {
+		t.Fatalf("hadron build: %v\n%s", err, out)
+	}
+	run := exec.Command(artifact, "--message", "parity")
+	out, err := run.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "parity") {
+		t.Fatalf("built executable: %v\n%s", err, out)
+	}
+	// An unsupported or invalid workflow is rejected with located diagnostics, and nothing is written.
+	bad := filepath.Join(dir, "bad.workflow.yaml")
+	if err := os.WriteFile(bad, []byte("workflow: {id: bad, version: v1}\nsteps:\n  - id: s\n    kind_version: v1\n    nosuchkind: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c = exec.Command(bin, "build", bad, "-o", filepath.Join(dir, "bad-exe"))
+	c.Dir, c.Env = dir, environ
+	if out, err := c.CombinedOutput(); err == nil || !strings.Contains(string(out), "offline build rejected") {
+		t.Errorf("building an invalid workflow: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bad-exe")); err == nil {
+		t.Error("a rejected build left an executable behind")
+	}
+}
+
+// The shipped examples are acceptance inputs: they validate, the runnable ones
+// run to success on the real daemon, and the gate example validates and waits.
+func TestShippedExamplesValidateAndRun(t *testing.T) {
+	bin := build(t)
+	addr := freeAddr(t)
+	dir, environ := env(t, addr)
+	root := filepath.Join(dir, "hadron-data", "workflows")
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	examples := map[string]string{}
+	for _, glob := range []string{"../../examples/workflow/production/*.workflow.yaml", "../../examples/workflow/*.workflow.yaml"} {
+		matches, err := filepath.Glob(glob)
+		if err != nil || len(matches) == 0 {
+			t.Fatalf("no examples under %s: %v", glob, err)
+		}
+		for _, m := range matches {
+			data, err := os.ReadFile(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := filepath.Base(m)
+			examples[name] = m
+			if err := os.WriteFile(filepath.Join(root, name), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	daemon := exec.Command(bin, "serve")
+	daemon.Dir, daemon.Env = dir, environ
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = daemon.Process.Kill(); _ = daemon.Wait() }()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if resp, err := http.Get("http://" + addr + "/healthz"); err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("daemon did not start")
+		}
+	}
+	cli := func(args ...string) (string, error) {
+		c := exec.Command(bin, append([]string{"workflow"}, args...)...)
+		c.Dir, c.Env = dir, environ
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	for name := range examples {
+		if out, err := cli("validate", name); err != nil || !strings.Contains(out, "valid ") {
+			t.Errorf("validate %s: %v\n%s", name, err, out)
+		}
+	}
+	for _, name := range []string{"hello-transform", "normalize-script"} {
+		runID := "example-" + name
+		out, err := cli("run", name+".workflow.yaml", "--run-id", runID, "--input-json", `{"message":"  Release READY  "}`, "--confirm")
+		if err != nil {
+			t.Fatalf("run %s: %v\n%s", name, err, out)
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			out, err := cli("inspect", runID, "-o", "json")
+			if err != nil {
+				t.Fatalf("inspect %s: %v\n%s", runID, err, out)
+			}
+			var res struct{ Run struct{ Status string } }
+			if json.Unmarshal([]byte(out[strings.Index(out, "{"):]), &res) != nil {
+				t.Fatalf("inspect output: %s", out)
+			}
+			if res.Run.Status == "succeeded" {
+				break
+			}
+			if res.Run.Status == "failed" || res.Run.Status == "canceled" || time.Now().After(deadline) {
+				t.Fatalf("%s ended %q: %s", runID, res.Run.Status, out)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 }

@@ -1,0 +1,46 @@
+workflow:
+  id: normalize-script
+  version: v1
+  metadata:
+    description: Deterministic JavaScript executed by the bounded goja adapter.
+
+inputs:
+  - name: message
+    type: string
+    required: true
+
+steps:
+  - id: normalize
+    kind: script
+    kind_version: v1
+    config:
+      runtime: goja
+      code: |
+        function main(input) {
+          return { normalized: input.message.trim().toLowerCase() };
+        }
+      input_schema:
+        type: object
+        additionalProperties: false
+        required: [message]
+        properties:
+          message:
+            type: string
+      output_schema:
+        type: object
+        additionalProperties: false
+        required: [normalized]
+        properties:
+          normalized:
+            type: string
+    with:
+      message: inputs.message
+    outputs:
+      normalized:
+        type: string
+    effects: [compute]
+
+outputs:
+  normalized:
+    type: string
+    value: steps.normalize.outputs.normalized

@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `hadron build`, workflow file and `ns/name@version` references, `explain`, and `-o text|json|yaml` output with `file:line:col` diagnostics on the workflow CLI. Every ref-taking command now takes one reference instead of NAME VERSION DIGEST.
+- API schema v2 (`internal/api/schema`), HTTP trace propagation with an opt-in exporter (`HADRON_OTEL`), and the workflow examples with an acceptance test.
+
 - Agent sessions: `agent_session@v1` and `agent_launch` on Tether sessions (`internal/tetherhost`, `hadron.agent_substrates` config), with the old behaviour tests (restart, cancel, unreachable daemon, replay). Substrate pin moves to `9c1da88` (BOM adds libs `mesh/core`).
 
 - The rest of the workflow CLI (resume, signal, rerun, waits, values, authoring, registry, exposure) and a `POST /api/workflows/runs/{id}/signal` route (signal was MCP-only before).

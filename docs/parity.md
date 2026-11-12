@@ -4,17 +4,21 @@ Compared against `hollis-labs/hadron` at `69c9d71` (the version in the scratch c
 
 Legend: **Done** = present and tested. **Changed** = present in a deliberately different shape. **Dropped** = deliberately not carried (fail forward, owner directives of 2026-11-02/04). **Gap** = a live feature of the old app that the new one lacks. **Decide** = needs an owner decision before it can be classed.
 
-## 1. What needs the owner
+## 1. Owner decisions (2026-11-11)
 
-| # | Item | Class | Recommendation |
-|---|---|---|---|
-| D1 | `hadron build` (offline build of a workflow into a daemon-less executable; `internal/offlinebuild`, 866 lines on libs `workflow/engine/offline`) | Gap / Decide | Port (it is a live feature with a libs engine behind it) unless nobody uses it. Ask who does. |
-| D2 | Workspaces (`hadron workspace list/create`, `/v1/workspaces`, `workspaces` table) | Decide | Drop. They belong to blueprint runs; the workflow engine's run scope is a different thing. |
-| D3 | Hub relay (`hubrelay`, `events_hub.go`: outbox to the event hub) | Decide | Separate decision: is the event hub still the integration, or is framework SSE + MCP enough? |
-| D4 | Per-workflow MCP tools and exposure sessions | Decide | Already on your list: exposure redesign discussion. |
-| D5 | Agent card public or token-gated | Decide | Gated now (old was open). One-field change. |
-| D6 | In-process agent runtimes (`agentsubstrate`, `llmprovider`, `messagesubstrate`, kind `go_agent_runtime`) | Decide | Dropped; confirm. Only Tether sessions exist. |
-| D7 | Consumers of the old names (`hadrond`, `/v1/...`, `hadron_workflows_*` MCP tools, `~/.hadron` paths) in other repos, agents and configs | Gap | Inventory before cutover; each needs an update or an alias decision (aliases are against the no-shim rule, so updates). |
+| # | Item | Decision |
+|---|---|---|
+| D1 | `hadron build` | Port. **Done** (`internal/offlinebuild`, `hadron build`). It compiles with the Go toolchain inside the Hadron module source tree, as before, so it works from a source checkout, not from a downloaded release binary |
+| D2 | Workspaces | Drop |
+| D3 | Hub relay | Parked for post-MVP review: CW-20261112-0028 |
+| D4 | Per-workflow MCP tools / exposure sessions | Discuss after the other items land |
+| D5 | Agent card gated, not public | Accepted; documented here and in `docs/status.md` |
+| D6 | In-process agent runtimes | Stay dropped for MVP; post-MVP review: CW-20261112-0029 |
+| D7 | Consumers of the old names | Inventory done: section 10 |
+| | `workflow unattended allow\|revoke\|list` | Follow-up: CW-20261112-0026 |
+| | Thin stdio MCP client | Follow-up: CW-20261112-0011 |
+
+Post-MVP items belong to the normal Hadron dev cycle, not this workstream. Frontend waits for the gui track.
 
 ## 2. Binaries and commands
 
@@ -24,13 +28,12 @@ Legend: **Done** = present and tested. **Changed** = present in a deliberately d
 | `hadrond mcp` (stdio, `--token`, `--token-file`, `HADRON_MCP_TOKEN`) | `hadron mcp --token-file`; token is a framework service token | Changed. Becoming a thin client: CW-20261112-0011 |
 | `hadron version` | framework `version` | Done |
 | `hadron daemon` (status) | framework `health` | Done |
-| `hadron workflow validate / run <file\|registry-ref>` | `workflow validate / run NAME VERSION DIGEST` (registry refs only) | **Gap**: no file references (`./x.workflow.yaml` as a `file` definition relative to the workflow root); no compact ref `ns/name@version#sha256:digest` |
-| `hadron workflow explain` | HTTP route exists; no CLI command | **Gap** (small) |
+| `hadron workflow validate / explain / run <file\|registry-ref>` | same, with `--input`, `--input-json`, `--run-id`, `--idempotency-key`, `--confirm`, `--dry-run`, `--pin`, identity flags | Done (file refs, `ns/name@version`, `ns/name@sha256:...`, exact `ns/name@version#sha256:...`) |
 | `hadron workflow inspect / cancel / resume / rerun` | same names | Done (JSON output) |
 | `hadron workflow catalog search / inspect`, `author *`, `registry *`, `exposure *` | `search`, `inspect-version`, `author *`, `registry *`, `exposure *` | Done. Different ref syntax (see above) |
-| `hadron workflow unattended allow / revoke / list` (edits the allow-list file directly, daemon-less) | none; the daemon still reads `unattended.json` | **Gap** (small, important: without it nobody can add an entry except by hand) |
-| CLI output: human diagnostics (`file:line:col code: message`), tables | raw response JSON; failures print `code (status): message` | **Gap** (UX): port the diagnostic formatting for validate/run |
-| `hadron build <workflow>` | none | **Gap**, D1 |
+| `hadron workflow unattended allow / revoke / list` (edits the allow-list file directly, daemon-less) | none; the daemon still reads `unattended.json` | **Gap**, follow-up CW-20261112-0026 (until then entries are added by hand) |
+| CLI output: human diagnostics (`file:line:col`), `--json` | `-o text` (default: diagnostics `severity CODE file:line:col: message`, summary lines), `-o json`, `-o yaml`; commands without a text form print indented JSON | Done |
+| `hadron build <workflow>` | `hadron build` | Done (D1) |
 | `hadron auth ui / rotate`, `hadron credential issue / revoke / list / audit` | none; framework auth (Tether is the issuer; `HOLLIS_AUTH_HADRON` dial) | Dropped. Needs a doc: how an operator gets a token for the CLI (`auth.token_file` / `mint_url`) |
 | `hadron workspace *` | none | Dropped, D2 |
 
@@ -47,8 +50,8 @@ Legend: **Done** = present and tested. **Changed** = present in a deliberately d
 | `/v1/workspaces`, `/v1/messages*`, `/v1/runs`, `/v1/schedules`, `/v1/pipelines`, `/v1/triggers`, `/v1/human-gates`, `/v1/blueprints/validate` | none | Dropped (blueprint/pipeline era, already behind `EnableLegacyRuntime`), D2 for workspaces |
 | Web UI served by the daemon | none | Frontend on hold until the gui track lands |
 | CORS middleware | framework host | Changed |
-| Published JSON schema of the API (`internal/api/schema/workflow-api.schema.json`, generated, with a drift test) | none | **Gap**: regenerate for `/api/...` and flat errors, or drop the publication on purpose |
-| OTel trace propagation middleware, `hadron.workflow.event_stream.rejected` meter | the stream meter is in the runtime; HTTP propagation is not wired | **Gap** pending Substrate's OTel module (not built) |
+| Published JSON schema of the API (generated, drift test) | v2: `internal/api/schema/workflow-api.schema.json` and `workflow.ts`, `/api/workflows` paths, per-operation scope, flat `ApiError`; `go generate ./internal/api` | Done |
+| OTel trace propagation middleware, exporter init (`HADRON_OTEL`) | HTTP trace propagation and exporter in `cmd/hadron/telemetry.go`; the stream meter is in the runtime | Done for HTTP (and `/mcp`). Stdio MCP `_meta` propagation not wired. Moves into Substrate's OTel module when it exists |
 
 ## 4. MCP
 
@@ -86,8 +89,8 @@ Schema: one goose migration of the 80 `workflow_*` tables plus `store_generation
 | Old | New | Class |
 |---|---|---|
 | ~all workflow unit tests | ported with their code | Done |
-| `test/e2e` (build tag; health, validate, run with typed JSON, production examples validate-and-run, workspace create, legacy roots refused, CLI refused without operator token) | binary-level tests in `cmd/hadron` (health, serve, MCP, CLI against a live daemon) | **Gap**: production-examples run, and enforce mode with a real token (both untested) |
-| `examples/workflow/` (hello-transform, normalize-script, http-cmd-transform, release-approval-gate, torque-task-bulk-create) | none | **Gap**: bring across as examples and acceptance inputs. `demos/` (8 blueprint-era) and `examples/archive`: drop |
+| `test/e2e` (health, validate, run with typed JSON, production examples validate-and-run, workspace create, legacy roots refused, CLI refused without operator token) | binary-level tests in `cmd/hadron`: health, serve, MCP, CLI against a live daemon, output formats, file refs, build, shipped examples validate and run | Done except **enforce mode with a real token**, still untested |
+| `examples/workflow/` (hello-transform, normalize-script, release-approval-gate; http-cmd-transform and torque-task-bulk-create) | the first three, with a rewritten README, validated and run in the acceptance test (`release-approval-gate` needed a static `environment` to validate on the current engine). The other two needed kinds the host does not register and tests that are gone | Done. `demos/` and `examples/archive`: dropped |
 | Operator docs (`getting-started`, `install`, `cli-reference`, `mcp-setup`, `safety`, `workflow-development`, `workflows`, `workflow-diagnostics`, `credential-rotation`, `release-ops`, `agentic-workflows`) | README, `docs/status.md`, this file | **Gap**: rewrite against the new surface, not copy; the engine-direction and planning docs stay in the old repo as history |
 | `Makefile`, lefthook, release scripts, `hadron.cerberus.yaml` (deploys `bin/hadrond`) | GitHub Actions CI only | **Gap** at cutover: build-1 CI (Cerberus handoff written), the Cerberus deploy file for `hadron serve`, install path, release workflow |
 | Repo names | `hadron-next` private | At cutover: old to `hadron-legacy`, new to `hadron`, public (scan-public clean, allowlist reviewed) |
@@ -100,13 +103,28 @@ Schema: one goose migration of the 80 `workflow_*` tables plus `store_generation
 - The cleanup list in `docs/status.md` (identifier names, file sizes, persistence importing a higher layer, timestamp helpers, outbox overlap with libs) is open.
 - `go.mod` requires an untagged Substrate commit; the next Substrate tag is the owner's call.
 
-## 9. Suggested order to close
+## 9. What is left to cutover
 
-1. Owner decisions D1 to D7 (D1, D2, D3, D5, D6 are one-line answers).
-2. Small CLI gaps: file refs, `explain`, `unattended`, diagnostic formatting. Half a day.
-3. Examples and e2e acceptance (production examples; enforce-mode token path).
-4. `build` if D1 says port.
-5. Exposure redesign (D4) and the OTel hookup when Substrate's module exists.
-6. Operator docs, CI on build-1, Cerberus deploy file, consumer inventory (D7).
-7. Frontend after the gui track lands.
-8. Cutover.
+1. Exposure discussion (D4), then whatever it changes.
+2. Frontend, after the gui track lands.
+3. Operator docs rewrite (not a copy), then CI on build-1, the Cerberus deploy file for `hadron serve`, and the consumer updates in section 10.
+4. Enforce-mode end-to-end test with a real token; live muxd check for agent sessions.
+5. Cutover: rename repos, make the new one public.
+
+## 10. Consumers of the old surface (inventory, 2026-11-11)
+
+Found outside the two Hadron repos by a read-only search of `~/dev`, `~/.claude`, `~/.codex`, `~/.tether` and `~/.cerberus`. The default address `127.0.0.1:8095` is unchanged.
+
+Runtime callers, most likely to break silently first:
+
+1. **Tether MCP proxy entry** `~/.tether/catalog/mcp-servers/hadron.yaml` spawns `/Users/<user>/go/bin/hadrond mcp`. Every `hadron_*` tool seen by Tether, Nanite, Torque and mux comes through it. It must become `hadron mcp --token-file <file>`; no token is passed today.
+2. **Cerberus**: `~/.cerberus/registry.yaml` registers the old repo's `hadron.cerberus.yaml` (service on 8095, plus an old GUI entry on 34116) and a launchd job runs its binary. Re-point to the new repo's manifest running `hadron serve`; drop the GUI entry.
+3. **Nanite embedded skills** (`hadron-run.md`, `blueprint-builder.md`, `qhealth.md`, `qstatus.md`): call blueprint-era tools (`hadron_blueprint_validate`, `hadron_run_enqueue`, `hadron_run_get`, `hadron_blueprints_list`) that the new app does not have, and probe `/v1/health`. Rewrite against `hadron_workflow_*` and `/healthz`.
+4. **Tether tool broker rules** (`libs/go-toolbroker/broker/default-rules.yaml`, 43 hits for `hadron_bp_*` and friends) go dead silently, since the new app has no `bp_*` tools.
+5. **`stack-explorer`** shells out to `hadron run <blueprint.yaml> --input ...` (`scripts/batch-scan.sh`, `internal/jobs/service.go`). The new CLI is `hadron workflow run`.
+6. **Torque and Tachyon workflow console UIs** expect `hadron_workflow_gate_submit`, `run_subscribe` and the run/gate/signal tools (specs and client stubs, not live calls yet): now `run_resume` with `wake_source`, and `run_events` with `wait_ms`.
+7. **`~/.hadron/`** (settings, `state/hadron.db`, blueprints, workflows, artifacts, attestor key) is ignored by the new app and not migrated.
+
+Config, deploy and docs: `apps/current-cerberus-config.yaml` (`./bin/hadrond serve`, `hadron-gui`), Tether launch and boot-profile specs and `~/.config/tachyon/projects.json` and `~/.codex/config.toml` (project paths, if the repo path changes), the website module page (`hadrond serve`, `hadrond mcp -token`, download URL), `torque/docs/architecture/mcp-registry.md`, `tether/docs/{agent-reach,secrets}.md` (`HADRON_MCP_TOKEN`), `chrispian/scopes/hollis-labs/hadron.md`, and `stack-explorer/repos.example.yaml`. Test fixtures in Tether, Nanite and `go-toolselect` use old names as data only. Static server lists that name the id `hadron` (`torque/internal/config/mux_servers.go`, `mcp-wire`) are safe if the server id stays `hadron`.
+
+Not covered: other machines' launchd and MCP entries, plugin caches and Tesseract-stored skills (Tesseract recall found none), CI release downloads in other monorepos.
