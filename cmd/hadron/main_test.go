@@ -92,7 +92,7 @@ func TestServeAnswersHealthCapabilitiesAndMe(t *testing.T) {
 	if code, body := get("/healthz"); code != 200 || !strings.Contains(body, `"database"`) {
 		t.Errorf("/healthz: %d %s", code, body)
 	}
-	if code, body := get("/api/capabilities"); code != 200 || !strings.Contains(body, `"scheduler"`) || !strings.Contains(body, `"queue"`) {
+	if code, body := get("/api/capabilities"); code != 200 || !strings.Contains(body, `"scheduler"`) || strings.Contains(body, `"queue"`) {
 		t.Errorf("/api/capabilities: %d %s", code, body)
 	}
 	if code, body := get("/api/me"); code != 200 || !strings.Contains(body, `"mode":"off"`) {

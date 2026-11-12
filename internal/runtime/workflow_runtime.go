@@ -1,0 +1,1093 @@
+package runtime
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/otel"
+
+	"github.com/hollis-labs/hadron/internal/a2a"
+	activationpkg "github.com/hollis-labs/hadron/internal/activation"
+	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
+	"github.com/hollis-labs/hadron/internal/artifacts"
+	"github.com/hollis-labs/hadron/internal/eventmap"
+	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/rundiagnostics"
+	"github.com/hollis-labs/hadron/internal/unattended"
+	agentadapter "github.com/hollis-labs/libs/workflow/engine/adapters/agent"
+	calladapter "github.com/hollis-labs/libs/workflow/engine/adapters/call"
+	gateadapter "github.com/hollis-labs/libs/workflow/engine/adapters/gate"
+	scriptadapter "github.com/hollis-labs/libs/workflow/engine/adapters/script"
+	"github.com/hollis-labs/libs/workflow/engine/adapters/transform"
+	waitadapter "github.com/hollis-labs/libs/workflow/engine/adapters/wait"
+	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
+	workflowgate "github.com/hollis-labs/libs/workflow/engine/gate"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/stepkind"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
+)
+
+const (
+	workflowClaimLease    = 90 * time.Second
+	workflowClaimRenew    = 30 * time.Second
+	workflowIdlePoll      = 100 * time.Millisecond
+	workflowRecoveryBatch = 100
+)
+
+// productionWorkflowKindBoundary is the daemon host capability profile, not
+// an engine limitation. Other public adapters remain available to embedded
+// hosts, but hadrond accepts only this fully composed exact set.
+// agent_session@v1 joins it only when a durable session host is composed.
+func productionWorkflowKindBoundary(agentSessions bool) []appworkflow.KindRef {
+	kinds := []appworkflow.KindRef{}
+	if agentSessions {
+		kinds = append(kinds, appworkflow.KindRef{Name: agentadapter.KindName, Version: agentadapter.KindVersion})
+	}
+	return append(kinds,
+		appworkflow.KindRef{Name: calladapter.KindName, Version: calladapter.KindVersion},
+		appworkflow.KindRef{Name: gateadapter.Name, Version: "v1"},
+		appworkflow.KindRef{Name: waitadapter.MessageWaitName, Version: "v1"},
+		appworkflow.KindRef{Name: scriptadapter.Name, Version: "v1"},
+		appworkflow.KindRef{Name: waitadapter.SleepName, Version: "v1"},
+		appworkflow.KindRef{Name: transform.Name, Version: "v1"},
+		appworkflow.KindRef{Name: waitadapter.WaitForName, Version: "v1"},
+	)
+}
+
+// Runtime owns every graph-native process collaborator.
+// Transports receive only its shared application-service facades.
+type Runtime struct {
+	host            *appworkflow.Host
+	operations      *appworkflow.WorkflowOperator
+	exposure        *appworkflow.WorkflowExposureService
+	lifecycle       *appworkflow.WorkflowLifecycleService
+	a2a             *a2a.Handler
+	catalog         *productionWorkflowCatalog
+	activationStore hoststate.ActivationStore
+	workers         *workflowWorkers
+	external        *workflowExternalReconciler
+	activation      *workflowActivationBridge
+	// sourceActivations registers and retires source (schedule) activations; the
+	// lifecycle service drives it, and tests reach its clock and store.
+	sourceActivations   *appworkflow.SourceActivationLifecycle
+	externalActivations activationpkg.ActivationManager
+}
+
+func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, error) {
+	var opts runtimeOptions
+	for _, option := range options {
+		option(&opts)
+	}
+	if store == nil {
+		return nil, errors.New("workflow runtime requires a store")
+	}
+	cfg = cfg.withDefaults()
+	workerCount := cfg.Workers
+	workflowRoot := cfg.SourceRoot()
+	if err := os.MkdirAll(workflowRoot, 0o750); err != nil {
+		return nil, fmt.Errorf("create workflow source root: %w", err)
+	}
+	state, err := persistence.NewWorkflowStateStore(store)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.EventOutbox {
+		mapper, mapperErr := eventmap.NewMapper(nil)
+		if mapperErr != nil {
+			return nil, fmt.Errorf("event outbox: %w", mapperErr)
+		}
+		if enableErr := state.EnableEventOutbox(context.Background(), mapper); enableErr != nil {
+			return nil, fmt.Errorf("event outbox: %w", enableErr)
+		}
+	}
+	journal, err := persistence.NewWorkflowHostStore(store)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.EventOutbox {
+		// The host store has its own state handle, so it gets the outbox too: its
+		// admission decisions are written in its own transaction.
+		mapper, mapperErr := eventmap.NewMapper(nil)
+		if mapperErr != nil {
+			return nil, fmt.Errorf("event outbox: %w", mapperErr)
+		}
+		if enableErr := journal.EnableEventOutbox(context.Background(), mapper); enableErr != nil {
+			return nil, fmt.Errorf("event outbox: %w", enableErr)
+		}
+	}
+	activationStore, err := persistence.NewWorkflowActivationStore(store)
+	if err != nil {
+		return nil, err
+	}
+	exposureStore, err := persistence.NewWorkflowExposureStore(store)
+	if err != nil {
+		return nil, err
+	}
+	a2aStore, err := persistence.NewWorkflowA2ATaskStore(store)
+	if err != nil {
+		return nil, err
+	}
+	catalog, err := openProductionWorkflowCatalog(filepath.Join(cfg.DataDir, "workflow-catalog.json"))
+	if err != nil {
+		return nil, err
+	}
+	artifactStore, err := artifacts.New(filepath.Join(cfg.DataDir, "workflow-artifacts"), values.ArtifactAuthorizerFunc(
+		func(_ context.Context, request values.ArtifactAuthorization) error {
+			if request.Owner == nil || request.Owner.ID == "" {
+				return values.ErrArtifactUnauthorized
+			}
+			return nil
+		}), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	waitAuthority := waitadapter.AuthorityResolverFunc(func(ctx context.Context, request waitadapter.AuthorityRequest) (workflowwait.ResponderAuthority, error) {
+		if request.Source.Kind == waitadapter.SourceChildRun {
+			// Host resumes child-run waits as responder child_run:<child id>
+			// (appworkflow child terminal recovery); only that child may wake it.
+			return workflowwait.ResponderAuthority{Kind: "child_run", Reference: request.Source.Reference}, nil
+		}
+		return workflowRunAuthority(ctx, journal, workflowruntime.RunID(request.Identity.RunID))
+	})
+	waitFor, err := waitadapter.NewWaitFor(waitadapter.Options{Authority: waitAuthority})
+	if err != nil {
+		return nil, err
+	}
+	messageWait, err := waitadapter.NewMessageWait(waitadapter.Options{Authority: waitAuthority})
+	if err != nil {
+		return nil, err
+	}
+	gate, err := gateadapter.New(gateadapter.Options{
+		Authority: workflowgate.AuthorityResolverFunc(func(ctx context.Context, request workflowgate.AuthorizationRequest) (workflowwait.ResponderAuthority, error) {
+			return workflowRunAuthority(ctx, journal, workflowruntime.RunID(request.RunID))
+		}),
+		Payloads: workflowgate.PayloadStoreFunc(func(ctx context.Context, request workflowgate.PayloadRequest) (values.ValueSetRef, error) {
+			return storeWorkflowGatePayload(ctx, state, request)
+		}),
+	})
+	if err != nil {
+		return nil, err
+	}
+	// call@v1 resolves children through the definition resolver, which in
+	// turn freezes a compile registry containing call@v1, and creates child
+	// runs through Host's policy gate, while Host receives call@v1. The
+	// deferred resolver, context provider, and child-run executor are bound as
+	// soon as their targets exist, before the runtime starts.
+	callResolver := &productionCallResolver{}
+	callContext := &workflowCallContext{}
+	callChildRuns := &productionChildRuns{}
+	call, err := calladapter.New(calladapter.Options{
+		Resolver: callResolver, State: journal, Context: callContext, Inline: refusingInlineCalls{}, Runs: callChildRuns,
+	})
+	if err != nil {
+		return nil, err
+	}
+	kinds := []stepkind.StepKind{transform.New(), scriptadapter.New(), waitadapter.NewSleep(nil), waitFor, messageWait, gate, call}
+	policyHooks := []workflowcompile.PolicyHook{productionCallPolicy}
+	var agentLaunch workflowcompile.NodeExpander = newGatedAgentLaunchExpander()
+	compileKinds := stepkind.NewRegistry()
+	for _, kind := range kinds {
+		if registerErr := compileKinds.Register(kind); registerErr != nil {
+			return nil, fmt.Errorf("register production workflow kind: %w", registerErr)
+		}
+	}
+	{
+		// agent_session@v1 is compile-visible only so it refuses with a clear
+		// gate message; Host never registers it.
+		gatedAgentSession, gateErr := newGatedAgentSessionKind()
+		if gateErr != nil {
+			return nil, gateErr
+		}
+		if registerErr := compileKinds.Register(gatedAgentSession); registerErr != nil {
+			return nil, fmt.Errorf("register gated agent session kind: %w", registerErr)
+		}
+	}
+	required := productionWorkflowKindBoundary(false)
+	stager := appworkflow.NewAuthoringSourceStager()
+	resolver, err := appworkflow.NewDefinitionResolver(appworkflow.DefinitionResolverOptions{
+		Roots: []string{workflowRoot}, FileAuthority: "local", FileTrustClass: "local",
+		Registry: catalog, Authoring: stager, BundledDefinitions: journal,
+		Authorizer: appworkflow.DefinitionAuthorizerFunc(func(context.Context, appworkflow.DefinitionAuthorization) error { return nil }),
+		Compile: appworkflow.DefinitionCompileOptions{
+			StepKinds: compileKinds, SemanticRevision: "hadrond-production-v2",
+			PolicyHooks:   policyHooks,
+			NodeExpanders: []workflowcompile.NodeExpander{agentLaunch},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	callResolver.bind(resolver)
+	plans := appworkflow.PinnedRecoveryPlanSource{
+		Roots: journal, Children: journal, State: state, Replays: state,
+		DependencyOptions: resolver.RecoveryDependencyOptions(),
+	}
+	callContextProvider, err := appworkflow.NewCallExpressionContextProvider(state, state, plans)
+	if err != nil {
+		return nil, err
+	}
+	callContext.bind(callContextProvider)
+
+	identity := appworkflow.ContextIdentityProvider{}
+	activation := newWorkflowActivationBridge()
+	waits := &workflowruntime.WaitCoordinator{
+		Store: state, Scheduler: activation,
+		Authorizer: workflowResponderAuthorizer{},
+	}
+	childRuns, err := appworkflow.NewPinnedChildRunMaterializer(appworkflow.ChildRunMaterializerOptions{State: state})
+	if err != nil {
+		return nil, err
+	}
+	// The unattended allow-list is read, never written, by the daemon; the
+	// first Snapshot logs what it holds at startup.
+	allowList := unattended.NewStore(filepath.Join(cfg.DataDir, unattended.FileName), os.Geteuid(), nil, nil)
+	allowList.Snapshot()
+	host, err := appworkflow.New(appworkflow.Options{
+		State: state, Journal: journal, Definitions: resolver, Identity: identity,
+		Policy: allowListedWorkflowPolicy(allowList), Confirm: appworkflow.ConfirmAuthorizerFunc(operatorConfirmAuthorizer),
+		Kinds: kinds, RequiredKinds: required, DryRun: productionDryRunSupport{},
+		Activations: activation, ActivationStore: activationStore, Waits: waits,
+		ReuseAuthorizer: workflowruntime.ReuseAuthorizerFunc(productionReusePolicy),
+		ChildRuns:       childRuns, Artifacts: artifactStore,
+		RecoveryInterval: 2 * time.Second, RecoveryBatchLimit: workflowRecoveryBatch,
+	})
+	if err != nil {
+		return nil, err
+	}
+	callChildRuns.bind(host)
+	activation.bindWaits(waits)
+	activationService := appworkflow.ActivationService{Host: host, Store: activationStore, CurrentRegistry: catalog, RequireCurrentFence: true}
+	// Source activations (cron-style workflow sources) run on the framework
+	// scheduler module's engine: it fires into this service through the late-bound
+	// runner, and the bridge starts it once the recovered Host is ready.
+	if opts.fires != nil {
+		opts.fires.bind(activationService)
+	}
+	if opts.source != nil {
+		activation.bindSourceScheduler(opts.source)
+	}
+
+	diagnostics := rundiagnostics.Service{
+		State: state, Plans: plans, Control: state, Replay: state, Pins: state,
+		Resources: state, Starts: journal,
+	}
+	replay := &workflowruntime.ReplayService{Store: state, Replay: state, Inputs: state, Control: state, Plans: plans, Registry: host.Registry()}
+	streamRejected, err := otel.Meter("hadron.workflow").Int64Counter("hadron.workflow.event_stream.rejected")
+	if err != nil {
+		return nil, err
+	}
+	operations, err := appworkflow.NewWorkflowOperator(appworkflow.WorkflowOperatorOptions{Host: host, Diagnostics: diagnostics, Replay: replay,
+		EventStreamLimit:    cfg.EventStreamLimit,
+		EventStreamRejected: func(ctx context.Context) { streamRejected.Add(ctx, 1) },
+	})
+	if err != nil {
+		return nil, err
+	}
+	management := workflowExposureManagement{identity: identity}
+	exposure, err := appworkflow.NewWorkflowExposureService(appworkflow.WorkflowExposureOptions{
+		Store: exposureStore, Catalog: catalog, Definitions: resolver, StepKinds: host.Registry(), Management: management,
+	})
+	if err != nil {
+		return nil, err
+	}
+	attestor, err := openWorkflowContractAttestor(filepath.Join(cfg.DataDir, "workflow-contract-attestor.key"))
+	if err != nil {
+		return nil, err
+	}
+	contracts, err := appworkflow.NewContractRegistrationService(appworkflow.ContractRegistrationOptions{
+		Definitions: resolver, StepKinds: host.Registry(), Catalog: catalog,
+		Authorizer: workflowNamespaceAuthorizer{identity: identity}, Attestor: attestor,
+		Policy: appworkflow.ContractTestPolicy{MinimumCases: 1, Repetitions: 2, RequireEffectCoverage: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	authoring, err := appworkflow.NewAgentAuthoringService(appworkflow.AgentAuthoringOptions{
+		Stager: stager, Contracts: contracts,
+		HostIdentity: appworkflow.AgentAuthoringHostIdentity{Authority: "hadron", TrustClass: "local", Principal: "operator:local"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	sourceActivationLifecycle := &appworkflow.SourceActivationLifecycle{Registry: catalog, Activations: activationService}
+	lifecycle, err := appworkflow.NewWorkflowLifecycleService(appworkflow.WorkflowLifecycleOptions{
+		Identity: identity, Contracts: contracts, Authoring: authoring, Exposure: exposure,
+		SourceActivations: sourceActivationLifecycle,
+	})
+	if err != nil {
+		return nil, err
+	}
+	correlations, err := appworkflow.NewA2ATaskCorrelations(appworkflow.A2ATaskCorrelationsOptions{Host: host, Store: a2aStore})
+	if err != nil {
+		return nil, err
+	}
+	a2aHandler, err := a2a.NewHandler(a2a.Options{Correlations: correlations, Workflows: operations, Reads: operations})
+	if err != nil {
+		return nil, err
+	}
+	nonce, err := workflowNonce()
+	if err != nil {
+		return nil, err
+	}
+	workers := newWorkflowWorkers(state, plans, journal, journal, state, host.Registry(), host.Dispatcher(), workerCount, nonce)
+	external, err := newWorkflowExternalReconciler(host.ExternalOperations(), workflowExternalReconcileInterval, workflowExternalReconcileBatch)
+	if err != nil {
+		return nil, err
+	}
+	return &Runtime{
+		host: host, operations: operations, exposure: exposure, lifecycle: lifecycle, a2a: a2aHandler,
+		catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
+		sourceActivations: sourceActivationLifecycle, externalActivations: activationpkg.ActivationManager{Service: activationService},
+	}, nil
+}
+
+func (r *Runtime) Start(ctx context.Context) error {
+	if r == nil {
+		return errors.New("workflow runtime is nil")
+	}
+	r.activation.Prepare()
+	if err := r.host.Start(ctx); err != nil {
+		r.activation.Stop()
+		return err
+	}
+	r.activation.Start()
+	r.workers.Start()
+	r.external.Start()
+	return nil
+}
+
+func (r *Runtime) Shutdown(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	workerErr := r.workers.Stop(ctx)
+	if workerErr != nil {
+		// Cancellation has already been delivered. Drain without a deadline so
+		// no live dispatch can retain a claim while Host or its store closes.
+		_ = r.workers.Stop(context.Background())
+	}
+	externalErr := r.external.Stop(ctx)
+	if externalErr != nil {
+		// Same drain rule: no adapter observation may outlive the store.
+		_ = r.external.Stop(context.Background())
+	}
+	r.activation.Stop()
+	hostCtx := ctx
+	if ctx == nil || ctx.Err() != nil {
+		hostCtx = context.Background()
+	}
+	hostErr := r.host.Shutdown(hostCtx)
+	return errors.Join(workerErr, externalErr, hostErr)
+}
+
+// productionDryRunSupport lists kinds whose effects hadrond can preview.
+// call@v1 is deliberately absent: a dry run cannot create the child run whose
+// behavior it would need to preview, so any plan containing a call node
+// reports dry run as unavailable.
+type productionDryRunSupport struct{}
+
+func (productionDryRunSupport) SupportsDryRun(_ context.Context, spec stepkind.StepKindSpec) (bool, error) {
+	return spec.Name == transform.Name || spec.Name == scriptadapter.Name || spec.Name == waitadapter.SleepName || spec.Name == waitadapter.WaitForName || spec.Name == waitadapter.MessageWaitName || spec.Name == gateadapter.Name, nil
+}
+
+// allowListedWorkflowPolicy is the Host's policy evaluator: the production
+// policy, with the unattended allow-list able to waive a Confirm. The Host
+// uses one evaluator for top-level starts and call-started child runs, so a
+// child is matched against the list by its own plan id and digest; an entry
+// for the root never covers its children.
+func allowListedWorkflowPolicy(allowList *unattended.Store) appworkflow.PolicyEvaluator {
+	return appworkflow.PolicyEvaluatorFunc(func(ctx context.Context, facts hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+		decision, err := productionWorkflowPolicy(ctx, facts)
+		if err != nil {
+			return decision, err
+		}
+		return unattended.Apply(allowList, facts, decision, time.Now()), nil
+	})
+}
+
+func productionWorkflowPolicy(_ context.Context, facts hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
+	if err := facts.Validate(); err != nil {
+		return invalidWorkflowPolicyFactsDecision()
+	}
+	// ConfirmationAdvised is set for mutating/destructive effects and for every
+	// call@v1 node (its child definition is unresolved at start), so call and
+	// agent_launch plans require explicit confirmation. Whether trusted child
+	// definitions may skip confirmation is an open product decision.
+	if facts.ConfirmationAdvised {
+		return hoststate.PolicyDecision{Outcome: hoststate.PolicyConfirm, Reason: "workflow effects require explicit confirmation"}, nil
+	}
+	return hoststate.PolicyDecision{Outcome: hoststate.PolicyAllow, Reason: "authenticated graph workflow request"}, nil
+}
+
+func invalidWorkflowPolicyFactsDecision() (hoststate.PolicyDecision, error) {
+	return hoststate.PolicyDecision{Outcome: hoststate.PolicyDeny, Reason: "valid bound workflow policy facts are required"}, nil
+}
+
+func productionReusePolicy(_ context.Context, candidate workflowruntime.ReuseCandidate) (workflowruntime.ReusePolicyDecision, error) {
+	if candidate.Authority.Principal == "" {
+		return workflowruntime.ReusePolicyDecision{Allow: false, Code: "reuse_identity_required", Reason: "pin reuse requires an authenticated authority"}, nil
+	}
+	return workflowruntime.ReusePolicyDecision{Allow: true, Code: "reuse_authenticated", Reason: "authenticated caller requested exact immutable output reuse"}, nil
+}
+
+type workflowResponderAuthorizer struct{}
+
+func (workflowResponderAuthorizer) AuthorizeResume(_ context.Context, request workflowwait.AuthorizationRequest) error {
+	if request.Source == workflowwait.WakeTimer && request.Record.Kind == workflowwait.KindTimer && request.Responder.Kind == "system" && request.Responder.Reference == "wait-timer" {
+		return nil
+	}
+	if request.Responder.Reference == "" || request.Record.Authority.Reference == "" || request.Responder.Reference != request.Record.Authority.Reference {
+		return appworkflow.ErrPolicyDenied
+	}
+	if request.Record.Authority.Kind != request.Responder.Kind && (request.Record.Authority.Kind != "principal" || request.Responder.Kind != "principal") {
+		return appworkflow.ErrPolicyDenied
+	}
+	return nil
+}
+
+func workflowRunAuthority(ctx context.Context, journal hoststate.Journal, runID workflowruntime.RunID) (workflowwait.ResponderAuthority, error) {
+	start, err := journal.LoadStart(ctx, runID)
+	if err != nil {
+		return workflowwait.ResponderAuthority{}, err
+	}
+	return workflowwait.ResponderAuthority{Kind: "principal", Reference: start.Record.Identity.Principal}, nil
+}
+
+func storeWorkflowGatePayload(ctx context.Context, state workflowruntime.StateStore, request workflowgate.PayloadRequest) (values.ValueSetRef, error) {
+	invocation := workflowruntime.NodeInvocationID{RunID: workflowruntime.RunID(request.RunID), NodeID: request.NodeID, Iteration: request.Iteration}
+	attempt := workflowruntime.AttemptID{Invocation: invocation, Number: request.Attempt}
+	payload, err := values.NewInline(workflowgate.CloneCheckpoint(request.Checkpoint), values.Metadata{
+		Producer:  values.Producer{Kind: "human_gate", Reference: request.NodeID, Output: "checkpoint"},
+		MediaType: "application/json", Redaction: values.RedactionPrivate, Retention: values.RetentionRun,
+	})
+	if err != nil {
+		return values.ValueSetRef{}, err
+	}
+	return state.SaveValues(ctx, workflowruntime.SaveValuesRequest{
+		Owner:  workflowruntime.ValueOwner{Kind: "gate-payload", RunID: invocation.RunID, Invocation: &invocation, Attempt: &attempt},
+		Values: values.ValueSet{"checkpoint": payload},
+	})
+}
+
+func localWorkflowIdentity() hoststate.IdentityBinding {
+	checkedAt := time.Unix(1, 0).UTC()
+	capabilities := []string{
+		gateadapter.CapabilityGate, waitadapter.CapabilityMessage, waitadapter.CapabilityWait, capabilityWorkflowCall,
+		capabilityAgentSessionLaunch, capabilityAgentSessionObserve, capabilityAgentSessionCancel,
+	}
+	sort.Strings(capabilities)
+	target := hoststate.ExecutionTarget{
+		Version: hoststate.ScopeTargetVersionV1, ID: "local", Kind: hoststate.ExecutionTargetLocal,
+		Capabilities: capabilities, Sandbox: hoststate.SandboxPolicy{Mode: hoststate.SandboxHostDefault},
+		Readiness:  hoststate.TargetReadiness{State: hoststate.TargetReady, CheckedAt: checkedAt},
+		Provenance: hoststate.TargetProvenance{Authority: "hadron", Reference: "local-runtime", Revision: "v1"},
+	}
+	return hoststate.IdentityBinding{
+		Principal: "operator:local", SourceAuthority: "http", Trust: "local",
+		Grants:          []string{"workflow.manage", "workflow.run"},
+		RunScope:        hoststate.RunScope{Version: hoststate.ScopeTargetVersionV1, Kind: hoststate.RunScopeProject, ID: "local"},
+		ExecutionTarget: &target,
+	}
+}
+
+func hasWorkflowGrant(binding hoststate.IdentityBinding, grant string) bool {
+	for _, current := range binding.Grants {
+		if current == grant {
+			return true
+		}
+	}
+	return false
+}
+
+type workflowNamespaceAuthorizer struct{ identity appworkflow.IdentityProvider }
+
+func (a workflowNamespaceAuthorizer) AuthorizeNamespace(ctx context.Context, request appworkflow.NamespaceAuthorization) error {
+	binding, err := a.identity.BindIdentity(ctx, appworkflow.IdentityRequest{})
+	if err != nil || binding.Principal != request.Principal || !hasWorkflowGrant(binding, "workflow.manage") {
+		return appworkflow.ErrPolicyDenied
+	}
+	return nil
+}
+
+type workflowExposureManagement struct{ identity appworkflow.IdentityProvider }
+
+func (a workflowExposureManagement) AuthorizeExposureManagement(ctx context.Context, _ appworkflow.ExposureManagementAuthorization) error {
+	binding, err := a.identity.BindIdentity(ctx, appworkflow.IdentityRequest{})
+	if err != nil || !hasWorkflowGrant(binding, "workflow.manage") {
+		return appworkflow.ErrPolicyDenied
+	}
+	return nil
+}
+
+type workflowContractAttestor struct{ key []byte }
+
+func openWorkflowContractAttestor(path string) (*workflowContractAttestor, error) {
+	lock, err := openPrivateWorkflowLock(path+".lock", "workflow contract attestor")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Close() }()
+	if lockErr := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); lockErr != nil { // #nosec G115 -- an open file descriptor is representable by the platform syscall API.
+		return nil, lockErr
+	}
+	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }() // #nosec G115 -- same validated open file descriptor.
+
+	key, err := readWorkflowContractAttestorKey(path)
+	if errors.Is(err, os.ErrNotExist) {
+		candidate := make([]byte, 32)
+		if _, randomErr := rand.Read(candidate); randomErr != nil {
+			return nil, randomErr
+		}
+		file, openErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600) // #nosec G304 -- host-owned config path.
+		if openErr != nil {
+			if errors.Is(openErr, os.ErrExist) {
+				winner, readErr := readWorkflowContractAttestorKey(path)
+				if readErr != nil {
+					return nil, readErr
+				}
+				key = winner
+			} else {
+				return nil, openErr
+			}
+		} else {
+			created, statErr := file.Stat()
+			published, lstatErr := os.Lstat(path)
+			if statErr != nil || lstatErr != nil || !created.Mode().IsRegular() || created.Mode().Perm()&0o077 != 0 || published.Mode()&os.ModeSymlink != 0 || !os.SameFile(created, published) {
+				_ = file.Close()
+				removeWorkflowContractAttestorKey(path, created)
+				return nil, errors.New("workflow contract attestor key publication is unsafe")
+			}
+			_, writeErr := file.Write(candidate)
+			syncErr := file.Sync()
+			closeErr := file.Close()
+			if writeErr != nil || syncErr != nil || closeErr != nil {
+				removeWorkflowContractAttestorKey(path, created)
+				return nil, errors.Join(writeErr, syncErr, closeErr)
+			}
+			key, err = readWorkflowContractAttestorKey(path)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else if err != nil {
+		return nil, err
+	}
+	if len(key) != 32 {
+		return nil, errors.New("workflow contract attestor key is invalid")
+	}
+	// The key authenticates durable qualification evidence. Sync its directory
+	// on every accepted open so both a new publication and a prior publication
+	// whose directory sync was interrupted become durable before use.
+	if err := syncWorkflowParentDirectory(path, "workflow contract attestor"); err != nil {
+		return nil, err
+	}
+	return &workflowContractAttestor{key: append([]byte(nil), key...)}, nil
+}
+
+func syncWorkflowParentDirectory(path, label string) error {
+	directory, err := os.Open(filepath.Dir(path)) // #nosec G304 -- directory derives from the explicitly configured host path.
+	if err != nil {
+		return fmt.Errorf("open %s directory: %w", label, err)
+	}
+	syncErr := directory.Sync()
+	closeErr := directory.Close()
+	if syncErr != nil || closeErr != nil {
+		return fmt.Errorf("sync %s directory: %w", label, errors.Join(syncErr, closeErr))
+	}
+	return nil
+}
+
+func removeWorkflowContractAttestorKey(path string, created os.FileInfo) {
+	published, err := os.Lstat(path)
+	if err == nil && created != nil && os.SameFile(created, published) {
+		_ = os.Remove(path)
+	}
+}
+
+func readWorkflowContractAttestorKey(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 || info.Size() != 32 {
+		return nil, errors.New("workflow contract attestor key must be a private 32-byte regular file")
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 -- host-owned config path validated above and again after open.
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Size() != 32 || opened.Mode().Perm()&0o077 != 0 {
+		return nil, errors.New("workflow contract attestor key changed or is not private")
+	}
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(file, key); err != nil {
+		return nil, err
+	}
+	var trailing [1]byte
+	if count, err := file.Read(trailing[:]); count != 0 || !errors.Is(err, io.EOF) {
+		return nil, errors.New("workflow contract attestor key exceeds 32 bytes")
+	}
+	return key, nil
+}
+
+func (a *workflowContractAttestor) AttestContractReport(_ context.Context, digest string) (string, error) {
+	mac := hmac.New(sha256.New, a.key)
+	_, _ = mac.Write([]byte(digest))
+	return "sha256:" + hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+func (a *workflowContractAttestor) VerifyContractReport(ctx context.Context, digest, attestation string) error {
+	expected, err := a.AttestContractReport(ctx, digest)
+	if err != nil || !hmac.Equal([]byte(expected), []byte(attestation)) {
+		return errors.New("workflow contract report attestation is invalid")
+	}
+	return nil
+}
+
+func workflowNonce() (string, error) {
+	buffer := make([]byte, 16)
+	if _, err := rand.Read(buffer); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buffer), nil
+}
+
+// sourceEngine is the schedule engine for workflow sources: the framework
+// scheduler module's libs engine, started once the recovered Host is ready.
+type sourceEngine interface {
+	Start()
+	Stop()
+}
+
+// workflowActivationBridge is bound before Host.Start. Source schedules run on
+// the framework scheduler module's engine; wait wake/deadline activations use process timers and
+// are reconstructed from durable waits by Host recovery after restart.
+type workflowActivationBridge struct {
+	mu                  sync.Mutex
+	waits               *workflowruntime.WaitCoordinator
+	source              sourceEngine
+	timers              map[workflowwait.ActivationID]*workflowActivationTimer
+	accepting           bool
+	dispatchReady       bool
+	sourceStarted       bool
+	stopping            bool
+	timerWG             sync.WaitGroup
+	beforeTimerDispatch func()
+}
+
+type workflowActivationTimer struct {
+	timer *time.Timer
+}
+
+func newWorkflowActivationBridge() *workflowActivationBridge {
+	return &workflowActivationBridge{timers: make(map[workflowwait.ActivationID]*workflowActivationTimer)}
+}
+
+func (b *workflowActivationBridge) bindWaits(waits *workflowruntime.WaitCoordinator) { b.waits = waits }
+func (b *workflowActivationBridge) bindSourceScheduler(source sourceEngine)          { b.source = source }
+
+// Prepare accepts recovery schedules before Host.Start. Due timers remain
+// fenced until Start marks the recovered Host ready, so startup cannot drop a
+// reconstructed wait or race its durable recovery transition.
+func (b *workflowActivationBridge) Prepare() {
+	b.mu.Lock()
+	if !b.stopping {
+		b.accepting = true
+	}
+	b.mu.Unlock()
+}
+
+func (b *workflowActivationBridge) Start() {
+	b.mu.Lock()
+	if b.stopping {
+		b.mu.Unlock()
+		return
+	}
+	b.accepting, b.dispatchReady = true, true
+	source := b.source
+	startSource := source != nil && !b.sourceStarted
+	b.sourceStarted = b.sourceStarted || startSource
+	b.mu.Unlock()
+	if startSource {
+		source.Start()
+	}
+}
+
+func (b *workflowActivationBridge) Stop() {
+	b.mu.Lock()
+	b.stopping = true
+	b.accepting, b.dispatchReady = false, false
+	for id, timer := range b.timers {
+		if timer.timer.Stop() {
+			b.timerWG.Done()
+		}
+		delete(b.timers, id)
+	}
+	source := b.source
+	stopSource := b.sourceStarted
+	b.sourceStarted = false
+	b.mu.Unlock()
+	if source != nil && stopSource {
+		source.Stop()
+	}
+	b.timerWG.Wait()
+}
+
+func (b *workflowActivationBridge) Schedule(ctx context.Context, activation workflowwait.Activation) error {
+	if ctx == nil {
+		return appworkflow.ErrHostNotReady
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := activation.Validate(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.waits == nil || b.source == nil || !b.accepting {
+		return appworkflow.ErrHostNotReady
+	}
+	if _, exists := b.timers[activation.ID]; exists {
+		return nil
+	}
+	b.armLocked(activation, time.Until(activation.FireAt))
+	return nil
+}
+
+func (b *workflowActivationBridge) Cancel(_ context.Context, id workflowwait.ActivationID) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if timer := b.timers[id]; timer != nil {
+		if timer.timer.Stop() {
+			b.timerWG.Done()
+		}
+		delete(b.timers, id)
+	}
+	return nil
+}
+
+func (b *workflowActivationBridge) fire(activation workflowwait.Activation, timer *workflowActivationTimer) {
+	b.mu.Lock()
+	if b.timers[activation.ID] != timer {
+		b.mu.Unlock()
+		return
+	}
+	if !b.accepting {
+		delete(b.timers, activation.ID)
+		b.mu.Unlock()
+		return
+	}
+	if !b.dispatchReady {
+		b.armLocked(activation, workflowIdlePoll)
+		b.mu.Unlock()
+		return
+	}
+	delete(b.timers, activation.ID)
+	waits := b.waits
+	beforeDispatch := b.beforeTimerDispatch
+	b.mu.Unlock()
+	if beforeDispatch != nil {
+		beforeDispatch()
+	}
+	if waits == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if activation.Kind == workflowruntime.ActivationWaitWake {
+		_, _ = waits.WakeTimer(ctx, workflowruntime.TimerWakeCommand{WaitID: workflowruntime.WaitID(activation.WaitID), FiredAt: time.Now().UTC()})
+		return
+	}
+	_, _ = waits.Recover(ctx, workflowruntime.OpenWaitQuery{RunID: workflowruntime.RunID(activation.RunID), Limit: workflowRecoveryBatch}, time.Now().UTC())
+}
+
+func (b *workflowActivationBridge) armLocked(activation workflowwait.Activation, delay time.Duration) {
+	if delay < 0 {
+		delay = 0
+	}
+	b.timerWG.Add(1)
+	timer := &workflowActivationTimer{}
+	b.timers[activation.ID] = timer
+	timer.timer = time.AfterFunc(delay, func() {
+		defer b.timerWG.Done()
+		b.fire(activation, timer)
+	})
+}
+
+type workflowWorkers struct {
+	state      workflowruntime.StateStore
+	plans      workflowruntime.RecoveryPlanSource
+	roots      hoststate.Journal
+	children   appworkflow.ChildRunDefinitionSource
+	replays    workflowruntime.ReplayStore
+	kinds      stepkind.Registry
+	dispatcher *workflowruntime.StepDispatcher
+	queue      *workflowruntime.ReadyQueueCoordinator
+	count      int
+	nonce      string
+	sequence   atomic.Uint64
+	mu         sync.Mutex
+	cancel     context.CancelFunc
+	done       chan struct{}
+	wg         sync.WaitGroup
+}
+
+func newWorkflowWorkers(state workflowruntime.StateStore, plans workflowruntime.RecoveryPlanSource, roots hoststate.Journal, children appworkflow.ChildRunDefinitionSource, replays workflowruntime.ReplayStore, kinds stepkind.Registry, dispatcher *workflowruntime.StepDispatcher, count int, nonce string) *workflowWorkers {
+	workers := &workflowWorkers{state: state, plans: plans, roots: roots, children: children, replays: replays, kinds: kinds, dispatcher: dispatcher, count: count, nonce: nonce}
+	admission := productionSchedulerAdmission{state: state, plans: plans, kinds: kinds, workers: count}
+	workers.queue = workflowruntime.NewResourceReadyQueueCoordinator(state, nil, admission)
+	return workers
+}
+
+type productionSchedulerAdmission struct {
+	state   workflowruntime.StateStore
+	plans   workflowruntime.RecoveryPlanSource
+	kinds   stepkind.Registry
+	workers int
+}
+
+func (a productionSchedulerAdmission) Requirements(ctx context.Context, candidate workflowruntime.ReadyCandidate) ([]workflowruntime.SchedulerResourceRequirement, error) {
+	run, err := a.state.LoadRun(ctx, candidate.InvocationID.RunID)
+	if err != nil {
+		return nil, err
+	}
+	pinned, err := a.plans.LoadRecoveryPlan(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	var node *graph.Node
+	for index := range pinned.Plan.Graph.Nodes {
+		if pinned.Plan.Graph.Nodes[index].ID == candidate.InvocationID.NodeID {
+			node = &pinned.Plan.Graph.Nodes[index]
+			break
+		}
+	}
+	if node == nil {
+		return nil, fmt.Errorf("pinned workflow node %q is unavailable", candidate.InvocationID.NodeID)
+	}
+	_, spec, err := stepkind.Resolve(a.kinds, node.Kind, node.KindVersion)
+	if err != nil {
+		return nil, err
+	}
+	effects := append(graph.EffectSet(nil), spec.Effects...)
+	effects = append(effects, node.Effects...)
+	capabilities := append([]string(nil), spec.RequiredCapabilities...)
+	capabilities = append(capabilities, pinned.Plan.Graph.Target.Capabilities...)
+	capabilities = append(capabilities, node.Target.Capabilities...)
+	named := make(map[string]int, len(pinned.Plan.Graph.Concurrency.Resources))
+	for _, resource := range pinned.Plan.Graph.Concurrency.Resources {
+		named[resource.Name] = resource.Limit
+	}
+	return workflowruntime.BuildSchedulerRequirements(candidate.InvocationID.RunID, workflowruntime.SchedulerLimits{
+		Workers: a.workers, PerRun: pinned.Plan.Graph.Concurrency.MaxRun, Named: named,
+	}, workflowruntime.SchedulerDemand{Effects: effects, Capabilities: capabilities, Concurrency: append([]graph.ConcurrencyClaim(nil), node.Concurrency...)})
+}
+
+func (w *workflowWorkers) Start() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.cancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.cancel, w.done = cancel, make(chan struct{})
+	for index := 0; index < w.count; index++ {
+		w.wg.Add(1)
+		go w.loop(ctx, index)
+	}
+	go func() { w.wg.Wait(); close(w.done) }()
+}
+
+func (w *workflowWorkers) Stop(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("workflow worker stop requires context")
+	}
+	w.mu.Lock()
+	cancel, done := w.cancel, w.done
+	w.mu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	select {
+	case <-done:
+		w.mu.Lock()
+		if w.done == done {
+			w.cancel, w.done = nil, nil
+		}
+		w.mu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (w *workflowWorkers) loop(ctx context.Context, index int) {
+	defer w.wg.Done()
+	owner := fmt.Sprintf("hadrond-%s-%d", w.nonce, index)
+	for ctx.Err() == nil {
+		sequence := w.sequence.Add(1)
+		now := time.Now().UTC()
+		token := fmt.Sprintf("claim-%s-%d-%d", w.nonce, index, sequence)
+		claim, acquired, err := w.queue.ClaimNext(ctx, workflowruntime.ReadyClaimRequest{
+			Owner: owner, Token: token, IdempotencyKey: token, Now: now, LeaseUntil: now.Add(workflowClaimLease),
+		})
+		if err != nil || !acquired {
+			if !waitWorkflowPoll(ctx) {
+				return
+			}
+			continue
+		}
+		w.dispatch(ctx, claim)
+	}
+}
+
+func (w *workflowWorkers) dispatch(parent context.Context, claim workflowruntime.ReadyClaim) {
+	run, err := w.state.LoadRun(parent, claim.Candidate.InvocationID.RunID)
+	if err != nil {
+		w.release(claim)
+		return
+	}
+	pinned, err := w.plans.LoadRecoveryPlan(parent, run)
+	if err != nil {
+		w.release(claim)
+		return
+	}
+	var definition *graph.Node
+	for index := range pinned.Plan.Graph.Nodes {
+		if pinned.Plan.Graph.Nodes[index].ID == claim.Candidate.InvocationID.NodeID {
+			definition = &pinned.Plan.Graph.Nodes[index]
+			break
+		}
+	}
+	if definition == nil {
+		w.release(claim)
+		return
+	}
+	identity, err := w.loadRunIdentity(parent, run.ID, make(map[workflowruntime.RunID]struct{}), 0)
+	if err != nil {
+		w.release(claim)
+		return
+	}
+	target := ""
+	if identity.ExecutionTarget != nil {
+		target = identity.ExecutionTarget.ID
+	}
+	var lineage []graph.DefinitionRef
+	if definition.Call != nil {
+		lineage, err = w.loadCallLineage(parent, run.ID, make(map[workflowruntime.RunID]struct{}), 0)
+		if err != nil {
+			w.release(claim)
+			return
+		}
+	}
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	renewDone := make(chan error, 1)
+	go w.renew(ctx, cancel, claim, renewDone)
+	dispatchKey := workflowDispatchIdempotencyKey(claim.Candidate.InvocationID)
+	_, dispatchErr := w.dispatcher.Dispatch(ctx, workflowruntime.DispatchRequest{Claim: claim, Node: *definition, CallLineage: lineage, IdempotencyKey: dispatchKey, Target: target})
+	cancel()
+	renewErr := <-renewDone
+	if dispatchErr != nil || renewErr != nil {
+		w.release(claim)
+	}
+}
+
+func (w *workflowWorkers) loadRunIdentity(ctx context.Context, runID workflowruntime.RunID, seen map[workflowruntime.RunID]struct{}, depth int) (hoststate.IdentityBinding, error) {
+	if depth > 64 {
+		return hoststate.IdentityBinding{}, errors.New("workflow run identity lineage exceeds 64")
+	}
+	if _, duplicate := seen[runID]; duplicate {
+		return hoststate.IdentityBinding{}, errors.New("workflow run identity lineage contains a cycle")
+	}
+	seen[runID] = struct{}{}
+	defer delete(seen, runID)
+	start, err := w.roots.LoadStart(ctx, runID)
+	if err == nil {
+		return start.Record.Identity.Clone(), nil
+	}
+	if !errors.Is(err, workflowruntime.ErrNotFound) {
+		return hoststate.IdentityBinding{}, err
+	}
+	child, childErr := w.children.LoadChildRunRequest(ctx, runID)
+	if childErr == nil {
+		return w.loadRunIdentity(ctx, workflowruntime.RunID(child.Parent.RunID), seen, depth+1)
+	}
+	if !errors.Is(childErr, workflowruntime.ErrNotFound) {
+		return hoststate.IdentityBinding{}, childErr
+	}
+	replay, replayErr := w.replays.LoadReplayProvenance(ctx, runID)
+	if replayErr != nil {
+		return hoststate.IdentityBinding{}, replayErr
+	}
+	return w.loadRunIdentity(ctx, replay.SourceRunID, seen, depth+1)
+}
+
+func workflowDispatchIdempotencyKey(invocation workflowruntime.NodeInvocationID) string {
+	identity := string(invocation.RunID) + "\x00" + invocation.NodeID + "\x00" + invocation.Iteration
+	return "dispatch-" + values.SHA256Digest([]byte(identity))[7:39]
+}
+
+func (w *workflowWorkers) renew(ctx context.Context, cancel context.CancelFunc, claim workflowruntime.ReadyClaim, done chan<- error) {
+	ticker := time.NewTicker(workflowClaimRenew)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			done <- nil
+			return
+		case now := <-ticker.C:
+			lease, err := w.queue.Renew(ctx, workflowruntime.RenewLeaseRequest{
+				InvocationID: claim.Candidate.InvocationID, Owner: claim.Lease.Owner, Token: claim.Lease.Token,
+				Generation: claim.Lease.Generation, Now: now.UTC(), LeaseUntil: now.UTC().Add(workflowClaimLease),
+			})
+			if err != nil {
+				cancel()
+				done <- err
+				return
+			}
+			claim.Lease = lease
+		}
+	}
+}
+
+func (w *workflowWorkers) release(claim workflowruntime.ReadyClaim) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = w.queue.Release(ctx, workflowruntime.ReleaseClaimRequest{
+		InvocationID: claim.Candidate.InvocationID, Owner: claim.Lease.Owner, Token: claim.Lease.Token,
+		Generation: claim.Lease.Generation, Now: time.Now().UTC(),
+	})
+}
+
+func waitWorkflowPoll(ctx context.Context) bool {
+	timer := time.NewTimer(workflowIdlePoll)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}

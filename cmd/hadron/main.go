@@ -5,9 +5,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,19 +20,24 @@ import (
 	"github.com/hollis-labs/substrate/modules/httphost"
 	"github.com/hollis-labs/substrate/modules/mcp"
 	"github.com/hollis-labs/substrate/modules/policy"
-	"github.com/hollis-labs/substrate/modules/queue"
 	"github.com/hollis-labs/substrate/modules/scheduler"
 
 	"github.com/hollis-labs/hadron/internal/persistence"
+	"github.com/hollis-labs/hadron/internal/runtime"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// TODO(hadron): replace AllowAll with Hadron's policy decision point when the
-	// engine host is ported (phase 2). It exists so the skeleton starts.
+	// Route access is decided by the scopes each route declares; what a workflow
+	// run may do is decided inside the engine host (internal/runtime), so the
+	// framework decision point has nothing further to add.
 	policy.UsePDP(policy.AllowAll{})
+
+	// The scheduler module's runner is the workflow activation service, which
+	// exists only once the Runtime is built; Fires is bound to it in serve.
+	fires := runtime.RegisterScheduler()
 
 	migFS, migRoot := persistence.Migrations()
 	database.UseMigrationFS(migFS, migRoot)
@@ -43,31 +50,47 @@ func main() {
 	defer func() { _ = run.Stop(context.Background()) }()
 
 	root := cli.Root(run.App)
-	root.AddCommand(serveCmd(ctx, run.App), mcpCmd(ctx, run.App))
+	root.AddCommand(serveCmd(ctx, run.App, fires), mcpCmd(ctx, run.App))
 	if err := root.ExecuteContext(ctx); err != nil {
 		_ = run.Stop(context.Background())
 		os.Exit(1)
 	}
 }
 
-// serveCmd is the daemon: it starts the worker and the scheduler, then serves HTTP.
-func serveCmd(ctx context.Context, app *module.App) *cobra.Command {
+// serveCmd is the daemon: it builds the workflow runtime over the framework's
+// database, starts its workers and the scheduler engine, then serves HTTP.
+func serveCmd(ctx context.Context, app *module.App, fires *runtime.Fires) *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
 		Short: "Run the Hadron daemon",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			if err := queue.Run(app); err != nil {
+			cfg, err := runtime.ConfigFromApp(app)
+			if err != nil {
 				return err
 			}
-			if err := scheduler.Run(app); err != nil {
+			db := database.From(app)
+			if db == nil {
+				return errors.New("hadron: the database module is not started")
+			}
+			rt, err := runtime.New(persistence.NewStore(db.DB()), cfg,
+				runtime.WithFires(fires), runtime.WithSourceEngine(scheduler.Engine(app)))
+			if err != nil {
+				return err
+			}
+			// The runtime starts the scheduler engine with the recovered host.
+			if err := rt.Start(ctx); err != nil {
 				return err
 			}
 			h, err := httphost.Handler(app, httphost.Options{})
 			if err != nil {
+				_ = rt.Shutdown(context.Background())
 				return err
 			}
-			return httphost.Serve(ctx, app, h, httphost.ServeOptions{})
+			serveErr := httphost.Serve(ctx, app, h, httphost.ServeOptions{})
+			shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			return errors.Join(serveErr, rt.Shutdown(shutdown))
 		},
 	}
 }

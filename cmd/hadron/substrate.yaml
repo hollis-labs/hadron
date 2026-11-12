@@ -3,12 +3,11 @@ app: hadron
 variant: app-host
 profiles: [agentic]
 modules:
-  add: [cli, database, queue, scheduler, events, policy]
+  add: [cli, database, scheduler, events, policy]
 config:
   logging: { level: info, format: text }
   httphost: { addr: "127.0.0.1:8095" }
   database:
     sqlite: { path: hadron.db }
-  # The daemon command starts the worker and the engine; a short-lived command never does.
-  queue: { autostart: false }
+  # The runtime starts the scheduler engine with the recovered host; a short-lived command never does.
   scheduler: { autostart: false }

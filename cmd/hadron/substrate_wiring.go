@@ -14,15 +14,14 @@ import (
 	_ "github.com/hollis-labs/substrate/modules/logging"
 	_ "github.com/hollis-labs/substrate/modules/mcp"
 	_ "github.com/hollis-labs/substrate/modules/policy"
-	_ "github.com/hollis-labs/substrate/modules/queue"
 	_ "github.com/hollis-labs/substrate/modules/scheduler"
 	_ "github.com/hollis-labs/substrate/modules/secrets"
 )
 
 const (
 	substrateApp        = "hadron"
-	substrateConfigJSON = "{\"database\":{\"sqlite\":{\"path\":\"hadron.db\"}},\"httphost\":{\"addr\":\"127.0.0.1:8095\"},\"logging\":{\"format\":\"text\",\"level\":\"info\"},\"queue\":{\"autostart\":false},\"scheduler\":{\"autostart\":false}}"
+	substrateConfigJSON = "{\"database\":{\"sqlite\":{\"path\":\"hadron.db\"}},\"httphost\":{\"addr\":\"127.0.0.1:8095\"},\"logging\":{\"format\":\"text\",\"level\":\"info\"},\"scheduler\":{\"autostart\":false}}"
 )
 
 // substrateModules is the start order.
-var substrateModules = []string{"config", "logging", "health", "capabilities", "secrets", "auth", "httphost", "mcp", "cli", "database", "queue", "scheduler", "events", "policy"}
+var substrateModules = []string{"config", "logging", "health", "capabilities", "secrets", "auth", "httphost", "mcp", "cli", "database", "scheduler", "events", "policy"}
