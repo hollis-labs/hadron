@@ -27,18 +27,19 @@ jobs:
         run: |
           set -eu
           v="$(git rev-parse --short=12 HEAD)"
-          mkdir -p dist
+          dist="$RUNNER_TEMP/dist"   # outside the checkout, so the binary does not report a dirty tree
+          mkdir -p "$dist"
           for target in linux/amd64 darwin/arm64; do
             os="${target%/*}"; arch="${target#*/}"
             stage="$(mktemp -d)"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -o "$stage/hadron" ./cmd/hadron
-            tar -C "$stage" -czf "dist/hadron_${v}_${os}_${arch}.tar.gz" hadron
+            tar -C "$stage" -czf "$dist/hadron_${v}_${os}_${arch}.tar.gz" hadron
             rm -rf "$stage"
           done
-          (cd dist && sha256sum ./*.tar.gz > "hadron_${v}_SHA256SUMS")
-          cat "dist/hadron_${v}_SHA256SUMS"
+          (cd "$dist" && sha256sum ./*.tar.gz > "hadron_${v}_SHA256SUMS")
+          cat "$dist/hadron_${v}_SHA256SUMS"
       - uses: actions/upload-artifact@v4
         with:
           name: hadron-${{ github.sha }}
-          path: dist/
+          path: ${{ runner.temp }}/dist/
           retention-days: 30
