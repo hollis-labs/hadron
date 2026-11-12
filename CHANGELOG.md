@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The rest of the workflow CLI (resume, signal, rerun, waits, values, authoring, registry, exposure) and a `POST /api/workflows/runs/{id}/signal` route (signal was MCP-only before).
+
 - `hadron workflow run|validate|inspect|cancel|events|search`: operator commands that call the running daemon's `/api/workflows` routes with the framework's outbound token. Catalog search takes a required namespace (CLI flag and MCP argument).
 
 - A2A: the agent card (`/.well-known/agent.json`) and task endpoints (`/a2a/tasks`...) on the Substrate host through `Mounts`, scoped `hadron.run`; `internal/a2a` and `internal/agentcard` ported with their tests (without the blueprint-era skill builder).

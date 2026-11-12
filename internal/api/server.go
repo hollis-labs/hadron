@@ -59,6 +59,7 @@ type Dependencies struct {
 	AgentCard           AgentCardProvider
 	Workflows           appworkflow.WorkflowOperations
 	WorkflowReads       appworkflow.WorkflowRunReadOperations
+	WorkflowSignals     appworkflow.WorkflowSignalOperations
 	WorkflowLifecycle   appworkflow.WorkflowLifecycleOperations
 	WorkflowAuth        WorkflowRequestAuthenticator
 	WorkflowActivations WorkflowActivationService

@@ -33,7 +33,7 @@ Phases 0 and 1 of the port plan (Tesseract `plan_hadron_port_to_substrate_202611
 - **Merged on purpose** (fail forward): `hadron_workflow_run_subscribe` into `run_events` (`wait_ms`), and `run_resume`/`gate_submit`/`message_submit` into `run_resume` with `wake_source`. **Dropped**: `hadron_workflows_search`, `_load`, `_describe`, the dynamically generated per-workflow tools and the namespaces resource; they belonged to exposure sessions (a token's mounted tool profile), which the framework's identity replaces. Whether an agent should get per-workflow tools again is a design decision for the exposure redesign. `hadron_workflow_catalog_search` and `_inspect` cover discovery.
 - **Dropped with the old server**: the CORS middleware and its test (the framework's host owns cross-origin policy), the operator sign-in routes, and the credentials routes.
 - **A2A** (`internal/a2a`, `internal/agentcard`, `internal/api/a2a.go`): the agent card at `GET /.well-known/agent.json` and the task endpoints under `/a2a/tasks`, mounted through `httphost.Options.Mounts` (the protocol fixes those paths), scoped `hadron.run`. Decision to confirm: the card is **not** public (the old one was unauthenticated); it lists published workflows and their schemas, so it needs a token in enforce mode. Public discovery is a one-field change (`Mount.Open`). The base URL comes from the request host. The blueprint-era `SkillFromBlueprint` was not ported.
-- **CLI** (`cmd/hadron/workflow.go`): `hadron workflow run|validate|inspect|cancel|events|search`, a client of the daemon's `/api/workflows` routes with the framework's outbound token (`--server` or `httphost.addr`); output is the response JSON, failures print the flat `code (status): message`. Catalog search needs `--namespace` because the engine authorizes one namespace at a time (the same on the MCP tool). More subcommands (resume, signal, authoring, registry) follow the same helper. The stdio MCP server becoming a client too is CW-20261112-0011.
+- **CLI** (`cmd/hadron/workflow.go`): `hadron workflow run|validate|inspect|cancel|events|search`, a client of the daemon's `/api/workflows` routes with the framework's outbound token (`--server` or `httphost.addr`); output is the response JSON, failures print the flat `code (status): message`. Catalog search needs `--namespace` because the engine authorizes one namespace at a time (the same on the MCP tool). Also `resume`, `signal`, `rerun`, `waits`, `values`, `inspect-version`, `author validate|scaffold|test|register`, `registry package|publish|pin|unpin|clear-current` and `exposure inspect|pin|unpin` (drafts and suites are JSON files, `-` for stdin). `signal` had no HTTP route in the old API (MCP only); `/api/workflows/runs/{id}/signal` is new. The stdio MCP server becoming a client too is CW-20261112-0011.
 - **Not built**: `reveal_private` is passed to the operator, which authorizes it (no exposure-profile display policy).
 - **Not verified end to end**: enforce-mode access (a real token against each route and tool). The scope tables are unit-tested; the token flow belongs with the Cerberus/Tether auth setup.
 
@@ -48,10 +48,9 @@ Not carried forward (archive): `blueprint_registry`, `blueprint_versions`, `pipe
 
 ## Next
 
-1. Remaining CLI subcommands (resume, signal, authoring, registry, exposure).
-2. Agent sessions (`tetherhost`, `agentsubstrate`, `llmprovider`, `messagesubstrate`) behind the gated `agent_session@v1` kind, then hub relay.
-3. Exposure redesign, including whether agents get per-workflow tools again (owner wants to discuss).
-4. Frontend via app-shell. 5. Parity checklist and the owner's cutover decision.
+1. Agent sessions (`tetherhost`, `agentsubstrate`, `llmprovider`, `messagesubstrate`) behind the gated `agent_session@v1` kind, then hub relay.
+2. Exposure redesign, including whether agents get per-workflow tools again (owner wants to discuss).
+3. Frontend via app-shell. 4. Parity checklist and the owner's cutover decision.
 
 ## Decisions
 

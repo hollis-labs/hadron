@@ -20,6 +20,7 @@ func TestEveryWorkflowRouteHasItsScope(t *testing.T) {
 		{"POST", "/api/workflows/runs/r1/cancel", runtime.ScopeRun},
 		{"POST", "/api/workflows/runs/r1/resume", runtime.ScopeRun},
 		{"POST", "/api/workflows/runs/r1/rerun", runtime.ScopeRun},
+		{"POST", "/api/workflows/runs/r1/signal", runtime.ScopeRun},
 		{"POST", "/api/workflows/runs/r1/waits", runtime.ScopeRun},
 		{"POST", "/api/workflows/runs/r1/values", runtime.ScopeRun},
 		{"POST", "/api/workflows/runs/r1/events", runtime.ScopeRun},

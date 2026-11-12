@@ -128,6 +128,8 @@ func workflowCmd(ctx context.Context, app *module.App) *cobra.Command {
 	search.Flags().IntVar(&searchLimit, "limit", 20, "matches to return")
 
 	c.AddCommand(run, validate, inspect, cancel, events, search)
+	addWaitCommands(ctx, c, client)
+	addLifecycleCommands(ctx, c, client)
 	return c
 }
 

@@ -24,6 +24,7 @@ func RegisterScopes(t *libauth.ScopeTable) {
 		Route("POST", base+"/runs/{id}/cancel", run).
 		Route("POST", base+"/runs/{id}/resume", run).
 		Route("POST", base+"/runs/{id}/rerun", run).
+		Route("POST", base+"/runs/{id}/signal", run).
 		Route("POST", base+"/runs/{id}/waits", run).
 		Route("POST", base+"/runs/{id}/values", run).
 		Route("POST", base+"/runs/{id}/events", run).

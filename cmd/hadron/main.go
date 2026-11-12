@@ -109,7 +109,7 @@ func serveCmd(ctx context.Context, app *module.App, fires *runtime.Fires) *cobra
 				return err
 			}
 			srv := api.NewServer(api.Dependencies{
-				Workflows: rt.Operations(), WorkflowReads: rt.Operations(), WorkflowLifecycle: rt.Lifecycle(),
+				Workflows: rt.Operations(), WorkflowReads: rt.Operations(), WorkflowSignals: rt.Operations(), WorkflowLifecycle: rt.Lifecycle(),
 				WorkflowAuth:        runtime.RequestAuthenticator{Source: "http", Mode: auth.Guard(app).Mode},
 				WorkflowActivations: rt.Activations(), A2ATasks: rt.A2A(), AgentCard: rt.AgentCard(),
 			})

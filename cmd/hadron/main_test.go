@@ -263,6 +263,28 @@ func TestWorkflowCommandsTalkToTheRunningDaemon(t *testing.T) {
 	if err == nil || !strings.Contains(out, "(") {
 		t.Errorf("inspect of an unknown run: err=%v\n%s", err, out)
 	}
+	// Every remaining subcommand reaches a real route: an unknown run or profile
+	// is a flat workflow error, never an unmapped path (a bare 404/405 body).
+	payload := filepath.Join(dir, "payload.json")
+	if err := os.WriteFile(payload, []byte(`{"kind":"object","value":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"signal", "no-run", "--name", "n", "--correlation", "c", "--payload", payload},
+		{"resume", "no-run", "--wait-id", "w", "--correlation", "c", "--payload", payload},
+		{"rerun", "no-run", "--from-node", "n"},
+		{"waits", "no-run"},
+		{"values", "no-run"},
+		{"author", "validate", "--draft", payload},
+		{"registry", "publish", "team/none", "v1", "sha256:" + strings.Repeat("0", 64)},
+		{"exposure", "inspect", "no-profile"},
+		{"inspect-version", "team/none", "v1", "sha256:" + strings.Repeat("0", 64)},
+	} {
+		out, err := cli(args...)
+		if err == nil || strings.Contains(out, "daemon answered") || !strings.Contains(out, "(4") && !strings.Contains(out, "(5") {
+			t.Errorf("hadron workflow %v: err=%v\n%s", args, err, out)
+		}
+	}
 	// Nothing listening: a clear message, not a stack of connection errors.
 	out, err = cli("--server", "http://"+freeAddr(t), "search", "--namespace", "team")
 	if err == nil || !strings.Contains(out, "daemon unreachable") {

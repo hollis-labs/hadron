@@ -207,6 +207,8 @@ func (s *Server) handleWorkflowRunAction(w http.ResponseWriter, r *http.Request)
 		s.handleWorkflowResume(w, r, runID)
 	case "rerun":
 		s.handleWorkflowRerun(w, r, runID)
+	case "signal":
+		s.handleWorkflowSignal(w, r, runID)
 	case "waits", "values", "events":
 		s.handleWorkflowRead(w, r, runID, action)
 	default:
@@ -263,6 +265,28 @@ func (s *Server) handleWorkflowResume(w http.ResponseWriter, r *http.Request, ru
 	}
 	request.Identity = workflowHTTPIdentity(request.Identity)
 	result, err := s.deps.Workflows.ResumeWorkflowRun(ctx, request)
+	if err != nil {
+		s.writeWorkflowFailure(w, err, nil, false)
+		return
+	}
+	writeWorkflowJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleWorkflowSignal(w http.ResponseWriter, r *http.Request, runID appworkflow.RunID) {
+	if s.deps.WorkflowSignals == nil {
+		writeWorkflowOperationError(w, http.StatusServiceUnavailable, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeUnavailable})
+		return
+	}
+	var request appworkflow.SignalWorkflowRunRequest
+	if !decodeWorkflowRequest(w, r, &request) || !workflowRunIDMatches(w, runID, request.RunID) || !workflowIdempotencyKey(w, r, &request.IdempotencyKey) {
+		return
+	}
+	ctx, ok := s.authenticateWorkflow(w, r, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessSignal, RunID: runID}, false)
+	if !ok {
+		return
+	}
+	request.Identity = workflowHTTPIdentity(request.Identity)
+	result, err := s.deps.WorkflowSignals.SignalWorkflowRun(ctx, request)
 	if err != nil {
 		s.writeWorkflowFailure(w, err, nil, false)
 		return
