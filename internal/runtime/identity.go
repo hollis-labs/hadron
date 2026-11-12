@@ -80,12 +80,12 @@ func BindingFromPrincipal(p libauth.Principal, sourceAuthority string) hoststate
 // permissive or enforce mode an unverified caller authenticates nothing.
 func Authenticate(ctx context.Context, mode libauth.Mode, sourceAuthority string) (context.Context, error) {
 	if p, ok := libauth.FromContext(ctx); ok && p.Verified {
-		return appworkflow.WithAuthenticatedIdentity(ctx, BindingFromPrincipal(p, sourceAuthority))
+		return bindWithSubject(ctx, BindingFromPrincipal(p, sourceAuthority), SubjectFromPrincipal(p))
 	}
 	if mode == libauth.ModeOff {
 		binding := localWorkflowIdentity()
 		binding.SourceAuthority = sourceAuthority
-		return appworkflow.WithAuthenticatedIdentity(ctx, binding)
+		return bindWithSubject(ctx, binding, localSubject())
 	}
 	return nil, appworkflow.ErrWorkflowUnauthenticated
 }
@@ -99,4 +99,14 @@ func operatorConfirmAuthorizer(_ context.Context, identity hoststate.IdentityBin
 		return true
 	}
 	return identity.Trust == trustVerified && hasWorkflowGrant(identity, grantConfirm)
+}
+
+// bindWithSubject attaches both the host identity and the access subject, so
+// the definition authorizer can tell an administrator from a profile-bound caller.
+func bindWithSubject(ctx context.Context, binding hoststate.IdentityBinding, subject Subject) (context.Context, error) {
+	bound, err := appworkflow.WithAuthenticatedIdentity(ctx, binding)
+	if err != nil {
+		return nil, err
+	}
+	return withSubject(bound, subject), nil
 }

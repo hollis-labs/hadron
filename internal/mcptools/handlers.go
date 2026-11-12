@@ -9,7 +9,7 @@ import (
 
 type args = map[string]any
 
-func (s *surface) validate(ctx context.Context, a args) (any, error) {
+func (s *Surface) validate(ctx context.Context, a args) (any, error) {
 	if err := unavailable(s.deps.Operations); err != nil {
 		return nil, err
 	}
@@ -17,7 +17,7 @@ func (s *surface) validate(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) run(ctx context.Context, a args) (any, error) {
+func (s *Surface) run(ctx context.Context, a args) (any, error) {
 	if err := unavailable(s.deps.Operations); err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (s *surface) run(ctx context.Context, a args) (any, error) {
 	return workflowStartResult(appworkflow.RunID(id), started, err)
 }
 
-func (s *surface) inspect(ctx context.Context, a args) (any, error) {
+func (s *Surface) inspect(ctx context.Context, a args) (any, error) {
 	if err := unavailable(s.deps.Operations); err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (s *surface) inspect(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) cancel(ctx context.Context, a args) (any, error) {
+func (s *Surface) cancel(ctx context.Context, a args) (any, error) {
 	if err := unavailable(s.deps.Operations); err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (s *surface) cancel(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) events(ctx context.Context, a args) (any, error) {
+func (s *Surface) events(ctx context.Context, a args) (any, error) {
 	if err := unavailable(s.deps.Reads); err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (s *surface) events(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) resume(ctx context.Context, a args) (any, error) {
+func (s *Surface) resume(ctx context.Context, a args) (any, error) {
 	if err := unavailable(s.deps.Operations); err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (s *surface) resume(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) signal(ctx context.Context, a args) (any, error) {
+func (s *Surface) signal(ctx context.Context, a args) (any, error) {
 	if err := unavailable(s.deps.Signals); err != nil {
 		return nil, err
 	}

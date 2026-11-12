@@ -18,6 +18,8 @@ type runtimeOptions struct {
 	// endpoint (tests inject a fake); tetherNow replaces the session host clock.
 	tetherClient tetherhost.Client
 	tetherNow    func() time.Time
+	access       AccessChecker
+	pdp          *AccessPDP
 }
 
 // WithTetherClient injects the Tether client in place of the one built from the

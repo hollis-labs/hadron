@@ -40,6 +40,10 @@ func (s *Server) handleWorkflowLifecycle(w http.ResponseWriter, r *http.Request)
 		s.handleWorkflowExposureInspect(w, r)
 	case "exposure/pin-definition", "exposure/unpin-definition":
 		s.handleWorkflowExposureMutation(w, r, action)
+	case "exposure/put-profile":
+		s.handleWorkflowExposurePut(w, r)
+	case "exposure/delete-profile":
+		s.handleWorkflowExposureDelete(w, r)
 	default:
 		writeWorkflowOperationError(w, http.StatusNotFound, appworkflow.WorkflowOperationError{Code: appworkflow.WorkflowErrorCodeNotFound})
 	}
@@ -210,6 +214,34 @@ func (s *Server) handleWorkflowExposureMutation(w http.ResponseWriter, r *http.R
 		result, err = s.deps.WorkflowLifecycle.UnpinWorkflowExposure(ctx, request)
 	}
 	s.writeWorkflowLifecycleResult(w, result, err, true)
+}
+
+func (s *Server) handleWorkflowExposurePut(w http.ResponseWriter, r *http.Request) {
+	var request appworkflow.PutWorkflowExposureProfileRequest
+	if !decodeWorkflowRequest(w, r, &request) {
+		return
+	}
+	ctx, ok := s.authenticateWorkflowLifecycle(w, r, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessExposurePut}, false)
+	if !ok {
+		return
+	}
+	request.Identity = workflowHTTPIdentity(request.Identity)
+	result, err := s.deps.WorkflowLifecycle.PutWorkflowExposureProfile(ctx, request)
+	s.writeWorkflowLifecycleResult(w, result, err, false)
+}
+
+func (s *Server) handleWorkflowExposureDelete(w http.ResponseWriter, r *http.Request) {
+	var request appworkflow.DeleteWorkflowExposureProfileRequest
+	if !decodeWorkflowRequest(w, r, &request) {
+		return
+	}
+	ctx, ok := s.authenticateWorkflowLifecycle(w, r, appworkflow.WorkflowAccessIntent{Operation: appworkflow.WorkflowAccessExposureDelete}, false)
+	if !ok {
+		return
+	}
+	request.Identity = workflowHTTPIdentity(request.Identity)
+	result, err := s.deps.WorkflowLifecycle.DeleteWorkflowExposureProfile(ctx, request)
+	s.writeWorkflowLifecycleResult(w, result, err, false)
 }
 
 func (s *Server) authenticateWorkflowLifecycle(w http.ResponseWriter, r *http.Request, intent appworkflow.WorkflowAccessIntent, hideDenied bool) (context.Context, bool) {

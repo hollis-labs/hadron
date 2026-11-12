@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Exposure and access (decision D4): exposure profiles decide which workflows a caller may use, enforced through the policy engine; the profile id is the token scope `hadron.profile.<id>`; administrators (`hadron.manage`) are unrestricted. One typed MCP tool per exposed workflow, listed per caller and kept in step with the catalog. Profile `put` and `delete` on HTTP, MCP and the CLI (profiles could not be created before). The agent card is filtered the same way. Tested end to end against the binary with enforcing auth and policy. Needs Substrate `57d54cf` (`mcp.UseToolFilter`).
+
 - `hadron build`, workflow file and `ns/name@version` references, `explain`, and `-o text|json|yaml` output with `file:line:col` diagnostics on the workflow CLI. Every ref-taking command now takes one reference instead of NAME VERSION DIGEST.
 - API schema v2 (`internal/api/schema`), HTTP trace propagation with an opt-in exporter (`HADRON_OTEL`), and the workflow examples with an acceptance test.
 

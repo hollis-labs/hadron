@@ -1,10 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/hollis-labs/libs/workflow/engine/graph"
 	"github.com/spf13/cobra"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
 
 // payloadFlags read a typed value from --payload FILE ('-' for stdin) or --payload-json.
@@ -209,6 +213,32 @@ func (e *cliEnv) addLifecycle(root *cobra.Command) {
 			return e.do(cmd, base+"exposure/inspect", appworkflow.InspectWorkflowExposureRequest{ProfileID: a[0]}, "", nil)
 		},
 	})
+	var putGeneration uint64
+	put := &cobra.Command{
+		Use: "put <profile.json>", Short: "Create (--expected-generation 0) or replace an exposure profile; callers hold it with the scope hadron.profile.<id>", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, a []string) error {
+			p, err := jsonArg(a[0], cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			var rec hoststate.ExposureProfileRecord
+			if err := json.Unmarshal(p, &rec); err != nil {
+				return fmt.Errorf("%s is not an exposure profile: %w", a[0], err)
+			}
+			return e.do(cmd, base+"exposure/put-profile", appworkflow.PutWorkflowExposureProfileRequest{Profile: rec, ExpectedGeneration: putGeneration}, "", nil)
+		},
+	}
+	put.Flags().Uint64Var(&putGeneration, "expected-generation", 0, "the generation being replaced; 0 creates")
+	var delGeneration uint64
+	del := &cobra.Command{
+		Use: "delete <profile-id>", Short: "Delete an exposure profile; callers holding its claim then use nothing", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, a []string) error {
+			return e.do(cmd, base+"exposure/delete-profile", appworkflow.DeleteWorkflowExposureProfileRequest{ProfileID: a[0], ExpectedGeneration: delGeneration}, "", nil)
+		},
+	}
+	del.Flags().Uint64Var(&delGeneration, "expected-generation", 0, "the generation being deleted (from inspect)")
+	_ = del.MarkFlagRequired("expected-generation")
+	exposure.AddCommand(put, del)
 	var generation uint64
 	for _, spec := range []struct{ use, short, path string }{
 		{"pin", "Pin one exact definition in a profile", "exposure/pin-definition"},

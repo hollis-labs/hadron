@@ -299,6 +299,23 @@ func TestWorkflowCommandsTalkToTheRunningDaemon(t *testing.T) {
 			t.Errorf("hadron workflow %v: err=%v\n%s", args, err, out)
 		}
 	}
+	// A profile can be created, read back and deleted from the CLI.
+	profile := filepath.Join(dir, "profile.json")
+	if err := os.WriteFile(profile, []byte(`{"id":"cli-profile","max_direct_tools":3,"search_scope":"none"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := cli("exposure", "put", profile); err != nil || !strings.Contains(out, "cli-profile") {
+		t.Fatalf("exposure put: %v\n%s", err, out)
+	}
+	if out, err := cli("exposure", "inspect", "cli-profile", "-o", "json"); err != nil || !strings.Contains(out, `"generation": 1`) {
+		t.Fatalf("exposure inspect: %v\n%s", err, out)
+	}
+	if out, err := cli("exposure", "delete", "cli-profile", "--expected-generation", "1"); err != nil || !strings.Contains(out, "deleted") {
+		t.Fatalf("exposure delete: %v\n%s", err, out)
+	}
+	if out, err := cli("exposure", "inspect", "cli-profile"); err == nil {
+		t.Fatalf("a deleted profile still inspects: %s", out)
+	}
 	// Nothing listening: a clear message, not a stack of connection errors.
 	out, err = cli("--server", "http://"+freeAddr(t), "search", "--namespace", "team")
 	if err == nil || !strings.Contains(out, "daemon unreachable") {

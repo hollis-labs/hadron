@@ -20,7 +20,7 @@ import (
 
 const (
 	substrateApp        = "hadron"
-	substrateConfigJSON = "{\"database\":{\"sqlite\":{\"path\":\"hadron.db\"}},\"httphost\":{\"addr\":\"127.0.0.1:8095\"},\"logging\":{\"format\":\"text\",\"level\":\"info\"},\"scheduler\":{\"autostart\":false}}"
+	substrateConfigJSON = "{\"database\":{\"sqlite\":{\"path\":\"hadron.db\"}},\"httphost\":{\"addr\":\"127.0.0.1:8095\"},\"logging\":{\"format\":\"text\",\"level\":\"info\"},\"policy\":{\"mode\":\"shadow\"},\"scheduler\":{\"autostart\":false}}"
 )
 
 // substrateModules is the start order.

@@ -44,6 +44,8 @@ type WorkflowLifecycleOperations interface {
 	InspectWorkflowExposure(context.Context, InspectWorkflowExposureRequest) (hoststate.ExposureProfileSnapshot, error)
 	PinWorkflowExposure(context.Context, MutateWorkflowExposureRequest) (hoststate.ExposureProfileSnapshot, error)
 	UnpinWorkflowExposure(context.Context, MutateWorkflowExposureRequest) (hoststate.ExposureProfileSnapshot, error)
+	PutWorkflowExposureProfile(context.Context, PutWorkflowExposureProfileRequest) (hoststate.ExposureProfileSnapshot, error)
+	DeleteWorkflowExposureProfile(context.Context, DeleteWorkflowExposureProfileRequest) (WorkflowExposureProfileDeleted, error)
 }
 
 type WorkflowLifecycleOptions struct {
@@ -226,6 +228,29 @@ type MutateWorkflowExposureRequest struct {
 	Definition         graph.DefinitionRef `json:"definition"`
 	ExpectedGeneration uint64              `json:"expected_generation"`
 	Identity           IdentityRequest     `json:"identity"`
+}
+
+// PutWorkflowExposureProfileRequest creates (ExpectedGeneration 0) or replaces a
+// profile: the set of exact workflows, namespaces and search scope a caller
+// holding the profile claim may use. A caller names a profile with the scope
+// hadron.profile.<id>.
+type PutWorkflowExposureProfileRequest struct {
+	Profile            hoststate.ExposureProfileRecord `json:"profile"`
+	ExpectedGeneration uint64                          `json:"expected_generation"`
+	Identity           IdentityRequest                 `json:"identity"`
+}
+
+type DeleteWorkflowExposureProfileRequest struct {
+	ProfileID          string          `json:"profile_id"`
+	ExpectedGeneration uint64          `json:"expected_generation"`
+	Identity           IdentityRequest `json:"identity"`
+}
+
+// WorkflowExposureProfileDeleted acknowledges a deletion. A caller still
+// holding the deleted profile's claim falls back to nothing.
+type WorkflowExposureProfileDeleted struct {
+	ProfileID string `json:"profile_id"`
+	Deleted   bool   `json:"deleted"`
 }
 
 func (s *WorkflowLifecycleService) SearchWorkflowCatalog(ctx context.Context, request SearchWorkflowCatalogRequest) (WorkflowCatalogSearchResult, error) {
@@ -620,6 +645,26 @@ func (s *WorkflowLifecycleService) UnpinWorkflowExposure(ctx context.Context, re
 		return hoststate.ExposureProfileSnapshot{}, err
 	}
 	return s.exposure.UnpinProfileDefinition(ctx, request.ProfileID, request.Definition, request.ExpectedGeneration)
+}
+
+func (s *WorkflowLifecycleService) PutWorkflowExposureProfile(ctx context.Context, request PutWorkflowExposureProfileRequest) (hoststate.ExposureProfileSnapshot, error) {
+	if _, err := s.bind(ctx, request.Identity); err != nil {
+		return hoststate.ExposureProfileSnapshot{}, err
+	}
+	if err := s.exposure.preflightProfilePins(ctx, canonicalExposureProfile(request.Profile)); err != nil {
+		return hoststate.ExposureProfileSnapshot{}, err
+	}
+	return s.exposure.PutProfile(ctx, request.Profile, request.ExpectedGeneration)
+}
+
+func (s *WorkflowLifecycleService) DeleteWorkflowExposureProfile(ctx context.Context, request DeleteWorkflowExposureProfileRequest) (WorkflowExposureProfileDeleted, error) {
+	if _, err := s.bind(ctx, request.Identity); err != nil {
+		return WorkflowExposureProfileDeleted{}, err
+	}
+	if err := s.exposure.DeleteProfile(ctx, request.ProfileID, request.ExpectedGeneration); err != nil {
+		return WorkflowExposureProfileDeleted{}, err
+	}
+	return WorkflowExposureProfileDeleted{ProfileID: request.ProfileID, Deleted: true}, nil
 }
 
 func (s *WorkflowLifecycleService) boundExact(ctx context.Context, identity IdentityRequest, ref graph.DefinitionRef) (hoststate.IdentityBinding, hadronregistry.WorkflowQuery, error) {

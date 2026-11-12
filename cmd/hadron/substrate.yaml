@@ -11,3 +11,7 @@ config:
     sqlite: { path: hadron.db }
   # The runtime starts the scheduler engine with the recovered host; a short-lived command never does.
   scheduler: { autostart: false }
+  # Which workflows a caller may use is a policy decision over its exposure
+  # profile. Shadow audits would-be denials and allows them (dev); release sets
+  # enforce.
+  policy: { mode: shadow }

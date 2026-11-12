@@ -81,6 +81,7 @@ type Runtime struct {
 	lifecycle  *appworkflow.WorkflowLifecycleService
 	a2a        *a2a.Handler
 	card       *agentcard.Builder
+	access     *accessGate
 	// agentSessions is the Tether-backed session host, nil while agent_session@v1 stays gated.
 	agentSessions   *tetherhost.Host
 	catalog         *productionWorkflowCatalog
@@ -195,6 +196,7 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 	// runs through Host's policy gate, while Host receives call@v1. The
 	// deferred resolver, context provider, and child-run executor are bound as
 	// soon as their targets exist, before the runtime starts.
+	access := &accessGate{custom: opts.access}
 	callResolver := &productionCallResolver{}
 	callContext := &workflowCallContext{}
 	callChildRuns := &productionChildRuns{}
@@ -245,7 +247,7 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 	resolver, err := appworkflow.NewDefinitionResolver(appworkflow.DefinitionResolverOptions{
 		Roots: []string{workflowRoot}, FileAuthority: "local", FileTrustClass: "local",
 		Registry: catalog, Authoring: stager, BundledDefinitions: journal,
-		Authorizer: appworkflow.DefinitionAuthorizerFunc(func(context.Context, appworkflow.DefinitionAuthorization) error { return nil }),
+		Authorizer: appworkflow.DefinitionAuthorizerFunc(access.authorize),
 		Compile: appworkflow.DefinitionCompileOptions{
 			StepKinds: compileKinds, SemanticRevision: "hadrond-production-v2",
 			PolicyHooks:   policyHooks,
@@ -328,6 +330,10 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 	if err != nil {
 		return nil, err
 	}
+	access.bind(exposure)
+	if opts.pdp != nil {
+		opts.pdp.bind(access)
+	}
 	attestor, err := openWorkflowContractAttestor(filepath.Join(cfg.DataDir, "workflow-contract-attestor.key"))
 	if err != nil {
 		return nil, err
@@ -372,16 +378,19 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 	if err != nil {
 		return nil, err
 	}
-	card, err := agentcard.NewBuilder(exposure)
+	visible := &visibleSource{}
+	card, err := agentcard.NewBuilder(visible)
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{
-		card: card, agentSessions: agentSessions,
+	rt := &Runtime{
+		card: card, agentSessions: agentSessions, access: access,
 		host: host, operations: operations, exposure: exposure, lifecycle: lifecycle, a2a: a2aHandler,
 		catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
 		sourceActivations: sourceActivationLifecycle, externalActivations: activationpkg.ActivationManager{Service: activationService},
-	}, nil
+	}
+	visible.bind(rt)
+	return rt, nil
 }
 
 func (r *Runtime) Start(ctx context.Context) error {

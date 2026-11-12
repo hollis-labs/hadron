@@ -391,6 +391,26 @@
       ],
       "type": "object"
     },
+    "AppworkflowDeleteWorkflowExposureProfileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_generation": {
+          "type": "integer"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_generation",
+        "identity",
+        "profile_id"
+      ],
+      "type": "object"
+    },
     "AppworkflowExplainWorkflowRequest": {
       "additionalProperties": false,
       "properties": {
@@ -641,6 +661,26 @@
         "definition",
         "identity",
         "suite"
+      ],
+      "type": "object"
+    },
+    "AppworkflowPutWorkflowExposureProfileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_generation": {
+          "type": "integer"
+        },
+        "identity": {
+          "$ref": "#/$defs/AppworkflowIdentityRequest"
+        },
+        "profile": {
+          "$ref": "#/$defs/HoststateExposureProfileRecord"
+        }
+      },
+      "required": [
+        "expected_generation",
+        "identity",
+        "profile"
       ],
       "type": "object"
     },
@@ -1666,6 +1706,22 @@
       ],
       "type": "object"
     },
+    "AppworkflowWorkflowExposureProfileDeleted": {
+      "additionalProperties": false,
+      "properties": {
+        "deleted": {
+          "type": "boolean"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deleted",
+        "profile_id"
+      ],
+      "type": "object"
+    },
     "AppworkflowWorkflowExposureProvenance": {
       "additionalProperties": false,
       "properties": {
@@ -2008,6 +2064,9 @@
     },
     "CancelWorkflowRunResult": {
       "$ref": "#/$defs/AppworkflowCancelWorkflowRunResult"
+    },
+    "DeleteWorkflowExposureProfileRequest": {
+      "$ref": "#/$defs/AppworkflowDeleteWorkflowExposureProfileRequest"
     },
     "DiagnosticCode": {
       "type": "string"
@@ -2621,6 +2680,9 @@
     },
     "PackageWorkflowVersionRequest": {
       "$ref": "#/$defs/AppworkflowPackageWorkflowVersionRequest"
+    },
+    "PutWorkflowExposureProfileRequest": {
+      "$ref": "#/$defs/AppworkflowPutWorkflowExposureProfileRequest"
     },
     "RegisterWorkflowDraftRequest": {
       "$ref": "#/$defs/AppworkflowRegisterWorkflowDraftRequest"
@@ -5095,6 +5157,9 @@
     "WorkflowExposureProfile": {
       "$ref": "#/$defs/HoststateExposureProfileSnapshot"
     },
+    "WorkflowExposureProfileDeleted": {
+      "$ref": "#/$defs/AppworkflowWorkflowExposureProfileDeleted"
+    },
     "WorkflowFailureDiagnostic": {
       "$ref": "#/$defs/RundiagnosticsFailureDiagnostic"
     },
@@ -5400,6 +5465,22 @@
       "path": "/api/workflows/lifecycle/exposure/pin-definition",
       "request": "MutateWorkflowExposureRequest",
       "response": "WorkflowExposureProfile",
+      "scope": "hadron.manage"
+    },
+    {
+      "name": "putWorkflowExposureProfile",
+      "method": "POST",
+      "path": "/api/workflows/lifecycle/exposure/put-profile",
+      "request": "PutWorkflowExposureProfileRequest",
+      "response": "WorkflowExposureProfile",
+      "scope": "hadron.manage"
+    },
+    {
+      "name": "deleteWorkflowExposureProfile",
+      "method": "POST",
+      "path": "/api/workflows/lifecycle/exposure/delete-profile",
+      "request": "DeleteWorkflowExposureProfileRequest",
+      "response": "WorkflowExposureProfileDeleted",
       "scope": "hadron.manage"
     },
     {

@@ -9,16 +9,17 @@ import (
 	"github.com/hollis-labs/libs/workflow/engine/graph"
 
 	"github.com/hollis-labs/hadron/internal/appworkflow"
+	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
 
-func (s *surface) lifecycle() (appworkflow.WorkflowLifecycleOperations, error) {
+func (s *Surface) lifecycle() (appworkflow.WorkflowLifecycleOperations, error) {
 	if nilInterfaceValue(s.deps.Lifecycle) {
 		return nil, workflowFailure(appworkflow.ErrHostNotReady)
 	}
 	return s.deps.Lifecycle, nil
 }
 
-func (s *surface) catalogSearch(ctx context.Context, a args) (any, error) {
+func (s *Surface) catalogSearch(ctx context.Context, a args) (any, error) {
 	l, err := s.lifecycle()
 	if err != nil {
 		return nil, err
@@ -36,7 +37,7 @@ func (s *surface) catalogSearch(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) catalogInspect(ctx context.Context, a args) (any, error) {
+func (s *Surface) catalogInspect(ctx context.Context, a args) (any, error) {
 	l, err := s.lifecycle()
 	if err != nil {
 		return nil, err
@@ -51,7 +52,7 @@ type contractInput struct {
 	MakeCurrent bool                              `json:"make_current,omitempty"`
 }
 
-func (s *surface) authorValidate(ctx context.Context, a args) (any, error) {
+func (s *Surface) authorValidate(ctx context.Context, a args) (any, error) {
 	l, err := s.lifecycle()
 	if err != nil {
 		return nil, err
@@ -66,7 +67,7 @@ func (s *surface) authorValidate(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) authorScaffold(ctx context.Context, a args) (any, error) {
+func (s *Surface) authorScaffold(ctx context.Context, a args) (any, error) {
 	l, err := s.lifecycle()
 	if err != nil {
 		return nil, err
@@ -81,7 +82,7 @@ func (s *surface) authorScaffold(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) authorTest(ctx context.Context, a args) (any, error) {
+func (s *Surface) authorTest(ctx context.Context, a args) (any, error) {
 	l, err := s.lifecycle()
 	if err != nil {
 		return nil, err
@@ -94,7 +95,7 @@ func (s *surface) authorTest(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) authorRegister(ctx context.Context, a args) (any, error) {
+func (s *Surface) authorRegister(ctx context.Context, a args) (any, error) {
 	l, err := s.lifecycle()
 	if err != nil {
 		return nil, err
@@ -107,7 +108,7 @@ func (s *surface) authorRegister(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) registryPackage(ctx context.Context, a args) (any, error) {
+func (s *Surface) registryPackage(ctx context.Context, a args) (any, error) {
 	l, err := s.lifecycle()
 	if err != nil {
 		return nil, err
@@ -126,7 +127,7 @@ func (s *surface) registryPackage(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) registryMutation(op string) func(context.Context, args) (any, error) {
+func (s *Surface) registryMutation(op string) func(context.Context, args) (any, error) {
 	return func(ctx context.Context, a args) (any, error) {
 		l, err := s.lifecycle()
 		if err != nil {
@@ -148,7 +149,7 @@ func (s *surface) registryMutation(op string) func(context.Context, args) (any, 
 	}
 }
 
-func (s *surface) exposureInspect(ctx context.Context, a args) (any, error) {
+func (s *Surface) exposureInspect(ctx context.Context, a args) (any, error) {
 	l, err := s.lifecycle()
 	if err != nil {
 		return nil, err
@@ -157,7 +158,7 @@ func (s *surface) exposureInspect(ctx context.Context, a args) (any, error) {
 	return workflowResult(r, err)
 }
 
-func (s *surface) exposureMutation(remove bool) func(context.Context, args) (any, error) {
+func (s *Surface) exposureMutation(remove bool) func(context.Context, args) (any, error) {
 	return func(ctx context.Context, a args) (any, error) {
 		l, err := s.lifecycle()
 		if err != nil {
@@ -194,4 +195,33 @@ func exactUint64Argument(a args, key string) (uint64, error) {
 		return 0, errors.New("exact integer argument is invalid")
 	}
 	return strconv.ParseUint(string(n), 10, 64)
+}
+
+func (s *Surface) exposurePut(ctx context.Context, a args) (any, error) {
+	l, err := s.lifecycle()
+	if err != nil {
+		return nil, err
+	}
+	var in struct {
+		Profile            hoststate.ExposureProfileRecord `json:"profile"`
+		ExpectedGeneration uint64                          `json:"expected_generation"`
+	}
+	if err := decodeWorkflowArguments(a, &in); err != nil {
+		return nil, workflowFailure(err)
+	}
+	r, err := l.PutWorkflowExposureProfile(ctx, appworkflow.PutWorkflowExposureProfileRequest{Profile: in.Profile, ExpectedGeneration: in.ExpectedGeneration, Identity: identity()})
+	return workflowResult(r, err)
+}
+
+func (s *Surface) exposureDelete(ctx context.Context, a args) (any, error) {
+	l, err := s.lifecycle()
+	if err != nil {
+		return nil, err
+	}
+	expected, err := exactUint64Argument(a, "expected_generation")
+	if err != nil || expected == 0 {
+		return nil, workflowFailure(errors.New("expected_generation must be an exact positive integer"))
+	}
+	r, err := l.DeleteWorkflowExposureProfile(ctx, appworkflow.DeleteWorkflowExposureProfileRequest{ProfileID: argString(a, "profile_id", ""), ExpectedGeneration: expected, Identity: identity()})
+	return workflowResult(r, err)
 }

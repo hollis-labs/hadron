@@ -36,6 +36,8 @@ func TestEveryWorkflowRouteHasItsScope(t *testing.T) {
 		{"POST", "/api/workflows/lifecycle/author/register", runtime.ScopeManage},
 		{"POST", "/api/workflows/lifecycle/registry/publish", runtime.ScopeManage},
 		{"POST", "/api/workflows/lifecycle/exposure/pin-definition", runtime.ScopeManage},
+		{"POST", "/api/workflows/lifecycle/exposure/put-profile", runtime.ScopeManage},
+		{"POST", "/api/workflows/lifecycle/exposure/delete-profile", runtime.ScopeManage},
 	} {
 		got, known := table.ForRoute(c.method, c.path)
 		if !known || got != c.scope {

@@ -333,6 +333,49 @@ func (s *WorkflowExposureService) ResolveSession(ctx context.Context, sessionID,
 	return bound, resolved.Clone(), nil
 }
 
+// ResolveProfile builds the session of a caller the transport has already
+// authenticated, from the exposure profile its verified claim names. There is no
+// durable principal record: the session is authenticated, carries the profile
+// (or the default meta-only profile when profileID is empty) and is re-checked
+// against the profile's current generation. An unknown profile id is an error,
+// so a typo cannot widen access.
+func (s *WorkflowExposureService) ResolveProfile(ctx context.Context, profileID string) (WorkflowExposureSession, error) {
+	if ctx == nil {
+		return WorkflowExposureSession{}, errors.New("workflow exposure context is required")
+	}
+	session := WorkflowExposureSession{SessionID: "claim", Authenticated: true, Profile: defaultExposureProfile()}
+	if profileID == "" {
+		return session, nil
+	}
+	snapshot, err := s.store.GetExposureProfile(ctx, profileID)
+	if err != nil {
+		return WorkflowExposureSession{}, fmt.Errorf("%w: assigned workflow exposure profile is unavailable", ErrPolicyDenied)
+	}
+	session.Profile, session.ProfileGeneration = snapshot.Record, snapshot.Generation
+	return session.Clone(), nil
+}
+
+// AuthorizeDefinition reports whether the session's profile lets its caller use
+// the exact registry definition: pinned by the profile, or inside its search
+// scope. Anything else, including a definition the catalog cannot resolve, is
+// ErrWorkflowHidden, which transports render as not found.
+func (s *WorkflowExposureService) AuthorizeDefinition(ctx context.Context, session WorkflowExposureSession, ref graph.DefinitionRef) error {
+	if err := s.reauthorize(ctx, session); err != nil {
+		return err
+	}
+	if !session.Authenticated || ref.Kind != "registry" || ref.ID == "" || ref.Version == "" || ref.Digest == "" {
+		return ErrWorkflowHidden
+	}
+	if err := s.requireGraphDependencies(); err != nil {
+		return err
+	}
+	resolution, err := s.catalog.ResolveWorkflow(ctx, registry.WorkflowQuery{Name: ref.ID, Version: ref.Version, Digest: ref.Digest})
+	if err != nil || !definitionAllowedBySession(session, resolution.Record) {
+		return ErrWorkflowHidden
+	}
+	return nil
+}
+
 // ContextIdentityProvider binds only identity facts placed in the context by
 // a trusted transport authenticator. Selectors may narrow those facts but
 // transported principals, attributes, or authorities can never replace them.
@@ -902,6 +945,9 @@ func (s *WorkflowExposureService) reauthorize(ctx context.Context, session Workf
 	if !session.Authenticated {
 		return nil
 	}
+	if session.Principal.Record.ID == "" {
+		return s.reauthorizeProfile(ctx, session)
+	}
 	current, err := s.store.GetMCPPrincipal(ctx, session.Principal.Record.ID)
 	if err != nil || current.Generation != session.Principal.Generation || !reflect.DeepEqual(current.Public(), session.Principal.Public()) {
 		return fmt.Errorf("%w: MCP principal changed", ErrPolicyDenied)
@@ -977,6 +1023,22 @@ func searchAllowsRecord(profile hoststate.ExposureProfileRecord, record registry
 	default:
 		return false
 	}
+}
+
+// reauthorizeProfile re-checks a claim-resolved session (no principal record)
+// against the profile's current generation and content.
+func (s *WorkflowExposureService) reauthorizeProfile(ctx context.Context, session WorkflowExposureSession) error {
+	if session.Profile.ID == defaultExposureProfile().ID {
+		if session.ProfileGeneration != 0 || !reflect.DeepEqual(session.Profile, defaultExposureProfile()) {
+			return fmt.Errorf("%w: default exposure profile changed", ErrPolicyDenied)
+		}
+		return nil
+	}
+	profile, err := s.store.GetExposureProfile(ctx, session.Profile.ID)
+	if err != nil || profile.Generation != session.ProfileGeneration || !reflect.DeepEqual(profile.Record, session.Profile) {
+		return fmt.Errorf("%w: exposure profile changed", ErrPolicyDenied)
+	}
+	return nil
 }
 
 func definitionAllowedBySession(session WorkflowExposureSession, record registry.WorkflowRecord) bool {

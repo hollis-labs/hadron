@@ -11,7 +11,7 @@ Legend: **Done** = present and tested. **Changed** = present in a deliberately d
 | D1 | `hadron build` | Port. **Done** (`internal/offlinebuild`, `hadron build`). It compiles with the Go toolchain inside the Hadron module source tree, as before, so it works from a source checkout, not from a downloaded release binary |
 | D2 | Workspaces | Drop |
 | D3 | Hub relay | Parked for post-MVP review: CW-20261112-0028 |
-| D4 | Per-workflow MCP tools / exposure sessions | Discuss after the other items land |
+| D4 | Per-workflow MCP tools / exposure sessions | Decided 2026-11-11 and built: profiles enforced through the policy engine, profile id as a token claim, typed tools. See `docs/status.md` "Exposure and access" |
 | D5 | Agent card gated, not public | Accepted; documented here and in `docs/status.md` |
 | D6 | In-process agent runtimes | Stay dropped for MVP; post-MVP review: CW-20261112-0029 |
 | D7 | Consumers of the old names | Inventory done: section 10 |
@@ -59,7 +59,7 @@ Post-MVP items belong to the normal Hadron dev cycle, not this workstream. Front
 |---|---|---|
 | Workflow run tools: validate, run, run_inspect, run_cancel, run_events, run_subscribe, run_resume, gate_submit, message_submit, signal | `hadron_workflow_{validate,run,run_inspect,run_cancel,run_events,run_resume,signal}`; subscribe and the two submits merged | Changed |
 | Lifecycle tools: catalog search/inspect, author validate/scaffold/test/register, registry package/publish/pin/unpin/clear_current, exposure inspect/pin/unpin | same names | Done (`catalog_search` needs a namespace) |
-| `hadron_workflows_search / _load`, `hadron_workflow_describe`, dynamic per-workflow tools, namespaces resource | none | Dropped with exposure sessions, D4 |
+| `hadron_workflows_search / _load`, `hadron_workflow_describe`, dynamic per-workflow tools, namespaces resource | typed per-workflow tools (one per exposed workflow, filtered per caller); search/load/describe/namespaces not carried (discovery is `tools/list`, the agent card and `catalog_search`) | Changed |
 | Blueprint, pipeline, run, schedule, trigger, human-gate, message, workspace, registry tools; skills tool; prompts/resources | none | Dropped (blueprint era). The skills tool and the `docs/mcp-skills` content were not reviewed: **check before closing** |
 | Stdio and HTTP | both | Done |
 | Principal tokens via `hadron credential` | framework auth, per-tool scopes | Changed |
@@ -97,19 +97,18 @@ Schema: one goose migration of the 80 `workflow_*` tables plus `store_generation
 
 ## 8. Known weak spots in what is done
 
-- Enforce-mode access is unit-tested at the scope tables only. No test sends a real token to a route or tool.
 - Agent sessions are tested against a fake Tether client, not a live muxd.
-- Exposure sessions are gone, yet the exposure profile routes and tools remain and still pin definitions into profiles that nothing mounts as tools. Until D4 they are inert surface.
+- Dead code from the old exposure sessions remains in `appworkflow` (`ResolveSession`, durable MCP principal methods and their persistence tests); cleanup list.
+- The enforce-mode access path is now tested end to end (`TestEnforcedCallersSeeAndRunOnlyTheirProfile`). Agent sessions are still only tested against a fake Tether client.
 - The cleanup list in `docs/status.md` (identifier names, file sizes, persistence importing a higher layer, timestamp helpers, outbox overlap with libs) is open.
 - `go.mod` requires an untagged Substrate commit; the next Substrate tag is the owner's call.
 
 ## 9. What is left to cutover
 
-1. Exposure discussion (D4), then whatever it changes.
-2. Frontend, after the gui track lands.
-3. Operator docs rewrite (not a copy), then CI on build-1, the Cerberus deploy file for `hadron serve`, and the consumer updates in section 10.
-4. Enforce-mode end-to-end test with a real token; live muxd check for agent sessions.
-5. Cutover: rename repos, make the new one public.
+1. Frontend, after the gui track lands.
+2. Operator docs rewrite (not a copy), then CI on build-1, the Cerberus deploy file for `hadron serve`, and the consumer updates in section 10.
+3. Live muxd check for agent sessions. (Enforce-mode access with real API keys is now covered by a binary test.)
+4. Cutover: rename repos, make the new one public.
 
 ## 10. Consumers of the old surface (inventory, 2026-11-11)
 

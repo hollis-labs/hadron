@@ -100,6 +100,8 @@ const (
 	WorkflowAccessExposureInspect      WorkflowAccessOperation = "exposure_inspect"
 	WorkflowAccessExposurePin          WorkflowAccessOperation = "exposure_pin"
 	WorkflowAccessExposureUnpin        WorkflowAccessOperation = "exposure_unpin"
+	WorkflowAccessExposurePut          WorkflowAccessOperation = "exposure_put_profile"
+	WorkflowAccessExposureDelete       WorkflowAccessOperation = "exposure_delete_profile"
 )
 
 // WorkflowAccessIntent is the non-secret operation metadata supplied to a

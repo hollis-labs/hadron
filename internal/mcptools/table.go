@@ -32,7 +32,7 @@ func ref(extra map[string]any, required ...string) map[string]any {
 	return obj(props, append([]string{"name", "version", "digest"}, required...)...)
 }
 
-func (s *surface) tools() []tool {
+func (s *Surface) staticTools() []tool {
 	run, manage := runtime.ScopeRun, runtime.ScopeManage
 	read := gmcp.Reads("reads workflow state").Idempotent()
 	write := gmcp.Writes().Idempotent()
@@ -74,6 +74,13 @@ func (s *surface) tools() []tool {
 		{"hadron_workflow_exposure_pin_definition", "Pin one exact definition in an exposure profile.", ref(map[string]any{
 			"profile_id": str(), "expected_generation": map[string]any{"type": "integer", "minimum": 1},
 		}, "profile_id", "expected_generation"), manage, write, s.exposureMutation(false)},
+		{"hadron_workflow_exposure_put_profile", "Create (expected_generation 0) or replace an exposure profile: the exact workflows, namespaces and search scope a caller holding the scope hadron.profile.<id> may use.", obj(map[string]any{
+			"profile":             map[string]any{"type": "object", "description": "id, namespaces, pins (exact definition refs), denied_effects, max_direct_tools, search_scope (none, public, namespaces, all), lazy_load, display"},
+			"expected_generation": map[string]any{"type": "integer", "minimum": 0},
+		}, "profile", "expected_generation"), manage, write, s.exposurePut},
+		{"hadron_workflow_exposure_delete_profile", "Delete an exposure profile. Callers holding its claim then see and use nothing.", obj(map[string]any{
+			"profile_id": str(), "expected_generation": map[string]any{"type": "integer", "minimum": 1},
+		}, "profile_id", "expected_generation"), manage, gmcp.Destroys("callers holding the profile lose access to its workflows").Idempotent(), s.exposureDelete},
 		{"hadron_workflow_exposure_unpin_definition", "Unpin one exact definition from an exposure profile.", ref(map[string]any{
 			"profile_id": str(), "expected_generation": map[string]any{"type": "integer", "minimum": 1},
 		}, "profile_id", "expected_generation"), manage, write, s.exposureMutation(true)},
