@@ -32,5 +32,10 @@ func RegisterScopes(t *libauth.ScopeTable) {
 		Route("POST", base+"/lifecycle/catalog/inspect", run).
 		Route("POST", base+"/lifecycle/author/*", manage).
 		Route("POST", base+"/lifecycle/registry/*", manage).
-		Route("POST", base+"/lifecycle/exposure/*", manage)
+		Route("POST", base+"/lifecycle/exposure/*", manage).
+		Route("GET", "/.well-known/agent.json", run).
+		Route("POST", "/a2a/tasks", run).
+		Route("GET", "/a2a/tasks/{id}", run).
+		Route("POST", "/a2a/tasks/{id}/cancel", run).
+		Route("POST", "/a2a/tasks/{id}/resume", run)
 }

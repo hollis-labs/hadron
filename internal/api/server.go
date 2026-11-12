@@ -11,7 +11,11 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/hollis-labs/substrate/modules/httphost"
+
+	"github.com/hollis-labs/hadron/internal/a2a"
 	activationpkg "github.com/hollis-labs/hadron/internal/activation"
+	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	appworkflowhoststate "github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 )
@@ -36,8 +40,23 @@ type WorkflowActivationService interface {
 	Fire(context.Context, activationpkg.ActivationEvent) (appworkflow.ActivationStartResult, error)
 }
 
+// A2ATaskService is the A2A task surface over workflow runs.
+type A2ATaskService interface {
+	SubmitTask(context.Context, a2a.TaskRequest) (*a2a.TaskResponse, error)
+	GetTask(context.Context, string) (*a2a.TaskResponse, error)
+	CancelTask(context.Context, string, a2a.CancelTaskRequest) (*a2a.TaskResponse, error)
+	ResumeTask(context.Context, string, a2a.ResumeTaskRequest) (*a2a.ResumeTaskResponse, error)
+}
+
+// AgentCardProvider builds the A2A discovery document for a base URL.
+type AgentCardProvider interface {
+	Card(context.Context, string) (*agentcard.AgentCard, error)
+}
+
 // Dependencies are the runtime services the handlers call.
 type Dependencies struct {
+	A2ATasks            A2ATaskService
+	AgentCard           AgentCardProvider
 	Workflows           appworkflow.WorkflowOperations
 	WorkflowReads       appworkflow.WorkflowRunReadOperations
 	WorkflowLifecycle   appworkflow.WorkflowLifecycleOperations
@@ -64,6 +83,18 @@ func NewServer(deps Dependencies) *Server {
 	mux.HandleFunc("/api/workflows/lifecycle/", s.handleWorkflowLifecycle)
 	s.handler = rejectPathTraversal(mux)
 	return s
+}
+
+// Mounts are the A2A routes, which a protocol fixes outside /api/: the agent
+// card and the task endpoints. They are guarded and scoped like the API routes
+// (see RegisterScopes); the card is not public because it lists the published
+// workflows and their schemas.
+func (s *Server) Mounts() []httphost.Mount {
+	return []httphost.Mount{
+		{Pattern: "GET /.well-known/agent.json", Handler: http.HandlerFunc(s.handleAgentCard)},
+		{Pattern: "/a2a/tasks", Handler: http.HandlerFunc(s.handleA2ATasks)},
+		{Pattern: "/a2a/tasks/", Handler: http.HandlerFunc(s.handleA2ATaskByID)},
+	}
 }
 
 // Handler is the mux, for httphost.Options.Routes and for tests.

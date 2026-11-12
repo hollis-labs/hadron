@@ -21,6 +21,7 @@ import (
 
 	"github.com/hollis-labs/hadron/internal/a2a"
 	activationpkg "github.com/hollis-labs/hadron/internal/activation"
+	"github.com/hollis-labs/hadron/internal/agentcard"
 	"github.com/hollis-labs/hadron/internal/appworkflow"
 	"github.com/hollis-labs/hadron/internal/appworkflow/hoststate"
 	"github.com/hollis-labs/hadron/internal/artifacts"
@@ -78,6 +79,7 @@ type Runtime struct {
 	exposure        *appworkflow.WorkflowExposureService
 	lifecycle       *appworkflow.WorkflowLifecycleService
 	a2a             *a2a.Handler
+	card            *agentcard.Builder
 	catalog         *productionWorkflowCatalog
 	activationStore hoststate.ActivationStore
 	workers         *workflowWorkers
@@ -351,7 +353,12 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 	if err != nil {
 		return nil, err
 	}
+	card, err := agentcard.NewBuilder(exposure)
+	if err != nil {
+		return nil, err
+	}
 	return &Runtime{
+		card: card,
 		host: host, operations: operations, exposure: exposure, lifecycle: lifecycle, a2a: a2aHandler,
 		catalog: catalog, activationStore: activationStore, workers: workers, external: external, activation: activation,
 		sourceActivations: sourceActivationLifecycle, externalActivations: activationpkg.ActivationManager{Service: activationService},

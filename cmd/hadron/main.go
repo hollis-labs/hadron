@@ -111,12 +111,12 @@ func serveCmd(ctx context.Context, app *module.App, fires *runtime.Fires) *cobra
 			srv := api.NewServer(api.Dependencies{
 				Workflows: rt.Operations(), WorkflowReads: rt.Operations(), WorkflowLifecycle: rt.Lifecycle(),
 				WorkflowAuth:        runtime.RequestAuthenticator{Source: "http", Mode: auth.Guard(app).Mode},
-				WorkflowActivations: rt.Activations(),
+				WorkflowActivations: rt.Activations(), A2ATasks: rt.A2A(), AgentCard: rt.AgentCard(),
 			})
 			api.RegisterScopes(auth.ScopeTable(app))
 			mux := http.NewServeMux()
 			mux.Handle("/api/workflows/", srv.Handler())
-			h, err := httphost.Handler(app, httphost.Options{Routes: mux})
+			h, err := httphost.Handler(app, httphost.Options{Routes: mux, Mounts: srv.Mounts()})
 			if err != nil {
 				_ = stopRuntime(rt)
 				return err

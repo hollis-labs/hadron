@@ -109,6 +109,20 @@ func TestServeAnswersHealthCapabilitiesAndMe(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), `"code":"invalid_request"`) || !strings.Contains(string(body), `"message"`) {
 		t.Errorf("POST /api/workflows/validate: %d %s", resp.StatusCode, body)
 	}
+	// A2A: the agent card lists the published workflows (none on a fresh install)
+	// and the task endpoint fails flat, both outside /api/.
+	if code, body := get("/.well-known/agent.json"); code != 200 || !strings.Contains(body, `"Hadron Workflows"`) {
+		t.Errorf("agent card: %d %s", code, body)
+	}
+	if resp, err := http.Post("http://"+addr+"/a2a/tasks", "application/json", strings.NewReader("not json")); err != nil {
+		t.Fatal(err)
+	} else {
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), `"message"`) {
+			t.Errorf("POST /a2a/tasks: %d %s", resp.StatusCode, b)
+		}
+	}
 	if code, _ := get("/api/nope"); code == 200 {
 		t.Error("an unknown API path answered 200")
 	}
