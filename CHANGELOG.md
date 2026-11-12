@@ -4,6 +4,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0-beta.1] - 2026-11-12
+
+First release of the new Hadron (built on Substrate). It replaces the old `hadrond` line (v0.5.0-beta.2, now `hadron-legacy`). Existing data does not move: start empty. The old blueprint-era tools and `/v1` API are gone; use `hadron_workflow_*` and `/healthz`.
+
+### Changed
+
+- Go 1.26.11 (fixes GO-2026-6859, net/http, found by govulncheck).
+
 ### Added
 
 - Operator documentation rewritten against the code: README and `docs/` getting started, workflows, CLI reference, configuration, access, MCP and A2A, operations. Every command in the getting-started path was run against a live daemon, and the allow-list example decodes with the daemon's own parser.
