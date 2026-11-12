@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -515,6 +516,105 @@ func TestShippedExamplesValidateAndRun(t *testing.T) {
 				t.Fatalf("%s ended %q: %s", runID, res.Run.Status, out)
 			}
 			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+const slowSource = `workflow: {id: slow, version: v1}
+inputs:
+  - {name: message, type: string, required: true}
+steps:
+  - id: spin
+    kind: script
+    kind_version: v1
+    config:
+      runtime: goja
+      code: |
+        function main(input) {
+          var s = 0;
+          for (var i = 0; i < 10000000; i++) { s += i; }
+          return { n: input.message + ":" + s };
+        }
+      input_schema: {type: object, additionalProperties: false, required: [message], properties: {message: {type: string}}}
+      output_schema: {type: object, additionalProperties: false, required: [n], properties: {n: {type: string}}}
+    with: {message: inputs.message}
+    outputs: {n: {type: string}}
+    effects: [compute]
+outputs:
+  n: {type: string, value: steps.spin.outputs.n}
+`
+
+// launchd, systemd and Cerberus stop a service with SIGTERM. A step that is
+// running then finishes, the daemon exits cleanly, and the next process completes
+// the run at once instead of waiting out a claim lease and marking the step crashed.
+func TestSIGTERMLetsARunningStepFinishAndTheNextProcessCompleteTheRun(t *testing.T) {
+	bin := build(t)
+	addr := freeAddr(t)
+	dir, environ := env(t, addr)
+	root := filepath.Join(dir, "hadron-data", "workflows")
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "slow.workflow.yaml"), []byte(slowSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := func() *exec.Cmd {
+		d := exec.Command(bin, "serve")
+		d.Dir, d.Env = dir, environ
+		if err := d.Start(); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			if resp, err := http.Get("http://" + addr + "/healthz"); err == nil {
+				_ = resp.Body.Close()
+				return d
+			}
+			if time.Now().After(deadline) {
+				_ = d.Process.Kill()
+				t.Fatal("daemon did not start")
+			}
+		}
+	}
+	cli := func(args ...string) string {
+		c := exec.Command(bin, append([]string{"workflow"}, args...)...)
+		c.Dir, c.Env = dir, environ
+		out, _ := c.CombinedOutput()
+		return string(out)
+	}
+
+	d := start()
+	defer func() { _ = d.Process.Kill() }()
+	if out := cli("run", "slow.workflow.yaml", "--input-json", `{"message":"x"}`, "--run-id", "slow-1"); !strings.Contains(out, "run slow-1") {
+		t.Fatalf("run: %s", out)
+	}
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(cli("inspect", "slow-1"), "spin running"); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the step never started running")
+		}
+	}
+	if err := d.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- d.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the daemon did not exit cleanly on SIGTERM: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("the daemon did not exit on SIGTERM")
+	}
+
+	d = start()
+	defer func() { _ = d.Process.Kill(); _ = d.Wait() }()
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		out := cli("inspect", "slow-1")
+		if strings.Contains(out, "status=succeeded") {
+			break
+		}
+		if strings.Contains(out, "crashed") || time.Now().After(deadline) {
+			t.Fatalf("the run was not completed by the next process:\n%s", out)
 		}
 	}
 }

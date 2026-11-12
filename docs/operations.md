@@ -37,6 +37,12 @@ Every HTTP request, including `/mcp`, continues the caller's W3C `traceparent` a
 
 `hadron.workers` node workers execute steps, claiming work from the database with leases, so a crashed worker's work is picked up again and two daemon processes on one database do not run the same step twice. On start the daemon recovers in-flight runs before it serves. Schedules and event activations fire through the framework scheduler, which claims each due fire with a lease.
 
+## Stopping and restarting
+
+`hadron serve` and `hadron mcp` stop on SIGINT or SIGTERM (what launchd, systemd and Cerberus send). A stop **drains**: the HTTP server closes, no new work is claimed, and a step already running gets up to 30 seconds to finish before it is cancelled. The next process picks up the run where it left off.
+
+A step that is cut off mid-attempt (SIGKILL, a crash, a power loss, or a step longer than the drain) is **not retried**: the daemon cannot know whether its effects happened. Its claim lapses after 90 seconds, then the step and its run are marked `crashed`. Until then the run shows `running`. Steps that have not started are unaffected, and a run waiting on a timer, a gate or a message survives any restart. Give a service manager at least 30 seconds before it escalates to SIGKILL (launchd's `ExitTimeOut`, systemd's `TimeoutStopSec`).
+
 ## Agent sessions
 
 `agent_session` steps (and the `agent_launch` shorthand) run agents as Tether sessions. Configure a substrate:

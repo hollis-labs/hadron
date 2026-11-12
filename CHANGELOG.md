@@ -10,6 +10,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `hadron serve` and `hadron mcp` ignored SIGTERM, so launchd, systemd and Cerberus killed the daemon abruptly; a step running at that moment stayed claimed for 90 seconds and then the run was marked crashed (found by Cerberus on the first deploy). They now stop on SIGTERM, and stopping drains the workers: running steps get up to the shutdown deadline to finish instead of being cancelled at once.
+
 - A profile's `denied_effects` now stops a start (the start policy), not only the tool listing.
 
 - Exposure and access (decision D4): exposure profiles decide which workflows a caller may use, enforced through the policy engine; the profile id is the token scope `hadron.profile.<id>`; administrators (`hadron.manage`) are unrestricted. One typed MCP tool per exposed workflow, listed per caller and kept in step with the catalog. Profile `put` and `delete` on HTTP, MCP and the CLI (profiles could not be created before). The agent card is filtered the same way. Tested end to end against the binary with enforcing auth and policy. Needs Substrate `57d54cf` (`mcp.UseToolFilter`).

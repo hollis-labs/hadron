@@ -1,8 +1,8 @@
 name: build
-# Builds the hadron binary for pushes to main only and attaches it to the run,
-# with sha256 sums. No tag or release is created. Runs on GitHub-hosted runners
-# until the build-1 runner is ready for this repository; then runs-on changes to
-# [self-hosted, Linux, X64, build-1] as in hollis-labs/substrate.
+# Builds the hadron binary on build-1 for pushes to main only and attaches it to
+# the run, with sha256 sums. No tag or release is created. Fork PRs never reach
+# this workflow; ci.yml (GitHub-hosted) covers pull requests, as in
+# hollis-labs/substrate.
 on:
   push:
     branches: [main]
@@ -13,14 +13,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, build-1]
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
+      - name: use the go.mod toolchain, not the box's system Go
+        run: echo "GOTOOLCHAIN=go$(awk '/^go /{print $2}' go.mod)" >> "$GITHUB_ENV"
       - run: go vet ./...
       - run: go test ./...
       - name: cross-build (CGO off; SQLite is pure Go)

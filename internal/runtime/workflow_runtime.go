@@ -886,7 +886,8 @@ type workflowWorkers struct {
 	nonce      string
 	sequence   atomic.Uint64
 	mu         sync.Mutex
-	cancel     context.CancelFunc
+	cancel     context.CancelFunc // stops claiming new work
+	abort      context.CancelFunc // cancels dispatches still running
 	done       chan struct{}
 	wg         sync.WaitGroup
 }
@@ -948,56 +949,71 @@ func (w *workflowWorkers) Start() {
 	if w.cancel != nil {
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	w.cancel, w.done = cancel, make(chan struct{})
+	claimCtx, cancel := context.WithCancel(context.Background())
+	runCtx, abort := context.WithCancel(context.Background())
+	w.cancel, w.abort, w.done = cancel, abort, make(chan struct{})
 	for index := 0; index < w.count; index++ {
 		w.wg.Add(1)
-		go w.loop(ctx, index)
+		go w.loop(claimCtx, runCtx, index)
 	}
 	go func() { w.wg.Wait(); close(w.done) }()
 }
 
+// Stop drains the workers: no new work is claimed, and a step already running
+// gets until ctx ends to finish. Only then is it canceled. A step canceled
+// mid-attempt is lost (the engine marks it crashed once its lease lapses), so
+// finishing it is the graceful path; the cancellation is the backstop.
 func (w *workflowWorkers) Stop(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("workflow worker stop requires context")
 	}
 	w.mu.Lock()
-	cancel, done := w.cancel, w.done
+	cancel, abort, done := w.cancel, w.abort, w.done
 	w.mu.Unlock()
 	if cancel == nil {
 		return nil
 	}
 	cancel()
-	select {
-	case <-done:
+	finished := func() {
 		w.mu.Lock()
 		if w.done == done {
-			w.cancel, w.done = nil, nil
+			w.cancel, w.abort, w.done = nil, nil, nil
 		}
 		w.mu.Unlock()
+	}
+	cancelRunning := func() {
+		if abort != nil {
+			abort()
+		}
+	}
+	select {
+	case <-done:
+		cancelRunning()
+		finished()
 		return nil
 	case <-ctx.Done():
+		cancelRunning()
 		return ctx.Err()
 	}
 }
 
-func (w *workflowWorkers) loop(ctx context.Context, index int) {
+func (w *workflowWorkers) loop(claimCtx, runCtx context.Context, index int) {
 	defer w.wg.Done()
 	owner := fmt.Sprintf("hadrond-%s-%d", w.nonce, index)
-	for ctx.Err() == nil {
+	for claimCtx.Err() == nil {
 		sequence := w.sequence.Add(1)
 		now := time.Now().UTC()
 		token := fmt.Sprintf("claim-%s-%d-%d", w.nonce, index, sequence)
-		claim, acquired, err := w.queue.ClaimNext(ctx, workflowruntime.ReadyClaimRequest{
+		claim, acquired, err := w.queue.ClaimNext(claimCtx, workflowruntime.ReadyClaimRequest{
 			Owner: owner, Token: token, IdempotencyKey: token, Now: now, LeaseUntil: now.Add(workflowClaimLease),
 		})
 		if err != nil || !acquired {
-			if !waitWorkflowPoll(ctx) {
+			if !waitWorkflowPoll(claimCtx) {
 				return
 			}
 			continue
 		}
-		w.dispatch(ctx, claim)
+		w.dispatch(runCtx, claim)
 	}
 }
 
