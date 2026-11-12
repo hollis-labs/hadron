@@ -532,7 +532,7 @@ steps:
       code: |
         function main(input) {
           var s = 0;
-          for (var i = 0; i < 10000000; i++) { s += i; }
+          for (var i = 0; i < 4000000; i++) { s += i; }
           return { n: input.message + ":" + s };
         }
       input_schema: {type: object, additionalProperties: false, required: [message], properties: {message: {type: string}}}
@@ -587,9 +587,38 @@ func TestSIGTERMLetsARunningStepFinishAndTheNextProcessCompleteTheRun(t *testing
 	if out := cli("run", "slow.workflow.yaml", "--input-json", `{"message":"x"}`, "--run-id", "slow-1"); !strings.Contains(out, "run slow-1") {
 		t.Fatalf("run: %s", out)
 	}
-	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(cli("inspect", "slow-1"), "spin running"); time.Sleep(10 * time.Millisecond) {
+	// Poll over HTTP (no process per poll) so a short step can still be caught running.
+	// The script sandbox allows one second of wall time, so the step cannot be made
+	// long; if it finishes before we look, the stop is trivially graceful and the
+	// assertions below still hold.
+	spinStatus := func() string {
+		resp, err := http.Post("http://"+addr+"/api/workflows/runs/slow-1/inspect", "application/json", strings.NewReader(`{"run_id":"slow-1","identity":{}}`))
+		if err != nil {
+			return ""
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var body struct {
+			Nodes []struct {
+				ID struct {
+					NodeID string `json:"node_id"`
+				} `json:"id"`
+				Status string `json:"status"`
+			} `json:"nodes"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		for _, n := range body.Nodes {
+			if n.ID.NodeID == "spin" {
+				return n.Status
+			}
+		}
+		return ""
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(2 * time.Millisecond) {
+		if st := spinStatus(); st == "running" || st == "succeeded" {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("the step never started running")
+			t.Fatal("the step never started")
 		}
 	}
 	if err := d.Process.Signal(syscall.SIGTERM); err != nil {

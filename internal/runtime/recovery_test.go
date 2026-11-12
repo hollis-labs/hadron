@@ -72,7 +72,7 @@ steps:
       code: |
         function main(input) {
           var s = 0;
-          for (var i = 0; i < 10000000; i++) { s += i; }
+          for (var i = 0; i < 4000000; i++) { s += i; }
           return { n: input.message + ":" + s };
         }
       input_schema: {type: object, additionalProperties: false, required: [message], properties: {message: {type: string}}}
