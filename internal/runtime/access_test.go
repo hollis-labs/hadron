@@ -163,3 +163,37 @@ func TestExposureProfileDecidesWhichWorkflowsACallerCanUse(t *testing.T) {
 type discardAudit struct{}
 
 func (discardAudit) Record(context.Context, libpolicy.AuditEvent) error { return nil }
+
+// A profile's denied effects stop a start even of a workflow it pins, on the
+// generic run path as well as on the typed tools.
+func TestProfileDeniedEffectsStopTheStart(t *testing.T) {
+	rt, _, _ := newTestRuntimeWith(t, nil)
+	if err := rt.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := Authenticate(libauth.WithPrincipal(t.Context(), libauth.Principal{Verified: true, ID: "user:admin", Scopes: []string{ScopeManage, ScopeRun}}), libauth.ModeEnforce, "http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := registerProductionActivationDraft(admin, t, rt.lifecycle, productionActivationDraft(t, "effectful", "v1")).Descriptor.Definition
+	for id, denied := range map[string]graph.EffectSet{"open": nil, "strict": {graph.EffectCompute}} {
+		if _, err := rt.exposure.PutProfile(admin, hoststate.ExposureProfileRecord{
+			ID: id, Pins: []graph.DefinitionRef{ref}, MaxDirectTools: 3, SearchScope: hoststate.ExposureSearchNone, DeniedEffects: denied,
+		}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := func(profile, runID string) error {
+		_, err := rt.operations.RunWorkflow(principalCtx(t, ScopeRun, ProfileScopePrefix+profile), appworkflow.RunWorkflowRequest{
+			RunID: appworkflow.RunID(runID), IdempotencyKey: runID, Definition: ref,
+			Inputs: map[string]any{"message": "hi"}, Identity: appworkflow.IdentityRequest{SourceAuthority: "http"},
+		})
+		return err
+	}
+	if err := start("open", "effects-open"); err != nil {
+		t.Errorf("a profile that denies nothing: %v", err)
+	}
+	if err := start("strict", "effects-strict"); err == nil {
+		t.Error("a profile that denies the workflow's effect still started it")
+	}
+}

@@ -77,7 +77,7 @@ func TestAllowListedWorkflowPolicyOnlyWaivesConfirm(t *testing.T) {
 	}}}); err != nil {
 		t.Fatal(err)
 	}
-	policy := allowListedWorkflowPolicy(unattended.NewStore(path, os.Geteuid(), nil, nil))
+	policy := allowListedWorkflowPolicy(unattended.NewStore(path, os.Geteuid(), nil, nil), &accessGate{})
 	decision, err := policy.EvaluatePolicy(t.Context(), facts)
 	if err != nil || decision.Outcome != hoststate.PolicyAllow || decision.Attributes[unattended.AttrEntry] != "ua-policy" {
 		t.Fatalf("listed advised facts = %#v, %v", decision, err)

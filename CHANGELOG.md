@@ -6,6 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Operator documentation rewritten against the code: README and `docs/` getting started, workflows, CLI reference, configuration, access, MCP and A2A, operations. Every command in the getting-started path was run against a live daemon, and the allow-list example decodes with the daemon's own parser.
+
+### Fixed
+
+- A profile's `denied_effects` now stops a start (the start policy), not only the tool listing.
+
 - Exposure and access (decision D4): exposure profiles decide which workflows a caller may use, enforced through the policy engine; the profile id is the token scope `hadron.profile.<id>`; administrators (`hadron.manage`) are unrestricted. One typed MCP tool per exposed workflow, listed per caller and kept in step with the catalog. Profile `put` and `delete` on HTTP, MCP and the CLI (profiles could not be created before). The agent card is filtered the same way. Tested end to end against the binary with enforcing auth and policy. Needs Substrate `57d54cf` (`mcp.UseToolFilter`).
 
 - `hadron build`, workflow file and `ns/name@version` references, `explain`, and `-o text|json|yaml` output with `file:line:col` diagnostics on the workflow CLI. Every ref-taking command now takes one reference instead of NAME VERSION DIGEST.

@@ -284,7 +284,7 @@ func New(store *persistence.Store, cfg Config, options ...Option) (*Runtime, err
 	allowList.Snapshot()
 	host, err := appworkflow.New(appworkflow.Options{
 		State: state, Journal: journal, Definitions: resolver, Identity: identity,
-		Policy: allowListedWorkflowPolicy(allowList), Confirm: appworkflow.ConfirmAuthorizerFunc(operatorConfirmAuthorizer),
+		Policy: allowListedWorkflowPolicy(allowList, access), Confirm: appworkflow.ConfirmAuthorizerFunc(operatorConfirmAuthorizer),
 		Kinds: kinds, RequiredKinds: required, DryRun: productionDryRunSupport{},
 		Activations: activation, ActivationStore: activationStore, Waits: waits,
 		ReuseAuthorizer: workflowruntime.ReuseAuthorizerFunc(productionReusePolicy),
@@ -447,11 +447,15 @@ func (productionDryRunSupport) SupportsDryRun(_ context.Context, spec stepkind.S
 // uses one evaluator for top-level starts and call-started child runs, so a
 // child is matched against the list by its own plan id and digest; an entry
 // for the root never covers its children.
-func allowListedWorkflowPolicy(allowList *unattended.Store) appworkflow.PolicyEvaluator {
+func allowListedWorkflowPolicy(allowList *unattended.Store, access *accessGate) appworkflow.PolicyEvaluator {
 	return appworkflow.PolicyEvaluatorFunc(func(ctx context.Context, facts hoststate.PolicyFacts) (hoststate.PolicyDecision, error) {
 		decision, err := productionWorkflowPolicy(ctx, facts)
 		if err != nil {
 			return decision, err
+		}
+		// A profile can deny effects outright; the allow-list never overrides a denial.
+		if denied := access.deniedEffect(ctx, facts.Effects); denied != "" {
+			return hoststate.PolicyDecision{Outcome: hoststate.PolicyDeny, Reason: "the caller's exposure profile denies the " + denied + " effect"}, nil
 		}
 		return unattended.Apply(allowList, facts, decision, time.Now()), nil
 	})

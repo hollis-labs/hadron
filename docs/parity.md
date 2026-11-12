@@ -91,7 +91,7 @@ Schema: one goose migration of the 80 `workflow_*` tables plus `store_generation
 | ~all workflow unit tests | ported with their code | Done |
 | `test/e2e` (health, validate, run with typed JSON, production examples validate-and-run, workspace create, legacy roots refused, CLI refused without operator token) | binary-level tests in `cmd/hadron`: health, serve, MCP, CLI against a live daemon, output formats, file refs, build, shipped examples validate and run | Done except **enforce mode with a real token**, still untested |
 | `examples/workflow/` (hello-transform, normalize-script, release-approval-gate; http-cmd-transform and torque-task-bulk-create) | the first three, with a rewritten README, validated and run in the acceptance test (`release-approval-gate` needed a static `environment` to validate on the current engine). The other two needed kinds the host does not register and tests that are gone | Done. `demos/` and `examples/archive`: dropped |
-| Operator docs (`getting-started`, `install`, `cli-reference`, `mcp-setup`, `safety`, `workflow-development`, `workflows`, `workflow-diagnostics`, `credential-rotation`, `release-ops`, `agentic-workflows`) | README, `docs/status.md`, this file | **Gap**: rewrite against the new surface, not copy; the engine-direction and planning docs stay in the old repo as history |
+| Operator docs (`getting-started`, `install`, `cli-reference`, `mcp-setup`, `safety`, `workflow-development`, `workflows`, `workflow-diagnostics`, `credential-rotation`, `release-ops`, `agentic-workflows`) | `README.md`, `docs/{getting-started,workflows,cli,configuration,access,mcp,operations}.md`, written against the new code | Done. Not carried: `install` (no release binary yet), `release-ops` (the release process is the cutover work), `credential-rotation` (framework auth), `workflow-diagnostics` (folded into `workflows.md` and `operations.md`); the engine-direction and planning docs stay in the old repo as history |
 | `Makefile`, lefthook, release scripts, `hadron.cerberus.yaml` (deploys `bin/hadrond`) | GitHub Actions CI only | **Gap** at cutover: build-1 CI (Cerberus handoff written), the Cerberus deploy file for `hadron serve`, install path, release workflow |
 | Repo names | `hadron-next` private | At cutover: old to `hadron-legacy`, new to `hadron`, public (scan-public clean, allowlist reviewed) |
 
@@ -106,7 +106,7 @@ Schema: one goose migration of the 80 `workflow_*` tables plus `store_generation
 ## 9. What is left to cutover
 
 1. Frontend, after the gui track lands.
-2. Operator docs rewrite (not a copy), then CI on build-1, the Cerberus deploy file for `hadron serve`, and the consumer updates in section 10.
+2. CI on build-1, the Cerberus deploy file for `hadron serve`, and the consumer updates in section 10.
 3. Live muxd check for agent sessions. (Enforce-mode access with real API keys is now covered by a binary test.)
 4. Cutover: rename repos, make the new one public.
 

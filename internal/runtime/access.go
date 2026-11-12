@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -145,6 +146,30 @@ func (g *accessGate) authorize(ctx context.Context, a appworkflow.DefinitionAuth
 		return g.custom(ctx, s, ref)
 	}
 	return g.direct(ctx, s, ref)
+}
+
+// deniedEffect returns an effect of the start that the caller's profile denies,
+// or "". Administrators, system contexts and starts with no profile effects to
+// deny are never affected. The profile is read per start, so a change applies at once.
+func (g *accessGate) deniedEffect(ctx context.Context, effects graph.EffectSet) string {
+	s, ok := SubjectFrom(ctx)
+	if !ok || s.Unrestricted || len(effects) == 0 {
+		return ""
+	}
+	e, err := g.service()
+	if err != nil {
+		return ""
+	}
+	session, err := e.ResolveProfile(ctx, s.ProfileID)
+	if err != nil {
+		return ""
+	}
+	for _, denied := range session.Profile.DeniedEffects {
+		if slices.Contains(effects, denied) {
+			return string(denied)
+		}
+	}
+	return ""
 }
 
 // direct evaluates the subject's profile without the policy engine.
