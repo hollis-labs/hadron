@@ -49,6 +49,8 @@ Not carried forward (archive): `blueprint_registry`, `blueprint_versions`, `pipe
 
 ## Next
 
+The parity checklist (`docs/parity.md`) is the working list to cutover; frontend waits for the gui track.
+
 1. Agent sessions (`tetherhost`, `agentsubstrate`, `llmprovider`, `messagesubstrate`) behind the gated `agent_session@v1` kind, then hub relay.
 2. Exposure redesign, including whether agents get per-workflow tools again (owner wants to discuss).
 3. Frontend via app-shell. 4. Parity checklist and the owner's cutover decision.
