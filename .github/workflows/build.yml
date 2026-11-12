@@ -1,0 +1,44 @@
+name: build
+# Builds the hadron binary for pushes to main only and attaches it to the run,
+# with sha256 sums. No tag or release is created. Runs on GitHub-hosted runners
+# until the build-1 runner is ready for this repository; then runs-on changes to
+# [self-hosted, Linux, X64, build-1] as in hollis-labs/substrate.
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: build-main
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+      - name: cross-build (CGO off; SQLite is pure Go)
+        run: |
+          set -eu
+          v="$(git rev-parse --short=12 HEAD)"
+          mkdir -p dist
+          for target in linux/amd64 darwin/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            stage="$(mktemp -d)"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -o "$stage/hadron" ./cmd/hadron
+            tar -C "$stage" -czf "dist/hadron_${v}_${os}_${arch}.tar.gz" hadron
+            rm -rf "$stage"
+          done
+          (cd dist && sha256sum ./*.tar.gz > "hadron_${v}_SHA256SUMS")
+          cat "dist/hadron_${v}_SHA256SUMS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hadron-${{ github.sha }}
+          path: dist/
+          retention-days: 30
