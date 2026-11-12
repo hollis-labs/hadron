@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,15 +14,17 @@ func appWith(block map[string]any) *module.App {
 }
 
 func TestConfigFromAppDefaultsAndValues(t *testing.T) {
+	t.Chdir(t.TempDir())
 	c, err := ConfigFromApp(&module.App{Name: "hadron", Config: map[string]any{}, Values: map[string]any{}})
-	if err != nil || c.DataDir != "hadron-data" || c.Workers != 3 || c.EventOutbox {
+	if err != nil || filepath.Base(c.DataDir) != "hadron-data" || !filepath.IsAbs(c.DataDir) || c.Workers != 3 || c.EventOutbox {
 		t.Fatalf("defaults = %+v, %v", c, err)
 	}
-	c, err = ConfigFromApp(appWith(map[string]any{"data_dir": "/srv/h", "workers": float64(5), "event_stream_limit": float64(2), "events": map[string]any{"outbox": true}}))
-	if err != nil || c.DataDir != "/srv/h" || c.Workers != 5 || c.EventStreamLimit != 2 || !c.EventOutbox {
+	dir := t.TempDir()
+	c, err = ConfigFromApp(appWith(map[string]any{"data_dir": dir, "workers": float64(5), "event_stream_limit": float64(2), "events": map[string]any{"outbox": true}}))
+	if err != nil || c.DataDir != resolved(t, dir) || c.Workers != 5 || c.EventStreamLimit != 2 || !c.EventOutbox {
 		t.Fatalf("values = %+v, %v", c, err)
 	}
-	if got := c.SourceRoot(); got != "/srv/h/workflows" {
+	if got := c.SourceRoot(); got != filepath.Join(resolved(t, dir), "workflows") {
 		t.Errorf("source root %q", got)
 	}
 }
@@ -41,5 +45,29 @@ func TestConfigFromAppRefusesWhatItDoesNotUnderstand(t *testing.T) {
 		} else if !strings.Contains(err.Error(), "hadron") {
 			t.Errorf("%s: error does not name the setting: %v", name, err)
 		}
+	}
+}
+
+func resolved(t *testing.T, dir string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestDataDirBehindASymlinkIsResolvedNotRefused(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	c, err := ConfigFromApp(appWith(map[string]any{"data_dir": filepath.Join(link, "data")}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(resolved(t, real), "data"); c.DataDir != want {
+		t.Errorf("data dir %q, want %q", c.DataDir, want)
 	}
 }

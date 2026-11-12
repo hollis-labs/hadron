@@ -98,6 +98,17 @@ func TestServeAnswersHealthCapabilitiesAndMe(t *testing.T) {
 	if code, body := get("/api/me"); code != 200 || !strings.Contains(body, `"mode":"off"`) {
 		t.Errorf("/api/me: %d %s", code, body)
 	}
+	// The workflow API is mounted under /api/workflows/ and fails flat: a malformed
+	// body is an invalid request, never a 404 and never the old {code}-only shape.
+	resp, err := http.Post("http://"+addr+"/api/workflows/validate", "application/json", strings.NewReader("not json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), `"code":"invalid_request"`) || !strings.Contains(string(body), `"message"`) {
+		t.Errorf("POST /api/workflows/validate: %d %s", resp.StatusCode, body)
+	}
 	if code, _ := get("/api/nope"); code == 200 {
 		t.Error("an unknown API path answered 200")
 	}
@@ -147,5 +158,53 @@ func TestMCPStdioAnswersInitialize(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(line), &resp); err != nil || resp.Result.ServerInfo.Name != "hadron" {
 		t.Fatalf("initialize reply: %v %s", err, line)
+	}
+}
+
+func TestMCPStdioListsAndCallsWorkflowTools(t *testing.T) {
+	bin := build(t)
+	dir, environ := env(t, freeAddr(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, bin, "mcp")
+	c.Dir, c.Env = dir, environ
+	in, _ := c.StdinPipe()
+	out, _ := c.StdoutPipe()
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close(); _ = c.Wait() }()
+	r := bufio.NewReader(out)
+	send := func(msg string) {
+		t.Helper()
+		if _, err := io.WriteString(in, msg+"\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() string {
+		t.Helper()
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("no reply: %v", err)
+		}
+		return line
+	}
+	send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
+	read()
+	send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	send(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	list := read()
+	for _, name := range []string{"hadron_workflow_run", "hadron_workflow_run_inspect", "hadron_workflow_run_events", "hadron_workflow_catalog_search", "hadron_workflow_author_register"} {
+		if !strings.Contains(list, `"`+name+`"`) {
+			t.Errorf("tools/list lacks %s: %s", name, list)
+		}
+	}
+	// A call reaches the engine host and fails as a tool error with a safe code
+	// (a digest that is not a digest is an invalid request), never a transport
+	// error or a crash.
+	send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"hadron_workflow_catalog_inspect","arguments":{"name":"team/none","version":"v1","digest":"sha256:00"}}}`)
+	call := read()
+	if !strings.Contains(call, `"isError":true`) || !strings.Contains(call, `"code":"invalid_request"`) {
+		t.Errorf("tools/call: %s", call)
 	}
 }

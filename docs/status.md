@@ -1,6 +1,6 @@
 # Status
 
-Phases 0 and 1 of the port plan (Tesseract `plan_hadron_port_to_substrate_20261104`) are done, and the first composition root (core step kinds, framework config and identity, no agent sessions) runs under `hadron serve`.
+Phases 0 and 1 of the port plan (Tesseract `plan_hadron_port_to_substrate_20261104`) are done, and the first composition root (core step kinds, framework config and identity, no agent sessions) runs under `hadron serve`, with the workflow API on `/api/workflows/...` and the workflow tools on MCP (HTTP `/mcp` and stdio `hadron mcp`).
 
 ## Ported
 
@@ -26,9 +26,18 @@ Phases 0 and 1 of the port plan (Tesseract `plan_hadron_port_to_substrate_202611
 - **Agent sessions** (`tetherhost`, `agentsubstrate`, `llmprovider`, `messagesubstrate`) and **hub relay**: not built; `agent_session@v1` stays registered as a gated kind. Later, behind that path.
 - **Exposure sessions** (durable token principals the old HTTP/MCP layers minted): not ported; they need redesign with the API and MCP phases, since the framework issues identity now.
 
+## API and MCP (`internal/api`, `internal/mcptools`)
+
+- **HTTP** (`internal/api`): ported from the old `/v1/workflows/...` handlers to `/api/workflows/...`: validate, explain, runs (start, inspect, cancel, resume, rerun, waits, values, events, SSE `events/stream`), activation fire, and the lifecycle routes (catalog search/inspect, author validate/scaffold/test/register, registry package/publish/pin/unpin/clear-current, exposure inspect/pin/unpin). Errors are flat `{code, message, details?}` with a fixed message per code (a hidden definition still looks like a missing one). `api.RegisterScopes` declares a scope per route (`hadron.run`, `hadron.manage`); an unlisted route is unmapped, which the guard refuses in enforce mode. Handlers hold no authentication code: `runtime.RequestAuthenticator` turns the verified principal into the host identity.
+- **MCP** (`internal/mcptools`): static tools `hadron_workflow_*` registered on Substrate's MCP server with per-tool scopes; identity from the verified principal on both transports. `hadron mcp` builds the runtime in-process over the same database as the daemon (claims and leases fence two processes).
+- **Merged on purpose** (fail forward): `hadron_workflow_run_subscribe` into `run_events` (`wait_ms`), and `run_resume`/`gate_submit`/`message_submit` into `run_resume` with `wake_source`. **Dropped**: `hadron_workflows_search`, `_load`, `_describe`, the dynamically generated per-workflow tools and the namespaces resource; they belonged to exposure sessions (a token's mounted tool profile), which the framework's identity replaces. Whether an agent should get per-workflow tools again is a design decision for the exposure redesign. `hadron_workflow_catalog_search` and `_inspect` cover discovery.
+- **Dropped with the old server**: the CORS middleware and its test (the framework's host owns cross-origin policy), the operator sign-in routes, and the credentials routes.
+- **Not built**: A2A routes and the agent card (via `httphost.Options.Mounts`), CLI workflow commands, `reveal_private` is passed to the operator, which authorizes it (no exposure-profile display policy).
+- **Not verified end to end**: enforce-mode access (a real token against each route and tool). The scope tables are unit-tested; the token flow belongs with the Cerberus/Tether auth setup.
+
 ## Not ported yet (rest of phase 2 and later)
 
-Classified from the old import graph, to be confirmed as each is reached: **execution** (`internal/execution`, 1.6k lines: blueprint-era step executors and manager, importing `blueprint`; the engine's libs adapters (`call`, `agent`, `gate`, `llm`, `mcp`, `wait`) are the live path, so likely dropped); **mcpadapter** (5.7k, tools, much of it blueprint tools; port the workflow tools onto `mcp.Server`); **api** (3.3k, `/v1`, replaced by `/api/...` handlers); **agentcard** (`legacy.go` imports blueprint; the card itself is needed for A2A); **scheduler and trigger** (legacy schedule fires and triggers; compare with the framework's `scheduler` module and the activation tables before porting); **tetherhost, hubrelay, messagesubstrate, agentsubstrate, llmprovider, launchartifacts** (integrations); **localauth** (dropped, replaced by the framework's auth); **settings, config** (replaced by Substrate config); **telemetry** (per-run JSONL, app code); **webui, hadron-app** (dropped).
+Classified from the old import graph, to be confirmed as each is reached: **execution** (`internal/execution`, 1.6k lines: blueprint-era step executors and manager, importing `blueprint`; the engine's libs adapters (`call`, `agent`, `gate`, `llm`, `mcp`, `wait`) are the live path, so likely dropped); **agentcard** (`legacy.go` imports blueprint; the card itself is needed for A2A); **scheduler and trigger** (legacy schedule fires and triggers; compare with the framework's `scheduler` module and the activation tables before porting); **tetherhost, hubrelay, messagesubstrate, agentsubstrate, llmprovider, launchartifacts** (integrations); **localauth** (dropped, replaced by the framework's auth); **settings, config** (replaced by Substrate config); **telemetry** (per-run JSONL, app code); **webui, hadron-app** (dropped).
 
 ## Schema still to add (with the subsystem that needs it)
 

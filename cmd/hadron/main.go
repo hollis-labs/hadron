@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/hollis-labs/substrate/boot"
 	"github.com/hollis-labs/substrate/module"
+	"github.com/hollis-labs/substrate/modules/auth"
 	"github.com/hollis-labs/substrate/modules/cli"
 	"github.com/hollis-labs/substrate/modules/database"
 	"github.com/hollis-labs/substrate/modules/httphost"
@@ -22,6 +24,8 @@ import (
 	"github.com/hollis-labs/substrate/modules/policy"
 	"github.com/hollis-labs/substrate/modules/scheduler"
 
+	"github.com/hollis-labs/hadron/internal/api"
+	"github.com/hollis-labs/hadron/internal/mcptools"
 	"github.com/hollis-labs/hadron/internal/persistence"
 	"github.com/hollis-labs/hadron/internal/runtime"
 )
@@ -50,60 +54,96 @@ func main() {
 	defer func() { _ = run.Stop(context.Background()) }()
 
 	root := cli.Root(run.App)
-	root.AddCommand(serveCmd(ctx, run.App, fires), mcpCmd(ctx, run.App))
+	root.AddCommand(serveCmd(ctx, run.App, fires), mcpCmd(ctx, run.App, fires))
 	if err := root.ExecuteContext(ctx); err != nil {
 		_ = run.Stop(context.Background())
 		os.Exit(1)
 	}
 }
 
-// serveCmd is the daemon: it builds the workflow runtime over the framework's
-// database, starts its workers and the scheduler engine, then serves HTTP.
+// startRuntime builds the workflow runtime over the framework's database,
+// registers the MCP workflow tools and starts the runtime (recovery, workers,
+// the scheduler engine). The caller shuts it down.
+func startRuntime(ctx context.Context, app *module.App, fires *runtime.Fires) (*runtime.Runtime, error) {
+	cfg, err := runtime.ConfigFromApp(app)
+	if err != nil {
+		return nil, err
+	}
+	db := database.From(app)
+	if db == nil {
+		return nil, errors.New("hadron: the database module is not started")
+	}
+	rt, err := runtime.New(persistence.NewStore(db.DB()), cfg,
+		runtime.WithFires(fires), runtime.WithSourceEngine(scheduler.Engine(app)))
+	if err != nil {
+		return nil, err
+	}
+	if err := mcptools.Register(app, mcptools.Dependencies{
+		Operations: rt.Operations(), Reads: rt.Operations(), Signals: rt.Operations(), Lifecycle: rt.Lifecycle(),
+	}); err != nil {
+		return nil, err
+	}
+	// The runtime starts the scheduler engine with the recovered host.
+	if err := rt.Start(ctx); err != nil {
+		return nil, err
+	}
+	return rt, nil
+}
+
+func stopRuntime(rt *runtime.Runtime) error {
+	shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return rt.Shutdown(shutdown)
+}
+
+// serveCmd is the daemon: the workflow runtime, the /api/workflows routes and
+// the /mcp endpoint on the framework's HTTP host.
 func serveCmd(ctx context.Context, app *module.App, fires *runtime.Fires) *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
 		Short: "Run the Hadron daemon",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			cfg, err := runtime.ConfigFromApp(app)
+			rt, err := startRuntime(ctx, app, fires)
 			if err != nil {
 				return err
 			}
-			db := database.From(app)
-			if db == nil {
-				return errors.New("hadron: the database module is not started")
-			}
-			rt, err := runtime.New(persistence.NewStore(db.DB()), cfg,
-				runtime.WithFires(fires), runtime.WithSourceEngine(scheduler.Engine(app)))
+			srv := api.NewServer(api.Dependencies{
+				Workflows: rt.Operations(), WorkflowReads: rt.Operations(), WorkflowLifecycle: rt.Lifecycle(),
+				WorkflowAuth:        runtime.RequestAuthenticator{Source: "http", Mode: auth.Guard(app).Mode},
+				WorkflowActivations: rt.Activations(),
+			})
+			api.RegisterScopes(auth.ScopeTable(app))
+			mux := http.NewServeMux()
+			mux.Handle("/api/workflows/", srv.Handler())
+			h, err := httphost.Handler(app, httphost.Options{Routes: mux})
 			if err != nil {
-				return err
-			}
-			// The runtime starts the scheduler engine with the recovered host.
-			if err := rt.Start(ctx); err != nil {
-				return err
-			}
-			h, err := httphost.Handler(app, httphost.Options{})
-			if err != nil {
-				_ = rt.Shutdown(context.Background())
+				_ = stopRuntime(rt)
 				return err
 			}
 			serveErr := httphost.Serve(ctx, app, h, httphost.ServeOptions{})
-			shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			return errors.Join(serveErr, rt.Shutdown(shutdown))
+			return errors.Join(serveErr, stopRuntime(rt))
 		},
 	}
 }
 
-// mcpCmd serves the MCP tools over stdio for an agent that launches Hadron as a subprocess.
-func mcpCmd(ctx context.Context, app *module.App) *cobra.Command {
+// mcpCmd serves the MCP tools over stdio for an agent that launches Hadron as a
+// subprocess. The process runs the workflow runtime in-process, over the same
+// database as the daemon; claims and leases keep two processes from running the
+// same work twice.
+func mcpCmd(ctx context.Context, app *module.App, fires *runtime.Fires) *cobra.Command {
 	var tokenFile string
 	c := &cobra.Command{
 		Use:   "mcp",
 		Short: "Serve MCP over stdio",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			return mcp.ServeStdio(ctx, app, mcp.StdioOptions{TokenFile: tokenFile})
+			rt, err := startRuntime(ctx, app, fires)
+			if err != nil {
+				return err
+			}
+			serveErr := mcp.ServeStdio(ctx, app, mcp.StdioOptions{TokenFile: tokenFile})
+			return errors.Join(serveErr, stopRuntime(rt))
 		},
 	}
 	c.Flags().StringVar(&tokenFile, "token-file", "", "file holding the caller's service token (required when auth is enforcing)")

@@ -7,6 +7,7 @@ require (
 	github.com/hollis-labs/libs/core/store v0.1.0
 	github.com/hollis-labs/libs/core/util v0.6.0
 	github.com/hollis-labs/libs/harness/core v0.16.0
+	github.com/hollis-labs/libs/mcp/plugin-mcp v0.6.0
 	github.com/hollis-labs/libs/security/auth v0.3.0
 	github.com/hollis-labs/libs/workflow/engine v0.2.0
 	github.com/hollis-labs/substrate v0.1.1-0.20261112021957-44fae7d6ca72
@@ -32,7 +33,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hollis-labs/libs/app/app-host v0.1.0 // indirect
 	github.com/hollis-labs/libs/core/panics v0.1.0 // indirect
-	github.com/hollis-labs/libs/mcp/plugin-mcp v0.6.0 // indirect
 	github.com/hollis-labs/libs/mesh/core v0.6.0 // indirect
 	github.com/hollis-labs/libs/security/policy v0.1.0 // indirect
 	github.com/hollis-labs/libs/security/redact v0.2.0 // indirect

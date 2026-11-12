@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Workflow API on `/api/workflows/...` (`internal/api`, ported from the old `/v1` handlers with their tests): runs, events and SSE stream, activations, lifecycle; flat `{code, message, details?}` errors; per-route scopes `hadron.run` and `hadron.manage`. Workflow tools on MCP (`internal/mcptools`): static `hadron_workflow_*` tools over HTTP `/mcp` and stdio `hadron mcp`, scoped per tool. `data_dir` is resolved to a real absolute path at config load (the artifact store refuses symlinked paths).
+
 - First composition root (`internal/runtime`, `internal/activation`): the engine host, operator, exposure, lifecycle, A2A handler, catalog, activations, workers and external reconciler, built over Substrate's database, with a validated `hadron:` config block, Principal-to-grants identity, and source activations on the framework `scheduler` module. `hadron serve` builds, starts and shuts it down. The `queue` module left the manifest. Agent sessions, hub relay and exposure sessions are not built yet (see docs/status.md).
 
 - Phase 2, the engine host: `internal/appworkflow` with `a2a`, `artifacts`, `unattended`, `rundiagnostics` and the live halves of `registry` (workflow catalog and index) and `pack` (workflow package and source), ported with their tests (all passing) and without the blueprint-era code. `internal/persistencetest` opens migrated databases for those tests.

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/hollis-labs/substrate/module"
@@ -92,7 +93,28 @@ func ConfigFromApp(app *module.App) (Config, error) {
 	if c.Workers < 0 || c.EventStreamLimit < 0 {
 		return c, fmt.Errorf("hadron.workers and hadron.event_stream_limit cannot be negative")
 	}
-	return c.withDefaults(), nil
+	c = c.withDefaults()
+	dir, err := resolveDataDir(c.DataDir)
+	if err != nil {
+		return c, fmt.Errorf("hadron.data_dir %q: %w", c.DataDir, err)
+	}
+	c.DataDir = dir
+	return c, nil
+}
+
+// resolveDataDir makes the data directory absolute, creates it owner-only and
+// resolves symlinks in its path. The artifact store refuses a root whose path
+// has a symlink component, and an unresolved working directory (macOS /var, a
+// symlinked home) would otherwise fail deep inside startup.
+func resolveDataDir(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(abs, 0o700); err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
 }
 
 func wholeNumber(name string, v any) (int, error) {
