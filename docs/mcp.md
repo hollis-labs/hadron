@@ -61,3 +61,21 @@ The daemon also speaks A2A, outside `/api/` because the protocol fixes the paths
 | `POST /a2a/tasks` | Submit a task (a workflow run) with an `Idempotency-Key` |
 | `GET /a2a/tasks/{id}` | Read a task |
 | `POST /a2a/tasks/{id}/cancel`, `/resume` | Cancel; resume a waiting task |
+
+## Server and authentication ownership
+
+Hadron's current Substrate implementation registers tools with
+`go-mcp/server` in `internal/mcptools`. The framework MCP module owns server
+construction, HTTP transport and stdio serving; `cmd/hadron/main.go` obtains
+that module rather than constructing an official-SDK server. There are no
+direct official-SDK server or HTTP-handler constructors in Hadron's Go source.
+The former `internal/mcpadapter` is not part of this implementation.
+
+Authentication belongs to the framework auth module and its `security/auth`
+Guard. Hadron adds tool scopes and workflow exposure-profile decisions in its
+runtime. The stdio command authenticates the configured token file through the
+same framework boundary. Replacing this with app-local
+`go-mcp/auth.HTTPMiddleware` would introduce a second HTTP-only admission
+policy and would not preserve stdio identity, scoped tool visibility or
+workflow authorization. Any framework provider migration must preserve those
+contracts in Substrate first; Hadron follows Substrate's pinned dependency BOM.
